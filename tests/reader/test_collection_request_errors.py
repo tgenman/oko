@@ -40,9 +40,9 @@ def test_swallowed_article_http_failure_keeps_original_exception_and_url(tmp_pat
                               rss_transport=httpx.MockTransport(respond)), headers=HEADERS) as client:
         presence(client, 'reader')
         card = wait_cards(client)[0]
-        material = client.get('/api/v3/materials/' + card['id']).json()
-        assert material['content']['completeness']['state'] == 'incomplete'
-        assert material['content']['text'] == 'Анонс статьи'
+        material = client.get('/api/v3/publication/' + card['id']).json()
+        assert material['completeness']['state'] == 'incomplete'
+        assert material['text'] == 'Анонс статьи'
         body, error = wait_for(client, lambda: failed_details(client))
         assert error['error_type'] == 'HTTPStatusError'
         assert '503' in error['message']

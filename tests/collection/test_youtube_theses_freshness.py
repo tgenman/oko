@@ -28,7 +28,7 @@ def wait(client, predicate):
     def ready():
         cards = read_all_cards(client, '/api/v3/cards')
         if len(cards) == 1:
-            material = client.get('/api/v3/materials/' + cards[0]['id']).json()
+            material = client.get('/api/v3/publication/' + cards[0]['id']).json()
             if predicate(material):
                 return material
         return None
@@ -80,25 +80,25 @@ def test_metadata_updates_reuse_caption_theses_across_restart(tmp_path, prompt_f
                    'model': 'local:latest', 'local_execution': True})
         subscribe(client)
         presence(client, 'reader')
-        original = wait(client, lambda m: m['theses']['result'] and not m['content']['loading'])
+        original = wait(client, lambda m: m['theses']['result'] and not m['loading'])
         assert summary_calls() == 1 and captions.calls == [VIDEO]
         request = next(r for r in calls if r.url.path == '/v1/chat/completions')
         task = json.loads(json.loads(request.content)['messages'][1]['content'])
-        assert task['sources'][0]['text'] == original['content']['text']
+        assert task['sources'][0]['text'] == original['text']
 
         for field, value in [('title', 'Updated title'), ('preview', PNG + b'changed')]:
             metadata[field] = value
             client.post('/api/v3/collect')
-            updated = wait(client, lambda m: m['content']['revision_id'] != original['content']['revision_id'] and not m['content']['loading']
-                           and m['filter']['attempt']['state'] in ('disabled','ready'))
-            assert updated['content']['text'] == original['content']['text']
+            updated = wait(client, lambda m: m['revision_id'] != original['revision_id'] and not m['loading']
+                           and m['filter']['state'] in ('disabled','ready'))
+            assert updated['text'] == original['text']
             assert updated['theses']['result'] == original['theses']['result']
             assert summary_calls() == 1 and captions.calls == [VIDEO]
             original = updated
 
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         presence(client, 'reader')
-        material = wait(client, lambda m: m['theses']['result'] and not m['content']['loading'])
+        material = wait(client, lambda m: m['theses']['result'] and not m['loading'])
         assert material['theses']['result'] == original['theses']['result']
         assert summary_calls() == 1 and captions.calls == [VIDEO]
         client.post('/api/v3/materials/' + material['id'] + '/viewed')
@@ -127,11 +127,11 @@ def test_changed_caption_text_requires_new_theses(tmp_path):
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080',
                    'model': 'local:latest', 'local_execution': True})
         presence(client, 'reader')
-        original = wait(client, lambda m: m['theses']['result'] and not m['content']['loading'])
+        original = wait(client, lambda m: m['theses']['result'] and not m['loading'])
         source.text = 'Changed saved transcript'
         client.post('/api/v3/collect')
-        wait(client, lambda m: m['theses']['result'] and m['content']['text'] == source.text and not m['content']['loading'])
+        wait(client, lambda m: m['theses']['result'] and m['text'] == source.text and not m['loading'])
         requests = [json.loads(json.loads(r.content)['messages'][1]['content'])
                     for r in calls if r.url.path == '/v1/chat/completions']
-        assert [r['sources'][0]['text'] for r in requests] == [original['content']['text'], source.text]
+        assert [r['sources'][0]['text'] for r in requests] == [original['text'], source.text]
         assert requests[0]['sources'][0]['version'] != requests[1]['sources'][0]['version']

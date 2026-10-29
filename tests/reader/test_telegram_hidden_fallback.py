@@ -19,10 +19,10 @@ def test_hidden_fallback_is_ignored_but_active_restriction_is_not(tmp_path, acti
         configure_fast_web(client)
         added = client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox')).json()
         identity = settled(client)[0]['id']
-        content = client.get('/api/v3/materials/' + identity).json()['content']
+        content = client.get('/api/v3/publication/' + identity).json()
         assert content['completeness']['state'] == ('incomplete' if active else 'complete')
         assert 'Available text 🔵' in content['text'] and '[Source](https://example.test/source)' in content['text']
-        assert content['external_attachments'] == [] and content['attachments'] == []
+        assert content['external_attachments'] == [] and [media for media in content['media'] if media['role']=='attachment'] == []
         assert content['post_web_unavailable'] is False
         state = client.get('/api/v3/collection-status/' + added['feed_id']).json()['source']
         assert state['state'] == ('error' if active else 'complete')
@@ -38,10 +38,10 @@ def test_existing_false_error_clears_without_inventing_an_author_edit(tmp_path):
         client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
         identity = settled(client)[0]['id']
         path = '/api/v3/materials/' + identity
-        original = client.get(path).json()['content']['text']
+        original = client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json()['text']
         active[0] = False
         client.post(path + '/retry'); settled(client)
-        content = client.get(path).json()['content']
+        content = client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json()
         assert content['text'] == original
         assert content['completeness']['state'] == 'complete'
         assert 'previous_versions' not in content
@@ -57,7 +57,7 @@ def test_forward_only_standalone_placeholder_saves_confirmed_restriction(tmp_pat
     with TestClient(create_app(tmp_path, token='test', api_only=True, rss_transport=httpx.MockTransport(response)), headers={'Authorization': 'Bearer test'}) as client:
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
-        content = client.get('/api/v3/materials/' + settled(client)[0]['id']).json()['content']
+        content = client.get('/api/v3/publication/' + settled(client)[0]['id']).json()
         assert content['post_web_unavailable'] is False
         assert content['completeness']['state'] == 'incomplete'
         assert 'Forwarded from' in content['text']
@@ -73,10 +73,10 @@ def test_removing_a_real_unsupported_iframe_is_still_an_author_edit(tmp_path):
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
         path = '/api/v3/materials/' + settled(client)[0]['id']
-        assert client.get(path).json()['content']['completeness']['state'] == 'incomplete'
+        assert client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json()['completeness']['state'] == 'incomplete'
         embedded[0] = False
         client.post(path + '/retry'); settled(client)
-        content = client.get(path).json()['content']
+        content = client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json()
         assert content['completeness']['state'] == 'complete'
         assert content['changed'] is True
         assert 'previous_versions' not in content

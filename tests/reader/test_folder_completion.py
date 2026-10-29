@@ -24,7 +24,7 @@ def test_folder_confirmation_deletes_all_originals_and_is_repeatable(tmp_path: P
             assert response.status_code == 200
         assert read_all_cards(client, '/api/v3/cards') == []
         for item in originals:
-            assert client.get('/api/v3/materials/' + item['id']).status_code == 404
+            assert client.get('/api/v3/publication/' + item['id']).status_code == 404
             assert not (tmp_path / 'content' / item['id']).exists()
 
 

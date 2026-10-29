@@ -51,7 +51,7 @@ def test_folder_completion_includes_hidden_materials_and_is_repeatable(postgres_
             result = client.post('/api/v3/folders/demo/completion', json={'token': preview.json()['token']})
             assert result.status_code == 200, result.text
         assert read_all_cards(client, '/api/v3/cards?show_hidden=true') == []
-        assert client.get('/api/v3/materials/' + item).status_code == 404
+        assert client.get('/api/v3/publication/' + item).status_code == 404
 
 
 def test_codex_choice_changes_only_future_work_on_postgres(postgres_url, tmp_path):
@@ -82,14 +82,14 @@ def test_codex_choice_changes_only_future_work_on_postgres(postgres_url, tmp_pat
         assert client.put('/api/v3/processors/codex', json=configuration('test-small')).status_code == 200
         assert client.patch('/api/v3/feeds/demo', json={'public_ai': True}).status_code == 200
         assert client.patch('/api/v3/settings/oko/global', json={'processor': 'codex', 'theses': True}).status_code == 200
-        wait_for(client, lambda: all(client.get('/api/v3/materials/'+card['id']).json()['theses']['result'] for card in read_all_cards(client, '/api/v3/cards')))
+        wait_for(client, lambda: all(client.get('/api/v3/publication/'+card['id']).json()['theses']['result'] for card in read_all_cards(client, '/api/v3/cards')))
         count = len(service.inputs)
         assert client.put('/api/v3/processors/codex', json=configuration('test-large', 'high', True)).status_code == 200
-        material = client.get('/api/v3/materials/' + item).json()
-        assert material['theses']['result']['points'][0]['text'] == 'test-small'
+        material = client.get('/api/v3/publication/' + item).json()
+        assert material['theses']['result']['points'][0] == 'test-small'
         assert material['theses']['result']['provenance']['model'] == 'test-small'
         assert len(service.inputs) == count
         assert client.post('/api/v3/materials/' + item + '/theses/retry').status_code == 200
-        changed = wait_for(client, lambda: (value if (value := client.get('/api/v3/materials/' + item).json())['theses']['result'] and value['theses']['result']['provenance'].get('model') == 'test-large' else None))
-        assert changed['theses']['result']['points'][0]['text'] == 'test-large'
+        changed = wait_for(client, lambda: (value if (value := client.get('/api/v3/publication/' + item).json())['theses']['result'] and value['theses']['result']['provenance'].get('model') == 'test-large' else None))
+        assert changed['theses']['result']['points'][0] == 'test-large'
         assert len(service.inputs) == count + 1

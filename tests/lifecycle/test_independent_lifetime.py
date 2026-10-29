@@ -144,7 +144,7 @@ def test_neutral_last_close_cancels_resistant_external_wait_and_prevents_late_co
             release.set()
         time.sleep(.05)
         cards = read_all_cards(client, '/api/v3/cards')
-        assert all(not (client.get('/api/v3/materials/' + card['id']).json()['availability'] == 'available') for card in cards)
+        assert all(not (client.get('/api/v3/publication/' + card['id']).json()['availability'] == 'available') for card in cards)
         assert 'Must never be committed' not in client.get('/api/v3/cards').text
 
 

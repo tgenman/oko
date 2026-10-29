@@ -109,7 +109,7 @@ def test_unread_includes_hidden_and_viewed_dates_follow_actual_scope(tmp_path):
         wait_for(client, lambda: len(read_all_cards(client, '/api/v3/cards')) == 2)
         card = read_all_cards(client, '/api/v3/cards')[0]
         clock[0] += 10
-        assert client.get('/api/v3/materials/' + card['id']).status_code == 200
+        assert client.get('/api/v3/publication/' + card['id']).status_code == 200
         assert activity()['marked_read'] is None
         assert client.post('/api/v3/materials/' + card['id'] + '/viewed').status_code == 200
         assert activity()['unread'] == 2

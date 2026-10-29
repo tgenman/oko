@@ -50,7 +50,7 @@ def test_viewed_and_feed_deletion_wait_for_one_cleanup(tmp_path: Path):
                 assert cleaning.wait(2)
                 switched = pool.submit(client.delete, '/api/v3/feeds/' + feed['id'])
                 # Queries remain usable while cleanup is waiting.
-                assert client.get('/api/v3/materials/' + item).status_code == 404
+                assert client.get('/api/v3/publication/' + item).status_code == 404
                 assert client.get('/api/v3/subscriptions').status_code == 200
                 time.sleep(.05)
             finally:
@@ -135,8 +135,8 @@ def test_reload_restores_missing_local_media_without_stopping_reader(tmp_path: P
         source.rows = source.rows + [dict(id=12, date=time.time()-60, text='', group=777, media=None)]
         client.post('/api/v3/materials/' + card['id'] + '/retry')
         from tests.support.reader import wait_for
-        value=wait_for(client,lambda: value if (value:=client.get('/api/v3/materials/'+card['id']).json())['content']['attachments'] and not value['content']['loading'] else None)
+        value=wait_for(client,lambda: value if (value := client.get('/api/v3/publication/'+card['id']).json()) and any(media['role'] == 'attachment' for media in value['media']) and not value['loading'] else None)
         assert client.get('/api/v3/status').json()['runtime_state']=='running'
-        assert client.get(value['content']['attachments'][0]['url']).content==b'media'
+        assert client.get([media for media in value['media'] if media['role'] == 'attachment'][0]['url']).content==b'media'
         assert client.get('/api/v3/cards').status_code == 200
         assert client.post('/api/v3/materials/' + card['id'] + '/viewed').status_code == 200

@@ -132,14 +132,14 @@ def test_reader_http_collection_media_settings_viewed_and_restart(postgres_url, 
         assert client.put('/api/v3/power', json={'enabled': True}).status_code == 200
         card = wait_cards(client)[0]
         item = card['id']
-        material = wait_for(client, lambda: (value if (value := client.get('/api/v3/materials/' + item).json())['content']['attachments'] else None))
-        assert 'Collected text' in material['content']['text']
+        material = wait_for(client, lambda: (value if (value := client.get('/api/v3/publication/' + item).json()) and any(media['role'] == 'attachment' for media in value['media']) else None))
+        assert 'Collected text' in material['text']
         frame = client.get('/api/v3/navigation')
         assert frame.status_code == 200, frame.text
         storage_id = frame.headers['X-Oko-Storage-Id']
         assert frame.json()['total'] == 1
         assert client.get('/api/v3/cards').json()['items'][0]['id'] == item
-        media = material['content']['attachments'][0]['url']
+        media = [media for media in material['media'] if media['role'] == 'attachment'][0]['url']
         assert client.get(media).content == PNG
         previous = requests.count('/feed')
         assert client.post('/api/v3/collect').status_code == 200
@@ -160,7 +160,7 @@ def test_reader_http_collection_media_settings_viewed_and_restart(postgres_url, 
         if delete_fault:
             wait_for(restarted, lambda: bool(failed_deletions))
         assert read_all_cards(restarted, '/api/v3/cards') == []
-        assert restarted.get('/api/v3/materials/' + item).status_code == 404
+        assert restarted.get('/api/v3/publication/' + item).status_code == 404
     if delete_fault:
         fail_delete[0] = False
         with TestClient(app(), headers=HEADERS) as recovered:
@@ -195,8 +195,8 @@ def test_shared_publication_survives_primary_feed_deletion(postgres_url, tmp_pat
                  for index, channel in enumerate((CHANNEL, 'UC' + 'b' * 22))]
         cards = wait_for(client, lambda: (cards if len(cards := read_all_cards(client, '/api/v3/cards')) == 1 and all(read_all_cards(client, '/api/v3/cards', params={'feed': feed['id']}) for feed in feeds) else None))
         item = cards[0]['id']
-        material = wait_for(client, lambda: (value if (value := client.get('/api/v3/materials/' + item).json())['content']['attachments'] else None))
-        media = material['content']['attachments'][0]['url']
+        material = wait_for(client, lambda: (value if (value := client.get('/api/v3/publication/' + item).json()) and any(media['role'] == 'attachment' for media in value['media']) else None))
+        media = [media for media in material['media'] if media['role'] == 'attachment'][0]['url']
         primary = next(feed for feed in feeds if feed['id'] == material['feed_id'])
         remaining = next(feed for feed in feeds if feed['id'] != primary['id'])
         composition = client.get('/api/v3/reading-composition')

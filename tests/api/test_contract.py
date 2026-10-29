@@ -67,6 +67,6 @@ def test_real_settings_diagnostics_and_exact_history_obey_contract(tmp_path):
         response = client.delete(f'/api/v3/feeds/{feed}/history',headers=headers)
         assert response.status_code == 200
         validate_reply(spec,'/api/v3/feeds/{identity}/history','delete',response)
-        response = client.get('/api/v3/materials/absent',headers=headers)
+        response = client.get('/api/v3/publication/absent',headers=headers)
         assert response.status_code == 404
-        validate_reply(spec,'/api/v3/materials/{item}','get',response)
+        validate_reply(spec,'/api/v3/publication/{item}','get',response)

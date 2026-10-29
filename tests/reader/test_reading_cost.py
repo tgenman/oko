@@ -31,9 +31,9 @@ def test_reading_http_budgets(tmp_path, count):
         assert len(response.json()['items']) == 40
         assert response.json()['total'] == count * 4
         assert int(response.headers['X-Test-SQL']) < 80 + 11 * count * 4
-        response = client.get('/api/v3/materials/' + items[0])
+        response = client.get('/api/v3/publication/' + items[0])
         assert response.status_code == 200
-        assert response.json()['content']['description'] == 'Synthetic video'
+        assert response.json()['description'] == 'Synthetic video'
         assert int(response.headers['X-Test-SQL']) <= 23
         jobs = [q for q in app.state.last_sql if re.search(r'\bFROM jobs\b', q, re.IGNORECASE)]
         # The compatible legacy response also reads history and fetch state.
@@ -49,7 +49,7 @@ def test_opening_one_material_does_not_read_unrelated_feeds(tmp_path):
         app = traced_app(root)
         with TestClient(app, headers=HEADERS) as client:
             tracing(client, app)
-            response = client.get('/api/v3/materials/' + items[0])
+            response = client.get('/api/v3/publication/' + items[0])
             assert response.status_code == 200
             costs.append(int(response.headers['X-Test-SQL']))
     assert costs[1] <= costs[0] + 2, costs
@@ -72,7 +72,7 @@ def test_selected_scope_sql_does_not_grow_with_other_materials(tmp_path):
             assert client.patch('/api/v3/settings/feed/' + feeds[0], json={'originals': False}).status_code == 200
             response = client.get('/api/v3/cards', params={'feed': feeds[0]})
             assert all('originals' not in card for card in response.json()['items'])
-            assert all(client.get('/api/v3/materials/'+card['id']).json()['originals'] is False for card in response.json()['items'])
+            assert all(client.get('/api/v3/publication/'+card['id']).json()['originals'] is False for card in response.json()['items'])
     assert costs[1] <= costs[0] + 2, costs
 
 

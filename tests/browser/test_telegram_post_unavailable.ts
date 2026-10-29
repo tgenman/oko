@@ -45,12 +45,12 @@ test('late unavailable Telegram post cannot replace another opened material',asy
  try{
   const post=material('P',{text:'',url:'https://t.me/fixture/11',full:false,post_web_unavailable:true});
   await r.start([material('A'),post]);
-  await r.page.evaluate(()=>readerTransport.held.set('/api/v3/materials/P',true));
+  await r.page.evaluate(()=>readerTransport.held.set('/fixture/material/P',true));
   await r.page.getByRole('button',{name:/^P ·/}).click();
-  await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/materials/P'));
+  await r.page.waitForFunction(()=>readerTransport.pending.has('/fixture/material/P'));
   await r.page.getByRole('button',{name:/^A ·/}).click();
   await expect(r.page.locator('#text')).toHaveText('Текст A');
-  await r.page.evaluate(body=>readerTransport.release('/api/v3/materials/P',body),post);
+  await r.page.evaluate(body=>readerTransport.release('/fixture/material/P',body),post);
   await expect(r.page.locator('#post-web-unavailable')).toHaveCount(0);
   await expect(r.page.locator('#text')).toHaveText('Текст A');
  }finally{await r.close();}

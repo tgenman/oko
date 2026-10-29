@@ -13,7 +13,7 @@ def test_exported_reading_contract_rejects_missing_fields_and_wrong_types(tmp_pa
     result = subprocess.run([sys.executable, '-m', 'oko.reader.contracts'], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     schemas = json.loads(result.stdout)
-    assert set(schemas) == {'navigation', 'cards', 'material', 'status'}
+    assert set(schemas) == {'navigation', 'cards', 'publication', 'status'}
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test'), headers=HEADERS) as client:
         setup_reader(client, theses=False)
         from oko.reader.contracts import CONTRACTS
@@ -33,11 +33,11 @@ def test_material_and_stopped_status_preserve_wire_fields(tmp_path):
     from oko.reader.contracts import CONTRACTS
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test'), headers=HEADERS) as client:
         identity = setup_reader(client, theses=False)
-        body = client.get('/api/v3/materials/' + identity).json()
-        assert CONTRACTS['material'].dump_python(CONTRACTS['material'].validate_python(body), mode='json', by_alias=True, exclude_unset=True) == body
-        assert body['theses']['attempt']['state'] == 'disabled'
+        body = client.get('/api/v3/publication/' + identity).json()
+        assert CONTRACTS['publication'].dump_python(CONTRACTS['publication'].validate_python(body), mode='json', by_alias=True, exclude_unset=True) == body
+        assert body['theses']['state'] == 'disabled'
         assert body['theses']['result'] is None
-        assert 'previous_versions' not in body['content']
+        assert 'previous_versions' not in body
         status = client.get('/api/v3/status/details').json()
         assert CONTRACTS['status'].dump_python(CONTRACTS['status'].validate_python(status), mode='json', by_alias=True, exclude_unset=True) == status
         assert status['runtime_state'] == 'running'

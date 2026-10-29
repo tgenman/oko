@@ -108,8 +108,7 @@ Description относится к внешнему источнику. Откр�
 `200 state: unavailable`. Уточнение схемы сохраняет фактические ответы сервера,
 включая статусы, предметные коды и receipts команд.
 
-Для карточек используются [GET /api/v3/cards и POST /api/v3/cards/read](../docs/architecture/cards-http-design.md). Список выдаётся порциями и проверяется по ETag; просмотр принимает явные ID. `POST /api/v3/reading/check` остаётся для статуса, навигации и частей открытого материала; открытие использует `GET /api/v3/reading/materials/{item}`.
-[Доставка, частичные ответы и восстановление](../docs/architecture/selective-reading.md).
+Для карточек используются [GET /api/v3/cards и POST /api/v3/cards/read](../docs/architecture/cards-http-design.md). Список выдаётся порциями и проверяется по ETag; просмотр принимает явные ID. Публикацию открывает `GET /api/v3/publication/{item}`.
 
 ## Единый ответ открытой публикации
 

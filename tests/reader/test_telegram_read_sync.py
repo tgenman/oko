@@ -107,16 +107,16 @@ def test_late_view_deletes_content_but_confirmation_waits_and_survives_restart(t
         presence(client, 'test')
         connect(client)
         cards = settled(client, 2)
-        late = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/materials/' + c['id']).json()['source']['message_ids']] == [29])['id']
+        late = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/publication/' + c['id']).json()['source']['message_ids']] == [29])['id']
         assert client.post('/api/v3/materials/' + late + '/viewed').status_code == 200
-        assert client.get('/api/v3/materials/' + late).status_code == 404
+        assert client.get('/api/v3/publication/' + late).status_code == 404
         status = wait_for(client, lambda s: any(r.get('pending') == 1 and r.get('waiting') for r in s.get('telegram_reads', [])))
         assert status['telegram_reads'][0]['waiting']=='telegram_read_frontier'
         assert network.acks == []
     with TestClient(create_app(tmp_path, **kwargs), headers=H) as client:
         presence(client, 'test')
         earlier = settled(client)[0]['id']
-        assert client.get('/api/v3/materials/' + late).status_code == 404
+        assert client.get('/api/v3/publication/' + late).status_code == 404
         assert client.post('/api/v3/materials/' + earlier + '/viewed').status_code == 200
         wait_for(client, lambda s: any(r.get('confirmed') == '29' and r.get('pending') == 0 for r in s.get('telegram_reads', [])))
         assert network.acks == [29]
@@ -140,17 +140,17 @@ def test_auto_read_requires_complete_media_and_does_not_delete_originals(tmp_pat
         feed = connect(client)
         client.patch('/api/v3/feeds/' + feed['id'], json={'auto_read': True})
         cards = settled(client, 2)
-        earlier = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/materials/' + c['id']).json()['source']['message_ids']] == [11])['id']
+        earlier = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/publication/' + c['id']).json()['source']['message_ids']] == [11])['id']
         status = wait_for(client, lambda s: any(r.get('pending') == 1 and r.get('waiting') for r in s.get('telegram_reads', [])))
         assert network.acks == []
-        assert not client.get('/api/v3/materials/' + earlier).json()['content']['completeness']['state']=='complete'
+        assert not client.get('/api/v3/publication/' + earlier).json()['completeness']['state']=='complete'
         network.broken = False
         client.post('/api/v3/materials/' + earlier + '/retry')
         wait_for(client, lambda s: any(r.get('confirmed') == '29' for r in s.get('telegram_reads', [])))
         assert network.acks == [29]
         assert len(read_all_cards(client, '/api/v3/cards')) == 2
-        material = client.get('/api/v3/materials/' + earlier).json()
-        assert material['content']['completeness']['state']=='complete' and client.get(material['content']['attachments'][0]['url']).content == b'complete-image'
+        material = client.get('/api/v3/publication/' + earlier).json()
+        assert material['completeness']['state']=='complete' and client.get([media for media in material['media'] if media['role'] == 'attachment'][0]['url']).content == b'complete-image'
 
 
 def test_old_history_blocks_until_separate_permission_and_external_reads_do_not_delete(tmp_path):
@@ -161,19 +161,19 @@ def test_old_history_blocks_until_separate_permission_and_external_reads_do_not_
         feed = connect(client,count=2)
         assert feed['read_history'] is False
         cards = settled(client, 2)
-        later = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/materials/' + c['id']).json()['source']['message_ids']] == [29])['id']
-        earlier = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/materials/' + c['id']).json()['source']['message_ids']] == [11])['id']
+        later = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/publication/' + c['id']).json()['source']['message_ids']] == [29])['id']
+        earlier = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/publication/' + c['id']).json()['source']['message_ids']] == [11])['id']
         client.post('/api/v3/materials/' + earlier + '/viewed')
         status = wait_for(client, lambda s: any(r.get('waiting')=='telegram_read_frontier' for r in s.get('telegram_reads', [])))
         assert network.acks == []
         client.patch('/api/v3/feeds/' + feed['id'], json={'read_history': True})
         wait_for(client, lambda s: any(r.get('confirmed') == '11' for r in s.get('telegram_reads', [])))
         assert network.acks == [11]
-        assert client.get('/api/v3/materials/' + later).status_code == 200
+        assert client.get('/api/v3/publication/' + later).status_code == 200
         network.read_max = 29
         client.post('/api/v3/collect')
         wait_for(client, lambda s: any(r.get('confirmed') == '29' for r in s.get('telegram_reads', [])))
-        assert client.get('/api/v3/materials/' + later).status_code == 200
+        assert client.get('/api/v3/publication/' + later).status_code == 200
 
 
 def test_reobserving_unchanged_page_schedules_read_frontier_check(tmp_path):
@@ -209,12 +209,12 @@ def test_unknown_ack_result_recovers_without_content_after_restart(tmp_path):
         client.post('/api/v3/materials/' + item + '/viewed')
         wait_for(client, lambda s: bool(s['telegram_reads'] and s['telegram_reads'][0]['error']))
         assert network.acks == [11] and network.read_max == 11
-        assert client.get('/api/v3/materials/' + item).status_code == 404
+        assert client.get('/api/v3/publication/' + item).status_code == 404
     with TestClient(create_app(tmp_path, token='test', telegram_client=network), headers=H) as client:
         presence(client, 'test')
         wait_for(client, lambda s: any(r.get('confirmed') == '11' and not r.get('error') for r in s['telegram_reads']))
         assert network.acks == [11]
-        assert client.get('/api/v3/materials/' + item).status_code == 404
+        assert client.get('/api/v3/publication/' + item).status_code == 404
         assert read_all_cards(client, '/api/v3/cards') == []
 
 
@@ -231,15 +231,15 @@ def test_ack_error_keeps_queue_and_retry_never_crosses_unviewed_message(tmp_path
         presence(client, 'test')
         connect(client)
         cards = settled(client, 2)
-        earlier = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/materials/' + c['id']).json()['source']['message_ids']] == [11])['id']
-        later = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/materials/' + c['id']).json()['source']['message_ids']] == [29])['id']
+        earlier = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/publication/' + c['id']).json()['source']['message_ids']] == [11])['id']
+        later = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/publication/' + c['id']).json()['source']['message_ids']] == [29])['id']
         client.post('/api/v3/materials/' + earlier + '/viewed')
         wait_for(client, lambda s: any(r.get('error') for r in s['telegram_reads']))
-        assert client.get('/api/v3/materials/' + earlier).status_code == 404
+        assert client.get('/api/v3/publication/' + earlier).status_code == 404
         network.broken = False
         wait_for(client, lambda s: any(r.get('confirmed') == '11' for r in s['telegram_reads']))
         assert network.acks == [11]
-        assert client.get('/api/v3/materials/' + later).status_code == 200
+        assert client.get('/api/v3/publication/' + later).status_code == 200
 
 
 def test_folder_completion_confirms_unique_message_set(tmp_path):
@@ -295,7 +295,7 @@ def test_cancelled_history_check_cannot_send_a_late_ack(tmp_path, action):
             presence(client, 'test')
             feed = connect(client)
             cards = settled(client, 2)
-            earlier = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/materials/' + c['id']).json()['source']['message_ids']] == [11])['id']
+            earlier = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/publication/' + c['id']).json()['source']['message_ids']] == [11])['id']
             client.post('/api/v3/materials/' + earlier + '/viewed')
             assert network.started.wait(3)
             if action == 'stop':
@@ -337,14 +337,14 @@ def test_deleted_remote_message_does_not_leave_confirmation_waiting_forever(tmp_
         presence(client, 'test')
         connect(client)
         cards = settled(client, 2)
-        later = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/materials/' + c['id']).json()['source']['message_ids']] == [29])['id']
-        earlier = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/materials/' + c['id']).json()['source']['message_ids']] == [11])['id']
+        later = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/publication/' + c['id']).json()['source']['message_ids']] == [29])['id']
+        earlier = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/publication/' + c['id']).json()['source']['message_ids']] == [11])['id']
         network.history = network.history[:1]
-        assert client.get('/api/v3/materials/' + later).status_code == 200
+        assert client.get('/api/v3/publication/' + later).status_code == 200
         client.post('/api/v3/materials/' + later + '/viewed')
         wait_for(client, lambda s: any(r.get('pending') == 0 and not r.get('waiting') for r in s['telegram_reads']))
         assert network.acks == []
-        assert client.get('/api/v3/materials/' + earlier).status_code == 200
+        assert client.get('/api/v3/publication/' + earlier).status_code == 200
         client.post('/api/v3/materials/' + earlier + '/viewed')
         wait_for(client, lambda s: any(r.get('confirmed') == '11' for r in s['telegram_reads']))
         assert network.acks == [11]
@@ -399,8 +399,8 @@ def test_disabling_auto_read_requires_view_for_saved_unconfirmed_post_after_rest
         feed = connect(client)
         client.patch('/api/v3/feeds/' + feed['id'], json={'auto_read': True})
         cards = settled(client, 2)
-        later = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/materials/' + c['id']).json()['source']['message_ids']] == [29])['id']
-        earlier = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/materials/' + c['id']).json()['source']['message_ids']] == [11])['id']
+        later = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/publication/' + c['id']).json()['source']['message_ids']] == [29])['id']
+        earlier = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/publication/' + c['id']).json()['source']['message_ids']] == [11])['id']
         wait_for(client, lambda s: any(r.get('pending') == 1 and r.get('waiting') for r in s['telegram_reads']))
         assert network.acks == []
         assert client.patch('/api/v3/feeds/' + feed['id'], json={'auto_read': False}).status_code == 200
@@ -409,7 +409,7 @@ def test_disabling_auto_read_requires_view_for_saved_unconfirmed_post_after_rest
         client.post('/api/v3/materials/' + earlier + '/viewed')
         wait_for(client, lambda s: any(int(r.get('confirmed') or '0') >= 11 for r in s['telegram_reads']))
         assert network.acks == [11]
-        assert client.get('/api/v3/materials/' + later).status_code == 200
+        assert client.get('/api/v3/publication/' + later).status_code == 200
         client.post('/api/v3/materials/' + later + '/viewed')
         wait_for(client, lambda s: any(r.get('confirmed') == '29' for r in s['telegram_reads']))
         assert network.acks == [11, 29]

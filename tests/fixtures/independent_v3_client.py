@@ -53,8 +53,8 @@ for _ in range(100):
 else:
     raise AssertionError(cards)
 item=cards[0]['id']
-code,material=send('GET','/api/v3/materials/'+item)
-assert code==200 and material['content']['text']
+code,material=send('GET','/api/v3/publication/'+item)
+assert code==200 and material['text']
 assert len(send('GET','/api/v3/cards')[1]['items'])==len(cards)
 # Commit a request, then lose its response body before the client decodes it.
 url=urlsplit(origin)

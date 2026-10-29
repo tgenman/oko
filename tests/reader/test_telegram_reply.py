@@ -23,18 +23,18 @@ def test_reply_is_separate_from_own_text_and_survives_restart(tmp_path, href):
         assert client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture',folder='Inbox')).status_code == 200
         card = settled(client)[0]
         assert card['title'] == 'Own first line'
-        material = client.get('/api/v3/materials/'+card['id']).json()
-        assert material['content']['text'] == 'Own first line\n\nOwn paragraph'
-        assert material['content']['reply_preview'] == dict(author='Reply author', text='Quoted context 🙂 …', source_url='https://t.me/fixture/10')
+        material = client.get('/api/v3/publication/'+card['id']).json()
+        assert material['text'] == 'Own first line\n\nOwn paragraph'
+        assert material['reply_preview'] == dict(author='Reply author', text='Quoted context 🙂 …', source_url='https://t.me/fixture/10')
         frame = client.get('/api/v3/publication/'+card['id']).json()
         entity = frame
-        assert entity['reply_preview'] == material['content']['reply_preview']
+        assert entity['reply_preview'] == material['reply_preview']
         assert entity['title'] == card['title']
-        assert material['content']['completeness']['state'] == 'complete'
+        assert material['completeness']['state'] == 'complete'
     with TestClient(create_app(tmp_path, **options), headers=headers) as client:
         configure_fast_web(client)
-        saved = client.get('/api/v3/materials/'+card['id']).json()
-        assert saved['content']['reply_preview'] == material['content']['reply_preview']
+        saved = client.get('/api/v3/publication/'+card['id']).json()
+        assert saved['reply_preview'] == material['reply_preview']
 
 
 def test_both_ai_operations_receive_reply_and_reply_changes_invalidate_results(tmp_path):
@@ -67,24 +67,24 @@ def test_both_ai_operations_receive_reply_and_reply_changes_invalidate_results(t
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         card = settled(client)[0]
         url = '/api/v3/materials/'+card['id']
-        first = wait_for(client,lambda: m if (m:=client.get(url).json())['theses']['result'] else None)
+        first = wait_for(client,lambda: m if (m:=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json())['theses']['result'] else None)
         assert {c['operation'] for c in calls} == {'filter','theses'}
         assert all(c['sources'][0]['reply_preview']['text']=='CONTEXT_ONE' and 'Own text marker' in c['sources'][0]['text'] for c in calls)
         assert all(c['sources'][0]['reply_preview']['author']=='Other author' and c['sources'][0]['reply_preview']['source_url']=='https://t.me/fixture/10' for c in calls)
         count = len(calls)
         phase[0] = 'CONTEXT_TWO'
         assert client.post(url+'/retry').status_code == 200
-        second = wait_for(client,lambda: m if (m:=client.get(url).json())['theses']['result'] and m['theses']['result']['points'][0]['text']=='Summary CONTEXT_TWO' else None)
-        assert second['content']['revision_id'] != first['content']['revision_id']
+        second = wait_for(client,lambda: m if (m:=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json())['theses']['result'] and m['theses']['result']['points'][0]=='Summary CONTEXT_TWO' else None)
+        assert second['revision_id'] != first['revision_id']
         assert len(calls) == count+2
-        assert 'previous_versions' not in second['content']
+        assert 'previous_versions' not in second
         count = len(calls)
         client.post(url+'/retry')
-        wait_for(client,lambda: not client.get(url).json()['content']['loading'])
+        wait_for(client,lambda: not client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['loading'])
         assert len(calls) == count
         phase[0] = 'HIDE_CONTEXT'
         client.post(url+'/retry')
-        wait_for(client,lambda: (result:=client.get(url).json()['filter']['result']) and result['hidden'])
+        wait_for(client,lambda: (result:=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['filter']['result']) and result['hidden'])
         assert calls[-1]['operation'] == 'filter'
 
 
@@ -102,14 +102,14 @@ def test_reply_only_and_partial_preview_have_no_invented_media(tmp_path,author,f
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         card = settled(client)[0]
-        m = client.get('/api/v3/materials/'+card['id']).json()
+        m = client.get('/api/v3/publication/'+card['id']).json()
         assert card['title'] == m['title'] == 'Ответ на сообщение'
-        assert m['content']['text'] == ''
-        assert m['content']['completeness']['state'] == 'complete'
-        assert m['content']['attachments'] == []
-        assert m['content']['reply_preview']['source_url'] == expected
-        assert m['content']['reply_preview']['author'] == (author or None)
-        assert 'bad()' not in m['content']['reply_preview']['text']
+        assert m['text'] == ''
+        assert m['completeness']['state'] == 'complete'
+        assert [media for media in m['media'] if media['role'] == 'attachment'] == []
+        assert m['reply_preview']['source_url'] == expected
+        assert m['reply_preview']['author'] == (author or None)
+        assert 'bad()' not in m['reply_preview']['text']
 
 
 @pytest.mark.parametrize('fragment,expected_calls', [('Quote-only marker', 2), ('', 0)])
@@ -139,7 +139,7 @@ def test_ai_can_process_reply_without_own_text_but_skips_metadata_only(tmp_path,
         client.patch('/api/v3/settings/oko/global',json=dict(processor='llamacpp',theses=True,prompt_filters='Evaluate all text'))
         presence(client,'reader')
         if expected_calls:
-            wait_for(client,lambda: client.get('/api/v3/materials/'+card['id']).json()['theses']['result'])
+            wait_for(client,lambda: client.get('/api/v3/publication/'+card['id']).json()['theses']['result'])
         wait_for(client,lambda: client.get('/api/v3/status/details').json()['work']==[{'phase':'idle'}])
         assert len(tasks)==expected_calls
         assert all(task['sources'][0]['text']=='' and task['sources'][0]['reply_preview']['text']==fragment for task in tasks)

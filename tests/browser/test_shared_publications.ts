@@ -20,7 +20,7 @@ test('one publication belongs to both feeds and survives deleting its first feed
  }
  await r.page.locator('[data-card]').click();
  await expect(r.page.locator('#images img')).toHaveAttribute('src',/^blob:/);
- const material=await r.api(`materials/${item}`);
+ const material=await r.api(`publication/${item}`);
  const survivor=feeds.find(f=>f.id!==material.feed_id)!;
  await r.api(`feeds/${material.feed_id}`,'DELETE');
  await expect(r.page.locator(`[data-feed="${material.feed_id}"]`)).toHaveCount(0);

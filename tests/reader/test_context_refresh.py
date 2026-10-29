@@ -53,14 +53,14 @@ def test_refresh_retries_incomplete_and_unavailable_once_preserving_saved_copy(t
     with TestClient(create_app(tmp_path,token='test',api_only=True,source=source),headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
         cards=wait_for(client,lambda:(cards if len(cards:=read_all_cards(client, '/api/v3/cards'))==2 and all(not c['loading'] for c in cards) else None))
-        copies={c['id']:client.get('/api/v3/materials/'+c['id']).json()['content']['text'] for c in cards}
+        copies={c['id']:client.get('/api/v3/publication/'+c['id']).json()['text'] for c in cards}
         assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'demo'}).status_code==200
         wait_for(client,lambda:source.calls['1']==2 and source.calls['2']==2)
         time.sleep(.12)
         assert source.calls=={'1':2,'2':2}
         assert source.cursors==[None,'2']
         for item,text in copies.items():
-            assert client.get('/api/v3/materials/'+item).json()['content']['text']==text
+            assert client.get('/api/v3/publication/'+item).json()['text']==text
         assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'demo'}).status_code==200
         wait_for(client,lambda:source.calls['2']==3)
         time.sleep(.12)
@@ -88,11 +88,11 @@ def test_refresh_retries_failed_theses_but_keeps_ready_results(tmp_path):
         client.patch('/api/v3/settings/oko/global',json={'theses':True,'prompt_filters':''})
         cards=wait_for(client,lambda:(c if len(c:=read_all_cards(client, '/api/v3/cards'))==3 else None))
         wait_for(client,lambda:len(set(model.calls))==3)
-        wait_for(client,lambda:sum(client.get('/api/v3/materials/'+c['id']).json()['theses']['attempt']['state']=='ready' for c in cards)==2)
+        wait_for(client,lambda:sum(client.get('/api/v3/publication/'+c['id']).json()['theses']['state']=='ready' for c in cards)==2)
         old=list(model.calls)
         model.failed=False
         assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'demo'}).status_code==200
-        wait_for(client,lambda:all(client.get('/api/v3/materials/'+c['id']).json()['theses']['attempt']['state']=='ready' for c in cards))
+        wait_for(client,lambda:all(client.get('/api/v3/publication/'+c['id']).json()['theses']['state']=='ready' for c in cards))
         assert len(model.calls)==len(old)+1
         assert model.calls[-1]==old[0]
 
@@ -146,10 +146,10 @@ def test_refresh_restores_previously_unavailable_publication(tmp_path):
         item=cards[0]['id']
         source.unavailable=True
         assert client.post('/api/v3/materials/'+item+'/retry').status_code==200
-        wait_for(client,lambda:client.get('/api/v3/materials/'+item).json()['content']['source_deleted'])
+        wait_for(client,lambda:client.get('/api/v3/publication/'+item).json()['source_deleted'])
         source.unavailable=False
         assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'demo'}).status_code==200
-        wait_for(client,lambda:not client.get('/api/v3/materials/'+item).json()['content']['source_deleted'])
+        wait_for(client,lambda:not client.get('/api/v3/publication/'+item).json()['source_deleted'])
 
 
 def test_refresh_keeps_forced_source_wait_but_advances_ordinary_retries(tmp_path):
@@ -231,9 +231,9 @@ def test_refresh_retries_failed_filter_without_repeating_successful_filters(tmp_
         client.patch('/api/v3/feeds/demo',json={'public_ai':True})
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':'Keep all text'})
         cards=wait_for(client,lambda:(c if len(c:=read_all_cards(client, '/api/v3/cards'))==3 else None))
-        wait_for(client,lambda:sum(client.get('/api/v3/materials/'+c['id']).json()['filter']['attempt']['state']=='ready' for c in cards)==2)
+        wait_for(client,lambda:sum(client.get('/api/v3/publication/'+c['id']).json()['filter']['state']=='ready' for c in cards)==2)
         old=list(model.calls)
         model.failed=False
         assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'demo'}).status_code==200
-        wait_for(client,lambda:all(client.get('/api/v3/materials/'+c['id']).json()['filter']['attempt']['state']=='ready' for c in cards))
+        wait_for(client,lambda:all(client.get('/api/v3/publication/'+c['id']).json()['filter']['state']=='ready' for c in cards))
         assert len(model.calls)==len(old)+1 and model.calls[-1]==old[0]

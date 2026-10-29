@@ -17,7 +17,7 @@ def test_external_audio_is_saved_without_errors_and_is_typed_for_reader(tmp_path
         result = client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
         assert result.status_code == 200, result.text
         cards = settled(client)
-        content = client.get('/api/v3/materials/'+cards[0]['id']).json()['content']
+        content = client.get('/api/v3/publication/'+cards[0]['id']).json()
         assert client.get('/api/v3/status/details').json()['problems']['count'] == 0
         assert content['completeness']['reason'] == 'external_attachment'
         assert content['external_attachments'] == [dict(kind='audio', title='A recorded lesson', author='Fixture author', size_label=None, duration=None, poster_url=None, source_url='https://t.me/fixture/11', reason='public_preview_unavailable', restriction=None)]
@@ -38,7 +38,7 @@ def test_web_video_size_limit_preserves_cover_and_real_cover_failure(tmp_path):
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         card=settled(client)[0]
         url='/api/v3/materials/'+card['id']
-        content=client.get(url).json()['content']
+        content=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()
         media=content['external_attachments'][0]
         assert media['kind']=='video' and media['restriction']=='size_limit' and media['duration']=='0:58'
         assert client.get(media['poster_url']).content==b'poster'
@@ -46,14 +46,14 @@ def test_web_video_size_limit_preserves_cover_and_real_cover_failure(tmp_path):
     # Persisted availability and covers survive a restart, without a personal source.
     with TestClient(create_app(tmp_path,**options),headers=headers) as client:
         configure_fast_web(client)
-        assert client.get(url).json()['content']['external_attachments'][0]==media
+        assert client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['external_attachments'][0]==media
         assert client.get('/api/v3/status/details').json()['problems']['count']==0
     broken[0]=True
     with TestClient(create_app(tmp_path/'failed',**options),headers=headers) as client:
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         card=settled(client)[0]
-        content=client.get('/api/v3/materials/'+card['id']).json()['content']
+        content=client.get('/api/v3/publication/'+card['id']).json()
         assert content['external_attachments'][0]['poster_url'] is None
         assert content['external_attachments'][0]['restriction']=='size_limit'
         assert content['completeness']['reason']!='external_attachment'
@@ -74,10 +74,10 @@ def test_external_metadata_changes_keep_old_version_context_without_false_update
         card=settled(client)[0];url='/api/v3/materials/'+card['id']
         phase[0]=1
         client.post(url+'/retry')
-        second=client.get(url).json()['content']
+        second=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()
         import time
         for _ in range(150):
-            second=client.get(url).json()['content']
+            second=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()
             if not second['loading'] and second['external_attachments'][0]['restriction'] is None:break
             time.sleep(.02)
         assert second['external_attachments'][0]['restriction'] is None
@@ -85,7 +85,7 @@ def test_external_metadata_changes_keep_old_version_context_without_false_update
         phase[0]=2
         client.post(url+'/retry')
         for _ in range(150):
-            third=client.get(url).json()['content']
+            third=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()
             if not third['loading'] and third['text'].startswith('Edited own text'):break
             time.sleep(.02)
         assert third['changed'] is True
@@ -104,13 +104,13 @@ def test_local_video_copy_wins_over_later_web_restriction(tmp_path):
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         card=settled(client)[0];url='/api/v3/materials/'+card['id']
-        first=client.get(url).json()['content'];video=next(a for a in first['attachments'] if a['kind']=='video')
+        first=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json();video=next(a for a in [media for media in first['media'] if media['role']=='attachment'] if a['kind']=='video')
         assert client.get(video['url']).content==b'local-video'
         restricted[0]=True
         client.post(url+'/retry');settled(client)
-        second=client.get(url).json()['content']
+        second=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()
         assert second['external_attachments']==[]
-        assert client.get(next(a['url'] for a in second['attachments'] if a['kind']=='video')).content==b'local-video'
+        assert client.get(next(a['url'] for a in [media for media in second['media'] if media['role']=='attachment'] if a['kind']=='video')).content==b'local-video'
         assert client.get('/api/v3/status/details').json()['problems']['count']==0
 
 
@@ -129,7 +129,7 @@ def test_real_download_failures_are_not_reclassified_as_external(tmp_path,failur
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         card=settled(client)[0]
-        content=client.get('/api/v3/materials/'+card['id']).json()['content']
+        content=client.get('/api/v3/publication/'+card['id']).json()
         assert client.get('/api/v3/status/details').json()['problems']['count']>0
         assert 'Own text' in content['text']
         assert content['completeness']['reason']!='external_attachment'
@@ -146,7 +146,7 @@ def test_reassessment_closes_only_the_recovered_material_problem(tmp_path):
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         cards=settled(client,2)
-        materials=[client.get('/api/v3/materials/'+card['id']).json() for card in cards]
+        materials=[client.get('/api/v3/publication/'+card['id']).json() for card in cards]
         target=next(m for m in materials if m['source']['message_ids']==['11'])
         other=next(m for m in materials if m['source']['message_ids']==['12'])
         assert client.get('/api/v3/status/details').json()['problems']['count']>=2
@@ -172,10 +172,10 @@ def test_new_external_attachment_after_complete_text_is_not_a_failure(tmp_path):
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         url='/api/v3/materials/'+settled(client)[0]['id']
-        assert client.get(url).json()['content']['completeness']['state']=='complete'
+        assert client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['completeness']['state']=='complete'
         external[0]=True
         client.post(url+'/retry');settled(client)
-        content=client.get(url).json()['content']
+        content=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()
         assert content['external_attachments'][0]['kind']=='audio'
         assert client.get('/api/v3/status/details').json()['problems']['count']==0
 
@@ -210,7 +210,7 @@ def test_lost_local_file_does_not_turn_into_a_normal_external_notice(tmp_path):
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         url='/api/v3/materials/'+settled(client)[0]['id']
-        attachment=client.get(url).json()['content']['attachments'][0]
+        attachment=[media for media in client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['media'] if media['role'] == 'attachment'][0]
         filename=attachment['url'].rsplit('/',1)[-1]
         for path in tmp_path.rglob(filename):path.unlink()
         restricted[0]=True
@@ -233,7 +233,7 @@ def test_external_document_metadata_text_and_restart(tmp_path):
         assert any(c['title']=='Бесы.txt' for c in cards)
         card=next(c for c in cards if c['title']=='Own caption')
         url='/api/v3/materials/'+card['id']
-        content=client.get(url).json()['content']
+        content=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()
         assert content['text']=='Own caption'
         assert card['external_attachment_kinds']==['document']
         media=content['external_attachments'][0]
@@ -241,12 +241,12 @@ def test_external_document_metadata_text_and_restart(tmp_path):
         assert media['author'] is None and media['source_url']=='https://t.me/fixture/13'
         assert content['completeness']['reason']=='external_attachment'
         empty=next(c for c in cards if c['title']=='Файл доступен в Telegram')
-        empty_content=client.get('/api/v3/materials/'+empty['id']).json()['content']
+        empty_content=client.get('/api/v3/publication/'+empty['id']).json()
         assert empty_content['text']==''
         assert empty_content['external_attachments'][0]['size_label'] is None
         assert client.get('/api/v3/status/details').json()['problems']['count']==0
         assert all('/s/' in request for request in requests)
     with TestClient(create_app(tmp_path,**options),headers=headers) as client:
         configure_fast_web(client)
-        assert client.get(url).json()['content']['external_attachments'][0]==media
+        assert client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['external_attachments'][0]==media
         assert client.get('/api/v3/status/details').json()['problems']['count']==0

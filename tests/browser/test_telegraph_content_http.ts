@@ -30,10 +30,10 @@ test('Telegraph is separate from its post and failed resources keep separate rea
  await r.page.screenshot({path:artifactPath('telegraph-content-mobile.png')});
  assert.equal(await r.page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
  const cards=(await r.api('cards')).items;
- const material=await r.api(`materials/${cards[0]!.id}`);
- if(material.content.availability!=='available')throw Error('Expected available content');
- assert.equal(material.content.linked_content?.articles.length,2);
- assert.match(material.content.text,/Текст до изображения/);
+ const material=await r.api(`publication/${cards[0]!.id}`);
+ if(material.availability!=='available')throw Error('Expected available content');
+ assert.equal(material.linked_content?.articles.length,2);
+ assert.match(material.text,/Текст до изображения/);
  await r.page.reload();await r.page.locator('[data-card]').click();
  await expect(r.page.locator('.telegraph-article').first()).toContainText('HTTP 403');
 });

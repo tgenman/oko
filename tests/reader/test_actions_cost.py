@@ -44,7 +44,7 @@ def test_status_and_viewed_work_budgets(tmp_path, count):
         assert response.status_code == 200
         # PostgreSQL tracing counts statements issued by the application.
         assert int(response.headers['X-Test-SQL']) < 240
-        assert client.get('/api/v3/materials/' + items[0]).status_code == 404
+        assert client.get('/api/v3/publication/' + items[0]).status_code == 404
         assert len(read_all_cards(client, '/api/v3/cards')) == count * 4 - 1
 
 
@@ -131,7 +131,7 @@ def test_viewed_uses_point_updates_in_large_service_archive(tmp_path):
         with measure_reads(app.state.host.require_store().db, enabled=lambda: request_sql.get() is not None) as work:
             response = client.post('/api/v3/materials/' + items[0] + '/viewed')
         assert response.status_code == 200
-        assert client.get('/api/v3/materials/' + items[0]).status_code == 404
+        assert client.get('/api/v3/publication/' + items[0]).status_code == 404
         assert work.rows < 5000, work
 
 

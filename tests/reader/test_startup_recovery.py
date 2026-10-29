@@ -115,7 +115,7 @@ def test_reader_opens_reads_and_stops_while_database_reconciliation_is_slow(post
             for _ in range(4):
                 started = time.monotonic()
                 assert client.get('/api/v3/cards').status_code == 200
-                assert client.get('/api/v3/materials/'+cards[0]['id']).status_code == 200
+                assert client.get('/api/v3/publication/'+cards[0]['id']).status_code == 200
                 assert time.monotonic()-started < 3
             started = time.monotonic()
             assert client.post('/api/v3/stop').status_code == 200
@@ -147,7 +147,7 @@ def test_settings_and_viewed_during_recovery_survive_an_early_stop_and_restart(p
     try:
         with closing(ready(root, process)) as client:
             assert client.get('/api/v3/settings/oko/global').json()['effective']['prompt_filters']['value'] == 'Keep useful text'
-            assert client.get('/api/v3/materials/'+cards[0]['id']).status_code == 404
+            assert client.get('/api/v3/publication/'+cards[0]['id']).status_code == 404
             assert len(read_all_cards(client, '/api/v3/cards')) == len(cards)-1
             assert client.get('/api/v3/status').json()['runtime_state'] == 'disabled'
             assert client.post('/api/v3/stop').status_code == 200
@@ -226,7 +226,7 @@ def test_global_settings_after_startup_queue_slow_reconciliation_without_blockin
     try:
         with closing(ready(root, process)) as client:
             assert client.get('/api/v3/settings/oko/global').json()['effective']['prompt_filters']['value'] == 'Use the new rules'
-            assert client.get('/api/v3/materials/'+cards[0]['id']).status_code == 404
+            assert client.get('/api/v3/publication/'+cards[0]['id']).status_code == 404
             assert client.post('/api/v3/stop').status_code == 200
             assert process.wait(timeout=3) == 0
     finally:

@@ -59,7 +59,7 @@ def test_reading_cards_reuses_feed_processing_options_without_point_reads(tmp_pa
     app = create_app(tmp_path, token='test', api_only=True, source=DemoSource())
     with TestClient(app, headers=HEADERS) as client:
         wait_for(client, lambda: (cards if len(cards := read_all_cards(client, '/api/v3/cards')) == 3
-                                 and all(client.get('/api/v3/materials/' + card['id']).json()['availability'] == 'available' for card in cards) else None))
+                                 and all(client.get('/api/v3/publication/' + card['id']).json()['availability'] == 'available' for card in cards) else None))
         assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
         queries = []
         client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(queries.append))
@@ -264,16 +264,16 @@ def test_material_immediately_uses_moved_feed_settings_and_delete_removes_cache(
     with TestClient(app, headers=HEADERS) as client:
         assert client.put('/api/v3/power', json={'enabled': True}).status_code == 200
         item = wait_for(client, lambda: (cards[0]['id'] if len(cards := read_all_cards(client, '/api/v3/cards')) == 3
-                                        and all(client.get('/api/v3/materials/' + card['id']).json()['availability'] == 'available' for card in cards) else None))
+                                        and all(client.get('/api/v3/publication/' + card['id']).json()['availability'] == 'available' for card in cards) else None))
         moved = client.patch('/api/v3/feeds/demo', json={'new_folder': 'Moved', 'importance': 'high', 'public_ai': True})
         assert moved.status_code == 200, moved.text
         folder = moved.json()['folder_id']
         assert client.patch('/api/v3/settings/folder/'+folder, json={'originals': False}).status_code == 200
-        material = client.get('/api/v3/materials/'+item)
+        material = client.get('/api/v3/publication/'+item)
         assert material.status_code == 200
         assert material.json()['originals'] is False
         assert client.patch('/api/v3/settings/folder/'+folder, json={'originals': True}).status_code == 200
-        assert client.get('/api/v3/materials/'+item).json()['originals'] is True
+        assert client.get('/api/v3/publication/'+item).json()['originals'] is True
         assert client.delete('/api/v3/feeds/demo').status_code == 200
         wait_for(client, lambda: not client.get('/api/v3/subscriptions').json()['feeds'])
         with pytest.raises(ValueError, match='Feed not found'):

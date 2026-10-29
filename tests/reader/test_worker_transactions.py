@@ -246,14 +246,14 @@ def test_collection_failure_does_not_stop_filter_and_summary_crons(tmp_path):
     with store.db:store.db.execute("UPDATE feeds SET cursor='' WHERE id='demo'")
     store.db.close()
     with TestClient(create_app(tmp_path,source=FailedSource(),token='test',api_only=True,ai_transport=transport([],theses=True)),headers=HEADERS) as client:
-        wait_for(client,lambda:client.get('/api/v3/materials/'+item).json()['theses']['result'])
+        wait_for(client,lambda:client.get('/api/v3/publication/'+item).json()['theses']['result'])
         def stopped_source():
             with database(tmp_path) as db:
                 return db.execute("SELECT status FROM jobs WHERE kind='discover'").fetchone()[0]=='failed'
         wait_for(client,stopped_source)
         with database(tmp_path) as db:
             assert db.execute("SELECT kind,status FROM jobs WHERE kind IN ('filter','theses') ORDER BY kind").fetchall()==[('filter','done'),('theses','done')]
-        assert client.get('/api/v3/materials/'+item).status_code==200
+        assert client.get('/api/v3/publication/'+item).status_code==200
 
 
 def test_uncommitted_result_is_invisible_to_an_independent_reader(tmp_path):

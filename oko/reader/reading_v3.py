@@ -4,8 +4,7 @@ from oko.storage.reading import reading_snapshot
 import hashlib
 import json
 from pathlib import Path
-from collections.abc import Callable
-from typing import Literal, TypedDict
+from typing import Literal
 
 from oko.reader.http_schemas import SchemaRoute
 
@@ -21,10 +20,6 @@ from oko.reader import snapshots as facts
 from oko.application.reader import ReaderApplication
 from oko.execution import ActionError
 from oko.domain.processing import ProcessingWait
-
-
-def media_url(value: str) -> wire.MediaUrl:
-    return wire.MediaUrl(value)
 
 
 def card_source_url(value: object) -> object:
@@ -67,12 +62,6 @@ def filter_state(value: facts.Filter | None, waiting: ProcessingWait | None) -> 
     return wire.FilterState(wire.FilterAttemptState(attempt=attempt(value.status, message, waiting), diagnostic_message=message, result=None))
 
 
-def theses_state(value: facts.Card, waiting: ProcessingWait | None) -> wire.ThesesState:
-    return theses_parts(value.theses if isinstance(value.theses, facts.Summary) else None,
-        value.provenance if isinstance(value.provenance, (facts.CodexProvenance, facts.LocalProvenance, facts.UnknownProvenance)) else None,
-        value.ai if isinstance(value.ai, facts.AI) else None, waiting)
-
-
 def theses_parts(summary: facts.Summary | None,
                  origin: facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance | None,
                  ai: facts.AI | None, waiting: ProcessingWait | None) -> wire.ThesesState:
@@ -82,23 +71,6 @@ def theses_parts(summary: facts.Summary | None,
     if status == 'done' and result is not None:
         return wire.ThesesState(wire.ThesesReadyState(attempt=wire.ProcessingReady(state='ready'), diagnostic_message=message, result=result))
     return wire.ThesesState(wire.ThesesAttemptState(attempt=attempt(status, message, waiting), diagnostic_message=message, result=result))
-
-
-class Common(TypedDict):
-    id: wire.MaterialId
-    title: str
-    feed_id: wire.FeedId
-    feed_title: str
-    folder_id: wire.FolderId
-    importance: wire.Importance
-    published_at: wire.Timestamp | None
-    source_url: wire.SourceUrl
-    source_position: wire.SourcePosition | None
-    source: wire.SourceReference
-    snippet: str
-    originals: bool
-    filter: wire.FilterState
-    theses: wire.ThesesState
 
 
 def saved_filter(runtime: ReaderApplication, item: str, value: facts.Filter | None) -> wire.FilterState:
@@ -111,51 +83,6 @@ def saved_filter(runtime: ReaderApplication, item: str, value: facts.Filter | No
             origin: facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance = TypeAdapter(facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance).validate_python(saved)
             filtered.root.result.provenance = provenance(origin)
     return filtered
-
-
-def common(runtime: ReaderApplication, value: facts.Card, feed: wire.SubscriptionFeed) -> Common:
-    current = runtime.queries
-    source: wire.DemoSourceReference | wire.RssSourceReference | wire.YoutubeSourceReference | wire.TelegramSourceReference
-    fid, url = wire.FeedId(value.feed_id), wire.SourceUrl(value.url)
-    owner = feed.root
-    if isinstance(owner, (wire.TelegramWebSubscriptionFeed, wire.TelegramClientSubscriptionFeed, wire.TelegramUnconfiguredSubscriptionFeed)):
-        source = wire.TelegramSourceReference(kind='telegram', feed_id=fid, source_url=url, access=wire.TelegramAccess(owner.access), message_ids=[wire.TelegramMessageId(str(n)) for n in value.members] if isinstance(value.members, list) else [])
-    elif owner.kind == 'youtube':
-        source = wire.YoutubeSourceReference(kind='youtube', feed_id=fid, source_url=url, captions=value.captions if isinstance(value.captions, str) else 'not_requested')
-    elif owner.kind == 'demo':
-        source = wire.DemoSourceReference(kind='demo', feed_id=fid, source_url=url)
-    else:
-        source = wire.RssSourceReference(kind='rss', feed_id=fid, source_url=url)
-    filtered = saved_filter(runtime,value.id,value.filter if isinstance(value.filter,facts.Filter) else None)
-    return Common(id=wire.MaterialId(value.id), title=value.title, feed_id=fid, feed_title=value.feed_title,
-        folder_id=wire.FolderId(value.folder_id), importance=wire.Importance(value.importance),
-        published_at=project.timestamp(value.published) if value.published_known else None,
-        source_url=url, source_position=wire.SourcePosition(value.source_order) if isinstance(value.source_order, int) else None,
-        source=wire.SourceReference(source), snippet=value.snippet, originals=value.originals is not False,
-        filter=filtered, theses=theses_state(value, runtime.processing_wait(value.id, 'theses')))
-
-
-def attachments(values: list[facts.Attachment]) -> list[wire.Attachment]:
-    return [wire.Attachment(kind=a.kind, mime=a.mime, url=media_url(a.url)) for a in values]
-
-
-def card(runtime: ReaderApplication, value: facts.Card, feed: wire.SubscriptionFeed, shared: Common | None = None) -> wire.ReadingCard:
-    current = runtime.queries
-    shared = shared if shared is not None else common(runtime, value, feed)
-    if not value.complete:
-        return wire.ReadingCard(wire.PendingReadingCard(**shared, availability='pending', loading=value.loading is not False))
-    if not isinstance(value.version, str) or not isinstance(value.full, bool) or not isinstance(value.reason, str):
-        raise ValueError('Saved material lacks revision or completeness')
-    return wire.ReadingCard(wire.AvailableReadingCard(**shared, availability='available',
-        post_web_unavailable=value.post_web_unavailable, external_attachments=[wire.ExternalAttachment(**a.model_dump()) for a in value.external_attachments],
-        external_attachment_kinds=list(dict.fromkeys(a.kind for a in value.external_attachments)),
-        loading=value.loading is True, completeness=completeness(value.full, value.reason, value.external_only, value.post_web_unavailable),
-        revision_id=wire.RevisionId(value.version), version=1, changed=value.changed is True,
-        source_deleted=value.source_deleted is True,
-        images=[media_url(url) for url in value.images] if isinstance(value.images, list) else [],
-        attachments=attachments(value.attachments) if isinstance(value.attachments, list) else []))
-
-
 
 
 def missing(resource: wire.AffectedResource) -> ApiError:
@@ -173,7 +100,7 @@ def preview(value: facts.CompletionPreview) -> wire.CompletionPreview:
     return wire.CompletionPreview(cards_count=value.cards, publications_count=value.originals, token=value.token)
 
 
-def register(app: FastAPI, runtime: ReaderApplication) -> Callable[[str], wire.ReadableMaterial]:
+def register(app: FastAPI, runtime: ReaderApplication) -> None:
     router = APIRouter(route_class=SchemaRoute, dependencies=[Depends(no_query)])
 
     def feeds(identity: str | None = None) -> dict[str, wire.SubscriptionFeed]:
@@ -294,42 +221,6 @@ def register(app: FastAPI, runtime: ReaderApplication) -> Callable[[str], wire.R
     async def read_cards(body: wire.CardReadRequest) -> Response:
         await runtime.viewed_many([item.root for item in body.ids])
         return Response(status_code=204)
-
-    @router.get('/api/v3/materials/{item}', response_model=wire.ReadableMaterial)
-    @read_locked(runtime.execution)
-    async def material(item: str) -> wire.ReadableMaterial:
-        return read_material(item)
-
-    def read_material(item: str) -> wire.ReadableMaterial:
-        with reading_snapshot():
-            identity(item)
-            current = runtime.queries
-            raw = current.material(item)
-            if raw is None:
-                raise missing(wire.AffectedResource(wire.MaterialResource(kind='material', material_id=identity(item))))
-            value = facts.Material.model_validate(raw)
-            raw_feed,binding = current.feed(value.feed_id)
-            owner = project.subscription(facts.SubscriptionFeed.model_validate(raw_feed),binding)
-            from oko.storage.composition import snippet
-            data = value.model_dump(exclude_unset=True)
-            for key in ('text', 'description', 'display_text', 'reply_preview', 'linked_content'):
-                data.pop(key, None)
-            data.update(feed_title=owner.root.title, folder_id=owner.root.folder_id.root, importance=owner.root.importance.root,
-                        snippet=snippet(value.description if isinstance(value.description, str) and value.description else value.display_text if isinstance(value.display_text, str) else value.text), published_known=value.published_known is not False)
-            entry = facts.Card.model_validate(data)
-            shared = common(runtime, entry, owner)
-            projected = card(runtime, entry, owner, shared).root
-            if isinstance(projected, wire.PendingReadingCard):
-                return wire.ReadableMaterial(wire.PendingReadableMaterial(**shared, availability='pending', content=wire.PendingPublicationContent(availability='pending', loading=projected.loading)))
-            content = wire.AvailablePublicationContent(availability='available', text=value.text,
-                linked_content=wire.LinkedContent.model_validate(value.linked_content.model_dump()) if value.linked_content else None,
-                display_text=value.display_text if isinstance(value.display_text, str) else value.text,
-                description=value.description if isinstance(value.description, str) else '',
-                reply_preview=wire.ReplyPreview(**value.reply_preview.model_dump()) if value.reply_preview else None,
-                post_web_unavailable=projected.post_web_unavailable, external_attachments=projected.external_attachments, images=projected.images, attachments=projected.attachments, completeness=projected.completeness,
-                loading=projected.loading, changed=projected.changed, source_deleted=projected.source_deleted,
-                revision_id=projected.revision_id, version=projected.version)
-            return wire.ReadableMaterial(wire.AvailableReadableMaterial(**shared, availability='available', content=content))
 
     def read_media(item: str, kind: Literal['images','media'], name: str, number: int | None = None) -> Response:
         identity(item)
@@ -456,4 +347,3 @@ def register(app: FastAPI, runtime: ReaderApplication) -> Callable[[str], wire.R
         return await execute(request, wire.CommandContext(wire.CommandRetryFilter(operation='retry_filter', material_id=identity(item))))
 
     app.include_router(router)
-    return read_material

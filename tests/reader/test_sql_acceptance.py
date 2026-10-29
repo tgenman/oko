@@ -19,7 +19,7 @@ def test_complete_http_cost_matrix(tmp_path,count):
         nav,cost=measure.request('navigation','GET','/api/v3/navigation');records.append(cost)
         folder=next(folder['id'] for folder in nav.json()['folders'] if any(feed['id']==feeds[0] for feed in folder['feeds']))
         operations=[('feed_cards','GET','/api/v3/cards',dict(params={'feed':feeds[0]})),
-            ('all_cards','GET','/api/v3/cards',{}),('material','GET','/api/v3/materials/'+items[0],{}),
+            ('all_cards','GET','/api/v3/cards',{}),('material','GET','/api/v3/publication/'+items[0],{}),
             ('status','GET','/api/v3/status',{}),('folder_preview','POST','/api/v3/folders/'+folder+'/completion/preview',{})]
         for name,method,url,options in operations:
             _,cost=measure.request(name,method,url,**options);records.append(cost)
@@ -39,7 +39,7 @@ def test_complete_http_cost_matrix(tmp_path,count):
                 if '/publication/' not in url:
                     assert cost['content_opens']==0 and cost['content_stats']==0 and cost['read_bytes']==0
         _,cost=measure.request('viewed','POST','/api/v3/materials/'+items[0]+'/viewed');records.append(cost)
-        assert client.get('/api/v3/materials/'+items[0]).status_code==404
+        assert client.get('/api/v3/publication/'+items[0]).status_code==404
     output=Path(os.environ.get('OKO_TEST_ARTIFACT_DIR',tmp_path));output.mkdir(parents=True,exist_ok=True)
     (output/f'matrix-{count*4}.json').write_text(json.dumps(dict(total=count*4,records=records),indent=2))
     print('SQL_ACCEPTANCE',json.dumps(dict(total=count*4,records=records)))

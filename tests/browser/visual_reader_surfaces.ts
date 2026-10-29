@@ -26,8 +26,8 @@ test('synthetic reader surfaces screenshots and geometry',async()=>{
     t.replies.set('/api/v3/import/preview',{body:{folders:[{title:'Наука'}],feeds:[]}});
     t.replies.set('/api/v3/feeds/verify',{body:{url:'https://example.org/feed.xml',title:'Синтетический источник',kind:'rss',verification:'verified'}});
     t.replies.set('/api/v3/image',{mime:'image/png',base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR9sAAAAASUVORK5CYII='});
-    t.held.set('/api/v3/materials/pending',true);
-    t.replies.set('/api/v3/materials/failed',{status:503,body:{detail:'Синтетическая ошибка открытия'}});
+    t.held.set('/fixture/material/pending',true);
+    t.replies.set('/fixture/material/failed',{status:503,body:{detail:'Синтетическая ошибка открытия'}});
    });
    async function shot(name: string,scope: string){
     await r.page.locator(scope).scrollIntoViewIfNeeded();

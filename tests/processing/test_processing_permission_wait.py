@@ -17,14 +17,15 @@ def test_forbidden_processing_waits_for_settings_without_errors_or_timed_retry(t
         items = [card['id'] for card in read_all_cards(client, '/api/v3/cards')]
 
         def blocked_materials():
-            materials = [client.get('/api/v3/materials/'+identity).json() for identity in items]
-            return materials if all('Запрещена публичная' in (m['theses']['diagnostic_message'] or '') for m in materials) else None
+            materials = [client.get('/api/v3/publication/'+identity).json() for identity in items]
+            return materials if all('Запрещена публичная' in (m['theses']['error'] or '') for m in materials) else None
 
         # The counter below covers every Demo publication, not just the first.
         blocked = wait_for(client, blocked_materials)
-        assert all(m['theses']['attempt']['retry_at'] is None for m in blocked)
+        assert all(m['theses']['state'] == 'error' for m in blocked)
         assert client.get('/api/v3/status/details').json()['diagnostic_count'] == 0
-        assert all(w.get('retry_at') is None for w in client.get('/api/v3/status/details').json()['work'] if w.get('reason') == 'public_ai_not_allowed')
+        waiting = [w for w in client.get('/api/v3/status/details').json()['work'] if w.get('reason') == 'public_ai_not_allowed']
+        assert waiting and all(w.get('retry_at') is None for w in waiting)
         assert not any(p['code'] == 'public_ai_not_allowed' for p in client.get('/api/v3/status/details').json()['problems']['current'])
         from tests.support.storage import database
         with database(tmp_path) as db:
@@ -35,5 +36,5 @@ def test_forbidden_processing_waits_for_settings_without_errors_or_timed_retry(t
         assert not model.inputs
         client.patch('/api/v3/feeds/demo', json={'public_ai': True})
         clock.now+=1
-        wait_for(client, lambda: client.get('/api/v3/materials/'+item).json()['theses']['result'])
+        wait_for(client, lambda: client.get('/api/v3/publication/'+item).json()['theses']['result'])
         assert model.inputs

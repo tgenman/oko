@@ -38,11 +38,12 @@ def test_full_telegram_heading_in_list_and_opened_material(tmp_path, access):
             assert response.status_code == 200, response.text
         card = settled(client)[0]
         identity = card['id']
-        version = client.get('/api/v3/materials/' + identity).json()['content']['version']
+        version = client.get('/api/v3/publication/' + identity).json()['revision_id']
     with TestClient(create_app(tmp_path, **options), headers=headers) as client:
         card = read_all_cards(client, '/api/v3/cards')[0]
-        material = client.get('/api/v3/materials/' + identity).json()
+        material = client.get('/api/v3/publication/' + identity).json()
         assert card['title'] == FIRST_LINE
+        assert material['revision_id'] == version
         assert material['title'] == FIRST_LINE
-        assert material['content']['text'] == TEXT
+        assert material['text'] == TEXT
         assert not card['changed']

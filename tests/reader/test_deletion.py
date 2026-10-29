@@ -31,7 +31,7 @@ def test_viewed_during_fetch_never_publishes_late_result(tmp_path: Path):
         viewed_source = cards[0]['source_url'].rsplit('/', 1)[1]
         client.post(f'/api/v3/materials/{item}/viewed')
         time.sleep(.05)
-        assert client.get(f'/api/v3/materials/{item}').status_code == 404
+        assert client.get(f'/api/v3/publication/{item}').status_code == 404
         assert not retained(tmp_path,item)
         assert all(b'Late secret' not in p.read_bytes() for p in tmp_path.rglob('*') if p.is_file())
 
@@ -47,13 +47,13 @@ def test_delete_failure_is_visible_and_retried_without_content_in_errors(tmp_pat
         presence(client, 'a')
         for _ in range(100):
             cards = read_all_cards(client, '/api/v3/cards')
-            if len(cards) == 3 and all((client.get('/api/v3/materials/' + card['id']).json()['availability'] == 'available') for card in cards):
+            if len(cards) == 3 and all((client.get('/api/v3/publication/' + card['id']).json()['availability'] == 'available') for card in cards):
                 break
             time.sleep(.02)
         item = cards[0]['id']
         viewed_source = cards[0]['source_url'].rsplit('/', 1)[1]
         client.post(f'/api/v3/materials/{item}/viewed')
-        assert client.get(f'/api/v3/materials/{item}').status_code == 404
+        assert client.get(f'/api/v3/publication/{item}').status_code == 404
         assert any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status/details').json()['problems']['current'])
         assert retained(tmp_path,item)
         fail = False
@@ -89,7 +89,7 @@ def test_explicitly_repeated_discovery_can_recreate_viewed_identity(tmp_path: Pa
         presence(client, 'a')
         for _ in range(100):
             cards = read_all_cards(client, '/api/v3/cards')
-            if len(cards) == 3 and all((client.get('/api/v3/materials/' + c['id']).json()['availability'] == 'available') for c in cards):
+            if len(cards) == 3 and all((client.get('/api/v3/publication/' + c['id']).json()['availability'] == 'available') for c in cards):
                 break
             time.sleep(.02)
         item = cards[0]['id']
@@ -101,7 +101,7 @@ def test_explicitly_repeated_discovery_can_recreate_viewed_identity(tmp_path: Pa
         presence(client, 'a')
         wait_for(client,lambda: len(read_all_cards(client, '/api/v3/cards'))==3 and viewed_source in source.downloaded)
         assert set(source.downloaded) <= {'1','2','3'}
-        assert client.get(f'/api/v3/materials/{item}').status_code == 404
+        assert client.get(f'/api/v3/publication/{item}').status_code == 404
 
 
 def test_restart_keeps_failed_deletion_retryable_and_blocks_collection(tmp_path: Path):
@@ -121,7 +121,7 @@ def test_restart_keeps_failed_deletion_retryable_and_blocks_collection(tmp_path:
         presence(client, 'a')
         for _ in range(100):
             cards = read_all_cards(client, '/api/v3/cards')
-            if len(cards) == 3 and all((client.get('/api/v3/materials/' + c['id']).json()['availability'] == 'available') for c in cards):
+            if len(cards) == 3 and all((client.get('/api/v3/publication/' + c['id']).json()['availability'] == 'available') for c in cards):
                 break
             time.sleep(.02)
         item = cards[0]['id']

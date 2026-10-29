@@ -3,11 +3,11 @@ import json
 from pathlib import Path
 from typing import Any
 from pydantic import TypeAdapter
-from oko.reader.generated.models import ReadingComposition, CardPage, ReadableMaterial, RuntimeStatus
+from oko.reader.generated.models import ReadingComposition, CardPage, PublicationResponse, RuntimeStatus
 
 CONTRACTS: dict[str, TypeAdapter[Any]] = {
     'navigation': TypeAdapter(ReadingComposition), 'cards': TypeAdapter(CardPage),
-    'material': TypeAdapter(ReadableMaterial),
+    'publication': TypeAdapter(PublicationResponse),
     'status': TypeAdapter(RuntimeStatus),
 }
 
@@ -15,7 +15,7 @@ CONTRACTS: dict[str, TypeAdapter[Any]] = {
 def schemas() -> dict[str, Any]:
     document = json.loads((Path(__file__).parent / 'generated/openapi.json').read_text())
     routes = {'navigation':'/api/v3/reading-composition', 'cards':'/api/v3/cards',
-              'material':'/api/v3/materials/{item}',
+              'publication':'/api/v3/publication/{item}',
               'status':'/api/v3/status'}
     return {name: dict(document['paths'][route]['get']['responses']['200']['content']['application/json']['schema'],
                        components=document['components'], **{'$schema':'https://json-schema.org/draft/2020-12/schema'})

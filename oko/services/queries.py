@@ -151,10 +151,6 @@ class ReadingQueries:
         return card(self._storage(), identity)
 
     @repository_access
-    def cards(self, show_hidden: bool = False, folder: str | None = None, feed: str | None = None) -> list[dict[str, Any]]:
-        return self._storage().reading.cards(show_hidden=show_hidden, folder=folder, feed=feed)
-
-    @repository_access
     def material(self, identity: str) -> dict[str, Any] | None:
         return self._storage().reading.material(identity)
 

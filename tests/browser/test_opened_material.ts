@@ -58,16 +58,16 @@ test('switch clears old material immediately and ignores late opening errors', a
     await r.start([material('A'), material('B'), material('C')]);
     await r.page.locator('#cards').getByRole('button', {name: /^A/}).click();
     await expect(r.page.locator('#text')).toHaveText('Текст A');
-    await r.page.evaluate(() => { readerTransport.held.set('/api/v3/materials/B', true); readerTransport.held.set('/api/v3/materials/C', true); });
+    await r.page.evaluate(() => { readerTransport.held.set('/fixture/material/B', true); readerTransport.held.set('/fixture/material/C', true); });
     await r.page.getByRole('button', {name: /^B/}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/B'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/fixture/material/B'));
     await expect(r.page.locator('#text')).toHaveText('');
     await expect(r.page.locator('#empty')).toHaveText('Loading item…');
     await r.page.locator('#cards').getByRole('button', {name: /^C/}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/C'));
-    await r.page.evaluate(body => readerTransport.release('/api/v3/materials/C', body), material('C'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/fixture/material/C'));
+    await r.page.evaluate(body => readerTransport.release('/fixture/material/C', body), material('C'));
     await expect(r.page.locator('#text')).toHaveText('Текст C');
-    await r.page.evaluate(() => readerTransport.release('/api/v3/materials/B', {detail: 'Поздняя ошибка B'}, 500));
+    await r.page.evaluate(() => readerTransport.release('/fixture/material/B', {detail: 'Поздняя ошибка B'}, 500));
     await settle(r.page);
     await expect(r.page.locator('#text')).toHaveText('Текст C');
     assert.deepEqual(r.errors, []);
@@ -78,12 +78,12 @@ test('late success of an old opening cannot replace the selected card', async ()
   const r = await reader();
   try {
     await r.start([material('A'), material('B')]);
-    await r.page.evaluate(() => readerTransport.held.set('/api/v3/materials/A', true));
+    await r.page.evaluate(() => readerTransport.held.set('/fixture/material/A', true));
     await r.page.locator('#cards').getByRole('button', {name: /^A/}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/A'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/fixture/material/A'));
     await r.page.getByRole('button', {name: /^B/}).click();
     await expect(r.page.locator('#text')).toHaveText('Текст B');
-    await r.page.evaluate(body => readerTransport.release('/api/v3/materials/A', body), material('A'));
+    await r.page.evaluate(body => readerTransport.release('/fixture/material/A', body), material('A'));
     await settle(r.page);
     await expect(r.page.locator('#text')).toHaveText('Текст B');
     assert.deepEqual(r.errors, []);
@@ -146,7 +146,7 @@ test('viewing retains loaded media and playback, rejects late media and switchin
       window.testVideo = document.querySelector<HTMLVideoElement>('#images video')!;
       testVideo.muted = true; testVideo.loop = true; await testVideo.play();
     });
-    await r.page.evaluate(() => readerTransport.replies.set('POST /api/v3/materials/A/viewed', {body:{ok:true},next:[['/api/v3/cards',{body:[{...readerTransport.replies.get('/api/v3/materials/B')!.body!}]}]]}));
+    await r.page.evaluate(() => readerTransport.replies.set('POST /api/v3/materials/A/viewed', {body:{ok:true},next:[['/api/v3/cards',{body:[{...readerTransport.replies.get('/fixture/material/B')!.body!}]}]]}));
     await r.page.getByRole('button', {name: 'Mark as Read', exact: true}).click();
     await expect(r.page.locator('#material-retained')).toBeVisible();
     assert.equal(await r.page.evaluate(() => !testVideo.paused && testVideo.hasAttribute('src')), true);
@@ -171,15 +171,15 @@ test('viewing a publication in another tab closes its pending opening but preser
     const unrelated = material('other', {folder_id: 'other-folder',feed_id:'other-feed'});
     await r.start([source, unrelated]);
     const otherTab = await r.context.newPage(); await r.start([source], otherTab);
-    await r.page.evaluate(() => readerTransport.held.set('/api/v3/materials/source', true));
+    await r.page.evaluate(() => readerTransport.held.set('/fixture/material/source', true));
     await r.page.getByRole('button', {name: /^source/}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/source'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/fixture/material/source'));
     await otherTab.getByRole('button', {name: /^source/}).click();
     await expect(otherTab.locator('#text')).toHaveText('Текст source');
     await otherTab.evaluate(() => readerTransport.replies.set('POST /api/v3/materials/source/viewed', {body:{ok:true},next:[['/api/v3/cards',{body:[]}]]}));
     await otherTab.getByRole('button', {name: 'Mark as Read', exact: true}).click();
     await expect(r.page.locator('#empty')).toHaveText('Select an item');
-    await r.page.evaluate(body => readerTransport.release('/api/v3/materials/source', body), source);
+    await r.page.evaluate(body => readerTransport.release('/fixture/material/source', body), source);
     await settle(r.page);
     await expect(r.page.locator('#empty')).toHaveText('Select an item');
     await r.page.locator('[data-card="other"]').click();
@@ -196,15 +196,15 @@ for (const interruption of ['stop', 'connection loss']) {
     const r = await reader();
     try {
       await r.start([material('A')]);
-      await r.page.evaluate(() => readerTransport.held.set('/api/v3/materials/A', true));
+      await r.page.evaluate(() => readerTransport.held.set('/fixture/material/A', true));
       await r.page.locator('#cards').getByRole('button', {name: /^A/}).click();
-      await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/materials/A'));
+      await r.page.waitForFunction(() => readerTransport.pending.has('/fixture/material/A'));
       if (interruption === 'stop') await r.page.evaluate(()=>{readerTransport.replies.get('/api/v3/status')!.body!.stopped=true;});
       else {
         await r.page.evaluate(() => readerTransport.replies.set('/api/v3/status', {status: 503, body: {detail: 'Связь потеряна'}}));
       }
       await expect(r.page.locator('#empty')).toHaveText('Select an item');
-      await r.page.evaluate(body => readerTransport.release('/api/v3/materials/A', body), material('A'));
+      await r.page.evaluate(body => readerTransport.release('/fixture/material/A', body), material('A'));
       await settle(r.page);
       await expect(r.page.locator('#text')).toHaveText('');
       await expect(r.page.locator('#material')).toBeHidden();
@@ -245,11 +245,11 @@ test('background processing updates keep long material visible and preserve scro
   await expect(r.page.locator('#text')).toContainText('Длинный текст');
   await r.page.locator('article').evaluate(node=>node.scrollTop=700);
   const before=await r.page.locator('article').evaluate(node=>node.scrollTop);expect(before).toBeGreaterThan(100);
-  await r.page.evaluate(()=>{const t=readerTransport;t.held.set('/api/v3/materials/long',true);t.replies.get('/api/v3/cards')!.body![0].ai={status:'pending',error:'Запрещена публичная AI-обработка'};});
-  await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/materials/long'));
+  await r.page.evaluate(()=>{const t=readerTransport;t.held.set('/fixture/material/long',true);t.replies.get('/api/v3/cards')!.body![0].ai={status:'pending',error:'Запрещена публичная AI-обработка'};});
+  await r.page.waitForFunction(()=>readerTransport.pending.has('/fixture/material/long'));
   await expect(r.page.locator('#text')).toContainText('Длинный текст');
   expect(await r.page.locator('article').evaluate(node=>node.scrollTop)).toBe(before);
-  await r.page.evaluate(()=>readerTransport.release('/api/v3/materials/long',readerTransport.replies.get('/api/v3/materials/long')!.body));
+  await r.page.evaluate(()=>readerTransport.release('/fixture/material/long',readerTransport.replies.get('/fixture/material/long')!.body));
   await expect(r.page.locator('#text')).toContainText('Длинный текст');
   expect(await r.page.locator('article').evaluate(node=>node.scrollTop)).toBe(before);
  }finally{await r.close();}
@@ -264,7 +264,7 @@ test('new text waits for a button, keeps its paragraph and never mixes summaries
     await r.page.locator('#text [data-reading-paragraph]').nth(25).evaluate(node=>node.scrollIntoView({block:'start'}));
     const before=await r.page.locator('#text [data-reading-paragraph]').nth(25).boundingBox();
     const fresh={...old,text:'Новый первый абзац\n\n'.repeat(8)+text,version:'new',theses:{points:[{text:'Новые тезисы',sources:[]}]}};
-    await r.page.evaluate(fresh=>readerTransport.replies.set('/api/v3/materials/A',{body:fresh}),fresh);
+    await r.page.evaluate(fresh=>readerTransport.replies.set('/fixture/material/A',{body:fresh}),fresh);
     await expect(r.page.locator('#material-update-button')).toBeVisible();
     await expect(r.page.locator('#text')).toHaveText(text);
     await expect(r.page.locator('#theses')).toHaveText('Старые тезисы');
@@ -290,7 +290,7 @@ test('summary and media append independently without replacing a playing video',
     await r.page.locator('article').evaluate(node=>node.scrollTop=500);
     const top=await r.page.locator('article').evaluate(node=>node.scrollTop);
     const next={...old,theses:{points:[{text:'Готовые тезисы',sources:[]}]},images:['/api/v3/materials/A/images/new.png']};
-    await r.page.evaluate(({next,png})=>{readerTransport.replies.set('/api/v3/materials/A/images/new.png',{base64:png,mime:'image/png'});readerTransport.replies.set('/api/v3/materials/A',{body:next});},{next,png});
+    await r.page.evaluate(({next,png})=>{readerTransport.replies.set('/api/v3/materials/A/images/new.png',{base64:png,mime:'image/png'});readerTransport.replies.set('/fixture/material/A',{body:next});},{next,png});
     await expect(r.page.locator('#theses')).toHaveText('Готовые тезисы');
     await expect(r.page.locator('#images img')).toHaveCount(1);
     assert.equal(await r.page.evaluate(()=>document.querySelector('#images video')===testVideo&&!testVideo.paused),true);
@@ -327,7 +327,7 @@ for(const fallback of ['neighbour','relative','filtered'])test('version replacem
     const ratio=await r.page.locator('article').evaluate(node=>node.scrollTop/(node.scrollHeight-node.clientHeight));
     const nextLines=fallback==='relative'?lines.map(line=>line.replace('Абзац','Заменён')):lines.filter((_,i)=>fallback!=='neighbour'||i!==25);
     const fresh={...old,text:'Вставка\n\n'.repeat(8)+nextLines.join('\n\n')+(fallback==='relative'?'\nНовый конец':'\nРеклама'),version:'new'};
-    await r.page.evaluate(fresh=>readerTransport.replies.set('/api/v3/materials/A',{body:fresh}),fresh);
+    await r.page.evaluate(fresh=>readerTransport.replies.set('/fixture/material/A',{body:fresh}),fresh);
     await expect(r.page.locator('#material-update-button')).toBeVisible();await r.page.locator('#material-update-button').click();
     await expect(r.page.locator(selector)).toContainText(fallback==='relative'?'Заменён':'Вставка');
     if(fallback==='relative')expect(Math.abs(await r.page.locator('article').evaluate(node=>node.scrollTop/(node.scrollHeight-node.clientHeight))-ratio)).toBeLessThan(.01);
@@ -360,12 +360,12 @@ test('storage replacement rejects old media replies and stages the replacement b
       };
     });
     await r.start([material('A',{version:'old',images:[]})]);
-    await r.page.evaluate(url=>{const reply=readerTransport.replies.get('/api/v3/materials/A');if(!reply?.body||typeof reply.body!=='object')throw new Error('Missing material fixture');reply.body={...reply.body,images:[url]};},url);
+    await r.page.evaluate(url=>{const reply=readerTransport.replies.get('/fixture/material/A');if(!reply?.body||typeof reply.body!=='object')throw new Error('Missing material fixture');reply.body={...reply.body,images:[url]};},url);
     await r.page.evaluate(url=>readerTransport.held.set(url,true),url);
     await r.page.locator('[data-card="A"]').click();await expect(r.page.locator('#text')).toHaveText('Текст A');await r.page.waitForFunction(url=>readerTransport.pending.has(url),url);
     await r.page.evaluate(()=>{
       readerTransport.held.set('test-storage-reset',true);
-      readerTransport.replies.set('/api/v3/materials/A',{body:{...readerTransport.replies.get('/api/v3/materials/A')!.body!,text:'Другой экземпляр',version:'old'}});
+      readerTransport.replies.set('/fixture/material/A',{body:{...readerTransport.replies.get('/fixture/material/A')!.body!,text:'Другой экземпляр',version:'old'}});
     });
     // Wait for the request after reset: the already in-flight pre-reset poll
     // can discover the new text before the injected reset is accepted.
@@ -468,11 +468,11 @@ test('reply context stays with its revision and historical previews use their ow
     await expect(card.locator('a')).toHaveCount(0);
     await card.getByRole('button',{name:'Весь фрагмент'}).click();
     const summarized={...old,theses:{points:[{text:'Новые тезисы той же версии',sources:[]}]}};
-    await r.page.evaluate(value=>readerTransport.replies.set('/api/v3/materials/A',{body:value}),summarized);
+    await r.page.evaluate(value=>readerTransport.replies.set('/fixture/material/A',{body:value}),summarized);
     await expect(r.page.locator('#theses')).toHaveText('Новые тезисы той же версии');
     await expect(card.getByRole('button',{name:'Свернуть'})).toHaveAttribute('aria-expanded','true');
     const fresh={...summarized,version:'new',reply_preview:{author:'Другой автор',text:'Новый контекст',source_url:'https://t.me/fixture/20'}};
-    await r.page.evaluate(value=>readerTransport.replies.set('/api/v3/materials/A',{body:value}),fresh);
+    await r.page.evaluate(value=>readerTransport.replies.set('/fixture/material/A',{body:value}),fresh);
     await expect(r.page.locator('#material-update-button')).toBeVisible();
     await expect(card).toContainText('Старый фрагмент');
     await r.page.locator('#material-update-button').click();

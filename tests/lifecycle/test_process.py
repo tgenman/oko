@@ -16,7 +16,7 @@ def test_restart_after_atomic_file_move(tmp_path: Path):
         assert process.wait(timeout=5) == 79
         process = launch(tmp_path)
         with connect(tmp_path, process) as client:
-            assert all(not (client.get('/api/v3/materials/' + card['id']).json()['availability'] == 'available') for card in read_all_cards(client, '/api/v3/cards'))
+            assert all(not (client.get('/api/v3/publication/' + card['id']).json()['availability'] == 'available') for card in read_all_cards(client, '/api/v3/cards'))
             presence(client, 'a')
             assert client.post('/api/v3/collect').status_code==200
             assert len(wait_cards(client, 3)) == 3
@@ -63,7 +63,7 @@ def test_pending_deletion_survives_process_death(tmp_path: Path):
         assert process.wait(timeout=5) == 79
         process = launch(tmp_path)
         with connect(tmp_path, process) as client:
-            assert client.get(f'/api/v3/materials/{item}').status_code == 404
+            assert client.get(f'/api/v3/publication/{item}').status_code == 404
             presence(client, 'a')
             assert len(wait_cards(client, 2)) == 2
             for _ in range(100):
@@ -159,7 +159,7 @@ def test_folder_completion_survives_death_during_atomic_set_or_physical_delete(t
                 time.sleep(.02)
             assert not any(w['phase']=='deleting' for w in client.get('/api/v3/status/details').json()['work'])
             for card in originals:
-                assert client.get('/api/v3/materials/' + card['id']).status_code == 404
+                assert client.get('/api/v3/publication/' + card['id']).status_code == 404
                 assert not (tmp_path / 'content' / card['id']).exists()
             client.post('/api/v3/collect')
             time.sleep(.1)

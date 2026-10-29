@@ -37,11 +37,11 @@ def test_metrics_have_a_separate_read_only_authorization_boundary(tmp_path):
 def test_request_labels_use_templates_not_material_ids_or_query_values(tmp_path):
     app=create_app(tmp_path,api_only=True,token='service',metrics_token=TOKEN)
     with TestClient(app) as client:
-        response=client.get('/api/v3/materials/private-publication-identifier',headers={'Authorization':'Bearer service'})
+        response=client.get('/api/v3/publication/private-publication-identifier',headers={'Authorization':'Bearer service'})
         assert response.status_code in (404,422)
         client.get('/unmatched-secret-url?private_key=never-export-this')
         text=client.get('/metrics',headers={'Authorization':'Bearer '+TOKEN}).text
-        assert '/api/v3/materials/{item}' in text
+        assert '/api/v3/publication/{item}' in text
         assert 'private-publication-identifier' not in text
         assert 'never-export-this' not in text and 'unmatched-secret-url' not in text
 
@@ -95,7 +95,7 @@ def test_real_collection_attempts_export_timings_without_source_contents(tmp_pat
         deadline=time.monotonic()+5
         while True:
             cards=read_all_cards(client, '/api/v3/cards')
-            if cards and client.get('/api/v3/materials/'+cards[0]['id']).json()['availability']=='available':break
+            if cards and client.get('/api/v3/publication/'+cards[0]['id']).json()['availability']=='available':break
             assert time.monotonic()<deadline
             time.sleep(.02)
         text=client.get('/metrics',headers={'Authorization':'Bearer '+TOKEN}).text
@@ -228,7 +228,7 @@ def test_worker_codex_checks_update_metrics_without_ui_check_or_new_scrape_reque
         configure_codex(client)
         client.patch('/api/v3/feeds/demo',json={'public_ai':True})
         client.patch('/api/v3/settings/oko/global',json={'theses':True})
-        wait_for(client,lambda:all(client.get('/api/v3/materials/'+card['id']).json()['theses']['result'] for card in read_all_cards(client, '/api/v3/cards')))
+        wait_for(client,lambda:all(client.get('/api/v3/publication/'+card['id']).json()['theses']['result'] for card in read_all_cards(client, '/api/v3/cards')))
         assert service.checks>0
         before=service.checks
         text=client.get('/metrics',headers={'Authorization':'Bearer '+TOKEN}).text

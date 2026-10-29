@@ -45,34 +45,34 @@ def test_same_video_is_readable_in_both_feeds_and_viewed_everywhere(shared):
     assert composition['count']==1 and [f['count'] for f in composition['feeds']]==[1,1]
     assert client.post('/api/v3/materials/'+cards[0]['id']+'/viewed').status_code==200
     assert read_all_cards(client, '/api/v3/cards')==[]
-    assert client.get('/api/v3/materials/'+cards[0]['id']).status_code==404
+    assert client.get('/api/v3/publication/'+cards[0]['id']).status_code==404
 
 
 def test_deleting_primary_feed_keeps_shared_publication_and_file(shared):
     client,feeds,_,_=shared
     item=read_all_cards(client, '/api/v3/cards')[0]['id']
-    original=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
+    original=wait_for(client,lambda:(m if (m := client.get('/api/v3/publication/'+item).json()) and any(media['role'] == 'attachment' for media in m['media']) else None))
     primary=next(f for f in feeds if f['id']==original['feed_id'])
     remaining=next(f for f in feeds if f['id']!=primary['id'])
-    media=original['content']['attachments'][0]['url']
+    media=[media for media in original['media'] if media['role'] == 'attachment'][0]['url']
     assert client.delete('/api/v3/feeds/'+primary['id']).status_code==200
     wait_for(client,lambda:not any(f['id']==primary['id'] for f in client.get('/api/v3/subscriptions').json()['feeds']))
     assert [c['id'] for c in read_all_cards(client, '/api/v3/cards', params={'feed':remaining['id']})]==[item]
-    assert client.get('/api/v3/materials/'+item).status_code==200
+    assert client.get('/api/v3/publication/'+item).status_code==200
     assert client.get(media).content==PNG
 
 
 def test_deleting_secondary_feed_preserves_primary_and_shared_media(shared):
     client,feeds,_,_=shared
     item=read_all_cards(client, '/api/v3/cards')[0]['id']
-    material=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
+    material=wait_for(client,lambda:(m if (m := client.get('/api/v3/publication/'+item).json()) and any(media['role'] == 'attachment' for media in m['media']) else None))
     primary=next(f for f in feeds if f['id']==material['feed_id'])
     secondary=next(f for f in feeds if f['id']!=primary['id'])
-    media=material['content']['attachments'][0]['url']
+    media=[media for media in material['media'] if media['role'] == 'attachment'][0]['url']
     assert client.delete('/api/v3/feeds/'+secondary['id']).status_code==200
     wait_for(client,lambda:not any(f['id']==secondary['id'] for f in client.get('/api/v3/subscriptions').json()['feeds']))
     assert [card['id'] for card in read_all_cards(client, '/api/v3/cards', params={'feed':primary['id']})]==[item]
-    assert client.get('/api/v3/materials/'+item).json()['feed_id']==primary['id']
+    assert client.get('/api/v3/publication/'+item).json()['feed_id']==primary['id']
     assert client.get(media).content==PNG
 
 
@@ -92,7 +92,7 @@ def test_viewed_native_publication_can_be_collected_again_from_explicit_history(
         assert result.status_code==200,result.text
         again=wait_for(client,lambda:next(iter(read_all_cards(client, '/api/v3/cards')),None))
         assert again['id']!=first['id']
-        assert client.get('/api/v3/materials/'+again['id']).json()['content']['text']=='Текст канала'
+        assert client.get('/api/v3/publication/'+again['id']).json()['text']=='Текст канала'
 
 
 def test_shared_publication_respects_all_source_permissions_and_uses_one_result(shared):
@@ -100,19 +100,20 @@ def test_shared_publication_respects_all_source_permissions_and_uses_one_result(
     item=read_all_cards(client, '/api/v3/cards')[0]['id']
     client.put('/api/v3/processors/llamacpp',json={'endpoint':'https://public.example','model':'local:latest','local_execution':False})
     client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp'})
-    first=client.get('/api/v3/materials/'+item).json()['feed_id']
+    first=client.get('/api/v3/publication/'+item).json()['feed_id']
     other=next(f['id'] for f in feeds if f['id']!=first)
     client.patch('/api/v3/feeds/'+other,json={'public_ai':False})
     client.patch('/api/v3/feeds/'+first,json={'public_ai':True})
     client.patch('/api/v3/settings/feed/'+first,json={'theses':True})
     wait_for(client,lambda:any(w.get('reason')=='public_ai_not_allowed' for w in client.get('/api/v3/status/details').json()['work']))
+    wait_for(client,lambda:'Запрещена публичная' in (client.get('/api/v3/publication/'+item).json()['theses']['error'] or ''))
     assert not [r for r in models if r.url.path=='/v1/chat/completions']
     client.patch('/api/v3/feeds/'+other,json={'public_ai':True})
-    wait_for(client,lambda:client.get('/api/v3/materials/'+item).json()['theses']['result'])
+    wait_for(client,lambda:client.get('/api/v3/publication/'+item).json()['theses']['result'])
     assert len([r for r in models if r.url.path=='/v1/chat/completions'])==1
     client.patch('/api/v3/settings/feed/'+other,json={'prompt_theses':'Other unused rules'})
     client.get('/api/v3/status/details')
-    assert client.get('/api/v3/materials/'+item).json()['theses']['result']
+    assert client.get('/api/v3/publication/'+item).json()['theses']['result']
     assert len([r for r in models if r.url.path=='/v1/chat/completions'])==1
 
 
@@ -161,7 +162,7 @@ def test_cancelled_native_history_skips_archive_but_collects_future_posts(tmp_pa
         tick[0]+=1
         assert client.post('/api/v3/collect').status_code==200
         card=wait_for(client,lambda:next(iter(read_all_cards(client, '/api/v3/cards')),None))
-        assert client.get('/api/v3/materials/'+card['id']).json()['content']['text']=='Post 4'
+        assert client.get('/api/v3/publication/'+card['id']).json()['text']=='Post 4'
         assert len(read_all_cards(client, '/api/v3/cards'))==1
 
 
@@ -187,8 +188,8 @@ def test_shared_media_download_continues_after_its_original_feed_is_deleted(tmp_
             card=read_all_cards(client, '/api/v3/cards')[0]
             assert client.delete('/api/v3/feeds/'+card['feed_id']).status_code==200
             release.set()
-            material=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+card['id']).json())['content']['attachments'] else None))
-            assert client.get(material['content']['attachments'][0]['url']).content==PNG
+            material=wait_for(client,lambda:(m if (m := client.get('/api/v3/publication/'+card['id']).json()) and any(media['role'] == 'attachment' for media in m['media']) else None))
+            assert client.get([media for media in material['media'] if media['role'] == 'attachment'][0]['url']).content==PNG
         finally:
             release.set()
 
@@ -236,4 +237,4 @@ def test_unreachable_link_cycle_does_not_retain_files_after_last_root_is_viewed(
         presence(client,'reader')
         assert client.post('/api/v3/materials/'+item+'/viewed').status_code==200
         assert not cached.exists()
-        assert client.get('/api/v3/materials/'+item).status_code==404
+        assert client.get('/api/v3/publication/'+item).status_code==404

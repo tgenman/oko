@@ -35,21 +35,21 @@ def test_edited_text_is_readable_while_new_photo_download_is_held(tmp_path):
             configure_fast_web(client)
             client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
             item = settled(client)[0]['id']
-            old = client.get('/api/v3/materials/'+item).json()
-            assert client.get(old['content']['attachments'][0]['url']).content == b'old-photo'
+            old = client.get('/api/v3/publication/'+item).json()
+            assert client.get([media for media in old['media'] if media['role'] == 'attachment'][0]['url']).content == b'old-photo'
             phase[0] = 1
             client.post('/api/v3/materials/'+item+'/retry')
             assert started.wait(3)
-            updated = wait_for(client, lambda: (m if (m := client.get('/api/v3/materials/'+item).json())['content']['text']=='Edited text' else None))
-            assert updated['content']['attachments'] == []
-            assert updated['content']['completeness']['state'] == 'incomplete'
+            updated = wait_for(client, lambda: (m if (m := client.get('/api/v3/publication/'+item).json())['text']=='Edited text' else None))
+            assert [media for media in updated['media'] if media['role'] == 'attachment'] == []
+            assert updated['completeness']['state'] == 'incomplete'
             release.set()
-            complete = wait_for(client, lambda: (m if (m := client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
-            assert client.get(complete['content']['attachments'][0]['url']).content == b'new-photo'
-            assert complete['content']['completeness']['state'] == 'complete'
-            assert complete['content']['attachments'][0]['url'] != old['content']['attachments'][0]['url']
-            assert client.get(old['content']['attachments'][0]['url']).status_code == 404
-            assert 'previous_versions' not in complete['content']
+            complete = wait_for(client, lambda: (m if (m := client.get('/api/v3/publication/'+item).json()) and any(media['role'] == 'attachment' for media in m['media']) else None))
+            assert client.get([media for media in complete['media'] if media['role'] == 'attachment'][0]['url']).content == b'new-photo'
+            assert complete['completeness']['state'] == 'complete'
+            assert [media for media in complete['media'] if media['role'] == 'attachment'][0]['url'] != [media for media in old['media'] if media['role'] == 'attachment'][0]['url']
+            assert client.get([media for media in old['media'] if media['role'] == 'attachment'][0]['url']).status_code == 404
+            assert 'previous_versions' not in complete
         finally:
             release.set()
 
@@ -80,7 +80,7 @@ def test_viewed_cancels_a_media_job_and_rejects_its_late_file(tmp_path):
             assert client.post('/api/v3/materials/'+item+'/viewed').status_code == 200
             release.set()
             wait_for(client, lambda: client.get('/api/v3/status/details').json()['work']==[{'phase':'idle'}])
-            assert client.get('/api/v3/materials/'+item).status_code == 404
+            assert client.get('/api/v3/publication/'+item).status_code == 404
             assert not any(b'late-private-photo' in path.read_bytes() for path in root.rglob('*') if path.is_file())
         finally:
             release.set()
@@ -124,13 +124,13 @@ def test_one_file_failure_keeps_other_files_and_backoff_survives_restart(tmp_pat
         client.patch('/api/v3/settings/oko/global', json={'retry_initial_seconds':60, 'retry_max_seconds':240})
         client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
         item = wait_for(client, lambda: (cards[0]['id'] if (cards := read_all_cards(client, '/api/v3/cards')) else None))
-        failed = wait_for(client, lambda: (m if len((m := client.get('/api/v3/materials/'+item).json())['content']['attachments'])==1 and 'Не удалось загрузить вложение' in m['content']['completeness'].get('message','') else None))
-        assert failed['content']['text']=='Readable text'
+        failed = wait_for(client, lambda: (m if (m := client.get('/api/v3/publication/'+item).json()) and sum(media['role'] == 'attachment' for media in m['media'])==1 and 'Не удалось загрузить вложение' in m['completeness'].get('message','') else None))
+        assert failed['text']=='Readable text'
         assert calls == {'bad':1, 'good':1}
         problems = client.get('/api/v3/status/details').json()['problems']['current']
         assert all(affected['material_id']==item for problem in problems for affected in problem['affected'] if affected['kind']=='material')
     with TestClient(create_app(root, **options), headers=HEADERS) as client:
-        assert client.get('/api/v3/materials/'+item).json()['content']['text']=='Readable text'
+        assert client.get('/api/v3/publication/'+item).json()['text']=='Readable text'
         assert calls == {'bad':1, 'good':1}
         offset[0] += 61
         wait_for(client, lambda: calls['bad']==2)
@@ -143,11 +143,11 @@ def test_one_file_failure_keeps_other_files_and_backoff_survives_restart(tmp_pat
         wait_for(client,doubled_delay)
         assert calls['good']==1
         offset[0] += 61
-        assert client.get('/api/v3/materials/'+item).json()['content']['completeness']['state']=='incomplete'
+        assert client.get('/api/v3/publication/'+item).json()['completeness']['state']=='incomplete'
         assert calls['bad']==2
         offset[0] += 60
-        loaded = wait_for(client, lambda: (m if (m := client.get('/api/v3/materials/'+item).json())['content']['completeness']['state']=='complete' else None))
-        assert len(loaded['content']['attachments'])==2
+        loaded = wait_for(client, lambda: (m if (m := client.get('/api/v3/publication/'+item).json())['completeness']['state']=='complete' else None))
+        assert len([media for media in loaded['media'] if media['role'] == 'attachment'])==2
         assert calls == {'bad':3, 'good':1}
 
 
@@ -168,17 +168,17 @@ def test_permanent_file_failure_waits_for_manual_retry(tmp_path):
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         item = wait_for(client,lambda:(cards[0]['id'] if (cards:=read_all_cards(client, '/api/v3/cards')) else None))
-        wait_for(client,lambda:'Не удалось загрузить вложение' in client.get('/api/v3/materials/'+item).json()['content']['completeness'].get('message',''))
+        wait_for(client,lambda:'Не удалось загрузить вложение' in client.get('/api/v3/publication/'+item).json()['completeness'].get('message',''))
         assert len(calls)==1
         problems = client.get('/api/v3/status/details').json()['problems']['current']
         assert any({'kind':'material','material_id':item} in problem['affected'] for problem in problems)
         available[0]=True
         offset[0]+=600
-        assert client.get('/api/v3/materials/'+item).json()['content']['attachments']==[]
+        assert [media for media in client.get('/api/v3/publication/'+item).json()['media'] if media['role'] == 'attachment']==[]
         assert len(calls)==1
         client.post('/api/v3/materials/'+item+'/retry')
-        ready = wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
-        assert client.get(ready['content']['attachments'][0]['url']).content==b'manually-retried'
+        ready = wait_for(client,lambda:(m if (m := client.get('/api/v3/publication/'+item).json()) and any(media['role'] == 'attachment' for media in m['media']) else None))
+        assert client.get([media for media in ready['media'] if media['role'] == 'attachment'][0]['url']).content==b'manually-retried'
         assert len(calls)==2
 
 
@@ -202,7 +202,7 @@ def test_publication_fetch_uses_configured_retry_delay_and_keeps_saved_text(tmp_
         state=wait_for(client,waiting)
         deadline=next(datetime.fromisoformat(w['retry_at'].replace('Z','+00:00')).timestamp() for w in state['work'] if w['phase']=='waiting' and w.get('retry_at'))
         assert deadline-time.time() > 550
-        assert client.get('/api/v3/materials/'+item).json()['content']['text']=='Saved text'
+        assert client.get('/api/v3/publication/'+item).json()['text']=='Saved text'
 
 
 def test_manual_fetch_retry_preserves_a_source_wait_and_saved_text(tmp_path):
@@ -231,7 +231,7 @@ def test_manual_fetch_retry_preserves_a_source_wait_and_saved_text(tmp_path):
         assert len(denied)==1
         client.post('/api/v3/materials/'+item+'/retry')
         assert deadline() is not None and deadline()>=before-.1
-        assert client.get('/api/v3/materials/'+item).json()['content']['text']=='Saved text'
+        assert client.get('/api/v3/publication/'+item).json()['text']=='Saved text'
         assert len(denied)==1
 
 
@@ -248,7 +248,7 @@ def test_media_urls_and_publication_media_ids_follow_source_order(tmp_path):
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         item=settled(client)[0]['id']
-        attachments=client.get('/api/v3/materials/'+item).json()['content']['attachments']
+        attachments=[media for media in client.get('/api/v3/publication/'+item).json()['media'] if media['role'] == 'attachment']
         assert [client.get(value['url']).content for value in attachments]==[b'one',b'two',b'three']
         with database(root) as db:
             media_ids=json.loads(db.execute('SELECT media_ids FROM items WHERE id = %s',(item,)).fetchone()[0])
@@ -273,8 +273,8 @@ def test_changed_resource_refreshes_description_before_downloading_new_bytes(tmp
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         item=wait_for(client,lambda:(c[0]['id'] if (c:=read_all_cards(client, '/api/v3/cards')) else None))
-        ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['text']=='Text b' and m['content']['attachments'] else None))
-        assert client.get(ready['content']['attachments'][0]['url']).content==b'/b.jpg'
+        ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/publication/'+item).json())['text']=='Text b' and [media for media in m['media'] if media['role'] == 'attachment'] else None))
+        assert client.get([media for media in ready['media'] if media['role'] == 'attachment'][0]['url']).content==b'/b.jpg'
         assert downloads==['/b.jpg']
 
 
@@ -292,11 +292,11 @@ def test_refreshed_signature_keeps_the_media_id_and_existing_bytes(tmp_path):
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         item=settled(client)[0]['id']
-        before=client.get('/api/v3/materials/'+item).json()['content']['attachments'][0]['url']
+        before=[media for media in client.get('/api/v3/publication/'+item).json()['media'] if media['role'] == 'attachment'][0]['url']
         signature[0]='second'
         client.post('/api/v3/materials/'+item+'/retry')
         settled(client)
-        after=client.get('/api/v3/materials/'+item).json()['content']['attachments'][0]['url']
+        after=[media for media in client.get('/api/v3/publication/'+item).json()['media'] if media['role'] == 'attachment'][0]['url']
         assert before==after
         assert client.get(after).content==b'unchanged'
         assert len(downloads)==1
@@ -314,8 +314,8 @@ def test_a_real_empty_attachment_is_ready_with_size_zero(tmp_path):
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         item=wait_for(client,lambda:(cards[0]['id'] if (cards:=read_all_cards(client, '/api/v3/cards')) else None))
-        ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
-        assert client.get(ready['content']['attachments'][0]['url']).content==b''
+        ready=wait_for(client,lambda:(m if (m := client.get('/api/v3/publication/'+item).json()) and any(media['role'] == 'attachment' for media in m['media']) else None))
+        assert client.get([media for media in ready['media'] if media['role'] == 'attachment'][0]['url']).content==b''
         with database(root) as db:
             assert db.execute('SELECT name , size_bytes , status FROM media_files WHERE publication_id = %s',(item,)).fetchone()==('empty.txt',0,'ready')
 
@@ -346,9 +346,9 @@ def test_replacement_starts_while_cancel_resistant_old_media_is_still_waiting(tm
             item=read_all_cards(client, '/api/v3/cards')[0]['id']
             phase[0]='b'
             client.post('/api/v3/materials/'+item+'/retry' if refresh=='retry' else '/api/v3/collect')
-            ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['text']=='Text b' and m['content']['attachments'] else None))
+            ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/publication/'+item).json())['text']=='Text b' and [media for media in m['media'] if media['role'] == 'attachment'] else None))
             assert not old_finished.is_set()
-            url=ready['content']['attachments'][0]['url']
+            url=[media for media in ready['media'] if media['role'] == 'attachment'][0]['url']
             assert client.get(url).content==b'/b.jpg'
             old_release.set()
             assert old_finished.wait(3)
@@ -389,8 +389,8 @@ def test_periodic_cleanup_removes_orphans_but_keeps_an_active_download(tmp_path)
             offset[0]+=3601
             wait_for(client,lambda:not orphan.exists() and not abandoned.exists())
             release.set()
-            ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
-            assert client.get(ready['content']['attachments'][0]['url']).content==b'first-last'
+            ready=wait_for(client,lambda:(m if (m := client.get('/api/v3/publication/'+item).json()) and any(media['role'] == 'attachment' for media in m['media']) else None))
+            assert client.get([media for media in ready['media'] if media['role'] == 'attachment'][0]['url']).content==b'first-last'
         finally:
             release.set()
 
@@ -479,8 +479,8 @@ def test_process_death_at_media_acceptance_never_exposes_uncommitted_bytes(tmp_p
         assert client.get(url).status_code==(200 if committed else 404)
         if not committed:
             client.post('/api/v3/materials/'+item+'/retry')
-        ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
-        assert client.get(ready['content']['attachments'][0]['url']).content==b'process-media'
+        ready=wait_for(client,lambda:(m if (m := client.get('/api/v3/publication/'+item).json()) and any(media['role'] == 'attachment' for media in m['media']) else None))
+        assert client.get([media for media in ready['media'] if media['role'] == 'attachment'][0]['url']).content==b'process-media'
 
 
 def test_telegraph_text_is_kept_while_its_image_download_waits(tmp_path):
@@ -501,15 +501,15 @@ def test_telegraph_text_is_kept_while_its_image_download_waits(tmp_path):
             client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
             assert started.wait(3)
             item=read_all_cards(client, '/api/v3/cards')[0]['id']
-            content=client.get('/api/v3/materials/'+item).json()['content']
+            content=client.get('/api/v3/publication/'+item).json()
             assert 'Article text' in content['text']
             selective=client.get('/api/v3/publication/'+item)
             assert selective.status_code==200,selective.text
             assert 'Article text' in content['linked_content']['articles'][0]['text']
             assert 'Не удалось' not in content['linked_content']['articles'][0]['text']
             release.set()
-            ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
-            assert client.get(ready['content']['linked_content']['articles'][0]['media_urls'][0]).content==b'article-image'
+            ready=wait_for(client,lambda:(m if (m := client.get('/api/v3/publication/'+item).json()) and any(media['role'] == 'attachment' for media in m['media']) else None))
+            assert client.get(ready['linked_content']['articles'][0]['media_urls'][0]).content==b'article-image'
         finally:
             release.set()
 
@@ -529,13 +529,13 @@ def test_unavailable_telegraph_keeps_the_last_article_with_new_post_text(tmp_pat
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         item=settled(client)[0]['id']
-        initial=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
-        assert 'Saved article text' in initial['content']['text']
-        old_url=initial['content']['linked_content']['articles'][0]['media_urls'][0]
+        initial=wait_for(client,lambda:(m if (m := client.get('/api/v3/publication/'+item).json()) and any(media['role'] == 'attachment' for media in m['media']) else None))
+        assert 'Saved article text' in initial['text']
+        old_url=initial['linked_content']['articles'][0]['media_urls'][0]
         broken[0]=True
         client.post('/api/v3/materials/'+item+'/retry')
         settled(client)
-        content=wait_for(client,lambda:(m['content'] if 'New post' in (m:=client.get('/api/v3/materials/'+item).json())['content']['text'] and m['content']['linked_content']['articles'][0]['error'] else None))
+        content=wait_for(client,lambda:(m if 'New post' in (m:=client.get('/api/v3/publication/'+item).json())['text'] and m['linked_content']['articles'][0]['error'] else None))
         assert 'New post' in content['text']
         assert 'Saved article text' in content['text']
         assert content['linked_content']['articles'][0]['error']
@@ -560,12 +560,12 @@ def test_explicit_feed_refresh_rechecks_unavailable_media(tmp_path):
         configure_fast_web(client)
         connected=client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox')).json()
         item=wait_for(client,lambda:(c[0]['id'] if (c:=read_all_cards(client, '/api/v3/cards')) else None))
-        wait_for(client,lambda:'удалена или недоступна' in client.get('/api/v3/materials/'+item).json()['content']['completeness'].get('message',''))
+        wait_for(client,lambda:'удалена или недоступна' in client.get('/api/v3/publication/'+item).json()['completeness'].get('message',''))
         assert files==[]
         unavailable[0]=False
         client.post('/api/v3/collect',json={'scope':'feed','feed_id':connected['feed_id']})
-        ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
-        assert client.get(ready['content']['attachments'][0]['url']).content==b'available-again'
+        ready=wait_for(client,lambda:(m if (m := client.get('/api/v3/publication/'+item).json()) and any(media['role'] == 'attachment' for media in m['media']) else None))
+        assert client.get([media for media in ready['media'] if media['role'] == 'attachment'][0]['url']).content==b'available-again'
         assert len(files)==1
 
 
@@ -596,15 +596,15 @@ def test_article_metadata_error_keeps_its_pending_media_identity(tmp_path):
                 before=db.execute('SELECT id FROM media_files WHERE publication_id = %s',(article,)).fetchone()[0]
             broken[0]=True
             client.post('/api/v3/materials/'+item+'/retry')
-            wait_for(client,lambda:'New post' in client.get('/api/v3/materials/'+item).json()['content']['text'])
+            wait_for(client,lambda:'New post' in client.get('/api/v3/publication/'+item).json()['text'])
             with database(root) as db:
                 assert db.execute('SELECT id FROM media_files WHERE publication_id = %s',(article,)).fetchone()[0]==before
             broken[0]=False
             release.set()
             client.post('/api/v3/materials/'+item+'/retry')
             wait_for(client,lambda:client.get('/api/v3/status/details').json()['work']==[{'phase':'idle'}])
-            ready=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
-            assert client.get(ready['content']['attachments'][0]['url']).content==b'article-image'
+            ready=wait_for(client,lambda:(m if (m := client.get('/api/v3/publication/'+item).json()) and any(media['role'] == 'attachment' for media in m['media']) else None))
+            assert client.get([media for media in ready['media'] if media['role'] == 'attachment'][0]['url']).content==b'article-image'
         finally:
             release.set()
 
@@ -628,11 +628,11 @@ def test_media_source_wait_survives_restart_and_does_not_pause_another_host(tmp_
         client.patch('/api/v3/settings/oko/global',json={'retry_initial_seconds':1,'retry_max_seconds':2})
         connected=client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox')).json()
         item=wait_for(client,lambda:(c[0]['id'] if (c:=read_all_cards(client, '/api/v3/cards')) else None))
-        content=wait_for(client,lambda:(m if (m:=client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
-        assert client.get(content['content']['attachments'][0]['url']).content==b'other-image'
+        content=wait_for(client,lambda:(m if (m := client.get('/api/v3/publication/'+item).json()) and any(media['role'] == 'attachment' for media in m['media']) else None))
+        assert client.get([media for media in content['media'] if media['role'] == 'attachment'][0]['url']).content==b'other-image'
         assert calls=={'paused':1,'other':1}
     with TestClient(create_app(root,**options),headers=HEADERS) as client:
-        assert client.get('/api/v3/materials/'+item).json()['content']['text']=='Saved text'
+        assert client.get('/api/v3/publication/'+item).json()['text']=='Saved text'
         client.post('/api/v3/collect',json={'scope':'feed','feed_id':connected['feed_id']})
         status=client.get('/api/v3/status/details').json()
         from datetime import datetime
@@ -656,7 +656,7 @@ def test_missing_publication_stops_fetch_as_unavailable_and_keeps_last_copy(tmp_
         wait_for(client,lambda:client.get('/api/v3/status').json()['sources'][0]['state']=='unavailable')
         with database(root) as db:
             assert db.execute("SELECT status FROM jobs WHERE kind = 'fetch' AND item = %s",(item,)).fetchone()[0]=='unavailable'
-        assert client.get('/api/v3/materials/'+item).json()['content']['text']=='Saved text'
+        assert client.get('/api/v3/publication/'+item).json()['text']=='Saved text'
         missing[0]=False
         client.post('/api/v3/materials/'+item+'/retry')
         wait_for(client,lambda:client.get('/api/v3/status').json()['sources'][0]['state']=='ready')
@@ -682,15 +682,15 @@ def test_partial_article_fetch_retries_automatically_after_restart(tmp_path,extr
         client.patch('/api/v3/settings/oko/global',json={'retry_initial_seconds':1,'retry_max_seconds':1})
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         item=wait_for(client,lambda:(c[0]['id'] if (c:=read_all_cards(client, '/api/v3/cards')) else None))
-        wait_for(client,lambda:any(a.get('error') and a['source_url']=='https://telegra.ph/Fixture' for a in (client.get('/api/v3/materials/'+item).json()['content'].get('linked_content') or {}).get('articles',[])))
+        wait_for(client,lambda:any(a.get('error') and a['source_url']=='https://telegra.ph/Fixture' for a in (client.get('/api/v3/publication/'+item).json().get('linked_content') or {}).get('articles',[])))
         with database(root) as db:
             article=db.execute("SELECT i . id FROM publication_links l JOIN items i ON i . id = l . target_publication_id WHERE l . source_publication_id = %s AND i . url = 'https://telegra.ph/Fixture'",(item,)).fetchone()[0]
             job=db.execute("SELECT status , retry_at , error FROM jobs WHERE kind = 'fetch' AND item = %s",(article,)).fetchone()
         assert job[0]=='pending' and job[1]>time.time() and job[2]
-        assert 'Useful post' in client.get('/api/v3/materials/'+item).json()['content']['text']
+        assert 'Useful post' in client.get('/api/v3/publication/'+item).json()['text']
     broken[0]=False
     with TestClient(create_app(root,**options),headers=HEADERS) as client:
-        wait_for(client,lambda:'Recovered article' in client.get('/api/v3/materials/'+item).json()['content']['text'])
+        wait_for(client,lambda:'Recovered article' in client.get('/api/v3/publication/'+item).json()['text'])
         with database(root) as db:
             assert db.execute("SELECT status , retry_at FROM jobs WHERE kind = 'fetch' AND item = %s",(article,)).fetchone()==('done',None)
             if 'Missing' in extra:

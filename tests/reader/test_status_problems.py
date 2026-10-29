@@ -188,12 +188,12 @@ def test_partial_material_is_visible_with_available_text(tmp_path):
     with TestClient(create_app(tmp_path, token='test', source=Partial()), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
         presence(client, 'reader')
-        wait_for(client,lambda:len(cards:=read_all_cards(client, '/api/v3/cards'))==2 and all((client.get('/api/v3/materials/' + c['id']).json()['availability'] == 'available') for c in cards))
+        wait_for(client,lambda:len(cards:=read_all_cards(client, '/api/v3/cards'))==2 and all((client.get('/api/v3/publication/' + c['id']).json()['availability'] == 'available') for c in cards))
         problems=client.get('/api/v3/status/details').json()['problems']
         assert problems['count']==2
         assert problems['current'][0]['code']=='material_incomplete'
         assert len(problems['current'][0]['affected'])==1
-        assert client.get('/api/v3/materials/'+problems['current'][0]['affected'][0]['material_id']).json()['content']['text']=='Доступный текст'
+        assert client.get('/api/v3/publication/'+problems['current'][0]['affected'][0]['material_id']).json()['text']=='Доступный текст'
 
 
 def test_viewing_removes_scoped_diagnostic_content_from_server_and_disk(tmp_path):
@@ -201,7 +201,7 @@ def test_viewing_removes_scoped_diagnostic_content_from_server_and_disk(tmp_path
     from tests.support.reader import setup_reader
     with TestClient(create_app(tmp_path, token='test', source=DemoSource()), headers=HEADERS) as client:
         item=setup_reader(client,theses=False)
-        title=client.get('/api/v3/materials/'+item).json()['title']
+        title=client.get('/api/v3/publication/'+item).json()['title']
         assert client.post('/api/v3/diagnostics',json={'source':'material','message':title,'material_ids':[item]}).status_code==200
         assert title in client.get('/api/v3/diagnostics').text
         assert client.post('/api/v3/materials/'+item+'/viewed').status_code==200
@@ -278,8 +278,8 @@ def test_normal_caption_spacing_is_work_without_a_problem(tmp_path):
             for feed in response.json()['feeds']:
                 client.patch('/api/v3/feeds/'+feed['id'],json={'importance':'high'})
         presence(client, 'reader')
-        wait_for(client,lambda:captions.calls==1 and len(cards:=read_all_cards(client, '/api/v3/cards'))==2 and sum(client.get('/api/v3/materials/'+card['id']).json()['source'].get('captions')=='available' for card in cards)==1)
-        waiting=next(card['id'] for card in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/materials/'+card['id']).json()['source'].get('captions')!='available')
+        wait_for(client,lambda:captions.calls==1 and len(cards:=read_all_cards(client, '/api/v3/cards'))==2 and sum(client.get('/api/v3/publication/'+card['id']).json()['source'].get('captions')=='available' for card in cards)==1)
+        waiting=next(card['id'] for card in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/publication/'+card['id']).json()['source'].get('captions')!='available')
         problems=client.get('/api/v3/status/details').json()['problems']
         assert not any(obj.get('material_id')==waiting for p in problems['current'] for obj in p['affected']),problems
         assert not any(p['code']=='youtube_rate_limited' for p in problems['current'])

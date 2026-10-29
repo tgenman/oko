@@ -42,8 +42,8 @@ test('multiline Markdown links normalize only their labels and destinations in a
   await expect(r.page.locator('#text code').last()).toHaveText('[Блок\n\nкода](https://code.test)\n');
   await expect(r.page.locator('#text code').first()).toHaveText('[Код ссылки](https://code.test)');
   await expect(r.page.locator('#description').getByRole('link',{name:'Описание видео'})).toHaveAttribute('href','https://youtu.be/BPoce9VGatE');
-  const source=await r.page.evaluate(async()=>{const reply=await fetch('/api/v3/materials/A');return reply.json();});
-  assert.equal(source.content.text,text);
+  const source=await r.page.evaluate(async()=>{const reply=await fetch('/api/v3/publication/A');return reply.json();});
+  assert.equal(source.text,text);
   await expect(r.page.locator('#text p').first()).toHaveText('До ссылки');await expect(r.page.locator('#text p').last()).toHaveText('После ссылки');
   await r.page.locator('[data-card="B"]').click();await expect(r.page.locator('#text').getByRole('link',{name:'Возврат каретки'})).toHaveAttribute('href','https://example.net/cr');
   assert.deepEqual(r.errors,[]);
@@ -61,10 +61,10 @@ test('Markdown publication links travel through the production HTTP reader uncha
  const link=page.locator('#text').getByRole('link',{name:'YouTube Christa Pike 911 Calls',exact:true});
  await expect(link).toHaveAttribute('href','https://youtu.be/BPoce9VGatE');
  await expect(page.locator('#text').getByRole('link',{name:'Статья',exact:true})).toHaveAttribute('href','https://www.upstartsmedia.com/p/tolan-raises-30m-for-ai-companion-you-trust');
- const cards=(await api('cards')).items;const response=await api(`materials/${cards[0]!.id}`);
- assert.equal(response.content.availability,'available');if(response.content.availability!=='available')throw Error('Expected available content');
- assert.ok(response.content.text.includes('[YouTube\n\nChrista Pike 911 Calls](https://youtu.be/\n  BPoce9VGatE)'));
- assert.ok(response.content.text.endsWith('[Статья](https://www.upstartsmedia.com/p/tolan-raises-30m-for-ai-companion-you-trust)'));
+ const cards=(await api('cards')).items;const response=await api(`publication/${cards[0]!.id}`);
+ assert.equal(response.availability,'available');if(response.availability!=='available')throw Error('Expected available content');
+ assert.ok(response.text.includes('[YouTube\n\nChrista Pike 911 Calls](https://youtu.be/\n  BPoce9VGatE)'));
+ assert.ok(response.text.endsWith('[Статья](https://www.upstartsmedia.com/p/tolan-raises-30m-for-ai-companion-you-trust)'));
  assert.equal(await page.locator('#text').locator('xpath=ancestor::details').count(),0);
 });
 
@@ -82,10 +82,10 @@ test('filtered publication keeps a collapsed full original, media and restorable
   await expect(r.page.locator('#text')).toContainText('Реклама');await expect(r.page.locator('#material img')).toHaveCount(1);
   await expect(r.page.locator('#filter-restore')).toHaveCount(0);
   const hidden={...item,filter:{...item.filter!,hidden:true,reason:'Скрыто фильтром'}};
-  await r.page.evaluate(hidden=>readerTransport.replies.set('/api/v3/materials/A',{body:hidden}),hidden);
+  await r.page.evaluate(hidden=>readerTransport.replies.set('/fixture/material/A',{body:hidden}),hidden);
   await expect(r.page.locator('#filter-status')).toContainText('Скрыто фильтром');await expect(r.page.locator('#text').getByRole('link',{name:'Статья'})).toBeVisible();
   await expect(r.page.locator('#original-panel')).toHaveCount(0);
-  await r.page.evaluate(item=>readerTransport.replies.set('/api/v3/materials/A',{body:item}),item);
+  await r.page.evaluate(item=>readerTransport.replies.set('/fixture/material/A',{body:item}),item);
   await expect(r.page.locator('#original-panel')).toHaveCount(1);
   await expect(r.page.locator('#original-panel')).not.toHaveAttribute('open');
   assert.deepEqual(r.errors,[]);
@@ -97,7 +97,7 @@ test('nested Markdown reading position survives an independently completed summa
   const text=Array.from({length:55},(_,i)=>'> - **Point '+i+'** '+('long text '.repeat(12))).join('\n>\n');
   const item=material('A',{text});await r.start([item]);await r.page.locator('[data-card="A"]').click();
   const anchor=r.page.locator('#text [data-reading-paragraph]').nth(25);await anchor.evaluate(node=>node.scrollIntoView({block:'start'}));const before=(await anchor.boundingBox())!.y;
-  await r.page.evaluate(item=>readerTransport.replies.set('/api/v3/materials/A',{body:{...item,theses:{points:[{text:'Summary ready',sources:[]}]}}}),item);
+  await r.page.evaluate(item=>readerTransport.replies.set('/fixture/material/A',{body:{...item,theses:{points:[{text:'Summary ready',sources:[]}]}}}),item);
   await expect(r.page.locator('#theses')).toHaveText('Summary ready');
   expect(Math.abs((await anchor.boundingBox())!.y-before)).toBeLessThan(2);
   assert.deepEqual(r.errors,[]);

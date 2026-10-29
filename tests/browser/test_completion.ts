@@ -51,7 +51,7 @@ for(const scope of ['folder','feed'] as const){
       await r.start([material('old')]);const url=path(scope),c=controls(r,scope);
       await r.page.evaluate(url=>{readerTransport.replies.set(url+'/preview',{body:{token:'captured',cards_count:1,publications_count:1}});readerTransport.held.set(url,true);},url);
       await open(r,scope);await expect(c.confirm).toBeEnabled();await c.confirm.click();await r.page.waitForFunction(url=>readerTransport.pending.has(url),url);await c.cancel.click();
-      const fresh=material('fresh');await r.page.evaluate(fresh=>{readerTransport.replies.set('/api/v3/cards',{body:[fresh]});readerTransport.replies.set('/api/v3/materials/fresh',{body:fresh});},fresh);
+      const fresh=material('fresh');await r.page.evaluate(fresh=>{readerTransport.replies.set('/api/v3/cards',{body:[fresh]});readerTransport.replies.set('/fixture/material/fresh',{body:fresh});},fresh);
       await expect(r.page.locator('[data-card="fresh"]')).toBeVisible();await r.page.locator('[data-card="fresh"]').click();await expect(r.page.locator('#text')).toContainText('Текст fresh');
       await release(r,scope,status);await expect(r.page.locator('#text')).toContainText('Текст fresh');await expect(r.page.locator('[data-card="fresh"]')).toBeVisible();expect(r.errors).toEqual([]);
     }finally{await r.close();}

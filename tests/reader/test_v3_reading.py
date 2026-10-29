@@ -1,4 +1,4 @@
-from tests.support.cards import read_all_cards, read_materials_for_cards
+from tests.support.cards import read_all_cards, read_publications_for_cards
 from oko.collection.contracts import DiscoveryResult, FetchResult
 from tests.support.v3 import TestClient
 from oko.collection.demo import DemoSource
@@ -15,17 +15,17 @@ def test_reading_and_explicit_completion_receipts(tmp_path):
         cards = [wire.CardListItem.model_validate(card) for card in response.json()['items']]
         assert len(cards) == 3
         card = next(card for card in cards if card.id.root == item)
-        material = client.get('/api/v3/materials/' + item)
+        material = client.get('/api/v3/publication/' + item)
         assert material.status_code == 200, material.text
-        value = wire.ReadableMaterial.model_validate(material.json()).root
-        assert value.availability == 'available' and value.content.text
+        value = wire.PublicationResponse.model_validate(material.json())
+        assert value.availability == 'available' and value.text
         assert value.feed_id == card.feed_id
         assert len(read_all_cards(client, '/api/v3/cards')) == 3
         result = client.post('/api/v3/materials/' + item + '/viewed', headers={'X-Oko-Action':'view-one'})
         assert result.status_code == 200, result.text
         assert client.get('/api/v3/commands/view-one').json()['outcome'] == 'succeeded'
-        assert client.get('/api/v3/materials/' + item).status_code == 404
-        folder = value.folder_id.root
+        assert client.get('/api/v3/publication/' + item).status_code == 404
+        folder = next(f['id'] for f in client.get('/api/v3/reading-composition').json()['folders'])
         preview = client.post(f'/api/v3/folders/{folder}/completion/preview').json()
         assert preview['publications_count'] == 2
         stale = client.post(f'/api/v3/folders/{folder}/completion', json={'token':'stale'}, headers={'X-Oko-Action':'stale-folder'})
@@ -80,17 +80,17 @@ def test_versions_all_media_and_receipt_survive_until_explicit_viewed(tmp_path):
         client.patch('/api/v3/settings/oko/global', json={'theses':False, 'prompt_filters':''})
         first = wait_for(client, lambda: next((v for v in read_all_cards(client, '/api/v3/cards') if not v['loading']), None))
         item = first['id']
-        assert client.get('/api/v3/materials/'+item).json()['content']['completeness']['state'] == 'incomplete'
+        assert client.get('/api/v3/publication/'+item).json()['completeness']['state'] == 'incomplete'
         source.revision = 2
         response = client.post(f'/api/v3/materials/{item}/retry', headers={'X-Oko-Action':'fetch-again'})
         assert response.status_code == 200, response.text
-        current = wait_for(client, lambda: (v if (v := client.get(f'/api/v3/materials/{item}').json())['content']['text'] == 'Text 2' and not v['content']['loading'] else None))
-        content = current['content']
+        current = wait_for(client, lambda: (v if (v := client.get(f'/api/v3/publication/{item}').json())['text'] == 'Text 2' and not v['loading'] else None))
+        content = current
         assert content['changed'] and 'previous_versions' not in content
         urls = []
         for material in [content]:
-            assert [a['kind'] for a in material['attachments']] == ['image','image','video','audio','circle','file']
-            urls += material['images'] + [a['url'] for a in material['attachments']]
+            assert [a['kind'] for a in material['media'] if a['role']=='attachment'] == ['image','image','video','audio','circle','file']
+            urls += [a['url'] for a in material['media']]
         for url in urls:
             response = client.get(url)
             assert response.status_code == 200 and response.content
@@ -121,14 +121,14 @@ def test_pending_unknown_dates_and_completion_do_not_admit_late_fetch(tmp_path):
         cards = wait_for(client, lambda: read_all_cards(client, '/api/v3/cards'))
         pending = cards[0]
         assert pending['loading'] and pending['published_at'] is None
-        material = client.get('/api/v3/materials/' + pending['id']).json()
+        material = client.get('/api/v3/publication/' + pending['id']).json()
         assert material['originals'] is False
         assert material['source_position'] is None
-        assert material['content'] == {'availability':'pending','loading':True}
-        assert 'text' not in material['content']
+        assert material['availability'] == 'pending' and material['loading']
+        assert material['text'] == ''
         composition = client.get('/api/v3/reading-composition').json()
         assert composition['count'] == 1
-        folder = material['folder_id']
+        folder = composition['folders'][0]['id']
         preview = client.post(f'/api/v3/folders/{folder}/completion/preview').json()
         assert preview['publications_count'] == 1
         assert client.post(f'/api/v3/folders/{folder}/completion', json={'token':preview['token']}).status_code == 200
@@ -142,7 +142,7 @@ def test_hidden_filter_theses_restoration_and_processing_receipts(tmp_path):
     from tests.support.filters import setup_filters
     with TestClient(create_app(tmp_path, token='test', api_only=True, source=FilterSource(), ai_transport=transport([], theses=True)), headers=HEADERS) as client:
         setup_filters(client)
-        cards = wait_for(client, lambda: (v if len(v := read_materials_for_cards(client, '/api/v3/cards?show_hidden=true')) == 3 and all(c['filter']['attempt']['state'] == 'ready' for c in v) else None))
+        cards = wait_for(client, lambda: (v if len(v := read_publications_for_cards(client, '/api/v3/cards?show_hidden=true')) == 3 and all(c['filter']['state'] == 'ready' for c in v) else None))
         hidden = next(c for c in cards if c['filter']['result']['hidden'])
         assert len(read_all_cards(client, '/api/v3/cards')) == 2
         assert client.get('/api/v3/reading-composition').json()['count'] == 2
@@ -152,15 +152,16 @@ def test_hidden_filter_theses_restoration_and_processing_receipts(tmp_path):
         client.patch('/api/v3/settings/oko/global', json={'theses':True})
         item = next(c['id'] for c in cards if not c['filter']['result']['hidden'])
         path = '/api/v3/materials/' + item
-        value = wait_for(client, lambda: (v if (v := client.get(path).json())['theses']['result'] else None))
+        publication_path = '/api/v3/publication/' + item
+        value = wait_for(client, lambda: (v if (v := client.get(publication_path).json())['theses']['result'] else None))
         assert value['theses']['result']['provenance']['kind'] == 'local'
-        assert value['content']['text']
+        assert value['text']
         for suffix in ['regenerate','theses/retry','filter/retry']:
             key = suffix.replace('/','-')
             response = client.post(path + '/' + suffix, headers={'X-Oko-Action':key})
             assert response.status_code == 200, response.text
             assert client.get('/api/v3/commands/' + key).json()['outcome'] == 'succeeded'
-        folder = hidden['folder_id']
+        folder = client.get('/api/v3/reading-composition').json()['folders'][0]['id']
         preview = client.post(f'/api/v3/folders/{folder}/completion/preview').json()
         assert preview['publications_count'] == 3
         assert client.post(f'/api/v3/folders/{folder}/completion', json={'token':preview['token']}).status_code == 200
@@ -188,43 +189,45 @@ def test_waiting_reasons_and_previous_theses_during_failed_regeneration(tmp_path
     with TestClient(create_app(tmp_path, token='test', api_only=True, source=DemoSource(), ai_transport=httpx.MockTransport(respond), clock=clock), headers=HEADERS) as client:
         item = setup_reader(client, theses=False)
         path = '/api/v3/materials/' + item
+        publication_path = '/api/v3/publication/' + item
         client.patch('/api/v3/settings/oko/global', json={'theses':True,'processor':'llamacpp'})
         clock.now+=1
-        state = wait_for(client, lambda: (s if (s := client.get(path).json()['theses'])['attempt']['state'] == 'waiting' else None))
-        assert state['attempt']['reason'] == 'processor_not_configured'
-        assert state['attempt']['retry_at'] is not None
+        state = wait_for(client, lambda: next((w for w in client.get('/api/v3/status/details').json()['work'] if w.get('reason') == 'processor_not_configured'), None))
+        assert state['retry_at'] is not None
+        wait_for(client, lambda: client.get(publication_path).json()['theses']['state'] == 'error')
         client.put('/api/v3/processors/llamacpp', json={'endpoint':'https://remote.example.org','model':'local:latest','local_execution':True})
         clock.now+=1
-        state = wait_for(client, lambda: (s if (s := client.get(path).json()['theses'])['attempt'].get('reason') == 'public_ai_not_allowed' else None))
-        assert state['result'] is None
+        wait_for(client, lambda: any(w.get('reason') == 'public_ai_not_allowed' for w in client.get('/api/v3/status/details').json()['work']))
+        wait_for(client, lambda: 'Запрещена публичная' in (client.get(publication_path).json()['theses']['error'] or ''))
+        assert client.get(publication_path).json()['theses']['result'] is None
         client.put('/api/v3/processors/llamacpp', json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':True})
         clock.now+=1
-        accepted = wait_for(client, lambda: client.get(path).json()['theses']['result'])
-        wait_for(client, lambda: all(c['theses']['result'] for c in read_materials_for_cards(client, '/api/v3/cards')))
+        accepted = wait_for(client, lambda: client.get(publication_path).json()['theses']['result'])
+        wait_for(client, lambda: all(c['theses']['result'] for c in read_publications_for_cards(client, '/api/v3/cards')))
         blocked[0] = True
         try:
             assert client.post(path + '/regenerate').status_code == 200
-            current = client.get(path).json()['theses']
-            assert current['attempt']['state'] in ('queued','running')
+            current = client.get(publication_path).json()['theses']
+            assert current['state'] in ('pending','processing')
             assert current['result'] == accepted
             fail[0] = True
         finally:
             blocked[0] = False
-        state = wait_for(client, lambda: (s if (s := client.get(path).json()['theses'])['attempt']['state'] == 'waiting' else None))
-        assert state['result'] == accepted
-        assert state['attempt']['reason'] == 'retry_scheduled'
+        wait_for(client, lambda: any(w.get('reason') == 'retry_scheduled' for w in client.get('/api/v3/status/details').json()['work']))
+        wait_for(client, lambda: client.get(publication_path).json()['theses']['state'] == 'error')
+        assert client.get(publication_path).json()['theses']['result'] == accepted
         blocked[0] = True
         fail[0] = False
         clock.now += 61
         try:
-            running = wait_for(client, lambda: (s if (s := client.get(path).json()['theses'])['attempt']['state'] == 'running' else None))
+            running = wait_for(client, lambda: (s if (s := client.get(publication_path).json()['theses'])['state'] == 'processing' else None))
             assert running['result'] == accepted
         finally:
             blocked[0] = False
         blocked[0] = True
         try:
             client.patch('/api/v3/settings/oko/global', json={'prompt_theses':'Different input'})
-            assert client.get(path).json()['theses']['result'] is None
+            assert client.get(publication_path).json()['theses']['result'] is None
         finally:
             blocked[0] = False
 
@@ -234,5 +237,6 @@ def test_public_codex_denial_has_domain_waiting_reason(tmp_path):
     with TestClient(create_app(tmp_path, token='test', api_only=True, source=DemoSource()), headers=HEADERS) as client:
         item = setup_reader(client, theses=False)
         client.patch('/api/v3/settings/oko/global', json={'theses':True,'processor':'codex'})
-        state = wait_for(client, lambda: (s if (s := client.get('/api/v3/materials/' + item).json()['theses'])['attempt']['state'] == 'waiting' else None))
-        assert state['attempt']['reason'] == 'public_ai_not_allowed'
+        wait_for(client, lambda: any(w.get('reason') == 'public_ai_not_allowed' for w in client.get('/api/v3/status/details').json()['work']))
+        wait_for(client, lambda: 'Запрещена публичная' in (client.get('/api/v3/publication/' + item).json()['theses']['error'] or ''))
+        assert client.get('/api/v3/publication/' + item).json()['theses']['result'] is None

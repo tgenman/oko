@@ -55,6 +55,9 @@ def test_status_survives_stop_and_legacy_check_is_absent(tmp_path):
     with TestClient(app,headers=HEADERS) as client:
         identity=client.get('/api/v3/status').headers['X-Oko-Storage-Id']
         assert client.post('/api/v3/reading/check',json={'storage_id':None,'resources':[]}).status_code==404
+        item=client.get('/api/v3/cards').json()['items'][0]['id']
+        assert client.get('/api/v3/publication/'+item).status_code==200
+        assert client.get('/api/v3/materials/'+item).status_code==404
         assert client.post('/api/v3/stop').status_code==200
         for _ in range(100):
             if app.state.host.execution._store is None:break

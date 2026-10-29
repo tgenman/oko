@@ -32,17 +32,17 @@ def test_library_copies_remain_independent_through_http(tmp_path, kind):
         assert len(cards) == 104
         assert cards == read_all_cards(b, '/api/v3/cards')
         item = cards[0]['id']
-        content = b.get('/api/v3/materials/' + item).json()['content']
+        content = b.get('/api/v3/publication/' + item).json()
         assert a.post('/api/v3/materials/' + item + '/viewed').status_code == 200
         assert a.patch('/api/v3/settings/oko/global', json={'prompt_theses': 'first only'}).status_code == 200
         assert len(read_all_cards(a, '/api/v3/cards')) == 103
         assert len(read_all_cards(b, '/api/v3/cards')) == 104
-        assert b.get('/api/v3/materials/' + item).json()['content'] == content
+        assert b.get('/api/v3/publication/' + item).json() == content
         assert b.get('/api/v3/settings/oko/global').json()['effective']['prompt_theses']['value'] != 'first only'
     prepare(third)
     with TestClient(create_app(third, api_only=True, token='test'), headers=HEADERS) as c:
         assert len(read_all_cards(c, '/api/v3/cards')) == 104
-        assert c.get('/api/v3/materials/' + item).json()['content'] == content
+        assert c.get('/api/v3/publication/' + item).json() == content
 
 
 def test_failed_template_build_is_not_reused_and_cleanup_removes_sources(tmp_path):
