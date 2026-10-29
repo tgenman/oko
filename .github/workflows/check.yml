@@ -67,6 +67,7 @@ jobs:
           name: check-reports-build
           path: .scratch/check-runs/
           if-no-files-found: ignore
+          overwrite: true
   tests:
     name: ${{ matrix.job }} checks
     needs: build
@@ -163,6 +164,7 @@ jobs:
           name: check-reports-${{ matrix.job }}
           path: .scratch/check-runs/
           if-no-files-found: ignore
+          overwrite: true
   postgres:
     name: PostgreSQL integration
     needs: build
@@ -218,6 +220,7 @@ jobs:
             .scratch/check-runs/
             .scratch/postgres-browser-artifacts/
           if-no-files-found: error
+          overwrite: true
   check:
     name: Full checks
     if: always()
