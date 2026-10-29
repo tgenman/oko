@@ -66,7 +66,7 @@ test('finite history warning and unknown date are visible in settings and materi
         initial_history: window.readerFixtures.history({mode: 'count', count: 100, count_text: '100', loaded: 15, state: 'done', frozen: true, scan_complete: true, available: 15, paused: false, warnings: ['Порядок RSS неоднозначен: точность выбора последних N не подтверждена']})};
       t.replies.set('/api/v3/subscriptions', {body: {folders: [{id: 'f', title: 'Учёба'}], feeds: [feed]}});
       t.replies.set('/api/v3/settings/feed/rss', {body: {...t.replies.get('/api/v3/settings/oko/global')!.body, feed}});
-      t.replies.set('/api/v3/materials/unknown', {body: {...card, originals: true, images: [], attachments: []}});
+      t.replies.set('/fixture/material/unknown', {body: {...card, originals: true, images: [], attachments: []}});
     }, card);
     await expect(r.page.locator('#cards')).toContainText('Unknown date');
     await r.page.locator('#cards button').first().click();

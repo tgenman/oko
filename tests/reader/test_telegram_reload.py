@@ -35,11 +35,11 @@ def test_full_account_copy_is_not_polled_but_can_be_explicitly_reloaded(tmp_path
         assert client.post('/api/v3/collect', json={'scope':'feed','feed_id':feed['id']}).status_code == 200
         wait_for(client, lambda: client.get('/api/v3/collection-status/'+feed['id']).json()['source']['state'] == 'complete')
         assert telegram.fetches == 0
-        assert client.get('/api/v3/materials/'+item).json()['content']['text'] == 'Original'
+        assert client.get('/api/v3/publication/'+item).json()['text'] == 'Original'
         assert client.post('/api/v3/materials/'+item+'/retry').status_code == 200
         settled(client)
         assert telegram.fetches == 1
-        assert client.get('/api/v3/materials/'+item).json()['content']['text'] == 'Edited'
+        assert client.get('/api/v3/publication/'+item).json()['text'] == 'Edited'
 
 
 
@@ -61,7 +61,7 @@ def test_web_full_copy_is_not_polled_and_terminal_reload_keeps_old_media(tmp_pat
         configure_fast_web(client)
         feed = client.post('/api/v3/telegram/connect', json={'source_locator':'@fixture','folder':'Inbox'}).json()['feed_id']
         item = settled(client)[0]['id']
-        old = client.get('/api/v3/materials/'+item).json()['content']
+        old = client.get('/api/v3/publication/'+item).json()
         assert downloads == ['Original']
         state[0] = 'Edited'
         client.post('/api/v3/collect', json={'scope':'feed','feed_id':feed})
@@ -76,10 +76,10 @@ def test_web_full_copy_is_not_polled_and_terminal_reload_keeps_old_media(tmp_pat
         while not client.get('/api/v3/status/details').json()['problems']['current'] and time.monotonic()<deadline:
             time.sleep(.02)
         assert client.get('/api/v3/status/details').json()['problems']['current']
-        kept = client.get('/api/v3/materials/'+item).json()['content']
+        kept = client.get('/api/v3/publication/'+item).json()
         assert kept['text'] == 'Edited'
         assert kept['revision_id'] != old['revision_id']
-        assert client.get(kept['attachments'][0]['url']).content == b'old-image'
+        assert client.get([a for a in kept['media'] if a['role']=='attachment'][0]['url']).content == b'old-image'
         client.post('/api/v3/collect', json={'scope':'feed','feed_id':feed})
         wait_for(client, lambda: not any(op['kind']=='discover' for op in client.get('/api/v3/collection-status/'+feed).json()['operations']))
         assert downloads == ['Original','Edited']

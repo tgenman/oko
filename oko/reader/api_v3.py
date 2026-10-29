@@ -64,7 +64,7 @@ def register(app: FastAPI, runtime: ReaderApplication, lifetime: Lifetime, wall_
     collection_v3.register(app, runtime)
     telegram_v3.register(app, runtime)
     connections_v3.register(app, runtime)
-    material_reader = reading_v3.register(app, runtime)
+    reading_v3.register(app, runtime)
     settings_v3.register(app, runtime)
     commands_v3.register(app, runtime)
     processors_v3.register(app, runtime)
@@ -181,7 +181,7 @@ def register(app: FastAPI, runtime: ReaderApplication, lifetime: Lifetime, wall_
             viewed_ids=[wire.MaterialId(value) for value in old.viewed_ids] if isinstance(old.viewed_ids, list) else [])
 
     from oko.reader import publication_v3
-    publication_v3.register(app,runtime,material_reader)
+    publication_v3.register(app,runtime)
     def metadata() -> dict[str, object]:
         return dict(
         enabled=runtime.enabled,stopped=runtime.stopped,work_allowed=runtime._live(),

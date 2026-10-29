@@ -43,7 +43,7 @@ class YouTubeTranscriptApi:
         # can cancel the job started by the v3 connection and defer its retry.
         presence(client, 'reader')
         material = wait(client, lambda m: m['source'].get('captions') == 'available')
-        assert material['content']['text'] == 'Текст через настоящий worker.'
+        assert material['text'] == 'Текст через настоящий worker.'
         client.post('/api/v3/materials/' + material['id'] + '/viewed')
         assert read_all_cards(client, '/api/v3/cards') == []
 
@@ -65,7 +65,7 @@ def wait(client, predicate, *, keep_alive=False):
             assert presence(client, 'reader').status_code==200
         cards = read_all_cards(client, '/api/v3/cards')
         if len(cards) == 1:
-            material = client.get('/api/v3/materials/' + cards[0]['id']).json()
+            material = client.get('/api/v3/publication/' + cards[0]['id']).json()
             if predicate(material):
                 return material
         time.sleep(.02)
@@ -88,15 +88,15 @@ def test_saved_captions_are_never_requested_again(tmp_path):
         feed = subscribe(client)
         client.patch('/api/v3/feeds/' + feed, json={'importance': 'high'})
         presence(client, 'reader')
-        material = wait(client, lambda m: m['source'].get('captions') == 'available' and not m['content']['loading'])
-        item, text = material['id'], material['content']['text']
+        material = wait(client, lambda m: m['source'].get('captions') == 'available' and not m['loading'])
+        item, text = material['id'], material['text']
         assert captions.calls == [VIDEO]
         # Both manual material reload and feed collection must use saved text.
         for endpoint in ('/api/v3/materials/' + item + '/retry', '/api/v3/collect'):
             before = len(downloads)
             assert client.post(endpoint).status_code == 200
-            material = wait(client, lambda m: len(downloads) > before and not m['content']['loading'])
-            assert material['source']['captions'] == 'available' and material['content']['text'] == text
+            material = wait(client, lambda m: len(downloads) > before and not m['loading'])
+            assert material['source']['captions'] == 'available' and material['text'] == text
             assert captions.calls == [VIDEO]
         client.patch('/api/v3/settings/feed/' + feed, json={'theses': False})
         client.patch('/api/v3/settings/feed/' + feed, json={'theses': True})
@@ -105,8 +105,8 @@ def test_saved_captions_are_never_requested_again(tmp_path):
         presence(client, 'reader')
         before = len(downloads)
         assert client.post('/api/v3/materials/' + item + '/retry').status_code == 200
-        material = wait(client, lambda m: len(downloads) > before and not m['content']['loading'])
-        assert material['source']['captions'] == 'available' and material['content']['text'] == text
+        material = wait(client, lambda m: len(downloads) > before and not m['loading'])
+        assert material['source']['captions'] == 'available' and material['text'] == text
         assert captions.calls == [VIDEO]
 
 
@@ -131,16 +131,16 @@ def test_normal_feed_waits_for_mode_and_missing_captions_never_reach_ai(tmp_path
         assert not captions.calls and not ai
         client.patch('/api/v3/settings/feed/' + feed, json={'theses': True, 'processor': 'llamacpp'})
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
-        material = wait(client, lambda m: m['source'].get('captions') == 'unavailable' and m['theses']['attempt']['state']=='ready')
-        assert material['content']['completeness'].get('message','') == 'Субтитры недоступны' and material['content']['text'] == ''
+        material = wait(client, lambda m: m['source'].get('captions') == 'unavailable' and m['theses']['state']=='ready')
+        assert material['completeness'].get('message','') == 'Субтитры недоступны' and material['text'] == ''
         assert material['theses']['result']['points']==[] and not ai
         captions.outcome = 'error'
         # Advance both admission clocks; never wait for real rate-limit time.
         wall[0] += 10
         tick[0] += 10
         client.post('/api/v3/materials/' + material['id'] + '/retry')
-        material = wait(client, lambda m: m['source'].get('captions') == 'error' and not m['content']['loading'])
-        assert 'Ограничение' in material['content']['completeness'].get('message','') and not ai
+        material = wait(client, lambda m: m['source'].get('captions') == 'error' and not m['loading'])
+        assert 'Ограничение' in material['completeness'].get('message','') and not ai
         captions.outcome = 'ok'
         # Advance both admission clocks; never wait for real rate-limit time.
         wall[0] += 10
@@ -149,7 +149,7 @@ def test_normal_feed_waits_for_mode_and_missing_captions_never_reach_ai(tmp_path
         wait(client,lambda m:m['source'].get('captions')=='available')
         tick[0]+=1
         material = wait(client, lambda m: m['theses']['result'])
-        assert material['content']['text'] == 'Проверенные субтитры.'
+        assert material['text'] == 'Проверенные субтитры.'
 
 
 def test_high_imported_youtube_gets_captions_theses_and_deletes_everything(tmp_path):
@@ -163,13 +163,13 @@ def test_high_imported_youtube_gets_captions_theses_and_deletes_everything(tmp_p
         client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'prompt_theses': 'Сохрани границы.'})
         presence(client, 'reader')
         material = wait(client, lambda m: m['theses']['result'])
-        assert material['content']['text'] == 'Модель принимает только текст. Источники сохраняются точно.'
+        assert material['text'] == 'Модель принимает только текст. Источники сохраняются точно.'
         assert material['source_url'] == f'https://www.youtube.com/watch?v={VIDEO}'
         assert captions.calls == [VIDEO]
 
         chat = next(r for r in ai if r.url.path == '/v1/chat/completions')
         assert 'Сохрани границы.' in json.loads(chat.content)['messages'][0]['content']
-        image = next(media['url'] for media in material['content']['attachments'] if media['kind']=='image')
+        image = next(media['url'] for media in [media for media in material['media'] if media['role'] == 'attachment'] if media['kind']=='image')
         assert client.get(image).content == PNG
         assert client.post('/api/v3/materials/' + material['id'] + '/viewed').status_code == 200
         assert client.get(image).status_code == 404
@@ -177,7 +177,7 @@ def test_high_imported_youtube_gets_captions_theses_and_deletes_everything(tmp_p
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
         presence(client, 'reader')
         time.sleep(.2)
-        assert client.get('/api/v3/materials/'+material['id']).status_code==404
+        assert client.get('/api/v3/publication/'+material['id']).status_code==404
         assert client.get(image).status_code==404
         # A repeated Atom window can create a new Publication; the old one stays removed.
 
@@ -193,8 +193,8 @@ def test_codex_permission_and_ready_captions_survive_restart(tmp_path):
         client.patch('/api/v3/feeds/'+feed,json={'public_ai':False,'importance':'high'})
         client.patch('/api/v3/settings/oko/global',json={'theses':True})
         presence(client, 'reader')
-        material = wait(client, lambda m: m['theses']['diagnostic_message'])
-        assert 'Запрещена публичная' in material['theses']['diagnostic_message']
+        material = wait(client, lambda m: m['theses']['error'])
+        assert 'Запрещена публичная' in material['theses']['error']
         assert not codex.inputs
         client.patch('/api/v3/feeds/' + feed, json={'public_ai': True})
         material = wait(client, lambda m: m['theses']['result'])
@@ -248,8 +248,8 @@ def test_late_captions_cannot_publish_after_reader_action(tmp_path, action):
             subscribe(client)
             assert captions.started.wait(3)
             item = read_all_cards(client, '/api/v3/cards')[0]['id']
-            material = wait_for(client, lambda: value if (value := client.get('/api/v3/materials/' + item).json())['content']['attachments'] else None)
-            assert client.get(material['content']['attachments'][0]['url']).content == PNG
+            material = wait_for(client, lambda: value if (value := client.get('/api/v3/publication/' + item).json()) and any(media['role'] == 'attachment' for media in value['media']) else None)
+            assert client.get([media for media in material['media'] if media['role'] == 'attachment'][0]['url']).content == PNG
             before_files = media_files()
             assert PNG in before_files.values()
             with psycopg.connect(database_url(tmp_path), autocommit=True) as db:
@@ -290,11 +290,11 @@ def test_late_captions_cannot_publish_after_reader_action(tmp_path, action):
         assert files == ({} if action == 'viewed' else before_files)
         if action == 'viewed':
             assert read_all_cards(client, '/api/v3/cards') == []
-            assert client.get('/api/v3/materials/' + item).status_code == 404
+            assert client.get('/api/v3/publication/' + item).status_code == 404
         elif action == 'stop':
             assert client.get('/api/v3/status').json()['runtime_state'] == 'stopped'
         else:
-            assert late_text not in client.get('/api/v3/materials/' + item).text
+            assert late_text not in client.get('/api/v3/publication/' + item).text
 
 
 def test_owned_caption_worker_preserves_original_exception_in_debug(tmp_path, monkeypatch):
@@ -314,7 +314,7 @@ class YouTubeTranscriptApi:
         presence(client, 'reader')
         feed = subscribe(client)
         presence(client, 'reader')
-        wait(client, lambda m: m['source'].get('captions') == 'error' and not m['content']['loading'], keep_alive=True)
+        wait(client, lambda m: m['source'].get('captions') == 'error' and not m['loading'], keep_alive=True)
         groups = client.get('/api/v3/diagnostics').json()['groups']
         matching = [g for g in groups if 'SDK failed' in g['message']]
         assert len(matching) == 1 and matching[0]['count'] == 1
@@ -375,7 +375,7 @@ class YouTubeTranscriptApi:
         presence(client, 'reader')
         subscribe(client)
         if not skipped:
-            wait(client, lambda m: m['source'].get('captions') == 'error' and not m['content']['loading'],keep_alive=True)
+            wait(client, lambda m: m['source'].get('captions') == 'error' and not m['loading'],keep_alive=True)
             assert any(g['error_type'] == 'VideoUnplayable' for g in client.get('/api/v3/diagnostics').json()['groups'])
             return
         for _ in range(200):

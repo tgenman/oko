@@ -111,10 +111,10 @@ def test_same_url_in_two_feeds_remains_in_each_folder_after_viewing_one(tmp_path
             presence(client, 'test')
             for _ in range(100):
                 cards = read_all_cards(client, '/api/v3/cards?folder=' + feed['folder_id'])
-                if len(cards) == 1 and (client.get('/api/v3/materials/'+cards[0]['id']).json()['availability'] == 'available'):
+                if len(cards) == 1 and (client.get('/api/v3/publication/'+cards[0]['id']).json()['availability'] == 'available'):
                     break
                 time.sleep(.02)
-            assert len(cards) == 1 and (client.get('/api/v3/materials/'+cards[0]['id']).json()['availability'] == 'available')
+            assert len(cards) == 1 and (client.get('/api/v3/publication/'+cards[0]['id']).json()['availability'] == 'available')
     with TestClient(create_app(tmp_path, token='test-token'), headers=HEADERS) as client:
         cards = read_all_cards(client, '/api/v3/cards')
         assert len(cards) == 1

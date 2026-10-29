@@ -175,8 +175,9 @@ test('feed inherited fields show their owner and resetting only one override pre
     await editSetting(r.page, 'prompt_filters');
     await r.page.locator('#setting-prompt_filters').fill('Несохранённый фильтр');
     await r.page.evaluate(() => {
-      const result=readerTransport.replies.get('/api/v3/settings/feed/one')!.body;
+      const result=structuredClone(readerTransport.replies.get('/api/v3/settings/feed/one')!.body);
       result!.effective.prompt_theses={value:'Промпт папки',scope:'folder',owner:'f'};result!.overrides={};
+      readerTransport.replies.set('PATCH /api/v3/settings/feed/one',{body:{},next:[['/api/v3/settings/feed/one',{body:result}]]});
     });
     await editSetting(r.page, 'prompt_theses');
     await theses.getByRole('button',{name:'Reset',exact:true}).click();

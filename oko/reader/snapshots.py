@@ -357,39 +357,6 @@ class Summary(WireModel):
     model_config = ConfigDict(extra='forbid')
     points: list[Point] = Field(..., title='Points')
 
-class Card(WireModel):
-    external_attachments: list[ExternalAttachment] = Field(default_factory=list)
-    external_only: bool = False
-    post_web_unavailable: bool = False
-    model_config = ConfigDict(extra='forbid')
-    ai: AI | None | MISSING = MISSING
-    attachments: list[Attachment] | MISSING = Field(default=MISSING, title='Attachments')
-    captions: Literal['available', 'not_requested', 'unavailable', 'error'] | None | MISSING = Field(default=MISSING, title='Captions')
-    changed: StrictBool | MISSING = Field(default=MISSING, title='Changed')
-    complete: StrictBool = Field(..., title='Complete')
-    feed_id: StrictStr = Field(..., title='Feed Id')
-    feed_title: StrictStr = Field(..., title='Feed Title')
-    filter: Filter | MISSING = MISSING
-    folder_id: StrictStr = Field(..., title='Folder Id')
-    full: StrictBool | MISSING = Field(default=MISSING, title='Full')
-    id: StrictStr = Field(..., title='Id')
-    images: list[StrictStr] | MISSING = Field(default=MISSING, title='Images')
-    importance: Literal['normal', 'elevated', 'high'] = Field(..., title='Importance')
-    loading: StrictBool | MISSING = Field(default=MISSING, title='Loading')
-    members: list[StrictInt] | MISSING = Field(default=MISSING, title='Members')
-    originals: StrictBool | MISSING = Field(default=MISSING, title='Originals')
-    provenance: UnknownProvenance | CodexProvenance | LocalProvenance | None | MISSING = Field(default=MISSING, title='Provenance')
-    published: StrictFloat = Field(..., title='Published')
-    published_known: StrictBool = Field(..., title='Published Known')
-    reason: StrictStr | MISSING = Field(default=MISSING, title='Reason')
-    snippet: StrictStr = Field(..., title='Snippet')
-    source_deleted: StrictBool | MISSING = Field(default=MISSING, title='Source Deleted')
-    source_order: StrictInt | None | MISSING = Field(default=MISSING, title='Source Order')
-    theses: Summary | None | MISSING = MISSING
-    title: StrictStr = Field(..., title='Title')
-    url: StrictStr = Field(..., title='Url')
-    version: StrictStr | MISSING = Field(default=MISSING, title='Version')
-
 class EffectiveSettings(WireModel):
     model_config = ConfigDict(extra='forbid')
     effective: EffectiveValues

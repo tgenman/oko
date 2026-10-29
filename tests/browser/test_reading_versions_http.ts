@@ -75,6 +75,6 @@ test('viewed in another tab deletes server content while the loaded tab retains 
   const text=await page.locator('#text').textContent(),image=await page.locator('#images img').getAttribute('src');
   const other=await context.newPage();await other.goto(origin+'/#token='+token);await expect(other.locator('#cards button')).toHaveCount(1);await other.locator('#cards button').click();await expect(other.locator('#text')).toHaveText(text!);await other.locator('#viewed').click();
   await expect(page.locator('#cards button')).toHaveCount(0);await expect(page.locator('#material-retained')).toBeVisible();await expect(page.locator('#text')).toHaveText(text!);await expect(page.locator('#images img')).toHaveAttribute('src',image!);await expect(page.locator('#viewed')).toBeDisabled();
-  const response=await page.request.get(origin+'/api/v3/materials/'+id,{headers:{Authorization:'Bearer '+token}});assert.equal(response.status(),404);
+  const response=await page.request.get(origin+'/api/v3/publication/'+id,{headers:{Authorization:'Bearer '+token}});assert.equal(response.status(),404);
   await page.reload();await expect(page.locator('#cards button')).toHaveCount(0);await expect(page.locator('#material')).toBeHidden();
 });

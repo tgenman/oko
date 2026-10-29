@@ -124,4 +124,4 @@ def test_youtube_archive_controls_survive_restart_and_allow_explicit_replay(tmp_
         assert len(read_all_cards(client, '/api/v3/cards'))==2
     with reader() as client:
         assert client.get('/api/v3/subscriptions').json()['feeds'][0]['history']['selection']=={'mode':'count','count':'2'}
-        assert client.get('/api/v3/materials/'+viewed).status_code==404
+        assert client.get('/api/v3/publication/'+viewed).status_code==404

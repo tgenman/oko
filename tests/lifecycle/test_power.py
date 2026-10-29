@@ -22,10 +22,10 @@ def test_disabled_oko_keeps_reading_and_local_actions_and_survives_restart(tmp_p
         assert state['work_allowed'] is False
         assert exits == []
         assert read_all_cards(client, '/api/v3/cards') == cards
-        assert client.get('/api/v3/materials/' + item).status_code == 200
+        assert client.get('/api/v3/publication/' + item).status_code == 200
         assert client.patch('/api/v3/settings/oko/global', json={'prompt_filters': 'later'}).status_code == 200
         assert client.post('/api/v3/materials/' + item + '/viewed').status_code == 200
-        assert client.get('/api/v3/materials/' + item).status_code == 404
+        assert client.get('/api/v3/publication/' + item).status_code == 404
         assert len(read_all_cards(client, '/api/v3/cards')) == 2
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         assert client.get('/api/v3/status').json()['runtime_state'] == 'disabled'
@@ -108,8 +108,8 @@ def test_power_rejects_late_download_and_resumes_interrupted_material(tmp_path):
         time.sleep(.08)
         cards = read_all_cards(client, '/api/v3/cards')
         assert source.attempts == 1
-        assert all(client.get('/api/v3/materials/' + card['id']).json()['availability'] != 'available' for card in cards)
-        assert 'Must never be accepted' not in client.get('/api/v3/materials/' + cards[0]['id']).text
+        assert all(client.get('/api/v3/publication/' + card['id']).json()['availability'] != 'available' for card in cards)
+        assert 'Must never be accepted' not in client.get('/api/v3/publication/' + cards[0]['id']).text
         assert client.put('/api/v3/power', json={'enabled': True}).status_code == 200
         client.post('/api/v3/collect')  # Explicit retry advances the interrupted fetch deadline.
         # Card and publication are separate HTTP snapshots: the fetch may finish

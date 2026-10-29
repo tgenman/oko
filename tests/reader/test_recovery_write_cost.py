@@ -31,11 +31,11 @@ def source_library(root, database_url, *, processing=False):
         feed = add_source(client, 'https://source.test/feed', 'Imported feed', 'Imported folder')
         assert client.put('/api/v3/power', json={'enabled': True}).status_code == 200
         item = wait_cards(client)[0]['id']
-        material = wait_for(client, lambda: (value if (value := client.get('/api/v3/materials/'+item).json())['content']['attachments'] else None))
-        media_url = material['content']['attachments'][0]['url']
+        material = wait_for(client, lambda: (value if (value := client.get('/api/v3/publication/'+item).json()) and any(media['role'] == 'attachment' for media in value['media']) else None))
+        media_url = [media for media in material['media'] if media['role'] == 'attachment'][0]['url']
         assert client.get(media_url).content == PNG
         if processing:
-            material = wait_for(client, lambda: (value if (value := client.get('/api/v3/materials/'+item).json())['theses']['result'] else None))
+            material = wait_for(client, lambda: (value if (value := client.get('/api/v3/publication/'+item).json())['theses']['result'] else None))
         assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
     return feed, item, media_url, material
 
@@ -63,7 +63,7 @@ def test_restart_does_not_rewrite_identical_materials(postgres_url, tmp_path):
     with TestClient(create_app(target, token='test', api_only=True, database_url=postgres_url,
                     rss_enabled=True, rss_transport=httpx.MockTransport(response)), headers=HEADERS) as client:
         assert client.get('/api/v3/status').status_code == 200
-        restored = client.get('/api/v3/materials/'+item)
+        restored = client.get('/api/v3/publication/'+item)
         assert restored.status_code == 200
         assert restored.json()['theses']['result'] == original['theses']['result']
         assert client.get(media).content == PNG

@@ -57,16 +57,15 @@ def test_open_read_budget_and_parity(tmp_path,count,processed):
     _,items=prepared(tmp_path,count,processed)
     app=traced_app(tmp_path)
     with TestClient(app,headers=HEADERS) as client,ReadingMeasurements(client,app,tmp_path) as measure:
-        legacy=client.get('/api/v3/materials/'+items[0]).json()
         reply,cost=measure.request('open','GET','/api/v3/publication/'+items[0])
         statements=list(app.state.last_sql)
         files=dict(measure.files)
         publication=reply.json()
-        assert_publication_parity(publication,legacy)
+        assert publication['id']==items[0]
         if processed:
-            assert legacy['theses']['result']['points']
-            assert legacy['filter']['result']['removed']==['Advertisement']
-            assert any(media['kind']=='image' for media in legacy['content']['attachments']) and 'previous_versions' not in legacy['content']
+            assert publication['theses']['result']['points']
+            assert publication['filter']['result']['removed']==['Advertisement']
+            assert any(media['kind']=='image' for media in [media for media in publication['media'] if media['role'] == 'attachment']) and 'previous_versions' not in publication
         cost.update(selects=sum(q.lstrip().upper().startswith(('SELECT','WITH')) for q in statements),
                     writes=sum(q.lstrip().upper().startswith(('INSERT','UPDATE','DELETE','REPLACE')) for q in statements),
                     max_file_reads=max(files.values(),default=0))
@@ -77,7 +76,7 @@ def test_open_read_budget_and_parity(tmp_path,count,processed):
         assert cost['selects']<=8,statements
         assert cost['max_file_reads']<=1,files
         if processed:
-            attachment=legacy['content']['attachments'][0]
+            attachment=[media for media in publication['media'] if media['role'] == 'attachment'][0]
             media,media_cost=measure.request('media','GET',attachment['url'])
             assert media.content==b'fixture'
             assert media_cost['content_opens']==1
@@ -103,33 +102,16 @@ def source_library(root, kind, complete):
     return items[0]
 
 
-def assert_publication_parity(actual, legacy):
-    for key in ('id','title','feed_id','published_at','source_url','source','source_position','originals','availability'):
-        assert actual[key]==legacy[key],key
-    content=legacy['content']
-    for key in ('text','description','revision_id','completeness','loading','changed','source_deleted','linked_content','reply_preview','post_web_unavailable','external_attachments'):
-        if key in content:assert actual[key]==content[key],key
-    assert [m['url'] for m in actual['media']]==content.get('images',[])+[a['url'] for a in content.get('attachments',[])]
-    filtered=legacy['filter']['result']
-    if filtered:
-        assert actual['filter']['result']==dict(filtered,text=content.get('display_text',content.get('text','')))
-    else:assert actual['filter']['result'] is None
-    theses=legacy['theses']['result']
-    if theses:
-        assert actual['theses']['result']==dict(points=[p['text'] for p in theses['points']],references=[p['references'] for p in theses['points']],provenance=theses['provenance'])
-    else:assert actual['theses']['result'] is None
-
 
 @pytest.mark.parametrize('kind',['demo','rss','youtube','telegram-web','telegram-client'])
 @pytest.mark.parametrize('complete',[False,True])
 def test_publication_http_parity_for_source_kinds(tmp_path,kind,complete):
     item=source_library(tmp_path,kind,complete)
     with TestClient(traced_app(tmp_path),headers=HEADERS) as client:
-        legacy=client.get('/api/v3/materials/'+item).json()
         response=client.get('/api/v3/publication/'+item)
         assert response.status_code==200,response.text
         actual=response.json()
-        assert_publication_parity(actual,legacy)
+        assert actual['id']==item
         assert actual['source']['kind']==('telegram' if kind.startswith('telegram') else kind)
         assert actual['availability']==('available' if complete else 'pending')
         unchanged=client.get('/api/v3/publication/'+item,headers={'If-None-Match':response.headers['ETag']})

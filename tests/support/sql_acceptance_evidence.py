@@ -72,7 +72,7 @@ def background_evidence():
       root=Path(d);_,items=library(root,[5]*count);app=traced_app(root)
       with TestClient(app,headers=HEADERS) as c:
        tracing(c,app)
-       old=c.get('/api/v3/materials/'+items[0]);new=c.get('/api/v3/publication/'+items[0])
+       old=c.get('/api/v3/publication/'+items[0]);new=c.get('/api/v3/publication/'+items[0])
        output['feeds'].append(dict(feeds=count,old_get_sql=int(old.headers['X-Test-SQL']),publication_get_sql=int(new.headers['X-Test-SQL'])))
     for count in [5,20,50]:
      with TemporaryDirectory() as d:

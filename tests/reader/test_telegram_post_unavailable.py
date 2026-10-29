@@ -30,27 +30,27 @@ def test_whole_post_restriction_is_saved_separately_without_errors_or_ai(tmp_pat
         assert result.status_code == 200, result.text
         cards = settled(client)
         url = '/api/v3/materials/'+cards[0]['id']
-        material = client.get(url).json()
+        material = client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()
         assert client.get('/api/v3/status/details').json()['problems']['count'] == 0
-        assert material['content']['post_web_unavailable'] is True
-        assert material['content']['completeness']['reason'] == 'post_web_unavailable'
-        assert material['content']['text'] == ''
-        assert material['content']['external_attachments'] == []
-        assert material['content']['attachments'] == []
+        assert material['post_web_unavailable'] is True
+        assert material['completeness']['reason'] == 'post_web_unavailable'
+        assert material['text'] == ''
+        assert material['external_attachments'] == []
+        assert [media for media in material['media'] if media['role'] == 'attachment'] == []
         frame = client.get('/api/v3/publication/'+cards[0]['id']).json()
         assert frame['post_web_unavailable'] is True
         assert cards[0]['post_web_unavailable'] is True
         assert cards[0]['title'] == 'Пост доступен только в Telegram'
-        assert material['filter']['attempt']['state'] == 'disabled'
-        assert material['theses']['attempt']['state'] == 'disabled'
+        assert material['filter']['state'] == 'disabled'
+        assert material['theses']['state'] == 'disabled'
         assert codex.inputs == []
         baseline = len(fetches)
         client.post('/api/v3/collect'); settled(client)
         assert len(fetches) == baseline
     with TestClient(create_app(tmp_path, **options), headers=headers) as client:
         configure_fast_web(client)
-        material = client.get(url).json()
-        assert material['content']['post_web_unavailable'] is True
+        material = client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()
+        assert material['post_web_unavailable'] is True
         assert client.get('/api/v3/status/details').json()['problems']['count'] == 0
 
 
@@ -72,7 +72,7 @@ def test_whole_post_marker_does_not_override_other_cases(tmp_path, text, media, 
     with TestClient(create_app(tmp_path, token='test', api_only=True, rss_transport=httpx.MockTransport(response)), headers={'Authorization':'Bearer test'}) as client:
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
-        content = client.get('/api/v3/materials/'+settled(client)[0]['id']).json()['content']
+        content = client.get('/api/v3/publication/'+settled(client)[0]['id']).json()
         assert content['post_web_unavailable'] is False
         assert content['completeness']['reason'] == expected
         if media:
@@ -89,10 +89,10 @@ def test_previous_local_text_is_kept_when_whole_post_becomes_restricted(tmp_path
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
         url = '/api/v3/materials/'+settled(client)[0]['id']
-        assert client.get(url).json()['content']['text'] == 'Saved own text'
+        assert client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['text'] == 'Saved own text'
         restricted[0] = True
         client.post(url+'/retry'); settled(client)
-        content = client.get(url).json()['content']
+        content = client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()
         assert content['text'] == 'Saved own text'
         assert content['post_web_unavailable'] is True
         assert content['changed'] is False
@@ -110,7 +110,7 @@ def test_later_content_is_collected_and_previous_version_keeps_post_restriction(
         text[0] = 'Now provided by Telegram'
         client.post('/api/v3/collect')
         for _ in range(150):
-            content = client.get(url).json()['content']
+            content = client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()
             if content['text'] == text[0] and not content['loading']: break
             time.sleep(.02)
         assert content['text'] == text[0]
@@ -127,12 +127,12 @@ def test_unknown_unsupported_post_is_reclassified_only_after_source_confirmation
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
         url = '/api/v3/materials/'+settled(client)[0]['id']
-        assert client.get(url).json()['content']['post_web_unavailable'] is False
+        assert client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['post_web_unavailable'] is False
         assert client.get('/api/v3/status/details').json()['problems']['count'] > 0
         confirmed[0] = True
         client.post(url+'/retry'); settled(client)
-        assert client.get(url).json()['content']['post_web_unavailable'] is True
-        assert client.get(url).json()['content']['changed'] is False
+        assert client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['post_web_unavailable'] is True
+        assert client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['changed'] is False
         assert client.get('/api/v3/status/details').json()['problems']['count'] == 0
 
 
@@ -148,17 +148,17 @@ def test_whole_post_restriction_keeps_local_video_but_does_not_hide_lost_file(tm
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         url='/api/v3/materials/'+settled(client)[0]['id']
-        video=client.get(url).json()['content']['attachments'][0]
+        video=[media for media in client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['media'] if media['role'] == 'attachment'][0]
         if lost:
             for path in tmp_path.rglob(video['url'].rsplit('/',1)[-1]):path.unlink()
         restricted[0]=True
         client.post(url+'/retry');settled(client)
-        content=client.get(url).json()['content']
+        content=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()
         if lost:
             assert client.get('/api/v3/status/details').json()['problems']['count']>0
         else:
             assert content['post_web_unavailable'] is True
-            assert client.get(content['attachments'][0]['url']).content==b'saved-video'
+            assert client.get([media for media in content['media'] if media['role']=='attachment'][0]['url']).content==b'saved-video'
             assert content['changed'] is False
             assert client.get('/api/v3/status/details').json()['problems']['count']==0
 
@@ -179,5 +179,5 @@ def test_restricted_post_does_not_hide_neighbour_failure_or_block_explicit_viewe
         assert post['id'] not in affected
         assert broken['id'] in affected
         assert client.post('/api/v3/materials/'+post['id']+'/viewed').status_code==200
-        assert client.get('/api/v3/materials/'+post['id']).status_code==404
-        assert client.get('/api/v3/materials/'+broken['id']).status_code==200
+        assert client.get('/api/v3/publication/'+post['id']).status_code==404
+        assert client.get('/api/v3/publication/'+broken['id']).status_code==200

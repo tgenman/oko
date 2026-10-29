@@ -161,5 +161,5 @@ def test_missing_rss_attachment_records_failure_without_removing_publication(tmp
         assert error['requests'][0]['http_status'] == 404
         cards = read_all_cards(client, '/api/v3/cards')
         assert len(cards) == 1
-        material = client.get('/api/v3/materials/'+cards[0]['id']).json()
-        assert material['content']['text'].endswith('Сохранённый текст')
+        material = client.get('/api/v3/publication/'+cards[0]['id']).json()
+        assert material['text'].endswith('Сохранённый текст')

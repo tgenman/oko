@@ -130,7 +130,7 @@ async function reader() {
         if(new URL(key,'http://localhost').pathname==='/api/v3/cards'&&(options?.method||'GET')==='GET'){
           const query=new URL(key,'http://localhost').searchParams,p=new URLSearchParams({sort:query.get('sort')||'newest'});
           for(const name of ['folder','feed','show_hidden'])if(query.has(name)&&(name!=='show_hidden'||query.get(name)==='true'))p.set(name,query.get(name)!);
-          const rows=await fixtureRead('/api/v3/cards?'+p) as import('../../frontend/src/api/generated/types.gen').ReadingCard[];
+          const rows=await fixtureRead('/api/v3/cards?'+p) as import('./fixture-types').SyntheticCard[];
           const cursor=query.get('cursor'),start=cursor?rows.findIndex(card=>card.id===cursor):0;
           if(start<0)return new Response(JSON.stringify({code:'cursor_expired'}),{status:409,headers:{'Content-Type':'application/json'}});
           const limit=Number(query.get('limit')||40),selected=rows.slice(start,start+limit),next=rows[start+limit]?.id||null;
@@ -146,7 +146,7 @@ async function reader() {
           return new Response(null,{status:204});
         }
         if(/^\/api\/v3\/publication\/[^/]+$/.test(key)){
-          const id=key.split('/')[4],m=await fixtureRead('/api/v3/materials/'+id) as import('../../frontend/src/api/generated/types.gen').ReadableMaterial;
+          const id=key.split('/')[4],m=await fixtureRead('/fixture/material/'+id) as import('./fixture-types').SyntheticOpened;
           const c=m.availability==='available'?m.content:null,f=m.filter.result,t=m.theses.result;
           const state=(part:typeof m.filter|typeof m.theses)=>part.attempt.state==='running'?'processing':part.diagnostic_message&&part.attempt.state!=='ready'?'error':({disabled:'disabled',queued:'pending',cancelled:'pending',waiting:'pending',ready:'ready'} as const)[part.attempt.state];
           const attachments=c?.attachments||[],images=c?.images||[];
@@ -207,7 +207,7 @@ async function reader() {
         t.replies.set('/api/v3/cards', {body: materials.map(({text, description, display_text, reply_preview, ...card}) => ({folder_id:'f',published_known:true,feed_title:'feed',importance:'normal',snippet:'',...card}))});
         for (const material of materials) {
           const {snippet, feed_title, ...opened} = material;
-          t.replies.set('/api/v3/materials/' + material.id, {body: opened});
+          t.replies.set('/fixture/material/' + material.id, {body: opened});
         }
       }, materials);
       await target.goto(origin + '/#token=' + token);

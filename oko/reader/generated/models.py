@@ -833,7 +833,7 @@ class MediaItem(WireModel):
     url: MediaUrl
 
 
-class SourcePosition6(RootModel[StrictInt]):
+class SourcePosition2(RootModel[StrictInt]):
     model_config = ConfigDict(allow_inf_nan=False)
     root: StrictInt = Field(..., ge=0)
 
@@ -3693,63 +3693,6 @@ class SubscriptionFeed(
     )
 
 
-class AvailableReadableMaterial(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    availability: Literal["available"]
-    content: AvailablePublicationContent
-    feed_id: FeedId
-    feed_title: StrictStr
-    filter: FilterState
-    folder_id: FolderId
-    id: MaterialId
-    importance: Importance
-    originals: StrictBool
-    published_at: Timestamp | None
-    snippet: StrictStr
-    source: SourceReference
-    source_position: SourcePosition | None
-    source_url: SourceUrl
-    theses: ThesesState
-    title: StrictStr
-
-
-class AvailableReadingCard(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    attachments: list[Attachment]
-    availability: Literal["available"]
-    changed: StrictBool
-    completeness: ContentCompleteness
-    external_attachment_kinds: list[
-        Literal["audio", "video", "image", "document", "unsupported"]
-    ] = []
-    external_attachments: list[ExternalAttachment] = Field(
-        default=[], validate_default=True
-    )
-    feed_id: FeedId
-    feed_title: StrictStr
-    filter: FilterState
-    folder_id: FolderId
-    id: MaterialId
-    images: list[MediaUrl]
-    importance: Importance
-    loading: StrictBool
-    originals: StrictBool
-    post_web_unavailable: StrictBool = Field(
-        default=False,
-        description="Source-confirmed restriction of the whole post through Telegram web; separate from external media.",
-    )
-    published_at: Timestamp | None
-    revision_id: RevisionId
-    snippet: StrictStr
-    source: SourceReference
-    source_deleted: StrictBool
-    source_position: SourcePosition | None
-    source_url: SourceUrl
-    theses: ThesesState
-    title: StrictStr
-    version: StrictInt = Field(..., ge=1, le=9007199254740991)
-
-
 class AvailableReadingEntityMaterial(WireModel):
     model_config = ConfigDict(extra="forbid")
     availability: Literal["available"]
@@ -3899,46 +3842,6 @@ class NavigationFeed(WireModel):
     )
 
 
-class PendingReadableMaterial(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    availability: Literal["pending"]
-    content: PendingPublicationContent
-    feed_id: FeedId
-    feed_title: StrictStr
-    filter: FilterState
-    folder_id: FolderId
-    id: MaterialId
-    importance: Importance
-    originals: StrictBool
-    published_at: Timestamp | None
-    snippet: StrictStr
-    source: SourceReference
-    source_position: SourcePosition | None
-    source_url: SourceUrl
-    theses: ThesesState
-    title: StrictStr
-
-
-class PendingReadingCard(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    availability: Literal["pending"]
-    feed_id: FeedId
-    feed_title: StrictStr
-    filter: FilterState
-    folder_id: FolderId
-    id: MaterialId
-    importance: Importance
-    loading: StrictBool
-    originals: StrictBool
-    published_at: Timestamp | None
-    snippet: StrictStr
-    source: SourceReference
-    source_position: SourcePosition | None
-    source_url: SourceUrl
-    theses: ThesesState
-    title: StrictStr
-
-
 class PendingReadingEntityMaterial(WireModel):
     model_config = ConfigDict(extra="forbid")
     availability: Literal["pending"]
@@ -4044,107 +3947,11 @@ class PublicationResponse(WireModel):
     revision_id: RevisionId | None
     source: SourceReference
     source_deleted: StrictBool
-    source_position: SourcePosition6 | None
+    source_position: SourcePosition2 | None
     source_url: SourceUrl
     text: StrictStr
     theses: Theses
     title: StrictStr
-
-
-class ReadableMaterial(RootModel[PendingReadableMaterial | AvailableReadableMaterial]):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: PendingReadableMaterial | AvailableReadableMaterial = Field(
-        ...,
-        discriminator="availability",
-        examples=[
-            {
-                "availability": "pending",
-                "content": {"availability": "pending", "loading": False},
-                "feed_id": "example",
-                "feed_title": "example",
-                "filter": {
-                    "attempt": {"state": "ready"},
-                    "diagnostic_message": None,
-                    "result": {
-                        "hidden": False,
-                        "provenance": {"kind": "unknown", "reason": "not_recorded"},
-                        "reason": "example",
-                        "removed": [],
-                    },
-                },
-                "folder_id": "example",
-                "id": "example",
-                "importance": "normal",
-                "originals": False,
-                "published_at": None,
-                "snippet": "example",
-                "source": {
-                    "feed_id": "example",
-                    "kind": "demo",
-                    "source_url": "https://example.test/post/1",
-                },
-                "source_position": None,
-                "source_url": "https://example.test/post/1",
-                "theses": {
-                    "attempt": {"state": "ready"},
-                    "diagnostic_message": None,
-                    "result": {
-                        "points": [],
-                        "provenance": {"kind": "unknown", "reason": "not_recorded"},
-                    },
-                },
-                "title": "example",
-            }
-        ],
-    )
-
-
-class ReadingCard(RootModel[PendingReadingCard | AvailableReadingCard]):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: PendingReadingCard | AvailableReadingCard = Field(
-        ...,
-        discriminator="availability",
-        examples=[
-            {
-                "availability": "pending",
-                "feed_id": "example",
-                "feed_title": "example",
-                "filter": {
-                    "attempt": {"state": "ready"},
-                    "diagnostic_message": None,
-                    "result": {
-                        "hidden": False,
-                        "provenance": {"kind": "unknown", "reason": "not_recorded"},
-                        "reason": "example",
-                        "removed": [],
-                    },
-                },
-                "folder_id": "example",
-                "id": "example",
-                "importance": "normal",
-                "loading": False,
-                "originals": False,
-                "published_at": None,
-                "snippet": "example",
-                "source": {
-                    "feed_id": "example",
-                    "kind": "demo",
-                    "source_url": "https://example.test/post/1",
-                },
-                "source_position": None,
-                "source_url": "https://example.test/post/1",
-                "theses": {
-                    "attempt": {"state": "ready"},
-                    "diagnostic_message": None,
-                    "result": {
-                        "points": [],
-                        "provenance": {"kind": "unknown", "reason": "not_recorded"},
-                    },
-                },
-                "title": "example",
-            }
-        ],
-    )
 
 
 class ReadingComposition(WireModel):

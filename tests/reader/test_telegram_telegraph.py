@@ -55,18 +55,18 @@ def test_direct_articles_are_complete_local_and_unique_without_recursive_crawlin
         assert client.post('/api/v3/telegram/connect',json=body).status_code == 200
         from tests.support.reader import wait_for
         identity=settled(client)[0]['id']
-        material=wait_for(client,lambda: value if (value:=client.get('/api/v3/materials/'+identity).json())['content']['completeness']['state']=='complete' else None)
-        assert material['content']['text'].startswith(POST)
-        linked = material['content']['linked_content']
+        material=wait_for(client,lambda: value if (value:=client.get('/api/v3/publication/'+identity).json())['completeness']['state']=='complete' else None)
+        assert material['text'].startswith(POST)
+        linked = material['linked_content']
         assert linked['post_text'] == POST
         assert [a['title'] for a in linked['articles']] == ['Title One', 'Title Two']
-        assert linked['articles'][0]['media_urls'] == [material['content']['attachments'][0]['url']]
-        assert material['content']['text'].count('Article One') == 1
-        assert material['content']['text'].count('Article Two') == 1
-        assert 'Photo caption' in material['content']['text']
-        assert (material['content']['completeness']['state']=='complete') is True
-        assert len(material['content']['attachments']) == 1
-        assert client.get(material['content']['attachments'][0]['url']).content == b'article-photo'
+        assert linked['articles'][0]['media_urls'] == [[media for media in material['media'] if media['role'] == 'attachment'][0]['url']]
+        assert material['text'].count('Article One') == 1
+        assert material['text'].count('Article Two') == 1
+        assert 'Photo caption' in material['text']
+        assert (material['completeness']['state']=='complete') is True
+        assert len([media for media in material['media'] if media['role'] == 'attachment']) == 1
+        assert client.get([media for media in material['media'] if media['role'] == 'attachment'][0]['url']).content == b'article-photo'
         assert not any('example.org' in url for url in calls)
         assert sum('/getPage/One?' in url for url in calls) == 2  # Metadata, then media locator validation.
         assert sum('/getPage/Two?' in url for url in calls) == 1
@@ -106,33 +106,33 @@ def test_article_completion_and_retry_keep_previous_copy_without_false_edit(tmp_
         while time.monotonic()<deadline:
             cards = read_all_cards(client, '/api/v3/cards')
             if cards:
-                pending = client.get('/api/v3/materials/'+cards[0]['id']).json()
-                if 'Статья Telegraph недоступна' in pending['content'].get('completeness',{}).get('message',''):
+                pending = client.get('/api/v3/publication/'+cards[0]['id']).json()
+                if 'Статья Telegraph недоступна' in (pending.get('completeness') or {}).get('message',''):
                     break
             time.sleep(.02)
-        assert pending and 'Статья Telegraph недоступна' in pending['content']['completeness'].get('message','')
+        assert pending and 'Статья Telegraph недоступна' in pending['completeness'].get('message','')
         identity = pending['id']
         phase[0] = 1
         client.post('/api/v3/materials/'+identity+'/retry')
         settled(client)
         from tests.support.reader import wait_for
-        loaded=wait_for(client,lambda: value if (value:=client.get('/api/v3/materials/'+identity).json())['content']['completeness']['state']=='complete' else None)
-        assert (loaded['content']['completeness']['state']=='complete') is True and 'previous_versions' not in loaded['content']
-        assert 'Version one' in loaded['content']['text']
-        assert loaded['content']['revision_id'] != pending['content']['revision_id']
-        image = loaded['content']['attachments'][0]['url']
+        loaded=wait_for(client,lambda: value if (value:=client.get('/api/v3/publication/'+identity).json())['completeness']['state']=='complete' else None)
+        assert (loaded['completeness']['state']=='complete') is True and 'previous_versions' not in loaded
+        assert 'Version one' in loaded['text']
+        assert loaded['revision_id'] != pending['revision_id']
+        image = [media for media in loaded['media'] if media['role'] == 'attachment'][0]['url']
         phase[0] = 2
         client.post('/api/v3/materials/'+identity+'/retry')
         settled(client)
-        retained = client.get('/api/v3/materials/'+identity).json()
-        assert retained['content']['text'] == loaded['content']['text'] and (retained['content']['completeness']['state']=='complete') is True
-        assert 'previous_versions' not in retained['content'] and retained['content']['revision_id']==loaded['content']['revision_id']
+        retained = client.get('/api/v3/publication/'+identity).json()
+        assert retained['text'] == loaded['text'] and (retained['completeness']['state']=='complete') is True
+        assert 'previous_versions' not in retained and retained['revision_id']==loaded['revision_id']
         assert client.get(image).content == b'known-article-image'
         phase[0] = 3
         client.post('/api/v3/materials/'+identity+'/retry')
         settled(client)
-        changed = client.get('/api/v3/materials/'+identity).json()
-        assert 'Version two' in changed['content']['text'] and 'previous_versions' not in changed['content']
+        changed = client.get('/api/v3/publication/'+identity).json()
+        assert 'Version two' in changed['text'] and 'previous_versions' not in changed
 
 
 def test_iframe_is_a_visible_incomplete_link_and_is_never_requested(tmp_path):
@@ -151,11 +151,11 @@ def test_iframe_is_a_visible_incomplete_link_and_is_never_requested(tmp_path):
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         from tests.support.reader import wait_for
         identity=settled(client)[0]['id']
-        material=wait_for(client,lambda: value if 'Available text' in (value:=client.get('/api/v3/materials/'+identity).json())['content']['text'] else None)
-        assert (material['content']['completeness']['state']=='complete') is False
-        assert 'Available text' in material['content']['text'] and 'http://127.0.0.1/private' in material['content']['text']
-        assert '<iframe' not in material['content']['text']
-        assert 'External embed not saved locally' in material['content']['completeness'].get('message','')
+        material=wait_for(client,lambda: value if 'Available text' in (value:=client.get('/api/v3/publication/'+identity).json())['text'] else None)
+        assert (material['completeness']['state']=='complete') is False
+        assert 'Available text' in material['text'] and 'http://127.0.0.1/private' in material['text']
+        assert '<iframe' not in material['text']
+        assert 'External embed not saved locally' in material['completeness'].get('message','')
         assert '127.0.0.1' not in calls
 
 
@@ -227,11 +227,11 @@ FakeClient.rows = linked_rows
         client.put('/api/v3/telegram/profiles/personal',json={'configuration_ref':'fixture'})
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@forum',folder='Forum',
                     access={'kind':'client','profile':'personal'},initial_history={'mode':'count','count':'1'}))
-        material = client.get('/api/v3/materials/'+settled(client)[0]['id']).json()
-        assert material['content']['text'].startswith('😀 [Читать статью](https://telegra.ph/Article)')
+        material = client.get('/api/v3/publication/'+settled(client)[0]['id']).json()
+        assert material['text'].startswith('😀 [Читать статью](https://telegra.ph/Article)')
         from tests.support.reader import wait_for
-        material=wait_for(client,lambda: value if 'Full linked article' in (value:=client.get('/api/v3/materials/'+material['id']).json())['content']['text'] else None)
-        assert 'Full linked article' in material['content']['text'] and (material['content']['completeness']['state']=='complete') is True
+        material=wait_for(client,lambda: value if 'Full linked article' in (value:=client.get('/api/v3/publication/'+material['id']).json())['text'] else None)
+        assert 'Full linked article' in material['text'] and (material['completeness']['state']=='complete') is True
         assert len(calls)==1
         assert trace.is_file()
 
@@ -295,7 +295,7 @@ def test_telegraph_transient_failure_preserves_theses_but_real_text_edit_invalid
         assert client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Web')).status_code==200
         identity=settled(client)[0]['id']
         path='/api/v3/materials/'+identity
-        initial=wait_for(client,lambda: v if (v:=client.get(path).json())['theses']['result'] and 'Original article' in v['content']['text'] else None)
+        initial=wait_for(client,lambda: v if (v:=client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json())['theses']['result'] and 'Original article' in v['text'] else None)
         accepted=initial['theses']['result']
         initial_calls=len([r for r in calls if r.url.path=='/v1/chat/completions'])
         if regenerating:
@@ -305,27 +305,27 @@ def test_telegraph_transient_failure_preserves_theses_but_real_text_edit_invalid
         phase[0]=2
         assert client.post(path+'/retry').status_code==200
         wait_for(client,lambda: client.get('/api/v3/collection-status').json()['counts']['complete']==1)
-        retained=client.get(path).json()
-        assert retained['content']['revision_id']==initial['content']['revision_id']
+        retained=client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json()
+        assert retained['revision_id']==initial['revision_id']
         assert retained['theses']['result']==accepted
         assert retained['filter']['result']==initial['filter']['result']
         assert len([r for r in calls if r.url.path=='/v1/chat/completions'])==initial_calls
-        assert retained['content']['text']==initial['content']['text']
+        assert retained['text']==initial['text']
         phase[0]=3
         block_ai[0]=True
         try:
             assert client.post(path+'/retry').status_code==200
-            changed=wait_for(client,lambda: v if (v:=client.get(path).json())['content']['revision_id']!=initial['content']['revision_id'] else None)
-            assert 'Actual edit' in changed['content']['text']
-            assert changed['content']['changed'] is True
+            changed=wait_for(client,lambda: v if (v:=client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json())['revision_id']!=initial['revision_id'] else None)
+            assert 'Actual edit' in changed['text']
+            assert changed['changed'] is True
             assert changed['theses']['result'] is None
         finally:
             block_ai[0]=False
-        regenerated=wait_for(client,lambda: client.get(path).json()['theses']['result'])
-        assert 'Actual edit' in regenerated['points'][0]['text']
+        regenerated=wait_for(client,lambda: client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json()['theses']['result'])
+        assert 'Actual edit' in regenerated['points'][0]
         if regenerating:
             assert regeneration_finished.wait(2)
-            assert client.get(path).json()['theses']['result']==regenerated
+            assert client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json()['theses']['result']==regenerated
         completed=[r for r in calls if r.url.path=='/v1/chat/completions']
         expected=initial_calls+(2 if filtered else 1)
         # An explicitly requested regeneration may already have reached the
@@ -367,8 +367,8 @@ def test_failed_article_and_image_keep_inline_links_and_http_reasons(tmp_path, a
         while time.monotonic() < deadline:
             cards = read_all_cards(client, '/api/v3/cards')
             if cards:
-                material = client.get('/api/v3/materials/' + cards[0]['id']).json()
-                linked = material.get('content', {}).get('linked_content')
+                material = client.get('/api/v3/publication/' + cards[0]['id']).json()
+                linked = material.get('linked_content')
                 if linked and len(linked['articles']) == 2 and all(article['error'] and 'HTTP' in article['error'] for article in linked['articles']):
                     break
             time.sleep(.02)
@@ -382,18 +382,18 @@ def test_failed_article_and_image_keep_inline_links_and_http_reasons(tmp_path, a
         assert 'HTTP 503' not in linked['post_text']
         assert unavailable['error'] and 'HTTP 503' in unavailable['error']
         assert image['media_urls'] == []
-        assert material['content']['completeness']['state'] == 'incomplete'
+        assert material['completeness']['state'] == 'incomplete'
         assert '> [!load-error]' not in image['text']
         status = client.get('/api/v3/status/details').json()
         assert any(a.get('material_id') == material['id'] for p in status['problems']['current'] for a in p['affected'])
         feed = client.get('/api/v3/collection-status/' + material['feed_id']).json()
         assert feed['source']['operation_count'] == 0
         assert feed['source']['state'] == 'complete'
-        before = material['content']['revision_id']
+        before = material['revision_id']
         assert client.post('/api/v3/materials/' + material['id'] + '/retry').status_code == 200
         settled(client)
-        after = client.get('/api/v3/materials/' + material['id']).json()
-        assert after['content']['revision_id'] == before
+        after = client.get('/api/v3/publication/' + material['id']).json()
+        assert after['revision_id'] == before
 
 
 @pytest.mark.parametrize('url', ['https://telegra.ph/Query?foo=1', 'https://telegra.ph/Query#section', 'http://telegra.ph/Query', 'https://www.telegra.ph/Query'])
@@ -411,8 +411,8 @@ def test_article_error_preserves_original_markdown_destination(tmp_path, url):
         while time.monotonic() < deadline:
             cards = read_all_cards(client, '/api/v3/cards')
             if cards:
-                material = client.get('/api/v3/materials/' + cards[0]['id']).json()
-                linked = material.get('content', {}).get('linked_content')
+                material = client.get('/api/v3/publication/' + cards[0]['id']).json()
+                linked = material.get('linked_content')
                 if linked and linked['articles'][0]['error']:
                     break
             time.sleep(.02)

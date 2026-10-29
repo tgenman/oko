@@ -144,57 +144,6 @@ export type AvailablePublicationContent = {
     version: number;
 };
 
-export type AvailableReadableMaterial = {
-    availability: 'available';
-    content: AvailablePublicationContent;
-    feed_id: FeedId;
-    feed_title: string;
-    filter: FilterState;
-    folder_id: FolderId;
-    id: MaterialId;
-    importance: Importance;
-    originals: boolean;
-    published_at: Timestamp | null;
-    snippet: string;
-    source: SourceReference;
-    source_position: number | null;
-    source_url: SourceUrl;
-    theses: ThesesState;
-    title: string;
-};
-
-export type AvailableReadingCard = {
-    attachments: Array<Attachment>;
-    availability: 'available';
-    changed: boolean;
-    completeness: ContentCompleteness;
-    external_attachment_kinds?: Array<'audio' | 'video' | 'image' | 'document' | 'unsupported'>;
-    external_attachments?: Array<ExternalAttachment>;
-    feed_id: FeedId;
-    feed_title: string;
-    filter: FilterState;
-    folder_id: FolderId;
-    id: MaterialId;
-    images: Array<MediaUrl>;
-    importance: Importance;
-    loading: boolean;
-    originals: boolean;
-    /**
-     * Source-confirmed restriction of the whole post through Telegram web; separate from external media.
-     */
-    post_web_unavailable?: boolean;
-    published_at: Timestamp | null;
-    revision_id: RevisionId;
-    snippet: string;
-    source: SourceReference;
-    source_deleted: boolean;
-    source_position: number | null;
-    source_url: SourceUrl;
-    theses: ThesesState;
-    title: string;
-    version: number;
-};
-
 export type AvailableReadingEntityMaterial = {
     availability: 'available';
     content: ReadingTextContent;
@@ -1808,44 +1757,6 @@ export type PendingPublicationContent = {
     loading: boolean;
 };
 
-export type PendingReadableMaterial = {
-    availability: 'pending';
-    content: PendingPublicationContent;
-    feed_id: FeedId;
-    feed_title: string;
-    filter: FilterState;
-    folder_id: FolderId;
-    id: MaterialId;
-    importance: Importance;
-    originals: boolean;
-    published_at: Timestamp | null;
-    snippet: string;
-    source: SourceReference;
-    source_position: number | null;
-    source_url: SourceUrl;
-    theses: ThesesState;
-    title: string;
-};
-
-export type PendingReadingCard = {
-    availability: 'pending';
-    feed_id: FeedId;
-    feed_title: string;
-    filter: FilterState;
-    folder_id: FolderId;
-    id: MaterialId;
-    importance: Importance;
-    loading: boolean;
-    originals: boolean;
-    published_at: Timestamp | null;
-    snippet: string;
-    source: SourceReference;
-    source_position: number | null;
-    source_url: SourceUrl;
-    theses: ThesesState;
-    title: string;
-};
-
 export type PendingReadingEntityMaterial = {
     availability: 'pending';
     content: PendingPublicationContent;
@@ -2119,18 +2030,6 @@ export type QuotaWindow = {
     resets_at: Timestamp | null;
     used_percent: number;
 };
-
-export type ReadableMaterial = ({
-    availability: 'pending';
-} & PendingReadableMaterial) | ({
-    availability: 'available';
-} & AvailableReadableMaterial);
-
-export type ReadingCard = ({
-    availability: 'pending';
-} & PendingReadingCard) | ({
-    availability: 'available';
-} & AvailableReadingCard);
 
 export type ReadingComposition = {
     count: number;
@@ -4463,52 +4362,6 @@ export type PreviewCompletionResponses = {
 };
 
 export type PreviewCompletionResponse = PreviewCompletionResponses[keyof PreviewCompletionResponses];
-
-export type MaterialData = {
-    body?: never;
-    path: {
-        /**
-         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
-         */
-        item: string;
-    };
-    query?: never;
-    url: '/api/v3/materials/{item}';
-};
-
-export type MaterialErrors = {
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    403: AuthorizationErrors;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    404: ResourceNotFoundError;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    422: RequestInvalidError;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    500: InternalErrorError;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    503: StorageUnavailableError;
-};
-
-export type MaterialError = MaterialErrors[keyof MaterialErrors];
-
-export type MaterialResponses = {
-    /**
-     * Read one publication and its typed pending/available content. Fetch retries do not hide saved incomplete text; caption state belongs only to YouTube and provenance belongs to results.
-     */
-    200: ReadableMaterial;
-};
-
-export type MaterialResponse = MaterialResponses[keyof MaterialResponses];
 
 export type RetryFilterData = {
     body?: never;

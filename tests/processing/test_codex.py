@@ -15,16 +15,16 @@ def test_codex_reports_unavailable_before_any_content_is_sent(tmp_path: Path, mo
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test', codex_client=LocalCodex()), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
         client.patch('/api/v3/settings/oko/global', json={'processor': 'codex', 'theses': True})
-        denied = wait_for(client, lambda: (m if (m := client.get('/api/v3/materials/' + item).json())['theses']['diagnostic_message'] else None))
-        assert 'Запрещена публичная' in denied['theses']['diagnostic_message']
+        denied = wait_for(client, lambda: (m if (m := client.get('/api/v3/publication/' + item).json())['theses']['error'] else None))
+        assert 'Запрещена публичная' in denied['theses']['error']
         assert not record.exists()
         client.patch('/api/v3/feeds/demo', json={'public_ai': True})
-        blocked = wait_for(client, lambda: (m if 'изоляция' in ((m := client.get('/api/v3/materials/' + item).json())['theses']['diagnostic_message'] or '') else None))
+        blocked = wait_for(client, lambda: (m if 'изоляция' in ((m := client.get('/api/v3/publication/' + item).json())['theses']['error'] or '') else None))
         assert blocked['theses']['result'] is None
-        assert blocked['content']['text'].startswith('Это тестовая публикация.')
+        assert blocked['text'].startswith('Это тестовая публикация.')
         assert not list(tmp_path.glob('content/*/1/theses.md'))
         assert client.post('/api/v3/materials/' + item + '/viewed').status_code == 200
-        assert client.get('/api/v3/materials/' + item).status_code == 404
+        assert client.get('/api/v3/publication/' + item).status_code == 404
         assert not (tmp_path / 'content' / item).exists()
         assert set(record.read_text().splitlines()) == {'--version'}
 
@@ -123,16 +123,16 @@ def test_allowed_codex_theses_use_contract_and_are_deleted(tmp_path):
         configure_codex(client)
         item = setup_reader(client, theses=True)
         client.patch('/api/v3/settings/oko/global', json={'processor': 'codex', 'theses': True, 'prompt_theses': 'Один тезис'})
-        denied = wait_for(client, lambda: (m if (m := client.get('/api/v3/materials/' + item).json())['theses']['diagnostic_message'] else None))
-        assert 'Запрещена публичная' in denied['theses']['diagnostic_message']
+        denied = wait_for(client, lambda: (m if (m := client.get('/api/v3/publication/' + item).json())['theses']['error'] else None))
+        assert 'Запрещена публичная' in denied['theses']['error']
         assert not service.inputs
         client.patch('/api/v3/feeds/demo', json={'public_ai': True})
-        material = wait_for(client, lambda: (m if (m := client.get('/api/v3/materials/' + item).json())['theses']['result'] else None))
-        assert material['theses']['result']['points'][0]['text'] == 'Просмотрено удаляет содержимое.'
+        material = wait_for(client, lambda: (m if (m := client.get('/api/v3/publication/' + item).json())['theses']['result'] else None))
+        assert material['theses']['result']['points'][0] == 'Просмотрено удаляет содержимое.'
         assert 'Один тезис' in service.inputs[0]
         assert '"generation":' in service.inputs[0]
         assert client.post('/api/v3/materials/' + item + '/viewed').status_code == 200
-        assert client.get('/api/v3/materials/' + item).status_code == 404
+        assert client.get('/api/v3/publication/' + item).status_code == 404
         assert not (tmp_path / 'content' / item).exists()
         assert not (tmp_path / 'staging' / item).exists()
 
@@ -146,9 +146,9 @@ def test_codex_refuses_unknown_source_and_keeps_original(tmp_path):
         item = setup_reader(client, theses=True)
         client.patch('/api/v3/feeds/demo', json={'public_ai': True})
         client.patch('/api/v3/settings/oko/global', json={'processor': 'codex', 'theses': True})
-        material = wait_for(client, lambda: (m if 'неизвестный источник' in ((m := client.get('/api/v3/materials/' + item).json())['theses']['diagnostic_message'] or '') else None))
+        material = wait_for(client, lambda: (m if 'неизвестный источник' in ((m := client.get('/api/v3/publication/' + item).json())['theses']['error'] or '') else None))
         assert material['theses']['result'] is None
-        assert material['content']['text']
+        assert material['text']
         assert not list(tmp_path.glob('content/*/1/theses.md'))
 
 
@@ -175,10 +175,10 @@ def test_late_codex_result_after_permission_change_is_not_published(tmp_path):
         assert entered.wait(2)
         try:
             client.patch('/api/v3/feeds/demo',json={'public_ai':False})
-            before=client.get('/api/v3/materials/'+item).json()['theses']['result']
+            before=client.get('/api/v3/publication/'+item).json()['theses']['result']
         finally:
             release.set()
-        denied=wait_for(client,lambda: (m if 'Запрещена публичная' in ((m:=client.get('/api/v3/materials/'+item).json())['theses']['diagnostic_message'] or '') else None))
+        denied=wait_for(client, lambda: (m if 'Запрещена публичная' in ((m := client.get('/api/v3/publication/' + item).json())['theses']['error'] or '') else None))
         assert before is None and denied['theses']['result'] is None
 
 
@@ -189,11 +189,11 @@ def test_completed_codex_theses_survive_restart_without_another_call(tmp_path):
         item=setup_reader(client, theses=True)
         client.patch('/api/v3/feeds/demo',json={'public_ai':True})
         client.patch('/api/v3/settings/oko/global',json={'processor':'codex','theses':True})
-        wait_for(client,lambda: all(client.get('/api/v3/materials/'+c['id']).json()['theses']['result'] for c in read_all_cards(client, '/api/v3/cards')))
+        wait_for(client,lambda: all(client.get('/api/v3/publication/'+c['id']).json()['theses']['result'] for c in read_all_cards(client, '/api/v3/cards')))
         count=len(service.inputs)
     with TestClient(create_app(tmp_path,source=DemoSource(),token='test',codex_client=service),headers=HEADERS) as client:
         presence(client, 'reader')
-        assert client.get('/api/v3/materials/'+item).json()['theses']['result']
+        assert client.get('/api/v3/publication/'+item).json()['theses']['result']
         assert len(service.inputs)==count
 
 
@@ -222,7 +222,7 @@ def test_codex_cancellation_on_view_keeps_late_result_deleted(tmp_path):
             assert client.post('/api/v3/materials/'+item+'/viewed').status_code==200
         finally:
             release.set()
-        assert client.get('/api/v3/materials/'+item).status_code==404
+        assert client.get('/api/v3/publication/'+item).status_code==404
         assert not (tmp_path/'content'/item).exists()
         assert not (tmp_path/'staging'/item).exists()
 
@@ -240,7 +240,7 @@ esac
         item=setup_reader(client, theses=True)
         client.patch('/api/v3/feeds/demo',json={'public_ai':True})
         client.patch('/api/v3/settings/oko/global',json={'processor':'codex','theses':True})
-        material=wait_for(client,lambda: (m if 'Авторизация' in ((m:=client.get('/api/v3/materials/'+item).json())['theses']['diagnostic_message'] or '') else None))
+        material=wait_for(client, lambda: (m if 'Авторизация' in ((m := client.get('/api/v3/publication/' + item).json())['theses']['error'] or '') else None))
         assert material['theses']['result'] is None
 
 
@@ -253,7 +253,7 @@ def test_codex_unknown_quota_prevents_source_transfer(tmp_path):
         item=setup_reader(client, theses=True)
         client.patch('/api/v3/feeds/demo',json={'public_ai':True})
         client.patch('/api/v3/settings/oko/global',json={'processor':'codex','theses':True})
-        material=wait_for(client,lambda: (m if 'Лимиты' in ((m:=client.get('/api/v3/materials/'+item).json())['theses']['diagnostic_message'] or '') else None))
+        material=wait_for(client, lambda: (m if 'Лимиты' in ((m := client.get('/api/v3/publication/' + item).json())['theses']['error'] or '') else None))
         assert not service.inputs and material['theses']['result'] is None
 
 
@@ -266,7 +266,7 @@ def test_codex_exhausted_quota_is_visible_without_source_transfer(tmp_path):
         item=setup_reader(client, theses=True)
         client.patch('/api/v3/feeds/demo',json={'public_ai':True})
         client.patch('/api/v3/settings/oko/global',json={'processor':'codex','theses':True})
-        material=wait_for(client,lambda: (m if 'Лимит Codex исчерпан' in ((m:=client.get('/api/v3/materials/'+item).json())['theses']['diagnostic_message'] or '') else None))
+        material=wait_for(client, lambda: (m if 'Лимит Codex исчерпан' in ((m := client.get('/api/v3/publication/' + item).json())['theses']['error'] or '') else None))
         assert not service.inputs and material['theses']['result'] is None
 
 

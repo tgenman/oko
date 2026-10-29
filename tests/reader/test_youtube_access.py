@@ -77,7 +77,7 @@ def eventually(predicate):
 
 
 def materials(client):
-    return [client.get('/api/v3/materials/' + row['id']).json() for row in read_all_cards(client, '/api/v3/cards')]
+    return [client.get('/api/v3/publication/' + row['id']).json() for row in read_all_cards(client, '/api/v3/cards')]
 
 
 def heartbeat(client):
@@ -93,11 +93,11 @@ def test_shared_spacing_and_cached_text_do_not_block_other_sources(tmp_path):
         heartbeat(client)
         eventually(lambda: len(captions.calls) == 1 and any(m['source'].get('captions') == 'available' for m in materials(client)))
         add(client, 'https://rss.test/feed')
-        eventually(lambda: any('Независимый текст' in m['content'].get('text','') for m in materials(client)))
+        eventually(lambda: any('Независимый текст' in m.get('text','') for m in materials(client)))
         assert len(captions.calls) == 1
         saved = next(m for m in materials(client) if m['source'].get('captions') == 'available')
         client.post('/api/v3/materials/' + saved['id'] + '/retry')
-        eventually(lambda: not client.get('/api/v3/materials/' + saved['id']).json()['content'].get('loading'))
+        eventually(lambda: not client.get('/api/v3/publication/' + saved['id']).json().get('loading'))
         assert len(captions.calls) == 1
         clock.advance(9.9)
         time.sleep(.1)
@@ -129,7 +129,7 @@ def test_block_is_shared_persistent_and_retry_cannot_bypass_it(tmp_path):
         client.patch('/api/v3/youtube', json={'mode': 'proxy', 'address': 'http://proxy.test:8000', 'password': 'secret'})
         add(client, 'https://rss.test/feed')
         def independent():
-            if any('Независимый текст' in m['content'].get('text','') for m in materials(client)):
+            if any('Независимый текст' in m.get('text','') for m in materials(client)):
                 return True
             clock.tick+=1
             return False
@@ -187,7 +187,7 @@ def test_missing_and_network_failure_keep_their_own_retry_policy(tmp_path, outco
         add(client)
         add(client, 'UC' + 'b' * 22)
         heartbeat(client)
-        eventually(lambda: len(captions.calls)==1 and any(m['source'].get('captions') == state and not m['content']['loading'] for m in materials(client)))
+        eventually(lambda: len(captions.calls)==1 and any(m['source'].get('captions') == state and not m['loading'] for m in materials(client)))
         assert not (client.get('/api/v3/youtube').json()['admission']=='paused')
         clock.advance(10)
         eventually(lambda: len(captions.calls) == 2)
@@ -259,7 +259,7 @@ def test_proxy_change_rejects_late_block_and_prevents_overlapping_calls(tmp_path
             release.set()
             time.sleep(.1)
             clock.advance(1)
-            eventually(lambda: 'Новое подключение' in materials(client)[0]['content'].get('text',''))
+            eventually(lambda: 'Новое подключение' in materials(client)[0].get('text',''))
             assert not (client.get('/api/v3/youtube').json()['admission']=='paused')
     finally:
         release.set()
@@ -271,7 +271,7 @@ def test_viewed_waiting_material_and_closed_reader_do_not_resume(tmp_path):
     with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
         add(client)
         heartbeat(client)
-        item = eventually(lambda: next((m for m in materials(client) if len(captions.calls)==1 and m['source'].get('captions') == 'error' and not m['content']['loading']), None))
+        item = eventually(lambda: next((m for m in materials(client) if len(captions.calls)==1 and m['source'].get('captions') == 'error' and not m['loading']), None))
         close_presence(client, 'reader')
         clock.advance(900)
         time.sleep(.1)
@@ -280,6 +280,6 @@ def test_viewed_waiting_material_and_closed_reader_do_not_resume(tmp_path):
         client.post('/api/v3/materials/' + item['id'] + '/viewed')
         heartbeat(client)
         time.sleep(.1)
-        assert client.get('/api/v3/materials/'+item['id']).status_code==404
+        assert client.get('/api/v3/publication/'+item['id']).status_code==404
         assert read_all_cards(client, '/api/v3/cards') == []
         assert len(captions.calls) == 1

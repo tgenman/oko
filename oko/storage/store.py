@@ -589,9 +589,6 @@ class Store:
             record_caught('store.material')
             return None
 
-    def cards(self, show_hidden: bool = False) -> list[dict[str, Any]]:
-        return self.reading.cards(show_hidden)
-
     def work_summary(self, *, include_problems: bool = False) -> list[WorkSummary]:
         condition = "jobs.status IN ('pending','running')"
         if include_problems:

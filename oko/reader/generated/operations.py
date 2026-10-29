@@ -30,7 +30,6 @@ RESPONSES: dict[tuple[str, str], Any] = {
     ('PATCH', '/api/v3/folders/{folder}'): models.SubscriptionFolder,
     ('POST', '/api/v3/folders/{folder}/completion'): models.CommandAcknowledgement,
     ('POST', '/api/v3/folders/{folder}/completion/preview'): models.CompletionPreview,
-    ('GET', '/api/v3/materials/{item}'): models.ReadableMaterial,
     ('POST', '/api/v3/materials/{item}/filter/retry'): models.CommandAcknowledgement,
     ('POST', '/api/v3/materials/{item}/regenerate'): models.CommandAcknowledgement,
     ('POST', '/api/v3/materials/{item}/retry'): models.CommandAcknowledgement,

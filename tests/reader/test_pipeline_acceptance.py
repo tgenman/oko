@@ -40,11 +40,11 @@ def test_postgres_runs_all_workers_http_media_and_restart(tmp_path):
     with TestClient(app,headers={'Authorization':'Bearer test'}) as client:
         presence(client)
         assert client.post('/api/v3/collect').status_code==200
-        cards=wait_for(client,lambda: rows if len(rows:=read_all_cards(client, '/api/v3/cards'))==2 and all(client.get('/api/v3/materials/'+row['id']).json()['theses']['result'] for row in rows) else None)
+        cards=wait_for(client,lambda: rows if len(rows:=read_all_cards(client, '/api/v3/cards'))==2 and all(client.get('/api/v3/publication/'+row['id']).json()['theses']['result'] for row in rows) else None)
         newest=next(card for card in cards if card['id']!=item)
-        material=wait_for(client,lambda: value if (value:=client.get('/api/v3/materials/'+newest['id']).json())['content']['attachments'] else None)
-        assert 'New useful text' in material['content']['text']
-        assert client.get(material['content']['attachments'][0]['url']).content==b'synthetic-image'
+        material=wait_for(client,lambda: value if (value := client.get('/api/v3/publication/'+newest['id']).json()) and any(media['role'] == 'attachment' for media in value['media']) else None)
+        assert 'New useful text' in material['text']
+        assert client.get([media for media in material['media'] if media['role'] == 'attachment'][0]['url']).content==b'synthetic-image'
         assert client.get('/api/v3/status').status_code==200
     with database(target) as db:
         assert json.loads(db.execute('SELECT processing_metadata FROM items WHERE id=%s',(item,)).fetchone()[0])['_pass']==context
@@ -56,7 +56,7 @@ def test_postgres_runs_all_workers_http_media_and_restart(tmp_path):
     with TestClient(create_app(target,token='test',api_only=True,ai_transport=httpx.MockTransport(model)),headers={'Authorization':'Bearer test'}) as client:
         restored=read_all_cards(client, '/api/v3/cards')
         assert {card['id'] for card in restored}=={card['id'] for card in cards}
-        assert all(client.get('/api/v3/materials/'+card['id']).json()['theses']['result'] for card in restored)
-        reopened=client.get('/api/v3/materials/'+newest['id']).json()
-        assert client.get(reopened['content']['attachments'][0]['url']).content==b'synthetic-image'
+        assert all(client.get('/api/v3/publication/'+card['id']).json()['theses']['result'] for card in restored)
+        reopened=client.get('/api/v3/publication/'+newest['id']).json()
+        assert client.get([media for media in reopened['media'] if media['role'] == 'attachment'][0]['url']).content==b'synthetic-image'
     assert len(calls)==generated

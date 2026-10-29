@@ -25,7 +25,7 @@ def test_forwarded_fragment_is_incomplete_without_errors_or_automatic_retry(tmp_
         client.patch('/api/v3/settings/oko/global',json={'theses':True,'prompt_filters':'Summarize the full original'})
         feed=client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'}).json()['feed_id']
         identity=settled(client)[0]['id'];path='/api/v3/materials/'+identity
-        content=client.get(path).json()['content'];linked=content['linked_content']
+        content=client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json();linked=content['linked_content']
         assert content['completeness']['state']=='incomplete' and content['completeness']['reason']=='source_incomplete'
         assert 'предпросмотра' in content['completeness']['message']
         assert linked and 'https://t.me/fixture/11' in linked['post_text']
@@ -45,12 +45,12 @@ def test_forwarded_fragment_is_incomplete_without_errors_or_automatic_retry(tmp_
         assert sum('/fixture/11' in x for x in requests)==count
         client.post(path+'/retry');settled(client)
         assert sum('/fixture/11' in x for x in requests)==count+1
-        assert not client.get(path).json()['content']['changed']
+        assert not client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json()['changed']
     count=sum('/fixture/11' in x for x in requests)
     with TestClient(create_app(tmp_path,**options),headers=headers) as client:
         configure_fast_web(client);time.sleep(.2)
         assert sum('/fixture/11' in x for x in requests)==count
-        assert client.get(path).json()['content']['linked_content']==linked
+        assert client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json()['linked_content']==linked
 
 
 def test_previous_fragment_survives_failed_manual_refresh_and_legacy_error_is_corrected(tmp_path):
@@ -66,19 +66,19 @@ def test_previous_fragment_survives_failed_manual_refresh_and_legacy_error_is_co
         path='/api/v3/materials/'+settled(client)[0]['id']
         assert client.get('/api/v3/status/details').json()['problems']['count']>0
         confirmed[0]=True;client.post(path+'/retry');settled(client)
-        content=client.get(path).json()['content']
+        content=client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json()
         assert 'Saved short preview' in content['text']
         assert 'https://t.me/original/42' in content['linked_content']['post_text']
         assert 'previous_versions' not in content and not content['changed']
         assert client.get('/api/v3/status/details').json()['problems']['count']==0
         broken[0]=True;client.post(path+'/retry');settled(client)
-        failed=client.get(path).json()['content']
+        failed=client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json()
         assert failed['text']==content['text']
         assert 'HTTP 500' in failed['linked_content']['post_text']
         assert 'previous_versions' not in failed and not failed['changed']
         assert client.get('/api/v3/status/details').json()['problems']['count']==0
         broken[0]=False;client.post(path+'/retry');settled(client)
-        assert 'HTTP 500' not in client.get(path).json()['content']['linked_content']['post_text']
+        assert 'HTTP 500' not in client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json()['linked_content']['post_text']
 
 
 def test_metadata_does_not_replace_a_genuine_full_local_copy(tmp_path):
@@ -91,7 +91,7 @@ def test_metadata_does_not_replace_a_genuine_full_local_copy(tmp_path):
         client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'})
         path='/api/v3/materials/'+settled(client)[0]['id']
         restricted[0]=True;client.post(path+'/retry');settled(client)
-        content=client.get(path).json()['content']
+        content=client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json()
         assert content['text']=='Complete original body'
         assert content['post_web_unavailable'] is True
         assert 'previous_versions' not in content and not content['changed']
@@ -113,8 +113,8 @@ def test_preview_rate_limit_keeps_runtime_wait_and_saved_fragment(tmp_path):
             if source['state']=='waiting':break
             time.sleep(.02)
         assert source['state']=='waiting' and source['operation']['retry_at']
-        assert 'Saved fragment' in client.get(path).json()['content']['text']
-        assert 'HTTP 429' not in client.get(path).json()['content']['linked_content']['post_text']
+        assert 'Saved fragment' in client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json()['text']
+        assert 'HTTP 429' not in client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json()['linked_content']['post_text']
 
 
 @pytest.mark.parametrize('text',[chr(0x2063)+'\nReadable heading\nBody', 'Long first paragraph ' * 20])
@@ -125,7 +125,7 @@ def test_fragment_title_is_readable_and_bounded_without_truncating_saved_text(tm
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'})
         card=settled(client)[0]
-        material=client.get('/api/v3/materials/'+card['id']).json()
+        material=client.get('/api/v3/publication/'+card['id']).json()
         assert any(char.isalnum() for char in material['title'])
         assert len(material['title'])<=141
-        assert text.strip() in material['content']['text']
+        assert text.strip() in material['text']

@@ -115,8 +115,6 @@ def test_existing_reading_fields_and_demo_position_are_preserved():
     assert accepts('AvailablePublicationContent', literal)
     for field in ['description', 'display_text']:
         assert not accepts('AvailablePublicationContent', {key: value for key, value in literal.items() if key != field})
-    card = contract()['components']['schemas']['AvailableReadingCard']['examples'][0]
-    assert accepts('ReadingCard', dict(card, images=['/api/v3/materials/publication/images/image-1.png'], attachments=[], loading=True, changed=True))
 
 
 def test_saved_subscription_transport_and_unresolved_connection_are_preserved():

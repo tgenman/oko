@@ -62,7 +62,7 @@ test('late completion response preserves a new publication opened in the same fe
   await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/feeds/feed/completion'));
   await r.page.locator('#feed-action-cancel').click();
   const fresh=material('fresh');
-  await r.page.evaluate(fresh=>{readerTransport.replies.set('/api/v3/cards',{body:[fresh]});readerTransport.replies.set('/api/v3/materials/fresh',{body:fresh});},fresh);
+  await r.page.evaluate(fresh=>{readerTransport.replies.set('/api/v3/cards',{body:[fresh]});readerTransport.replies.set('/fixture/material/fresh',{body:fresh});},fresh);
   await expect(r.page.locator('[data-card="fresh"]')).toBeVisible();await r.page.locator('[data-card="fresh"]').click();await expect(r.page.locator('#text')).toContainText('Текст fresh');
   await r.page.evaluate(async()=>{const channel=new BroadcastChannel('oko-reader');try{await new Promise<void>((resolve,reject)=>{const timer=window.setTimeout(()=>reject(new Error('Completion response was not processed')),5000);channel.onmessage=event=>{if(event.data?.kind==='feed-viewed'&&event.data.feed==='feed'){window.clearTimeout(timer);resolve();}};readerTransport.release('/api/v3/feeds/feed/completion',{ok:true,command_id:'completed-old'});});}finally{channel.close();}});
   expect(await r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url==='/api/v3/feeds/feed/completion').length)).toBe(1);

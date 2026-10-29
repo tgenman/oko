@@ -240,9 +240,9 @@ def test_publication_keeps_filter_provenance_across_restart(tmp_path):
         with TestClient(create_app(tmp_path,**options),headers=HEADERS) as client:
             if identity is None:
                 setup_filters(client)
-                cards=wait_for(client,lambda:(v if len(v:=[client.get('/api/v3/materials/'+c['id']).json() for c in client.get('/api/v3/cards').json()['items']])==2 and all(c['filter']['attempt']['state']=='ready' for c in v) else None))
+                cards=wait_for(client,lambda:(v if len(v:=[client.get('/api/v3/publication/'+c['id']).json() for c in client.get('/api/v3/cards').json()['items']])==2 and all(c['filter']['state']=='ready' for c in v) else None))
                 identity=cards[0]['id']
-            expected=client.get('/api/v3/materials/'+identity).json()['filter']['result']['provenance']
+            expected=client.get('/api/v3/publication/'+identity).json()['filter']['result']['provenance']
             frame=client.get('/api/v3/publication/'+identity).json()
             actual=frame['filter']['result']['provenance']
             assert actual==expected=={'kind':'local','processor_id':'llamacpp','model':{'name':'local:latest','state':'known'}}

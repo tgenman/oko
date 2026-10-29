@@ -57,16 +57,16 @@ def test_new_choice_keeps_ready_theses_and_explicit_retry_uses_new_model(tmp_pat
         assert client.put('/api/v3/processors/codex', json=configuration()).status_code == 200
         client.patch('/api/v3/feeds/demo', json={'public_ai': True})
         client.patch('/api/v3/settings/oko/global', json={'theses': True})
-        wait_for(client, lambda: all(client.get('/api/v3/materials/'+c['id']).json()['theses']['result'] for c in read_all_cards(client, '/api/v3/cards')))
+        wait_for(client, lambda: all(client.get('/api/v3/publication/'+c['id']).json()['theses']['result'] for c in read_all_cards(client, '/api/v3/cards')))
         count = len(service.inputs)
         assert client.put('/api/v3/processors/codex', json=configuration('test-large', 'high')).status_code == 200
-        material = client.get('/api/v3/materials/' + item).json()
-        assert material['theses']['result']['points'][0]['text'] == 'test-small'
+        material = client.get('/api/v3/publication/' + item).json()
+        assert material['theses']['result']['points'][0] == 'test-small'
         assert material['theses']['result']['provenance']['model'] == 'test-small'
         assert len(service.inputs) == count
         assert client.post('/api/v3/materials/' + item + '/theses/retry').status_code == 200
-        changed = wait_for(client, lambda: (m if (m := client.get('/api/v3/materials/' + item).json())['theses']['result'] and m['theses']['result']['provenance'].get('model') == 'test-large' else None))
-        assert changed['theses']['result']['points'][0]['text'] == 'test-large'
+        changed = wait_for(client, lambda: (m if (m := client.get('/api/v3/publication/' + item).json())['theses']['result'] and m['theses']['result']['provenance'].get('model') == 'test-large' else None))
+        assert changed['theses']['result']['points'][0] == 'test-large'
         assert len(service.inputs) == count + 1
 
 
@@ -97,9 +97,9 @@ def test_delayed_theses_finish_with_old_choice_after_settings_save(tmp_path):
             assert client.put('/api/v3/processors/codex',json=configuration('test-large','high')).status_code==200
         finally:
             released.set()
-        material = wait_for(client,lambda: (m if (m:=client.get('/api/v3/materials/'+item).json())['theses']['result'] else None))
+        material = wait_for(client,lambda: (m if (m:=client.get('/api/v3/publication/'+item).json())['theses']['result'] else None))
         assert material['theses']['result']['provenance']['model']=='test-small'
-        wait_for(client,lambda: all(client.get('/api/v3/materials/'+c['id']).json()['theses']['result'] for c in read_all_cards(client, '/api/v3/cards')))
+        wait_for(client,lambda: all(client.get('/api/v3/publication/'+c['id']).json()['theses']['result'] for c in read_all_cards(client, '/api/v3/cards')))
         assert service.inputs[0]=='test-small' and service.inputs[1:]==['test-large','test-large']
 
 

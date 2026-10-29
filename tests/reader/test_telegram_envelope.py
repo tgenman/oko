@@ -36,6 +36,6 @@ def test_unknown_telegram_cursor_is_a_visible_compatibility_problem_without_rese
             time.sleep(.02)
         else:
             raise AssertionError(state)
-        assert client.get('/api/v3/materials/'+material).status_code == 200
+        assert client.get('/api/v3/publication/'+material).status_code == 200
     with database(tmp_path) as db:
         assert db.execute('SELECT cursor FROM feeds WHERE id = %s',(feed,)).fetchone()[0] == incompatible

@@ -18,11 +18,11 @@ for(const initial of ['ready','error'] as const) test(`common YouTube publicatio
  expect(card.source_url).toBe('https://www.youtube.com/watch?v=abcdefghijk');
  if(initial==='error'){
   await expect(r.page.locator('#completeness')).toContainText('Synthetic caption error');
-  expect((await r.api(`materials/${card.id}`)).theses.result).toBeNull();
+  expect((await r.api(`publication/${card.id}`)).theses.result).toBeNull();
   await r.page.screenshot({path:artifactPath('youtube-caption-error.png')});
   await r.setYoutubeState('missing');
   await r.page.getByRole('button',{name:'Retry Download',exact:true}).click();
-  await expect.poll(async()=>{const m=await r.api(`materials/${card.id}`);return m.theses.result?.points.length;}).toBe(0);
+  await expect.poll(async()=>{const m=await r.api(`publication/${card.id}`);return m.theses.result?.points.length;}).toBe(0);
   if(await r.page.getByRole('button',{name:'Show new version',exact:true}).isVisible())await r.page.getByRole('button',{name:'Show new version',exact:true}).click();
   await r.page.screenshot({path:artifactPath('youtube-caption-missing.png')});
   await r.setYoutubeState('ready');
@@ -31,12 +31,12 @@ for(const initial of ['ready','error'] as const) test(`common YouTube publicatio
   await r.page.getByRole('button',{name:'Show new version',exact:true}).click();
  }
  await expect(r.page.locator('#text')).toContainText('Raw YouTube captions.');
- await expect.poll(async()=>Boolean((await r.api(`materials/${card.id}`)).theses.result?.points.length)).toBe(true);
- const material=await r.api(`materials/${card.id}`);
- expect('attachments' in material.content && material.content.attachments.some(a=>a.kind==='image')).toBe(false);
+ await expect.poll(async()=>Boolean((await r.api(`publication/${card.id}`)).theses.result?.points.length)).toBe(true);
+ const material=await r.api(`publication/${card.id}`);
+ expect(material.media.some(a=>a.role==='attachment'&&a.kind==='image')).toBe(false);
  await r.page.screenshot({path:artifactPath(`youtube-${initial}-captions-before-cover.png`)});
  await r.setMediaState('ready');
- await expect.poll(async()=>{const m=await r.api(`materials/${card.id}`);return 'attachments' in m.content && m.content.attachments.some(a=>a.kind==='image');}).toBe(true);
+ await expect.poll(async()=>{const m=await r.api(`publication/${card.id}`);return m.media.some(a=>a.role==='attachment'&&a.kind==='image');}).toBe(true);
  await expect(r.page.locator('#images img')).toHaveAttribute('src',/^blob:/);
  await expect(r.page.locator('#text')).toContainText('Raw YouTube captions.');
  await expect(r.page.locator('#theses li')).toHaveCount(1);

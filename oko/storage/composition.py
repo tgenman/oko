@@ -2,7 +2,6 @@
 from oko.storage.database import expect_row
 from oko.storage.reading import reading_snapshot
 from dataclasses import dataclass
-from html.parser import HTMLParser
 from typing import Any, TYPE_CHECKING, TypedDict
 
 if TYPE_CHECKING:
@@ -19,36 +18,6 @@ class Navigation(TypedDict):
 class FolderContents:
     members: tuple[tuple[str, str], ...]
     cards: tuple[str, ...]
-
-
-class _Snippet(HTMLParser):
-    """Plain list preview, omitting executable markup and normalizing space."""
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.parts: list[str] = []
-        self.ignored = 0
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag in ('script', 'style'):
-            self.ignored += 1
-        elif tag in ('p', 'div', 'br', 'li'):
-            self.parts.append(' ')
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in ('script', 'style') and self.ignored:
-            self.ignored -= 1
-        elif tag in ('p', 'div', 'li'):
-            self.parts.append(' ')
-
-    def handle_data(self, data: str) -> None:
-        if not self.ignored:
-            self.parts.append(data)
-
-
-def snippet(text: str) -> str:
-    parser = _Snippet()
-    parser.feed(text)
-    return ' '.join(''.join(parser.parts).split())[:500]
 
 
 def telegram_title(header: dict[str, Any], text: str) -> str:
@@ -86,44 +55,6 @@ class ReadingComposition:
         predicate=" WHERE (missing, stamp, id) >= (SELECT missing, stamp, id FROM ordered WHERE id = %(cursor)s)" if cursor is not None else ''
         rows=db.execute(cte+' SELECT id FROM ordered'+predicate+' ORDER BY missing, stamp, id LIMIT %(limit)s',args)
         return [row[0] for row in rows],total
-
-    @reading_snapshot()
-    def cards(self, show_hidden: bool = False, folder: str | None = None, feed: str | None = None) -> list[dict[str, Any]]:
-        where, parameters = ['i.viewed=0'], []
-        if feed is not None:
-            where.append('EXISTS ( SELECT 1 FROM reading_memberships m WHERE m . publication_id = i . id AND m . feed_id = %s )')
-            parameters.append(feed)
-        if folder is not None:
-            where.append('EXISTS ( SELECT 1 FROM reading_memberships m JOIN feeds owner ON owner . id = m . feed_id WHERE m . publication_id = i . id AND owner . folder_id = %s )')
-            parameters.append(folder)
-        rows = self._store.db.execute(f"SELECT i . * FROM items_read i JOIN feeds f ON f . id = i . feed_id WHERE {' AND '.join(where)} ORDER BY i . published DESC", parameters).fetchall()
-        feeds = {owner['id']: owner for owner in self._store.subscriptions.feeds_many({row['feed_id'] for row in rows})}
-        cards = []
-        from oko.storage.material_read import material_inputs
-        with material_inputs(self._store.db, {row['id'] for row in rows}):
-            for row in rows:
-                owner_id=row['feed_id']
-                material = self._store.saved_publication(row)
-                if material:
-                    material = _reading_heading(material, feeds[owner_id], self._store.original(row['id'])[0] if material['complete'] else {})
-                if material and (show_hidden or not material.get('filter', {}).get('hidden')):
-                    owner = feeds[owner_id]
-                    text = material.pop('text')
-                    description = material.pop('description', '')
-                    material.pop('reply_preview', None)
-                    material.pop('linked_content', None)
-                    preview = description or text
-                    filtered = material.get('filter', {})
-                    if not description and filtered.get('status') == 'done':
-                        # Preserve the existing preview of display_text followed by
-                        # its final fragment pass, including joined boundaries.
-                        for fragment in filtered['removed']:
-                            preview = preview.replace(fragment, '')
-                    if filtered.get('status') == 'done':
-                        for fragment in filtered['removed']:
-                            preview = preview.replace(fragment, '')
-                    cards.append(dict(material, feed_id=owner_id, snippet=snippet(preview), feed_title=owner['title'], folder_id=owner['folder_id'], importance=owner['importance']))
-        return cards
 
     @reading_snapshot()
     def navigation(self) -> Navigation:

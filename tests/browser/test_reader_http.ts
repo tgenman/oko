@@ -28,7 +28,7 @@ test('production HTTP reader keeps folder/feed membership, previews, theses and 
   }
   await api('processors/llamacpp','PUT',{endpoint:'http://localhost:9931',model:'local:latest',local_execution:true});
   await api('settings/oko/global','PATCH',{theses:true});
-  await expect.poll(async()=>{const cards=(await api('cards')).items;return cards.length===2&&(await Promise.all(cards.map(c=>api(`materials/${c.id}`)))).every(c=>!!c.theses.result);},{timeout:15000}).toBe(true);
+  await expect.poll(async()=>{const cards=(await api('cards')).items;return cards.length===2&&(await Promise.all(cards.map(c=>api(`publication/${c.id}`)))).every(c=>!!c.theses.result);},{timeout:15000}).toBe(true);
   await expect(page.locator(`[data-feed="${empty!.id}"]`)).toHaveCount(0);
   await page.locator('#read-feeds-toggle').click();
   await page.locator(`[data-feed="${empty!.id}"]`).click();
