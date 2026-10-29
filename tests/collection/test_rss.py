@@ -80,7 +80,7 @@ def test_initial_period_resume_atom_and_source_errors_are_independent(tmp_path: 
         presence(client, 'test')
         cards = wait_cards(client, 2)
         assert {c['title'] for c in cards} == {'Atom', 'Заголовок'}
-        state = client.get('/api/v3/status').json()
+        state = client.get('/api/v3/status/details').json()
         assert state['total_sources'] == 5 and state['ready_sources'] == 2
         assert state['runtime_state']=='running'
         assert any(work['phase']=='waiting' for work in state['work'])
@@ -104,7 +104,7 @@ def test_duplicate_rss_guids_are_reported_without_fabricating_other_ids(tmp_path
         import_feed(client)
         presence(client,'test')
         def failed():
-            status=client.get('/api/v3/status').json()
+            status=client.get('/api/v3/status/details').json()
             return status if any(source.get('message') and 'внешний ID' in source['message'] for source in status['sources']) else None
         status=wait_for(client,failed)
         assert status['sources'][0]['state']=='unavailable'
@@ -147,7 +147,7 @@ def test_source_disabled_switch_cannot_continue_collecting(tmp_path: Path):
         wait_cards(client)
         client.patch('/api/v3/feeds/' + feed['id'], json={'transport': None})
         client.post('/api/v3/collect')
-        assert client.get('/api/v3/status').json()['total_sources'] == 0
+        assert client.get('/api/v3/status/details').json()['total_sources'] == 0
 
 
 def test_rss_saved_jobs_recover_after_failed_file_commit(tmp_path: Path):
@@ -265,7 +265,7 @@ def test_reused_guid_updates_the_same_record_and_article_link(tmp_path: Path):
         presence(client, 'test')
         card = wait_cards(client)[0]
         client.post('/api/v3/collect')
-        wait_for(client, lambda: reads >= 3 and not any(work['phase']=='collecting' for work in client.get('/api/v3/status').json()['work']))
+        wait_for(client, lambda: reads >= 3 and not any(work['phase']=='collecting' for work in client.get('/api/v3/status/details').json()['work']))
         material = client.get('/api/v3/materials/' + card['id']).json()
         assert material['id']==card['id']
         assert material['title']=='Другой заголовок' and material['content']['text']=='Другой анонс'

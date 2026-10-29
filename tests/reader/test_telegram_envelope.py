@@ -30,7 +30,7 @@ def test_unknown_telegram_cursor_is_a_visible_compatibility_problem_without_rese
     with TestClient(create_app(tmp_path,token='test',api_only=True,telegram_client=telegram),headers=headers) as client:
         deadline = time.monotonic()+2
         while time.monotonic()<deadline:
-            state = client.get('/api/v3/status').json()
+            state = client.get('/api/v3/status/details').json()
             if 'Несовместимый курсор Telegram' in str(state):
                 break
             time.sleep(.02)

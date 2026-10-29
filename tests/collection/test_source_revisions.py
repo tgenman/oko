@@ -33,7 +33,7 @@ def test_rss_edit_keeps_only_latest_media_and_explicit_replay_can_return_viewed(
         assert 'previous_versions' not in current['content']
         assert client.get(next(a['url'] for a in current['content']['attachments'] if a['kind']=='image')).content == PNG + b'2'
         client.post('/api/v3/collect')
-        wait_for(client, lambda: client.get('/api/v3/status').json()['work']==[{'phase':'idle'}])
+        wait_for(client, lambda: client.get('/api/v3/status/details').json()['work']==[{'phase':'idle'}])
         assert 'previous_versions' not in client.get('/api/v3/materials/' + item).json()['content']
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         assert client.get('/api/v3/materials/' + item).json()['content']['text'].endswith('Версия 2')
@@ -99,7 +99,7 @@ def test_interrupted_version_publish_keeps_old_until_fresh_retry(tmp_path):
         source.text = 'Вторая версия'
         interrupted[0] = True
         client.post('/api/v3/collect')
-        wait_for(client, lambda: any(p['code']=='material_save_failed' for p in client.get('/api/v3/status').json()['problems']['current']))
+        wait_for(client, lambda: any(p['code']=='material_save_failed' for p in client.get('/api/v3/status/details').json()['problems']['current']))
         assert client.get('/api/v3/materials/' + item).json()['content']['text'] == 'Первая версия'
         assert 'previous_versions' not in client.get('/api/v3/materials/' + item).json()['content']
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
@@ -228,7 +228,7 @@ def test_youtube_title_edit_is_visible_but_leaving_atom_window_is_not_deletion(t
         time.sleep(.1)
         retained = client.get('/api/v3/materials/' + item).json()
         assert retained['title'] == 'Новое название видео' and retained['content']['source_deleted'] is False
-        assert 'changes outside this window are not detected' in client.get('/api/v3/status').json()['sources'][0]['changes']
+        assert 'changes outside this window are not detected' in client.get('/api/v3/status/details').json()['sources'][0]['changes']
 
 
 
@@ -289,13 +289,13 @@ def test_failed_unchanged_telegram_reload_does_not_create_revision_or_erase_medi
         original = client.get('/api/v3/materials/' + item).json()
         source.fail = True
         client.post('/api/v3/materials/' + item + '/retry')
-        wait_for(client, lambda: any(p['code']=='source_unavailable' for p in client.get('/api/v3/status').json()['problems']['current']) or client.get('/api/v3/materials/' + item).json()['content']['changed'])
+        wait_for(client, lambda: any(p['code']=='source_unavailable' for p in client.get('/api/v3/status/details').json()['problems']['current']) or client.get('/api/v3/materials/' + item).json()['content']['changed'])
         retained = client.get('/api/v3/materials/' + item).json()
         assert retained['content']['revision_id'] == original['content']['revision_id']
         assert retained['content']['changed'] is False and 'previous_versions' not in retained['content']
         assert (retained['content']['completeness']['state']=='complete') is True
         assert client.get(retained['content']['attachments'][0]['url']).content == b'saved-image'
-        assert [p['message'] for p in client.get('/api/v3/status').json()['problems']['current'] if p['code'] in ('source_unavailable','material_save_failed','material_read_failed')] == ['Ограничение частоты']
+        assert [p['message'] for p in client.get('/api/v3/status/details').json()['problems']['current'] if p['code'] in ('source_unavailable','material_save_failed','material_read_failed')] == ['Ограничение частоты']
         source.fail = False
         client.post('/api/v3/materials/' + item + '/retry')
         wait_for(client, lambda: not client.get('/api/v3/materials/' + item).json()['content']['loading'])
@@ -303,7 +303,7 @@ def test_failed_unchanged_telegram_reload_does_not_create_revision_or_erase_medi
         source.text = 'Настоящая правка текста при недоступном вложении'
         source.fail = True
         client.post('/api/v3/materials/' + item + '/retry')
-        wait_for(client, lambda: any(p['code']=='source_unavailable' for p in client.get('/api/v3/status').json()['problems']['current']))
+        wait_for(client, lambda: any(p['code']=='source_unavailable' for p in client.get('/api/v3/status/details').json()['problems']['current']))
         wait_for(client,lambda:client.get('/api/v3/materials/'+item).json()['content']['text']==source.text)
         source.fail = False
         client.post('/api/v3/materials/' + item + '/retry')
@@ -336,7 +336,7 @@ def test_disabling_youtube_theses_keeps_existing_captions_without_refetch(tmp_pa
         count = captions.calls
         client.patch('/api/v3/settings/feed/' + feed, json={'theses': False})
         client.post('/api/v3/collect')
-        wait_for(client, lambda: not client.get('/api/v3/materials/' + item).json()['content'].get('loading') and client.get('/api/v3/status').json()['ready_sources'] == 1)
+        wait_for(client, lambda: not client.get('/api/v3/materials/' + item).json()['content'].get('loading') and client.get('/api/v3/status/details').json()['ready_sources'] == 1)
         retained = client.get('/api/v3/materials/' + item).json()
         assert retained['content']['text'] == 'Уже сохранённые субтитры'
         assert retained['source']['captions'] == 'available'

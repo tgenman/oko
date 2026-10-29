@@ -54,12 +54,12 @@ def test_delete_failure_is_visible_and_retried_without_content_in_errors(tmp_pat
         viewed_source = cards[0]['source_url'].rsplit('/', 1)[1]
         client.post(f'/api/v3/materials/{item}/viewed')
         assert client.get(f'/api/v3/materials/{item}').status_code == 404
-        assert any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status').json()['problems']['current'])
+        assert any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status/details').json()['problems']['current'])
         assert retained(tmp_path,item)
         fail = False
         clock.now += 1.1
-        wait_for(client, lambda: not any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status').json()['problems']['current']))
-        assert not any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status').json()['problems']['current'])
+        wait_for(client, lambda: not any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status/details').json()['problems']['current']))
+        assert not any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status/details').json()['problems']['current'])
         assert not retained(tmp_path,item)
 
 
@@ -132,7 +132,7 @@ def test_restart_keeps_failed_deletion_retryable_and_blocks_collection(tmp_path:
         client.patch('/api/v3/settings/oko/global', json={'theses': False})
         presence(client, 'a')
         time.sleep(.1)
-        status = client.get('/api/v3/status').json()
+        status = client.get('/api/v3/status/details').json()
         assert status['runtime_state']=='running'
         assert any(p['code']=='feed_delete_failed' for p in status['problems']['current'])
         assert source.calls == 0
@@ -142,4 +142,4 @@ def test_restart_keeps_failed_deletion_retryable_and_blocks_collection(tmp_path:
         wait_for(client, lambda: source.calls == 1 and not retained(tmp_path,item))
         assert not retained(tmp_path,item)
         assert source.calls == 1
-        assert not any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status').json()['problems']['current'])
+        assert not any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status/details').json()['problems']['current'])

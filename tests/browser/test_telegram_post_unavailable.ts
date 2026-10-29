@@ -34,7 +34,7 @@ test('whole Telegram post uses link card C separately from audio and large video
  await expect(page.locator('#external-attachments')).toHaveText('');
  await page.setViewportSize({width:390,height:844});
  await page.locator('#post-web-unavailable').screenshot({path:artifactPath('telegram-whole-post-C-narrow.png')});
- await expect.poll(async()=>{const s=await api('v3/status');return s.problems.count;}).toBe(0);
+ await expect.poll(async()=>{const s=await api('v3/status/details');return s.problems.count;}).toBe(0);
 });
 
 

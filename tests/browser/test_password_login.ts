@@ -40,7 +40,7 @@ test('only login is visible before authentication on desktop and mobile; logout 
   await expect(page.getByLabel('Логин')).toBeVisible();
   await expect(page.locator('#reader-shell')).toHaveCount(0);
   // Reader remains available to its internal administrative caller.
-  expect((await api('status')).lifetime.kind).toBe('explicit');
+  expect((await api('status/details')).lifetime.kind).toBe('explicit');
   expect(errors).toEqual([]);
 });
 

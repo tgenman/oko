@@ -73,9 +73,9 @@ def test_web_full_copy_is_not_polled_and_terminal_reload_keeps_old_media(tmp_pat
             time.sleep(.02)
         assert downloads == ['Original','Edited']
         deadline = time.monotonic()+3
-        while not client.get('/api/v3/status').json()['problems']['current'] and time.monotonic()<deadline:
+        while not client.get('/api/v3/status/details').json()['problems']['current'] and time.monotonic()<deadline:
             time.sleep(.02)
-        assert client.get('/api/v3/status').json()['problems']['current']
+        assert client.get('/api/v3/status/details').json()['problems']['current']
         kept = client.get('/api/v3/materials/'+item).json()['content']
         assert kept['text'] == 'Edited'
         assert kept['revision_id'] != old['revision_id']

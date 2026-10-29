@@ -306,7 +306,7 @@ def test_reassigned_public_username_cannot_replace_connected_peer(tmp_path: Path
         presence(client, 'test')
         client.post('/api/v3/materials/' + item + '/retry')
         for _ in range(100):
-            errors = client.get('/api/v3/status').json()['problems']['current']
+            errors = client.get('/api/v3/status/details').json()['problems']['current']
             if any(e['code']=='source_identity_conflict' for e in errors):
                 break
             time.sleep(.02)
@@ -346,7 +346,7 @@ def test_owned_worker_verifies_readback_when_ack_returns_false(tmp_path: Path, m
         assert [int(identity) for identity in card['source']['message_ids']] == [11, 12]
         assert client.post('/api/v3/materials/' + card['id'] + '/viewed').status_code == 200
         for _ in range(200):
-            status = client.get('/api/v3/status').json()
+            status = client.get('/api/v3/status/details').json()
             if any(r['confirmed'] == '12' if advance else bool(r['error']) for r in status['telegram_reads']):
                 break
             time.sleep(.02)

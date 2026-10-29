@@ -40,7 +40,7 @@ def test_card_and_opened_read_decode_each_saved_content_once(tmp_path, monkeypat
             assert time.monotonic() < deadline
             time.sleep(.01)
         revisions = []
-        for url in ['/api/v3/cards','/api/v3/reading/materials/'+parent,'/api/v3/cards']:
+        for url in ['/api/v3/cards','/api/v3/publication/'+parent,'/api/v3/cards']:
             decoded.clear()
             response = client.get(url)
             assert response.status_code == 200
@@ -48,9 +48,7 @@ def test_card_and_opened_read_decode_each_saved_content_once(tmp_path, monkeypat
                 card=next(c for c in response.json()['items'] if c['id']==parent)
                 assert 'snippet' not in card and 'text' not in card
             else:
-                resource=next(r for r in response.json()['resources'] if r['kind']=='material')
-                assert resource['state']=='changed'
-                revisions.append(resource['data']['content']['revision_id'])
+                revisions.append(response.json()['revision_id'])
             assert decoded[row['content']] <= 1
             assert decoded[linked['content']] <= 1
             if not url.endswith('/cards'):

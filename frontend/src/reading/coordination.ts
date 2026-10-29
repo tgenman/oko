@@ -208,23 +208,23 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       opened.refresh();
       const pageResult=pages.poll(options,list.visible(),list.atTop(),controller.signal)
         .then(page=>({page}),error=>({error}));
-      const frame=await resources.check(resources.plan(),controller.signal);
+      const reply=await resources.refresh(controller.signal,statusPanel.isOpen()||menus.isOpen());
       if(!active())return;
-      const accepted=resources.accept(frame);
+      const accepted=resources.accept(reply);
       if(accepted.reset){pages.clear();list.clear();opened.reset();void refresh();return;}
-      if(frame.state!=='current')return;
       opened.connected();
       const state=resources.status;
       if(!state)throw new Error('Reading status temporarily unavailable');
       const recovered=unavailable;unavailable=false;
       statusAvailable = true;
       onCollectionPoll();
-      const statusConfirmed=frame.resources.some(resource=>resource.kind==='status'&&(resource.state==='changed'||resource.state==='unchanged'));
+      const statusConfirmed=true;
+      const details=resources.details;
       // Local form actions can replace their own optimistic state after this
       // server version was accepted. Reapply confirmed cached status for the
       // new owner revision, without loading an unchanged form every poll.
-      if(statusConfirmed&&(recovered||accepted.changed.has('status')||settingsAppliedRevision!==settingsRevision)){
-        menus.status(state,settingsRevision);settingsAppliedRevision=settingsRevision;
+      if(menus.isOpen()&&details&&!accepted.detailsError&&(recovered||accepted.changed.has('details')||settingsAppliedRevision!==settingsRevision)){
+        menus.status(details,settingsRevision);settingsAppliedRevision=settingsRevision;
       }
       if(recovered||accepted.changed.has('status')){
       debug.updateStatus(state.diagnostic_count, state.diagnostic_persistence_error||undefined, debugRevision);
@@ -234,10 +234,14 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       workAllowed=state.work_allowed;
       menus.workAllowed(state.work_allowed);
       opened.workAllowed(state.work_allowed);
-      statusPanel.update(state.problems, state);
+      statusPanel.summary(state);
       debug.forgetMaterials(state.viewed_ids || []);
       statusPanel.forgetMaterials(state.viewed_ids || []);
       menus.sources(state.sources || []);
+      }
+      if(statusPanel.isOpen()){
+        if(accepted.detailsError)statusPanel.detailsFailed(errorMessage(accepted.detailsError));
+        else if(details)statusPanel.update(details.problems,details);
       }
       // A lost command response can remain pending while server status stays
       // unchanged. Every confirmed poll admits receipt reconciliation.
@@ -253,7 +257,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
         if(tree.update(navigation,state.sources||[]))return;
         list.setArea(tree.selection,navigation);
       } else if(accepted.changed.has('status'))tree.update(navigation,state.sources||[]);
-      if(state.runtime_state==='unavailable'){opened.disconnected();list.error(state.problems.current.find(p=>p.code==='storage_unavailable')?.message||'Storage unavailable');return;}
+      if(state.runtime_state==='unavailable'){opened.disconnected();list.error('Storage unavailable');return;}
       const result=await pageResult;
       if(!active())return;
       if('error' in result)throw result.error;

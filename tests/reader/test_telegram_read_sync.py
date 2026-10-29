@@ -41,10 +41,10 @@ def test_runtime_auto_read_batches_eligibility_and_keeps_http_responsive(tmp_pat
             assert time.monotonic()-before < 1
             deadline = time.monotonic()+5
             while time.monotonic() < deadline:
-                if any(row['pending'] == 32 for row in client.get('/api/v3/status').json()['telegram_reads']):
+                if any(row['pending'] == 32 for row in client.get('/api/v3/status/details').json()['telegram_reads']):
                     break
                 time.sleep(.02)
-            assert any(row['pending'] == 32 for row in client.get('/api/v3/status').json()['telegram_reads'])
+            assert any(row['pending'] == 32 for row in client.get('/api/v3/status/details').json()['telegram_reads'])
         finally:
             client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))
         member_points = [q for q in queries if any(q.startswith(f'SELECT members FROM {table} WHERE id=') for table in ('items', 'items_read', 'items_by_feed', 'unviewed_items_by_feed'))]
@@ -93,7 +93,7 @@ class ReadTelegram(Telegram):
 def wait_for(client, predicate):
     for _ in range(200):
         presence(client, 'test')
-        status = client.get('/api/v3/status').json()
+        status = client.get('/api/v3/status/details').json()
         if predicate(status):
             return status
         time.sleep(.02)

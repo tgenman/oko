@@ -7,10 +7,12 @@ this boundary. Remaining operations migrate with their domain consumers.
 from collections.abc import Callable
 from datetime import datetime, timezone
 import secrets
+import hashlib
+import json
 from typing import Literal
 
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import JSONResponse, Response
 
 from oko.diagnostics import Journal
 from oko.reader import projection_v3 as project
@@ -93,12 +95,60 @@ def register(app: FastAPI, runtime: ReaderApplication, lifetime: Lifetime, wall_
             expires_at=timestamp(wall_clock() + lifetime.remaining(value)),
             renew_after_seconds=lifetime.renew_after_seconds)
 
-    @app.get('/api/v3/status', response_model=wire.RuntimeStatus)
+    status_storage = ''
+    final_status: wire.RuntimeStatus | None = None
+    status_version: object = 0
+    status_changed: float | None = None
+
+    def status_tag(details: bool) -> str:
+        nonlocal status_storage,status_version,status_changed
+        queries=runtime.final_queries if runtime.has_storage and runtime._error is None else None
+        if queries is not None:
+            status_storage=queries.versions.identity
+            version=queries.versions.version('status','runtime')
+            if version is not None:status_version=version['version'];status_changed=version['changed']
+        stamp=json.dumps([status_storage,status_version,details,metadata()],sort_keys=True,separators=(',',':')).encode()
+        return '"'+hashlib.sha256(stamp).hexdigest()+'"'
+
+    def status_response(request: Request, details: bool) -> Response:
+        nonlocal status_storage
+        etag=status_tag(details)
+        headers={'ETag':etag,'X-Oko-Storage-Id':status_storage}
+        if request.headers.get('if-none-match')==etag:return Response(status_code=304,headers=headers)
+        value = status_data().model_dump(mode='json')
+        # Reconciliation can change the saved status version during projection.
+        etag=status_tag(details)
+        if status_changed is not None:value['problems']['updated_at']=timestamp(status_changed).model_dump(mode='json')
+        if not details:
+            def progress(phase: str) -> dict[str, object]:
+                entries = [entry['progress'] for entry in value['work'] if entry['phase']==phase] if value['work_allowed'] else []
+                return dict(state='running' if entries else 'idle',
+                    completed=sum(entry['completed'] for entry in entries),
+                    total=None if any(entry['total'] is None for entry in entries) else sum(entry['total'] for entry in entries))
+            summary = {key:value[key] for key in ('api_version','runtime_state','lifetime','work_allowed','active_client_sessions',
+                'sources','diagnostic_count','diagnostic_persistence_error','viewed_ids')}
+            summary.update(enabled=runtime.enabled,collection=progress('collecting'),processing=progress('processing'),
+                problems=[dict(id=problem['id'],message=problem['message'],
+                    feed_id=next((ref['feed_id'] for ref in problem['affected'] if ref['kind']=='feed'),None))
+                    for problem in value['problems']['current']])
+            value = wire.StatusSummary.model_validate(summary).model_dump(mode='json')
+        encoded=json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()
+        headers={'ETag':etag,'X-Oko-Storage-Id':status_storage}
+        if request.headers.get('if-none-match')==etag:return Response(status_code=304,headers=headers)
+        return Response(encoded,media_type='application/json',headers=headers)
+
+    @app.get('/api/v3/status', dependencies=[Depends(no_query)])
     @read_locked(runtime.execution)
-    async def status() -> wire.RuntimeStatus:
-        return status_data()
+    async def status(request: Request) -> Response:
+        return status_response(request,False)
+
+    @app.get('/api/v3/status/details', dependencies=[Depends(no_query)])
+    @read_locked(runtime.execution)
+    async def status_details(request: Request) -> Response:
+        return status_response(request,True)
 
     def status_data() -> wire.RuntimeStatus:
+        if final_status is not None and runtime.stopped:return final_status
         snapshot = runtime.status_snapshot()
         old = facts.Status.model_validate(snapshot.state)
         current = runtime.queries if runtime.has_storage and not runtime.stopped else None
@@ -130,15 +180,29 @@ def register(app: FastAPI, runtime: ReaderApplication, lifetime: Lifetime, wall_
             diagnostic_count=len(journal.records), diagnostic_persistence_error=journal.persistence_error or None,
             viewed_ids=[wire.MaterialId(value) for value in old.viewed_ids] if isinstance(old.viewed_ids, list) else [])
 
-    from oko.reader import versions_v3
-    versions_v3.register(app,runtime,status_data,material_reader,lambda: dict(
+    from oko.reader import publication_v3
+    publication_v3.register(app,runtime,material_reader)
+    def metadata() -> dict[str, object]:
+        return dict(
         enabled=runtime.enabled,stopped=runtime.stopped,work_allowed=runtime._live(),
         clients=lifetime.active_clients,sources=sorted(runtime._sources),
         diagnostics=[(r['id'],r['count'],r['last_time']) for r in journal.records],diagnostic_error=journal.persistence_error,
         error=runtime._error,lifetime=lifetime.mode,
         lease=lifetime.lease_seconds if lifetime.mode!='explicit' else None,
         grace=lifetime.grace_seconds if lifetime.mode!='explicit' else None,
-        renew=lifetime.renew_after_seconds if lifetime.mode!='explicit' else None))
+        renew=lifetime.renew_after_seconds if lifetime.mode!='explicit' else None)
+    runtime.reader_advance=lambda: runtime.queries.versions.advance(metadata())
+
+    async def finish_status() -> None:
+        nonlocal final_status,status_storage
+        if runtime.has_storage:
+            queries=runtime.final_queries
+            status_storage=queries.versions.identity
+            queries.versions.advance(metadata())
+            final_status=status_data()
+            version=queries.versions.version('status','runtime')
+            if version is not None:final_status.problems.updated_at=timestamp(version['changed'])
+    runtime.reader_finish=finish_status
 
     @app.post('/api/v3/client-sessions', status_code=201, response_model=wire.ClientSession)
     async def create_client_session() -> wire.ClientSession:

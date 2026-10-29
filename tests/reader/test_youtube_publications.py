@@ -248,7 +248,7 @@ def test_failed_caption_revalidation_keeps_verified_file_and_results(tmp_path):
         broken[0]=True
         wall[0]+=11
         client.post('/api/v3/materials/'+card['id']+'/retry')
-        wait_for(client,lambda:any(problem['message']=='Refresh failed' for problem in client.get('/api/v3/status').json()['problems']['current']))
+        wait_for(client,lambda:any(problem['message']=='Refresh failed' for problem in client.get('/api/v3/status/details').json()['problems']['current']))
         kept=client.get('/api/v3/materials/'+card['id']).json()
         assert kept['content']['text']=='Verified captions.' and kept['theses']['result']==old['theses']['result']
         assert client.get(url).content==b'Verified captions.'

@@ -105,13 +105,13 @@ def test_shared_publication_respects_all_source_permissions_and_uses_one_result(
     client.patch('/api/v3/feeds/'+other,json={'public_ai':False})
     client.patch('/api/v3/feeds/'+first,json={'public_ai':True})
     client.patch('/api/v3/settings/feed/'+first,json={'theses':True})
-    wait_for(client,lambda:any(w.get('reason')=='public_ai_not_allowed' for w in client.get('/api/v3/status').json()['work']))
+    wait_for(client,lambda:any(w.get('reason')=='public_ai_not_allowed' for w in client.get('/api/v3/status/details').json()['work']))
     assert not [r for r in models if r.url.path=='/v1/chat/completions']
     client.patch('/api/v3/feeds/'+other,json={'public_ai':True})
     wait_for(client,lambda:client.get('/api/v3/materials/'+item).json()['theses']['result'])
     assert len([r for r in models if r.url.path=='/v1/chat/completions'])==1
     client.patch('/api/v3/settings/feed/'+other,json={'prompt_theses':'Other unused rules'})
-    client.get('/api/v3/status')
+    client.get('/api/v3/status/details')
     assert client.get('/api/v3/materials/'+item).json()['theses']['result']
     assert len([r for r in models if r.url.path=='/v1/chat/completions'])==1
 

@@ -58,17 +58,11 @@ def test_open_read_budget_and_parity(tmp_path,count,processed):
     app=traced_app(tmp_path)
     with TestClient(app,headers=HEADERS) as client,ReadingMeasurements(client,app,tmp_path) as measure:
         legacy=client.get('/api/v3/materials/'+items[0]).json()
-        reply,cost=measure.request('open','GET','/api/v3/reading/materials/'+items[0])
+        reply,cost=measure.request('open','GET','/api/v3/publication/'+items[0])
         statements=list(app.state.last_sql)
         files=dict(measure.files)
-        parts={r['kind']:r['data'] for r in reply.json()['resources']}
-        assert set(parts)=={'material','filter','theses','media'}
-        for k,v in parts['material'].items():
-            if k!='content': assert v==legacy[k],k
-        for k,v in parts['material']['content'].items():assert v==legacy['content'][k],k
-        assert parts['filter']['filter']==legacy['filter']
-        assert parts['theses']['theses']==legacy['theses']
-        for k,v in parts['media'].items(): assert v==legacy['content'][k],k
+        publication=reply.json()
+        assert_publication_parity(publication,legacy)
         if processed:
             assert legacy['theses']['result']['points']
             assert legacy['filter']['result']['removed']==['Advertisement']
@@ -109,66 +103,52 @@ def source_library(root, kind, complete):
     return items[0]
 
 
-def assert_text_parity(actual, legacy):
-    for k,v in actual.items():
-        if k=='content':
-            for name,value in v.items():assert value==legacy[k][name]
-        else:assert v==legacy[k]
-
-
-@pytest.mark.parametrize('kind,complete',[('youtube',False),('telegram-client',True)])
-def test_split_text_http_parity(tmp_path,kind,complete):
-    item=source_library(tmp_path,kind,complete)
-    with TestClient(traced_app(tmp_path),headers=HEADERS) as client:
-        legacy=client.get('/api/v3/materials/'+item).json()
-        response=client.get('/api/v3/reading/materials/'+item)
-        assert response.status_code==200,response.text
-        resource=next(r for r in response.json()['resources'] if r['kind']=='material')
-        assert resource['state']=='changed',resource
-        assert_text_parity(resource['data'],legacy)
+def assert_publication_parity(actual, legacy):
+    for key in ('id','title','feed_id','published_at','source_url','source','source_position','originals','availability'):
+        assert actual[key]==legacy[key],key
+    content=legacy['content']
+    for key in ('text','description','revision_id','completeness','loading','changed','source_deleted','linked_content','reply_preview','post_web_unavailable','external_attachments'):
+        if key in content:assert actual[key]==content[key],key
+    assert [m['url'] for m in actual['media']]==content.get('images',[])+[a['url'] for a in content.get('attachments',[])]
+    filtered=legacy['filter']['result']
+    if filtered:
+        assert actual['filter']['result']==dict(filtered,text=content.get('display_text',content.get('text','')))
+    else:assert actual['filter']['result'] is None
+    theses=legacy['theses']['result']
+    if theses:
+        assert actual['theses']['result']==dict(points=[p['text'] for p in theses['points']],references=[p['references'] for p in theses['points']],provenance=theses['provenance'])
+    else:assert actual['theses']['result'] is None
 
 
 @pytest.mark.parametrize('kind',['demo','rss','youtube','telegram-web','telegram-client'])
 @pytest.mark.parametrize('complete',[False,True])
-def test_split_text_projection_parity_for_source_kinds(tmp_path,kind,complete):
-    # Both real projection paths, with independent PostgreSQL schemas and files per case.
-    # No scheduler, HTTP/lifespan or external adapters are needed for this matrix.
-    from types import SimpleNamespace
-    from oko.execution import Execution
-    from oko.services.queries import ReadingQueries
-    from fastapi import FastAPI
-    from oko.reader.reading_v3 import register
-    from oko.reader.versions_v3 import VersionedReading
-    from oko.storage.reading import reading_snapshot
+def test_publication_http_parity_for_source_kinds(tmp_path,kind,complete):
     item=source_library(tmp_path,kind,complete)
-    store=Store(tmp_path,lambda _:None)
-    try:
-        runtime=SimpleNamespace(execution=Execution(lambda: True), queries=ReadingQueries(lambda: store),
-            processing_wait=lambda item,kind:store.processing.waiting(item,kind,store.clock(),store.wall_clock()))
-        legacy=register(FastAPI(),runtime)(item).model_dump(mode='json')
-        reading=VersionedReading(runtime,None,None,None)
-        with reading_snapshot():
-            actual=reading.text(item)
-        assert_text_parity(actual,legacy)
+    with TestClient(traced_app(tmp_path),headers=HEADERS) as client:
+        legacy=client.get('/api/v3/materials/'+item).json()
+        response=client.get('/api/v3/publication/'+item)
+        assert response.status_code==200,response.text
+        actual=response.json()
+        assert_publication_parity(actual,legacy)
         assert actual['source']['kind']==('telegram' if kind.startswith('telegram') else kind)
         assert actual['availability']==('available' if complete else 'pending')
-    finally:
-        store.db.close()
+        unchanged=client.get('/api/v3/publication/'+item,headers={'If-None-Match':response.headers['ETag']})
+        assert unchanged.status_code==304 and not unchanged.content
 
 
 @pytest.mark.parametrize('count',[26,100])
-def test_idle_check_only_compares_versions(tmp_path,count):
+def test_idle_conditional_reads_return_no_body_or_writes(tmp_path,count):
     _,items=library(tmp_path,[count]*4)
     app=traced_app(tmp_path)
     with TestClient(app,headers=HEADERS) as client,ReadingMeasurements(client,app,tmp_path) as measure:
-        initial=client.post('/api/v3/reading/check',json=dict(storage_id=None,resources=[dict(kind='status',known_version=None),dict(kind='navigation',known_version=None)])).json()
-        resources=[dict(kind=r['kind'],**({'id':r['id']} if r['kind']=='feed' else {}),known_version=r['version']) for r in initial['resources']]
-        opened=client.get('/api/v3/reading/materials/'+items[0]).json()
-        resources.extend(dict(kind=r['kind'],id=r['id'],known_version=r['version']) for r in opened['resources'])
-        reply,cost=measure.request('idle','POST','/api/v3/reading/check',json=dict(storage_id=initial['storage_id'],resources=resources))
-        queries=app.state.last_sql
-        print('IDLE_COST',json.dumps(cost))
-        assert all(r['state']=='unchanged' for r in reply.json()['resources'])
-        assert cost['sql']<=2,queries
-        assert cost['content_opens']==cost['content_stats']==0
-        assert not any(q.lstrip().upper().startswith(('UPDATE','DELETE','INSERT')) for q in queries)
+        for url in ('/api/v3/status','/api/v3/navigation','/api/v3/publication/'+items[0]):
+            initial=client.get(url)
+            assert initial.status_code==200
+            reply,cost=measure.request('idle','GET',url,expected_status=304,headers={'If-None-Match':initial.headers['ETag']})
+            queries=app.state.last_sql
+            print('IDLE_COST',url,json.dumps(cost))
+            assert reply.status_code==304 and not reply.content
+            if '/publication/' not in url:
+                assert cost['content_opens']==cost['content_stats']==0
+            writes=[q for q in queries if q.lstrip().upper().startswith(('UPDATE','DELETE','INSERT'))]
+            assert not writes, writes

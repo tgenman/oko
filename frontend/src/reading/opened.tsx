@@ -1,5 +1,5 @@
 import {SourceIcon} from './tree';
-import type {SubscriptionFeed} from '../api/generated/types.gen';
+import type {Navigation} from './tree';
 import {LinkedPublication} from './linked-content';
 import {PostWebUnavailable} from './post-web-unavailable';
 import {ExternalAttachments} from './external-attachments';
@@ -21,7 +21,7 @@ import {createStore,useStore,host,errorMessage} from './store';
 type MediaFetch=(path:string,signal?:AbortSignal,cache?:RequestCache)=>Promise<Response>;
 type Material = (ReadingEntityMaterial & Pick<PublicationResponse,'filter'|'theses'>) & {content:AvailablePublicationContent|{availability:'pending'}};
 type OpenCard=Pick<Card,'id'>&Partial<Card>;
-type Session={id:string;sourceTitle?:string;sourceFeed?:SubscriptionFeed;folder_id:string|undefined;etag:string|null;loading:boolean;detached:boolean;reset:boolean;assetsPaused:boolean;assetEpoch:number;assets:AbortController;controller:AbortController};
+type Session={id:string;sourceTitle?:string;sourceFeed?:Navigation['feeds'][number];folder_id:string|undefined;etag:string|null;loading:boolean;detached:boolean;reset:boolean;assetsPaused:boolean;assetEpoch:number;assets:AbortController;controller:AbortController};
 type Resource={url:string;kind:Attachment['kind'];name:string;failed?:boolean};
 function Media({material,fetchMedia,session,id,className,imageAlt='Publication image',optional=false}:{material:Pick<AvailablePublicationContent,'images'|'attachments'|'external_attachments'>;fetchMedia:MediaFetch;session:Session;id?:string;className?:string;imageAlt?:string;optional?:boolean}) {
   const ref=useRef<HTMLDivElement>(null),[resources,setResources]=useState<Resource[]>([]);
@@ -79,7 +79,7 @@ function availableContent(material:Material):AvailablePublicationContent|null {
   }
 }
 
-export function createOpenedMaterial({readerApi,fetchMedia,onViewed,onChanged,getFeed,getStorage}:{getStorage:()=>string|null;getFeed:(id:string)=>SubscriptionFeed|undefined;readerApi:ReaderApi;fetchMedia:MediaFetch;onViewed:(id:string)=>void;onChanged:(changed:boolean)=>void}) {
+export function createOpenedMaterial({readerApi,fetchMedia,onViewed,onChanged,getFeed,getStorage}:{getStorage:()=>string|null;getFeed:(id:string)=>Navigation['feeds'][number]|undefined;readerApi:ReaderApi;fetchMedia:MediaFetch;onViewed:(id:string)=>void;onChanged:(changed:boolean)=>void}) {
   const store=createStore({session:null as Session|null,material:null as Material|null,empty:'Select an item',message:'',processingOpen:false,workAllowed:true,pending:null as Material|null,retained:false,generation:0});
   const active=(session:Session)=>store.get().session===session&&!session.controller.signal.aborted;
   function clear(empty='Select an item') {store.get().session?.controller.abort();store.set({session:null,material:null,empty,message:'',processingOpen:false,workAllowed:store.get().workAllowed,pending:null,retained:false,generation:0});}
@@ -147,7 +147,7 @@ export function createOpenedMaterial({readerApi,fetchMedia,onViewed,onChanged,ge
     const shortened=!!filter&&!filter.hidden&&filter.removed.length>0;
     const originalText=<div id="text" data-reading-region>{content&&session?<PublicationText material={content} sourceUrl={material?.source_url||''} session={session} fetchMedia={fetchMedia} inlineMedia={!shortened}/>:null}</div>;
     const feed=material?getFeed(material.feed_id)||session?.sourceFeed:undefined;
-    const avatar=feed&&'avatar_url' in feed?feed.avatar_url:undefined;
+    const avatar=feed?.avatar_url??undefined;
     const sourceKind=material?.source.kind||'rss';
     const captions=material?.source.kind==='youtube';
     const completeness=!material?'':!content?'Loading item':content.loading?(captions?'Fetching subtitles and preview'+(content.completeness.state==='incomplete'?' · '+content.completeness.message:''):'Text saved · loading attachments'):content.completeness.state==='incomplete'?(content.completeness.reason==='post_web_unavailable'?'Пост недоступен для веб-просмотра':content.completeness.reason==='external_attachment'?'Текст сохранён · вложения доступны в Telegram':'Incomplete item · '+content.completeness.message):captions?'Subtitles and preview saved':'Fully saved';

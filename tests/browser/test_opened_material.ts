@@ -168,7 +168,7 @@ test('viewing a publication in another tab closes its pending opening but preser
   const r = await reader();
   try {
     const source = material('source');
-    const unrelated = material('other', {folder_id: 'other-folder'});
+    const unrelated = material('other', {folder_id: 'other-folder',feed_id:'other-feed'});
     await r.start([source, unrelated]);
     const otherTab = await r.context.newPage(); await r.start([source], otherTab);
     await r.page.evaluate(() => readerTransport.held.set('/api/v3/materials/source', true));
@@ -182,7 +182,7 @@ test('viewing a publication in another tab closes its pending opening but preser
     await r.page.evaluate(body => readerTransport.release('/api/v3/materials/source', body), source);
     await settle(r.page);
     await expect(r.page.locator('#empty')).toHaveText('Select an item');
-    await r.page.getByRole('button', {name: /^other/}).click();
+    await r.page.locator('[data-card="other"]').click();
     await expect(r.page.locator('#text')).toHaveText('Текст other');
     await otherTab.evaluate(() => { const channel = new BroadcastChannel('oko-reader'); channel.postMessage({kind: 'folder-viewed', folder: 'f'}); channel.close(); });
     await settle(r.page);
@@ -350,14 +350,13 @@ test('storage replacement rejects old media replies and stages the replacement b
   const r=await reader();try{
     const url='/api/v3/materials/A/images/one.png';
     await r.page.addInitScript(()=>{
-      const fetch=window.fetch.bind(window);let reset=true;
+      const fetch=window.fetch.bind(window);
       window.fetch=async(url,options)=>{
-        if(String(url)!=='/api/v3/reading/check'||!readerTransport.held.has('test-storage-reset'))return fetch(url,options);
-        const storage_id='2d879353-68a3-4919-831c-32cb82c3d55f';
-        if(reset){reset=false;return new Response(JSON.stringify({state:'reset',storage_id}),{headers:{'Content-Type':'application/json'}});}
-        const request=JSON.parse(String(options!.body));request.storage_id=null;
-        const reply=await fetch(url,{...options,body:JSON.stringify(request)}),frame=await reply.json();
-        return new Response(JSON.stringify({...frame,storage_id}),{headers:{'Content-Type':'application/json'}});
+        if(!['/api/v3/status','/api/v3/navigation'].includes(String(url))||!readerTransport.held.has('test-storage-reset'))return fetch(url,options);
+        const headers=new Headers(options?.headers);headers.delete('If-None-Match');
+        const reply=await fetch(url,{...options,headers});
+        const responseHeaders=new Headers(reply.headers);responseHeaders.set('X-Oko-Storage-Id','2d879353-68a3-4919-831c-32cb82c3d55f');
+        return new Response(await reply.text(),{status:reply.status,headers:responseHeaders});
       };
     });
     await r.start([material('A',{version:'old',images:[]})]);
@@ -422,17 +421,17 @@ test('reply context is a compact separate card with safe navigation and local ex
     // independent of the card, as is renewing the browser presence lease.
     const heartbeat=await r.api('client-sessions','POST');
     const requests=await r.page.evaluate(()=>readerTransport.requests);
-    const foreground=(q:(typeof requests)[number])=>!(q.method==='POST'&&q.url==='/api/v3/reading/check'||q.method==='PUT'&&/^\/api\/v3\/client-sessions\/[^/]+$/.test(q.url)||q.method==='GET'&&(q.url.startsWith('/api/v3/cards?')||q.url.startsWith('/api/v3/publication/')||['/api/v3/status','/api/v3/collection-status'].includes(q.url)));
+    const foreground=(q:(typeof requests)[number])=>!(q.method==='PUT'&&/^\/api\/v3\/client-sessions\/[^/]+$/.test(q.url)||q.method==='GET'&&(q.url.startsWith('/api/v3/cards?')||q.url.startsWith('/api/v3/publication/')||['/api/v3/status','/api/v3/navigation'].includes(q.url)));
     const start=await r.page.evaluate(()=>readerTransport.requests.length);
     assert.ok(requests.some(q=>q.url==='/api/v3/publication/A'&&q.method==='GET'));
     await card.getByRole('button',{name:'Весь фрагмент'}).focus();
     await r.page.keyboard.press('Enter');
     await expect(card.getByRole('button',{name:'Свернуть'})).toHaveAttribute('aria-expanded','true');
     assert.equal(await card.locator('.reply-preview-text').textContent(),excerpt);
-    await r.page.evaluate(async()=>{const reply=await fetch('/api/v3/reading/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({storage_id:null,resources:[]})});if(!reply.ok)throw new Error('Background check failed');});
+
     await r.page.evaluate(async({id,token})=>{const reply=await fetch('/api/v3/client-sessions/'+id,{method:'PUT',headers:{Authorization:'Bearer '+token}});if(!reply.ok)throw new Error('Heartbeat failed: '+reply.status);},{id:heartbeat.id,token:r.token});
     await r.page.evaluate(async token=>{
-      for(const path of ['/api/v3/status','/api/v3/collection-status']){
+      for(const path of ['/api/v3/status','/api/v3/navigation']){
         const reply=await fetch(path,{headers:{Authorization:'Bearer '+token}});
         if(!reply.ok)throw new Error('Background status failed: '+path);
       }
@@ -440,15 +439,10 @@ test('reply context is a compact separate card with safe navigation and local ex
     const observed=await r.page.evaluate(()=>readerTransport.requests);
     assert.ok(observed.some(q=>q.method==='PUT'&&q.url==='/api/v3/client-sessions/'+heartbeat.id));
     assert.deepEqual(observed.filter(foreground),requests.filter(foreground));
-    const checks=await r.page.evaluate(start=>readerTransport.requests.slice(start).filter(q=>q.url==='/api/v3/reading/check'&&q.method==='POST'),start);
-    for(const request of checks){
-      assert.ok(Array.isArray(request.body?.resources));
-      for(const resource of request.body.resources){
-        if(['material','filter','theses','media'].includes(resource.kind)){
-          assert.fail('Publication parts must not use the universal check');
-        }
-      }
-    }
+    const polls=await r.page.evaluate(start=>readerTransport.requests.slice(start).filter(q=>['/api/v3/status','/api/v3/navigation'].includes(q.url)),start);
+    assert.ok(polls.length>=2);
+    assert.ok(polls.every(q=>q.method==='GET'&&!q.body));
+    assert.ok(!observed.some(q=>q.url==='/api/v3/reading/check'));
     await r.page.screenshot({path:artifactPath('telegram-reply-desktop.png')});
     await r.page.setViewportSize({width:1120,height:900});
     await card.getByRole('button',{name:'Свернуть'}).click();
@@ -496,9 +490,12 @@ test('a replacement library cannot update the shown publication before its statu
    Object.assign(window,{publicationRestoreRace:state});
    window.fetch=async(url,options)=>{
     const path=String(url);
-    if(state.enabled&&path==='/api/v3/reading/check'){
-     const response=await original(url,options);
-     if(!state.checkHeld){state.checkHeld=true;await new Promise<void>(resolve=>{state.release=resolve;});}
+    if(state.enabled&&['/api/v3/status','/api/v3/navigation'].includes(path)){
+     const headers=new Headers(options?.headers);headers.delete('If-None-Match');
+     const reply=await original(url,{...options,headers});
+     const responseHeaders=new Headers(reply.headers);responseHeaders.set('X-Oko-Storage-Id','2d879353-68a3-4919-831c-32cb82c3d55f');
+     const response=new Response(await reply.text(),{status:reply.status,headers:responseHeaders});
+     if(path==='/api/v3/status'&&!state.checkHeld){state.checkHeld=true;await new Promise<void>(resolve=>{state.release=resolve;});}
      return response;
     }
     if(state.enabled&&path==='/api/v3/publication/A'){
@@ -531,11 +528,12 @@ test('a late old-library publication response cannot cross an accepted storage r
    const replacement='2d879353-68a3-4919-831c-32cb82c3d55f';
    window.fetch=async(url,options)=>{
     const path=String(url);
-    if(state.enabled&&path==='/api/v3/reading/check'){
-     if(!state.reset){state.reset=true;return new Response(JSON.stringify({state:'reset',storage_id:replacement}),{headers:{'Content-Type':'application/json'}});}
-     const request=JSON.parse(String(options!.body));request.storage_id=null;
-     const reply=await original(url,{...options,body:JSON.stringify(request)}),frame=await reply.json();
-     return new Response(JSON.stringify({...frame,storage_id:replacement}),{headers:{'Content-Type':'application/json'}});
+    if(state.enabled&&['/api/v3/status','/api/v3/navigation'].includes(path)){
+     const headers=new Headers(options?.headers);headers.delete('If-None-Match');
+     const reply=await original(url,{...options,headers});
+     const responseHeaders=new Headers(reply.headers);responseHeaders.set('X-Oko-Storage-Id',replacement);
+     if(path==='/api/v3/status')state.reset=true;
+     return new Response(await reply.text(),{status:reply.status,headers:responseHeaders});
     }
     if(state.enabled&&path==='/api/v3/publication/A'){
      const identity=new Headers(options?.headers).get('X-Oko-Storage-Id'),headers=new Headers(options?.headers);headers.delete('If-None-Match');
@@ -543,7 +541,7 @@ test('a late old-library publication response cannot cross an accepted storage r
      const reason=identity===replacement?'NEW LIBRARY':'OLD LIBRARY';
      body.filter={state:'ready',result:{hidden:true,reason,text:'Original text',removed:[],provenance:{kind:'unknown',reason:'not_recorded'}},error:null};
      if(identity!==replacement&&!state.oldHeld){state.oldHeld=true;await new Promise<void>(resolve=>{state.release=resolve;});}
-     return new Response(JSON.stringify(body),{headers:{'Content-Type':'application/json',ETag:'"'+reason+'"'}});
+     return new Response(JSON.stringify(body),{headers:{'Content-Type':'application/json',ETag:'"'+reason+'"','X-Oko-Storage-Id':identity||response.headers.get('X-Oko-Storage-Id')!}});
     }
     return original(url,options);
    };

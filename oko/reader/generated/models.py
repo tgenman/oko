@@ -632,6 +632,32 @@ class MediaUrl(RootModel[StrictStr]):
     )
 
 
+class NavigationEntry(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    avatar_url: FeedAvatarUrl | None
+    connection: StrictStr
+    count: StrictInt = Field(..., ge=0)
+    has_unviewed: StrictBool
+    id: FeedId
+    kind: StrictStr
+    telegram_access: Literal["web", "client", "unconfigured"] | None
+    title: StrictStr
+
+
+class NavigationFolder(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    count: StrictInt = Field(..., ge=0)
+    feeds: list[NavigationEntry]
+    id: FolderId
+    title: StrictStr
+
+
+class NavigationResponse(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    folders: list[NavigationFolder]
+    total: StrictInt = Field(..., ge=0)
+
+
 class OkoSettingOrigin(WireModel):
     model_config = ConfigDict(extra="forbid")
     owner: Literal["global"]
@@ -812,18 +838,6 @@ class SourcePosition6(RootModel[StrictInt]):
     root: StrictInt = Field(..., ge=0)
 
 
-class ReadingEntityVersion(RootModel[StrictStr]):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: StrictStr = Field(..., examples=["1"], max_length=20, pattern="^[1-9][0-9]*$")
-
-
-class ReadingFeedReference(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    count: StrictInt = Field(..., ge=0)
-    has_unviewed: StrictBool
-    id: FeedId
-
-
 class ReadingFolder(WireModel):
     model_config = ConfigDict(extra="forbid")
     count: StrictInt = Field(..., ge=0, le=9007199254740991)
@@ -835,43 +849,6 @@ class ReadingFolder(WireModel):
         le=9007199254740991,
     )
     title: StrictStr
-
-
-class ReadingFolderEntity(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    count: StrictInt = Field(..., ge=0, le=9007199254740991)
-    id: FolderId
-    position: StrictInt = Field(
-        ...,
-        description="Persisted ordering position; demo source legitimately uses -1.",
-        ge=-9007199254740991,
-        le=9007199254740991,
-    )
-    title: StrictStr
-    version: ReadingEntityVersion
-
-
-class ReadingIndex(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    count: StrictInt = Field(..., ge=0)
-    feeds: list[ReadingFeedReference]
-    folders: list[ReadingFolderEntity]
-
-
-class ReadingKnownVersion(RootModel[ReadingEntityVersion | None]):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: ReadingEntityVersion | None = Field(..., examples=[None, "1"])
-
-
-class ReadingResourceKind(
-    RootModel[
-        Literal["status", "navigation", "feed", "material", "filter", "theses", "media"]
-    ]
-):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: Literal[
-        "status", "navigation", "feed", "material", "filter", "theses", "media"
-    ] = Field(..., examples=["status"])
 
 
 class ReadingStorageId(RootModel[UUID]):
@@ -1136,6 +1113,20 @@ class SourceUrl(RootModel[AnyUrl]):
     root: AnyUrl = Field(..., examples=["https://example.test/post/1"])
 
 
+class StatusProblem(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    feed_id: FeedId | None
+    id: StrictStr
+    message: StrictStr
+
+
+class StatusProgress(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    completed: StrictInt = Field(..., ge=0)
+    state: Literal["idle", "running"]
+    total: StrictInt | None = Field(..., ge=0)
+
+
 class StorageChangedError(WireModel):
     model_config = ConfigDict(extra="forbid")
     code: Literal["storage_changed"]
@@ -1218,23 +1209,6 @@ class Timestamp(RootModel[datetime]):
         description="RFC 3339 timestamp with a mandatory timezone offset, normalized to UTC in responses.",
         examples=["2026-10-15T10:00:00Z"],
     )
-
-
-class UnavailableReadingResource(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    id: StrictStr = Field(..., min_length=1)
-    kind: ReadingResourceKind
-    reason: Literal["viewed", "not_found", "scope_removed", "runtime_stopped"]
-    state: Literal["unavailable"] = Field(..., examples=["unavailable"])
-    version: ReadingKnownVersion | None
-
-
-class UnchangedReadingResource(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    id: StrictStr = Field(..., min_length=1)
-    kind: ReadingResourceKind
-    state: Literal["unchanged"] = Field(..., examples=["unchanged"])
-    version: ReadingEntityVersion
 
 
 class UnknownLocalModel(WireModel):
@@ -1440,62 +1414,6 @@ class CardPage(WireModel):
 class CardReadRequest(WireModel):
     model_config = ConfigDict(extra="forbid")
     ids: list[MaterialId]
-
-
-class ChangedNavigationResource(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    data: ReadingIndex
-    id: StrictStr = Field(..., min_length=1)
-    kind: Literal["navigation"] = Field(..., examples=["navigation"])
-    state: Literal["changed"] = Field(..., examples=["changed"])
-    version: ReadingEntityVersion
-
-
-class CheckFeed(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    id: FeedId
-    kind: Literal["feed"] = Field(..., examples=["feed"])
-    known_version: ReadingKnownVersion | None
-
-
-class CheckFilter(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    id: MaterialId
-    kind: Literal["filter"] = Field(..., examples=["filter"])
-    known_version: ReadingKnownVersion | None
-
-
-class CheckMaterial(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    id: MaterialId
-    kind: Literal["material"] = Field(..., examples=["material"])
-    known_version: ReadingKnownVersion | None
-
-
-class CheckMedia(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    id: MaterialId
-    kind: Literal["media"] = Field(..., examples=["media"])
-    known_version: ReadingKnownVersion | None
-
-
-class CheckNavigation(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["navigation"] = Field(..., examples=["navigation"])
-    known_version: ReadingKnownVersion | None
-
-
-class CheckStatus(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["status"] = Field(..., examples=["status"])
-    known_version: ReadingKnownVersion | None
-
-
-class CheckTheses(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    id: MaterialId
-    kind: Literal["theses"] = Field(..., examples=["theses"])
-    known_version: ReadingKnownVersion | None
 
 
 class ClientDiagnosticEvent(WireModel):
@@ -1895,14 +1813,6 @@ class ExternalAttachment(WireModel):
     title: StrictStr | None
 
 
-class FailedReadingResource(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    id: StrictStr = Field(..., min_length=1)
-    kind: ReadingResourceKind
-    message: StrictStr = Field(..., min_length=1)
-    state: Literal["failed"] = Field(..., examples=["failed"])
-
-
 class FeedActivity(WireModel):
     model_config = ConfigDict(extra="forbid")
     created: Timestamp | None = Field(
@@ -2242,57 +2152,6 @@ class QuotaWindow(WireModel):
     used_percent: StrictFloat = Field(..., ge=0.0, le=100.0)
 
 
-class ReadingCheck(
-    RootModel[
-        CheckStatus
-        | CheckNavigation
-        | CheckFeed
-        | CheckMaterial
-        | CheckFilter
-        | CheckTheses
-        | CheckMedia
-    ]
-):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: (
-        CheckStatus
-        | CheckNavigation
-        | CheckFeed
-        | CheckMaterial
-        | CheckFilter
-        | CheckTheses
-        | CheckMedia
-    ) = Field(
-        ..., discriminator="kind", examples=[{"kind": "status", "known_version": None}]
-    )
-
-
-class ReadingCheckRequest(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    resources: list[ReadingCheck] = Field(..., max_length=50000, min_length=1)
-    storage_id: ReadingStorageId | None
-
-
-class ReadingMediaData(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    attachments: list[Attachment]
-    external_attachments: list[ExternalAttachment] = Field(
-        default=[], validate_default=True
-    )
-    images: list[MediaUrl]
-    post_web_unavailable: StrictBool = Field(
-        default=False,
-        description="Source-confirmed restriction of the whole post through Telegram web; separate from external media.",
-    )
-    revision_id: RevisionId | None
-
-
-class ReadingReset(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    state: Literal["reset"] = Field(..., examples=["reset"])
-    storage_id: ReadingStorageId
-
-
 class ReadingTextContent(WireModel):
     model_config = ConfigDict(extra="forbid")
     availability: Literal["available"]
@@ -2463,6 +2322,23 @@ class SourceState(WireModel):
 class SourceUnavailableErrorDetails(WireModel):
     model_config = ConfigDict(extra="forbid")
     retry_at: Timestamp | None
+
+
+class StatusSummary(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    active_client_sessions: StrictInt = Field(..., ge=0, le=9007199254740991)
+    api_version: StrictStr = Field(..., pattern="^\\d+\\.\\d+\\.\\d+$")
+    collection: StatusProgress
+    diagnostic_count: StrictInt = Field(..., ge=0, le=9007199254740991)
+    diagnostic_persistence_error: StrictStr | None
+    enabled: StrictBool
+    lifetime: LifetimePolicy
+    problems: list[StatusProblem]
+    processing: StatusProgress
+    runtime_state: Literal["running", "disabled", "stopping", "stopped", "unavailable"]
+    sources: list[SourceState]
+    viewed_ids: list[MaterialId]
+    work_allowed: StrictBool
 
 
 class StorageUnavailableErrorDetails(WireModel):
@@ -2756,15 +2632,6 @@ class AvailablePublicationContent(WireModel):
     source_deleted: StrictBool
     text: StrictStr
     version: StrictInt = Field(..., ge=1, le=9007199254740991)
-
-
-class ChangedMediaResource(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    data: ReadingMediaData
-    id: StrictStr = Field(..., min_length=1)
-    kind: Literal["media"] = Field(..., examples=["media"])
-    state: Literal["changed"] = Field(..., examples=["changed"])
-    version: ReadingEntityVersion
 
 
 class ClientSessionExpiredError(WireModel):
@@ -3695,18 +3562,6 @@ class HistoryConflictErrorDetails(WireModel):
     history: HistoryState
 
 
-class ReadingFilterData(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    filter: FilterState
-    revision_id: RevisionId | None
-
-
-class ReadingThesesData(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    revision_id: RevisionId | None
-    theses: ThesesState
-
-
 class RecoveryIntent(
     RootModel[
         RecoveryConfigureProcessor
@@ -3907,33 +3762,6 @@ class AvailableReadingEntityMaterial(WireModel):
     source_position: SourcePosition | None
     source_url: SourceUrl
     title: StrictStr
-
-
-class ChangedFeedResource(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    data: SubscriptionFeed
-    id: StrictStr = Field(..., min_length=1)
-    kind: Literal["feed"] = Field(..., examples=["feed"])
-    state: Literal["changed"] = Field(..., examples=["changed"])
-    version: ReadingEntityVersion
-
-
-class ChangedFilterResource(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    data: ReadingFilterData
-    id: StrictStr = Field(..., min_length=1)
-    kind: Literal["filter"] = Field(..., examples=["filter"])
-    state: Literal["changed"] = Field(..., examples=["changed"])
-    version: ReadingEntityVersion
-
-
-class ChangedThesesResource(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    data: ReadingThesesData
-    id: StrictStr = Field(..., min_length=1)
-    kind: Literal["theses"] = Field(..., examples=["theses"])
-    state: Literal["changed"] = Field(..., examples=["changed"])
-    version: ReadingEntityVersion
 
 
 class CurrentProblem(WireModel):
@@ -4391,24 +4219,6 @@ class SubscriptionCatalog(WireModel):
     folders: list[SubscriptionFolder]
 
 
-class ChangedMaterialResource(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    data: ReadingEntityMaterial
-    id: StrictStr = Field(..., min_length=1)
-    kind: Literal["material"] = Field(..., examples=["material"])
-    state: Literal["changed"] = Field(..., examples=["changed"])
-    version: ReadingEntityVersion
-
-
-class ChangedStatusResource(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    data: RuntimeStatus
-    id: StrictStr = Field(..., min_length=1)
-    kind: Literal["status"] = Field(..., examples=["status"])
-    state: Literal["changed"] = Field(..., examples=["changed"])
-    version: ReadingEntityVersion
-
-
 class DuplicateSourceError(WireModel):
     model_config = ConfigDict(extra="forbid")
     code: Literal["duplicate_source"]
@@ -4541,40 +4351,6 @@ class ErrorEnvelope(
     )
 
 
-class ReadingResource(
-    RootModel[
-        ChangedStatusResource
-        | ChangedNavigationResource
-        | ChangedFeedResource
-        | ChangedMaterialResource
-        | ChangedFilterResource
-        | ChangedThesesResource
-        | ChangedMediaResource
-        | UnchangedReadingResource
-        | UnavailableReadingResource
-        | FailedReadingResource
-    ]
-):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: (
-        ChangedStatusResource
-        | ChangedNavigationResource
-        | ChangedFeedResource
-        | ChangedMaterialResource
-        | ChangedFilterResource
-        | ChangedThesesResource
-        | ChangedMediaResource
-        | UnchangedReadingResource
-        | UnavailableReadingResource
-        | FailedReadingResource
-    ) = Field(
-        ...,
-        examples=[
-            {"id": "runtime", "kind": "status", "state": "unchanged", "version": "1"}
-        ],
-    )
-
-
 class TelegramConnect409Errors(
     RootModel[
         AccessImmutableError
@@ -4633,13 +4409,6 @@ class CommandReceiptFailed(WireModel):
     updated_at: Timestamp
 
 
-class ReadingFrame(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    resources: list[ReadingResource]
-    state: Literal["current"] = Field(..., examples=["current"])
-    storage_id: ReadingStorageId
-
-
 class CommandReceipt(
     RootModel[
         CommandReceiptPending
@@ -4669,21 +4438,6 @@ class CommandReceipt(
                 "id": "example",
                 "outcome": "pending",
                 "updated_at": "2026-10-15T10:00:00Z",
-            }
-        ],
-    )
-
-
-class ReadingCheckResponse(RootModel[ReadingFrame | ReadingReset]):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: ReadingFrame | ReadingReset = Field(
-        ...,
-        discriminator="state",
-        examples=[
-            {
-                "resources": [],
-                "state": "current",
-                "storage_id": "3f003741-d0c7-4e62-8d12-55fb652f404a",
             }
         ],
     )

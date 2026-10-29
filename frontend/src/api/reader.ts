@@ -1,7 +1,7 @@
 import {randomId} from '../browser-platform';
 import {createClient} from './generated/client';
 import {status as runtimeStatus, createClientSession, renewClientSession, closeClientSession, stop, collect, setPower} from './generated/sdk.gen';
-import type {CommandContext,RuntimeStatus} from './generated/types.gen';
+import type {CommandContext,StatusSummary} from './generated/types.gen';
 import {ReaderError,decodeJson} from './errors';
 import {isBinaryOperation} from './generated/media.gen';
 export {ReaderError} from './errors';
@@ -16,8 +16,8 @@ export type ActionTracker = {
 export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch: typeof fetch; token: string | null; origin: string; onError?:(error:unknown, source:string)=>void}) {
   let tracker: ActionTracker | undefined;
   const reported = new WeakSet<object>();
-  let versionCheck: Promise<RuntimeStatus> | undefined;
-  async function compatible(): Promise<RuntimeStatus> {
+  let versionCheck: Promise<StatusSummary> | undefined;
+  async function compatible(): Promise<StatusSummary> {
     if (!versionCheck) versionCheck = runtimeStatus({client}).then(reply => {
       if (reply.data.api_version.split('.')[0] !== '3') throw new ReaderError('Unsupported Oko API version');
       return reply.data;
@@ -47,7 +47,7 @@ export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch
         if (error instanceof ReaderError && error.code==='storage_changed' && url.pathname.startsWith('/api/v3/publication/')) throw error;
         if (onError && !['/api/v3/diagnostics','/api/v3/command-observations'].includes(url.pathname) && !url.pathname.startsWith('/api/v3/commands/')) {
           if (error instanceof Error) {
-            Object.assign(error,{materialIds:url.pathname.startsWith('/api/v3/materials/') ? [url.pathname.split('/')[4]] : url.pathname.startsWith('/api/v3/reading/materials/') ? [url.pathname.split('/')[5]] : []});
+            Object.assign(error,{materialIds:url.pathname.startsWith('/api/v3/materials/') ? [url.pathname.split('/')[4]] : url.pathname.startsWith('/api/v3/publication/') ? [url.pathname.split('/')[4]] : []});
             reported.add(error);
           }
           onError(error,request.method+' '+url.pathname);
@@ -69,7 +69,7 @@ export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch
     },
     setActionTracker(value:ActionTracker) {tracker = value;},
     wasReported(error:unknown) {return typeof error === 'object' && error !== null && reported.has(error);},
-    async status(signal?: AbortSignal): Promise<RuntimeStatus> {
+    async status(signal?: AbortSignal): Promise<StatusSummary> {
       const reply = await runtimeStatus({client, signal});
       return reply.data;
     },

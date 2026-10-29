@@ -23,9 +23,9 @@ def test_card_does_not_construct_opened_material(tmp_path, monkeypatch):
         card = next(card for card in response.json()['items'] if card['id']==item)
         assert 'snippet' not in card and 'text' not in card
         assert opened == [], 'Card read constructed the full opened material'
-        response = client.get('/api/v3/reading/materials/' + item)
+        response = client.get('/api/v3/publication/' + item)
         assert response.status_code == 200
-        assert any(r['kind'] == 'material' and r['state'] == 'changed' for r in response.json()['resources'])
+        assert response.json()['id'] == item
         assert item in opened
 
 
@@ -56,8 +56,8 @@ def test_card_keeps_linked_preview_without_mutating_opened_material(tmp_path):
         assert 'snippet' not in card and 'text' not in card
         assert card['changed'] is True
         assert card['preview_url'] == '/api/v3/materials/child/media/image.png'
-        opened = client.get('/api/v3/reading/materials/'+item).json()
-        material = next(r['data'] for r in opened['resources'] if r['kind']=='material')
-        assert 'Linked body' in material['content']['text']
+        opened = client.get('/api/v3/publication/'+item).json()
+        material = opened
+        assert 'Linked body' in material['text']
         repeated = client.get('/api/v3/cards').json()
         assert next(c for c in repeated['items'] if c['id']==item) == card

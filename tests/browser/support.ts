@@ -39,7 +39,7 @@ async function reader() {
       };
       const youtube=(value:unknown)=>{const v=value as import('./scenario-data').YouTube|undefined;return {mode:v?.mode||'direct',address:v?.address||'',has_username:!!v?.has_username,has_password:!!v?.has_password,admission:v?.paused?'paused':v?.next_at?'waiting':'ready',retry_at:v?.next_at?new Date(v.next_at*1000).toISOString():null,strikes:v?.strikes||0,reason:v?.reason?'youtube_rate_limited':null};};
       const v3Reply=(url:string,method:string,body:unknown):unknown=>{
-        if(url==='/api/v3/status'){
+        if(url==='/api/v3/status'||url==='/api/v3/status/details'){
           if(body&&typeof body==='object'&&'api_version'in body&&'runtime_state'in body)return body;
           const v=body as import('./scenario-data').Status;
           const problem=(p:import('./scenario-data').Problem)=>{
@@ -110,7 +110,7 @@ async function reader() {
       const entityVersions=new Map<string,{version:number;json:string}>();
       async function fixtureRead(url:string) {
         if(held.has(url)){const result=await new Promise<Response>(resolve=>pending.set(url,resolve)),body=await result.json();if(!result.ok)throw new Error(body.message||body.detail||'Synthetic reading failure');return body;}
-        const pathname=url.split('?')[0],reply=replies.get('GET '+url)||replies.get(url)||replies.get('GET '+pathname)||replies.get(pathname);
+        const pathname=url.split('?')[0],reply=replies.get('GET '+url)||replies.get(url)||replies.get('GET '+pathname)||replies.get(pathname)||(pathname==='/api/v3/status/details'?replies.get('/api/v3/status'):undefined);
         if(!reply)throw new Error('Missing selective fixture: '+url);
         for(const [route,next] of reply.next||[])replies.set(route,next);
         const result=await response(url,'GET',reply.body,reply.status||200),body=await result.json();
@@ -118,47 +118,6 @@ async function reader() {
         return body;
       }
       const storageId='3f003741-d0c7-4e62-8d12-55fb652f404a';
-      async function selective(request:import('../../frontend/src/api/generated/types.gen').ReadingCheckRequest) {
-        type Resource=import('../../frontend/src/api/generated/types.gen').ReadingResource;
-        type Material=import('../../frontend/src/api/generated/types.gen').ReadableMaterial;
-        const resources:Resource[]=[],added=new Set<string>();
-        const changed=(kind:Resource['kind'],id:string,data:unknown,known:string|null)=>{
-          const key=kind+'/'+id;if(added.has(key))return;added.add(key);
-          const json=JSON.stringify(data),old=entityVersions.get(key),version=old?(old.json===json?old.version:old.version+1):1;
-          entityVersions.set(key,{version,json});
-          resources.push(known===String(version)?{kind,id,state:'unchanged',version:String(version)}:{kind,id,state:'changed',version:String(version),data} as Resource);
-        };
-        let catalog:import('../../frontend/src/api/generated/types.gen').ReadingComposition|undefined;
-        const navigation=async():Promise<import('../../frontend/src/api/generated/types.gen').ReadingComposition>=>catalog??=await fixtureRead('/api/v3/reading-composition');
-        const opened=new Map<string,Material>();
-        async function material(id:string){if(!opened.has(id))opened.set(id,await fixtureRead('/api/v3/materials/'+id));return opened.get(id)!;}
-
-        if(request.storage_id&&request.storage_id!==storageId)return {state:'reset',storage_id:storageId};
-        for(const item of request.resources){
-          const kind=item.kind;
-          if(kind==='status')changed(kind,'runtime',await fixtureRead('/api/v3/status'),item.known_version);
-          else if(kind==='navigation'){
-            const nav=await navigation();
-            changed(kind,'navigation',{...nav,folders:nav.folders.map(f=>({...f,version:'1'})),feeds:nav.feeds.map(f=>({id:f.feed.id,count:f.count,has_unviewed:f.has_unviewed}))},item.known_version);
-            for(const ref of nav.feeds){const known=request.resources.find(r=>r.kind==='feed'&&r.id===ref.feed.id);changed('feed',ref.feed.id,ref.feed,known?.known_version??null);}
-          }else if(kind==='feed'){
-            const feed=(await navigation()).feeds.find(f=>f.feed.id===item.id)?.feed;
-            if(feed)changed(kind,item.id,feed,item.known_version);
-            else resources.push({kind,id:item.id,state:'unavailable',version:null,reason:'not_found'});
-          }else{
-            const m=await material(item.id),revision=m.availability==='available'?m.content.revision_id:null;
-            if(kind==='filter')changed(kind,item.id,{revision_id:revision,filter:m.filter},item.known_version);
-            else if(kind==='theses')changed(kind,item.id,{revision_id:revision,theses:m.theses},item.known_version);
-            else if(kind==='media')changed(kind,item.id,{revision_id:revision,images:m.availability==='available'?m.content.images:[],attachments:m.availability==='available'?m.content.attachments:[]},item.known_version);
-            else{
-              const {feed_title,folder_id,importance,snippet,filter,theses,...text}=m;
-              if(text.availability==='available'){const {images,attachments,display_text,...content}=text.content;text.content=content as typeof text.content;}
-              changed(kind,item.id,text,item.known_version);
-            }
-          }
-        }
-        return {state:'current',storage_id:storageId,resources};
-      }
       window.fetch = async (url, options) => {
         const key = String(url);
         window.readerTransport.requests.push({url: key, method: options?.method || 'GET', body: options?.body ? JSON.parse(String(options.body)) : null});
@@ -194,8 +153,28 @@ async function reader() {
           const etag='"'+version+'"';if(new Headers(options?.headers).get('If-None-Match')===etag)return new Response(null,{status:304,headers:{ETag:etag}});
           const result=await response(key,'GET',body);result.headers.set('ETag',etag);return result;
         }
-        if(key==='/api/v3/reading/check')return response(key,'POST',await selective(JSON.parse(String(options?.body))));
-        if(key.startsWith('/api/v3/reading/materials/')){const id=key.split('/')[5];return response(key,'GET',await selective({storage_id:null,resources:(['material','filter','theses','media'] as const).map(kind=>({kind,id,known_version:null}))}));}
+        if(key==='/api/v3/navigation'){
+          const catalog=await fixtureRead('/api/v3/reading-composition') as import('../../frontend/src/api/generated/types.gen').ReadingComposition;
+          const body={total:catalog.count,folders:catalog.folders.map(folder=>({id:folder.id,title:folder.title,count:folder.count,
+            feeds:catalog.feeds.filter(entry=>entry.feed.folder_id===folder.id).map(entry=>({id:entry.feed.id,title:entry.feed.title,
+              avatar_url:'avatar_url' in entry.feed?entry.feed.avatar_url??null:null,count:entry.count,kind:entry.feed.kind,
+              has_unviewed:entry.has_unviewed,connection:entry.feed.connection,
+              telegram_access:entry.feed.kind==='telegram'?entry.feed.access.kind:null}))}))};
+          const json=JSON.stringify(body),old=entityVersions.get('navigation/subject'),version=old?(old.json===json?old.version:old.version+1):1;
+          entityVersions.set('navigation/subject',{version,json});const etag='"'+version+'"';
+          if(new Headers(options?.headers).get('If-None-Match')===etag)return new Response(null,{status:304,headers:{ETag:etag}});
+          const result=await response(key,'GET',body);result.headers.set('ETag',etag);return result;
+        }
+        if(key==='/api/v3/status'||key==='/api/v3/status/details'){
+          const value=await fixtureRead('/api/v3/status/details') as import('../../frontend/src/api/generated/types.gen').RuntimeStatus;
+          const progress=(phase:string)=>{const entries=value.work.flatMap(w=>(w.phase==='collecting'||w.phase==='processing')&&w.phase===phase?[w.progress]:[]);return {state:entries.length?'running':'idle',completed:entries.reduce((n,p)=>n+p.completed,0),total:entries.some(p=>p.total===null)?null:entries.reduce((n,p)=>n+(p.total??0),0)};};
+          const {work,initial_histories,telegram_reads,youtube,ready_sources,total_sources,problems,...base}=value;
+          const body=key.endsWith('/details')?value:{...base,enabled:value.runtime_state!=='disabled',collection:progress('collecting'),processing:progress('processing'),problems:problems.current.map(p=>({id:p.id,message:p.message,feed_id:p.affected.find(r=>r.kind==='feed')?.feed_id??null}))};
+          const json=JSON.stringify(body),old=entityVersions.get(key),version=old?(old.json===json?old.version:old.version+1):1;
+          entityVersions.set(key,{version,json});const etag='"'+version+'"';
+          if(new Headers(options?.headers).get('If-None-Match')===etag)return new Response(null,{status:304,headers:{ETag:etag,'X-Oko-Storage-Id':storageId}});
+          const result=await response(key,'GET',body);result.headers.set('ETag',etag);result.headers.set('X-Oko-Storage-Id',storageId);return result;
+        }
         if (held.has(key)) return new Promise(resolve => pending.set(key, resolve));
         const method = options?.method || 'GET', pathname = key.split('?')[0];
         const reply = replies.get(method + ' ' + key) || replies.get(key) || replies.get(method + ' ' + pathname) || replies.get(pathname);
@@ -217,7 +196,7 @@ async function reader() {
         const t = window.readerTransport;
         t.replies.set('/api/v3/status', {body: {stage: 'Готово', errors: [], sources: [], ready_sources: 1, total_sources: 1}});
         t.replies.set('/api/v3/folders', {body: [{id: 'f', title: 'Тема', count: 0}]});
-        t.replies.set('/api/v3/reading-composition', {body: {folders: [{id:'f',title:'Тема',count:0}], feeds:[...new Map(materials.map(m=>[m.feed_id,{id:m.feed_id,title:m.feed_title||m.feed_id,folder_id:m.folder_id||'f',kind:'rss',count:0}])).values()], count:0}});
+        t.replies.set('/api/v3/reading-composition', {body: {folders: [...new Set(['f',...materials.map(m=>m.folder_id||'f')])].map(id=>({id,title:id==='f'?'Тема':id,count:0})), feeds:[...new Map(materials.map(m=>[m.feed_id,{id:m.feed_id,title:m.feed_title||m.feed_id,folder_id:m.folder_id||'f',kind:'rss',count:0}])).values()], count:0}});
         t.replies.set('/api/v3/processors/codex', {body:{config:null}});
         t.replies.set('/api/v3/youtube', {body:{mode:'direct', address:'', has_password:false, has_username:false, paused:false, next_at:0, strikes:0, reason:''}});
         t.replies.set('/api/v3/processors/codex/models', {body:{models:[]}});

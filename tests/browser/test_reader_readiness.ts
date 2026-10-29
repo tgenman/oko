@@ -10,7 +10,7 @@ test('opening reader waits for actual browser registration before source command
  const opening=r.openReader().then(()=>{opened=true;});
  try{
   await requested;await r.page.waitForLoadState('load');
-  assert.equal((await r.api('v3/status')).active_client_sessions,0);
+  assert.equal((await r.api('v3/status/details')).active_client_sessions,0);
   assert.equal(opened,false,'openReader must keep waiting while registration is held');
   release();await opening;
   await r.api('v3/telegram/connect','POST',{source_locator:'@postunavailable',folder:'News'});

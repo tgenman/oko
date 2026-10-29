@@ -7,7 +7,7 @@ test('reader header keeps every action beside Oko and progress below on desktop'
   try {
     await r.page.setViewportSize({width:1440,height:900});
     await r.start([material('one',{title:'Кто быстрее?',snippet:'Три одинаковые бутылки скатываются с горки.',changed:true,feed_title:'GetAClass'})]);
-    const state=await r.api('v3/status');
+    const state=await r.api('v3/status/details');
     state.work=[{phase:'processing',operation:'theses',progress:{completed:0,total:10}},{phase:'processing',operation:'filter',progress:{completed:0,total:10}},{phase:'collecting',feed_id:null,progress:{completed:0,total:10}},{phase:'deleting',feed_id:null,progress:{completed:0,total:10}},{phase:'waiting',reason:'retry_scheduled',retry_at:null}];
     await r.page.evaluate(state=>readerTransport.replies.set('/api/v3/status',{body:state}),state);
     await expect(r.page.locator('#progress')).toContainText('Сейчас источники не обновляются');

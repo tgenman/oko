@@ -29,8 +29,8 @@ for(const perFeed of [26,100] as const)for(const active of [false,true]){
   await expect(r.page.locator('#cards [data-card]')).toHaveCount(40);
   await expect(r.page.locator('#count')).toHaveText(String(perFeed*4));
   if(active){
-    let state=await r.api('status');
-    try {await expect.poll(async()=>{state=await r.api('status');return state.work.some(w=>w.phase==='processing');},{timeout:20000}).toBe(true);}
+    let state=await r.api('status/details');
+    try {await expect.poll(async()=>{state=await r.api('status/details');return state.work.some(w=>w.phase==='processing');},{timeout:20000}).toBe(true);}
     catch(error){console.log('PROCESSING_NOT_READY',JSON.stringify(state),JSON.stringify(await r.api('diagnostics')));throw error;}
   }
   const ids=await r.page.locator('#cards [data-card]').evaluateAll(nodes=>nodes.slice(0,40).map(n=>(n as HTMLElement).dataset.card!));
@@ -42,7 +42,7 @@ for(const perFeed of [26,100] as const)for(const active of [false,true]){
       await r.page.locator(`[data-card="${id}"]`).click();
       await r.page.waitForFunction(expected=>window.readingBenchmark.samples.length===expected,++expected,{polling:'raf'});
     }
-    work.push((await r.api('status')).work);
+    work.push((await r.api('status/details')).work);
   }
   const samples=await r.page.evaluate(()=>window.readingBenchmark.samples);
   const result={materials:perFeed*4,active,work,samples,series:(['first','repeat'] as const).map(phase=>{

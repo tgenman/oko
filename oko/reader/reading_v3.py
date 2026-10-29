@@ -1,6 +1,8 @@
 from oko.execution import read_locked
 """Typed reading projection and HTTP adapter over the existing reading lifecycle."""
 from oko.storage.reading import reading_snapshot
+import hashlib
+import json
 from pathlib import Path
 from collections.abc import Callable
 from typing import Literal, TypedDict
@@ -8,7 +10,7 @@ from typing import Literal, TypedDict
 from oko.reader.http_schemas import SchemaRoute
 
 from fastapi import APIRouter, Body, Depends, FastAPI, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from oko.reader.media_response import OpenMediaResponse
 
 from oko.reader import projection_v3 as project
@@ -186,6 +188,30 @@ def register(app: FastAPI, runtime: ReaderApplication) -> Callable[[str], wire.R
         owners = feeds()
         return wire.ReadingComposition(count=value.count, folders=[wire.ReadingFolder(id=wire.FolderId(f.id), title=f.title, position=f.position if isinstance(f.position, int) else 0, count=f.count) for f in value.folders], feeds=[wire.NavigationFeed(feed=owners[f.id], count=f.count, has_unviewed=f.has_unviewed) for f in value.feeds])
 
+    @router.get('/api/v3/navigation')
+    @read_locked(runtime.execution)
+    async def navigation_view(request: Request) -> Response:
+        with reading_snapshot():
+            snapshot = composition().model_dump(mode='json')
+            groups = [dict(id=folder['id'],title=folder['title'],count=folder['count'],feeds=[])
+                      for folder in snapshot['folders']]
+            by_id = {folder['id']:folder for folder in groups}
+            for entry in snapshot['feeds']:
+                feed = entry['feed']
+                group = by_id.get(feed['folder_id'])
+                if group is not None:
+                    group['feeds'].append(dict(id=feed['id'],title=feed['title'],avatar_url=feed.get('avatar_url'),
+                        count=entry['count'],kind=feed['kind'],has_unviewed=entry['has_unviewed'],connection=feed['connection'],
+                        telegram_access=feed.get('access',{}).get('kind')))
+            for group in groups:
+                group['feeds'].sort(key=lambda feed:(feed['title'].casefold(),feed['id']))
+            body = wire.NavigationResponse.model_validate(dict(total=snapshot['count'],folders=groups)).model_dump(mode='json')
+            encoded = json.dumps(body,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()
+            etag = '"'+hashlib.sha256(runtime.queries.versions.identity.encode()+b'\0'+encoded).hexdigest()+'"'
+            if request.headers.get('if-none-match') == etag:
+                return Response(status_code=304,headers={'ETag':etag,'X-Oko-Storage-Id':runtime.queries.versions.identity})
+            return JSONResponse(body,headers={'ETag':etag,'X-Oko-Storage-Id':runtime.queries.versions.identity})
+
     @router.get('/api/v3/reading-composition', response_model=wire.ReadingComposition)
     @read_locked(runtime.execution)
     async def navigation() -> wire.ReadingComposition:
@@ -282,7 +308,8 @@ def register(app: FastAPI, runtime: ReaderApplication) -> Callable[[str], wire.R
             if raw is None:
                 raise missing(wire.AffectedResource(wire.MaterialResource(kind='material', material_id=identity(item))))
             value = facts.Material.model_validate(raw)
-            owner = feeds(value.feed_id)[value.feed_id]
+            raw_feed,binding = current.feed(value.feed_id)
+            owner = project.subscription(facts.SubscriptionFeed.model_validate(raw_feed),binding)
             from oko.storage.composition import snippet
             data = value.model_dump(exclude_unset=True)
             for key in ('text', 'description', 'display_text', 'reply_preview', 'linked_content'):

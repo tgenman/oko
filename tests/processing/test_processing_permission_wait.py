@@ -23,9 +23,9 @@ def test_forbidden_processing_waits_for_settings_without_errors_or_timed_retry(t
         # The counter below covers every Demo publication, not just the first.
         blocked = wait_for(client, blocked_materials)
         assert all(m['theses']['attempt']['retry_at'] is None for m in blocked)
-        assert client.get('/api/v3/status').json()['diagnostic_count'] == 0
-        assert all(w.get('retry_at') is None for w in client.get('/api/v3/status').json()['work'] if w.get('reason') == 'public_ai_not_allowed')
-        assert not any(p['code'] == 'public_ai_not_allowed' for p in client.get('/api/v3/status').json()['problems']['current'])
+        assert client.get('/api/v3/status/details').json()['diagnostic_count'] == 0
+        assert all(w.get('retry_at') is None for w in client.get('/api/v3/status/details').json()['work'] if w.get('reason') == 'public_ai_not_allowed')
+        assert not any(p['code'] == 'public_ai_not_allowed' for p in client.get('/api/v3/status/details').json()['problems']['current'])
         from tests.support.storage import database
         with database(tmp_path) as db:
             before = db.execute("SELECT sum(attempt) FROM jobs WHERE kind='theses'").fetchone()[0]

@@ -15,6 +15,6 @@ test('supported Telegram text ignores the hidden fallback and remains fully save
  await expect(page.locator('#external-attachments')).toBeEmpty();
  await expect(page.locator('#completeness')).toHaveText('Fully saved');
  await expect(page.locator('#retry')).toBeHidden();
- await expect.poll(async()=>(await api('status')).problems.count).toBe(0);
+ await expect.poll(async()=>(await api('status/details')).problems.count).toBe(0);
  await page.screenshot({path:artifactPath('telegram-hidden-fallback.png')});
 });

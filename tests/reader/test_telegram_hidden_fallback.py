@@ -26,7 +26,7 @@ def test_hidden_fallback_is_ignored_but_active_restriction_is_not(tmp_path, acti
         assert content['post_web_unavailable'] is False
         state = client.get('/api/v3/collection-status/' + added['feed_id']).json()['source']
         assert state['state'] == ('error' if active else 'complete')
-        assert client.get('/api/v3/status').json()['problems']['count'] == (1 if active else 0)
+        assert client.get('/api/v3/status/details').json()['problems']['count'] == (1 if active else 0)
 
 
 def test_existing_false_error_clears_without_inventing_an_author_edit(tmp_path):
@@ -46,7 +46,7 @@ def test_existing_false_error_clears_without_inventing_an_author_edit(tmp_path):
         assert content['completeness']['state'] == 'complete'
         assert 'previous_versions' not in content
         assert content['changed'] is False
-        assert client.get('/api/v3/status').json()['problems']['count'] == 0
+        assert client.get('/api/v3/status/details').json()['problems']['count'] == 0
 
 
 def test_forward_only_standalone_placeholder_saves_confirmed_restriction(tmp_path):
@@ -61,7 +61,7 @@ def test_forward_only_standalone_placeholder_saves_confirmed_restriction(tmp_pat
         assert content['post_web_unavailable'] is False
         assert content['completeness']['state'] == 'incomplete'
         assert 'Forwarded from' in content['text']
-        assert client.get('/api/v3/status').json()['problems']['count'] == 0
+        assert client.get('/api/v3/status/details').json()['problems']['count'] == 0
         assert 'Фрагмент предпросмотра' in content['linked_content']['post_text'] or 'фрагмент предпросмотра' in content['linked_content']['post_text']
 
 

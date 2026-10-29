@@ -126,8 +126,8 @@ def test_completion_preserves_unreadable_and_pending_members(tmp_path, corruptio
         assert cards[pending]['loading']
         healthy=next(card for identity,card in cards.items() if identity not in (damaged,pending))
         assert healthy['title']!='Публикация недоступна'
-        opened=client.get('/api/v3/reading/materials/'+healthy['id']).json()
-        assert next(r['data'] for r in opened['resources'] if r['kind']=='material')['content']['text']
+        opened=client.get('/api/v3/publication/'+healthy['id']).json()
+        assert opened['text']
         preview = client.post('/api/v3/feeds/demo/completion/preview').json()
         assert preview['cards_count'] == 3
         assert preview['publications_count'] == 3

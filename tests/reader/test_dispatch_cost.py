@@ -96,7 +96,7 @@ def test_status_of_pending_files_does_not_query_each_publication(tmp_path):
         store.db.close()
         app=traced_app(root)
         with TestClient(app,headers=HEADERS) as client,ReadingMeasurements(client,app,root) as measure:
-            response,cost=measure.request('status','GET','/api/v3/status')
+            response,cost=measure.request('status','GET','/api/v3/status/details')
             assert response.json()['problems']['count']==0
             costs.append(cost)
     assert costs[1]['sql']<=costs[0]['sql']+10,costs

@@ -87,7 +87,7 @@ def settled(client, count=1, timeout=4):
         if len(cards) == count and all(not c['loading'] for c in cards):
             return cards
         time.sleep(.02)
-    raise AssertionError(client.get('/api/v3/status').json())
+    raise AssertionError(client.get('/api/v3/status/details').json())
 
 
 def connected_feed(client, response):

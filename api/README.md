@@ -116,3 +116,14 @@ Description относится к внешнему источнику. Откр�
 `GET /api/v3/publication/{id}` возвращает исходный текст, фильтрацию, тезисы
 и сведения о медиа одним ответом с ETag. Подробности и состояния обработки:
 [контракт публикации](../docs/architecture/publication-http-design.md).
+
+
+## Предметные запросы вместо reading/check (#177)
+
+`GET /navigation` возвращает вложенные папки и фиды. `GET /status` — краткое
+состояние, текущие проблемы и данные допуска/жизненного цикла.
+`GET /status/details` — подробности для открытой панели статуса или настроек.
+Каждый GET поддерживает собственные ETag / If-None-Match и пустой ответ 304.
+`POST /reading/check` и `GET /reading/materials/{item}` больше не зарегистрированы;
+используются `GET /cards` и уже существующий `GET /publication/{item}`.
+Подробности решения: [human](../docs/human/navigation-and-status.md).
