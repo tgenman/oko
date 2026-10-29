@@ -529,3 +529,25 @@ def test_telegram_sync_migration_preserves_pending_feeds(connections):
         names = ['telegram_read_initial_added','telegram_read_initial_changed','telegram_read_item_added','telegram_read_item_changed','telegram_read_member_insert','telegram_read_member_update']
         assert db.execute('SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname=ANY(%s)', (names,)).fetchone() == (0,)
         verify(db, MIGRATIONS)
+
+
+def test_telegram_read_reasons_migrate_without_losing_facts(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:17])
+        db.execute("INSERT INTO telegram_read_members(feed,member,eligible,reason,missing) VALUES ('feed',1,1,'saved',0),('feed',2,1,'viewed',0),('feed',3,0,NULL,1)")
+        migrate(db, MIGRATIONS)
+        assert db.execute('SELECT member,saved,viewed,missing FROM telegram_read_members ORDER BY member').fetchall() == [(1,True,False,0),(2,False,True,0),(3,False,False,1)]
+        verify(db, MIGRATIONS)
+
+
+@pytest.mark.parametrize(('eligible','reason'), [(1,'unexpected'), (2,'saved'), (None,None)])
+def test_telegram_read_reasons_reject_unknown_eligible_reason(connections, eligible, reason):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:17])
+        db.execute("INSERT INTO telegram_read_members(feed,member,eligible,reason) VALUES ('feed',1,%s,%s)", (eligible,reason))
+        with pytest.raises(psycopg.errors.RaiseException, match='invalid Telegram read eligibility reason'):
+            migrate(db, MIGRATIONS)
+        assert db.execute('SELECT eligible,reason FROM telegram_read_members').fetchone() == (eligible,reason)
+        verify(db, MIGRATIONS[:17])

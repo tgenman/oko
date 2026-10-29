@@ -231,3 +231,13 @@
 - Catalog measurement after version 17: 29 tables and 116 non-internal triggers.
   The current read-sync pass still has the legacy saved-content scan and the
   target separate saved/viewed eligibility facts remain unfinished.
+- Migration 018 separates saved and viewed Telegram read reasons, preserving
+  legacy eligible rows and refusing unknown eligibility values or reasons.
+  Recording a saved message no longer overwrites an explicit viewed reason;
+  disabling auto-read still admits explicitly viewed messages. The existing
+  status projection trigger is adapted and remains transitional.
+- The focused regression first failed because the independent columns did not
+  exist. After implementation, 102 Python tests and type checks passed, followed
+  by four migration checks for valid and malformed legacy facts. One Playwright
+  Telegram access scenario passed and its screenshot was inspected. The legacy
+  saved-content scan still remains and must be replaced by event-owned facts.

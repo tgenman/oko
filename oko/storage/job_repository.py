@@ -416,7 +416,7 @@ class JobRepository:
                         for start in range(0,len(members),500):
                             part = members[start:start+500]
                             member_marks = ','.join('%s' for _ in part)
-                            eligible.update(r[0] for r in db.execute(f'SELECT member FROM telegram_read_members WHERE feed = %s AND eligible = 1 AND member IN ( {member_marks} )', (feed,*part)))
+                            eligible.update(r[0] for r in db.execute(f'SELECT member FROM telegram_read_members WHERE feed = %s AND saved AND member IN ( {member_marks} )', (feed,*part)))
                         saved = []
                         from oko.storage.reading import reading_snapshot
                         with reading_snapshot(), material_read.material_inputs(db,{row['id'] for row in rows}):

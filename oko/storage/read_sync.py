@@ -61,8 +61,10 @@ class ReadSync:
                        [(feed, member) for member in members])
 
     def eligible(self, feed: str, members: list[int], reason: str) -> None:
-        self.store.db.executemany('INSERT INTO telegram_read_members ( feed , member , eligible , reason ) VALUES ( %s , %s , 1 , %s ) ON CONFLICT ( feed , member ) DO UPDATE SET eligible = 1 , reason = excluded . reason',
-                                  [(feed, member, reason) for member in members])
+        if reason not in ('saved', 'viewed'):
+            raise ValueError('Invalid Telegram read reason')
+        self.store.db.executemany(f'INSERT INTO telegram_read_members (feed,member,{reason}) VALUES (%s,%s,true) ON CONFLICT (feed,member) DO UPDATE SET {reason}=true WHERE NOT telegram_read_members.{reason}',
+                                  [(feed, member) for member in members])
         if members:
             self.mark_feed(feed)
 
@@ -88,7 +90,7 @@ class ReadSync:
                     username=config.get('telegram_username'), since=state['since'],
                     initial=state['initial'], read_history=config['read_history'], auto_read=config['auto_read'],
                     eligible=[r[0] for r in self.store.db.execute(
-                        "SELECT member FROM telegram_read_members WHERE feed = %s AND eligible = 1 AND missing = 0 AND ( %s = 1 OR reason = 'viewed' ) ORDER BY member", (feed, config['auto_read']))])
+                        'SELECT member FROM telegram_read_members WHERE feed = %s AND missing = 0 AND ( viewed OR ( %s = 1 AND saved ) ) ORDER BY member', (feed, config['auto_read']))])
 
     def signature(self, request: dict[str, Any]) -> str:
         return json.dumps({k: v for k, v in request.items() if k != 'initial'}, sort_keys=True)

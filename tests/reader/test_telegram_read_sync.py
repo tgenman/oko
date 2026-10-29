@@ -221,6 +221,31 @@ def test_new_read_sync_signal_survives_an_in_progress_pass(tmp_path):
         assert client.portal.call(check)
 
 
+def test_saved_and_viewed_are_independent_read_reasons(tmp_path):
+    network = ReadTelegram()
+    app = create_app(tmp_path, token='test', telegram_client=network)
+    with TestClient(app, headers=H) as client:
+        presence(client, 'test')
+        feed = connect(client, count=2)['id']
+        settled(client, 2)
+        assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
+        assert client.patch('/api/v3/feeds/'+feed, json={'auto_read':False}).status_code == 200
+
+        async def check():
+            async with app.state.host.execution._actions:
+                store = app.state.host.require_store()
+                with store.db:
+                    store.read_sync.eligible(feed, [11], 'viewed')
+                    store.read_sync.eligible(feed, [11], 'saved')
+                row = store.db.execute('SELECT saved,viewed FROM telegram_read_members WHERE feed=%s AND member=11', (feed,)).fetchone()
+                request = store.read_sync.request(feed)
+                return tuple(row), request['eligible'] if request else None
+
+        reasons, eligible = client.portal.call(check)
+        assert reasons == (True, True)
+        assert 11 in eligible
+
+
 def test_unknown_ack_result_recovers_without_content_after_restart(tmp_path):
     network = ReadTelegram()
     network.history = network.history[:1]

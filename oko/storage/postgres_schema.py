@@ -22,4 +22,5 @@ MIGRATIONS = (
     Migration(15, 'receipt-cleanup', (Path(__file__).parent / 'postgres' / '015-receipt-cleanup.sql').read_text()),
     Migration(16, 'reader-time', (Path(__file__).parent / 'postgres' / '016-reader-time.sql').read_text()),
     Migration(17, 'telegram-sync', (Path(__file__).parent / 'postgres' / '017-telegram-sync.sql').read_text()),
+    Migration(18, 'telegram-read-reasons', (Path(__file__).parent / 'postgres' / '018-telegram-read-reasons.sql').read_text()),
 )
