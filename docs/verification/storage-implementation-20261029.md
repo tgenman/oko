@@ -178,3 +178,14 @@
 - Catalog measurement on an empty database migrated through version 13: 35 tables
   and 138 non-internal triggers. Full target schema, direct event-driven Job
   scheduling and first-started-feed selection remain unfinished.
+- Migration 014 replaces `reader_material_links` with GIN indexes over the
+  authoritative journal objects and removes its six triggers/functions. It
+  rejects malformed bodies, unsupported object shapes, invalid material IDs,
+  and any mismatch between saved records and the old projection before dropping it.
+- The affected migration, receipt, problem, viewing and query-cost suites passed
+  101 Python tests, including the existing 5000-unrelated-receipts bound; 7
+  Playwright status/reader scenarios passed. An initial HTTP viewing check failed
+  before its consumer was moved and passed after the indexed lookup was connected.
+- Catalog measurement on an empty database migrated through version 14: 34 tables
+  and 132 non-internal triggers. Superseded-receipt cleanup and the remaining
+  reader projections are not yet moved.

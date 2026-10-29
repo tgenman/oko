@@ -1,8 +1,5 @@
-"""Indexed material references and superseded receipts, derived from journal rows.
-
-Triggers keep these projections in the same transaction, including legacy writes.
-Only initial migration scans the journal; its authoritative JSON stays unchanged.
-"""
+"""Indexed material references and superseded receipt cleanup."""
+import json
 from oko.storage.database import Database, Row
 
 
@@ -14,8 +11,9 @@ def material_records(db: Database, kind: str, members: set[str]) -> list[Row]:
     ids = sorted(members)
     for start in range(0, len(ids), 400):
         batch = ids[start:start + 400]
-        query = f"SELECT * FROM {table} WHERE id IN ( SELECT record FROM reader_material_links WHERE kind = %s AND item IN ( {','.join(('%s' for _ in batch))} ) )"
-        rows.update({r['id']: r for r in db.execute(query, [kind, *batch])})
+        query = f"SELECT * FROM {table} WHERE (body::jsonb->'objects') @> ANY(%s::jsonb[])"
+        needles = [json.dumps([dict(kind='material', id=identity)]) for identity in batch]
+        rows.update({r['id']: r for r in db.execute(query, (needles,))})
     return list(rows.values())
 
 

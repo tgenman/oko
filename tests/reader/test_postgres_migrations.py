@@ -413,3 +413,53 @@ def test_processing_input_migration_rejects_ambiguous_rows(connections, invalid)
             migrate(db, MIGRATIONS)
         assert db.execute(f'SELECT item FROM {table}').fetchone() == ('one',)
         verify(db, MIGRATIONS[:12])
+
+
+def test_journal_link_migration_preserves_material_references(connections):
+    import json
+    from oko.storage.postgres_schema import MIGRATIONS
+    body = json.dumps({'objects':[{'kind':'material','id':'item'},{'kind':'feed','id':'feed'}]})
+    with connections() as db:
+        migrate(db, MIGRATIONS[:13])
+        db.execute("INSERT INTO reader_action_results(id,identity,body,started,result) VALUES ('action','identity',%s,1,'failed')", (body,))
+        db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('problem','problem-identity','action',%s,1)", (body,))
+        assert db.execute("SELECT count(*) FROM reader_material_links WHERE item='item'").fetchone() == (2,)
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT to_regclass('reader_material_links')").fetchone() == (None,)
+        assert db.execute("SELECT id FROM reader_action_results WHERE (body::jsonb->'objects') @> %s::jsonb", ('[{"kind":"material","id":"item"}]',)).fetchall() == [('action',)]
+        assert db.execute("SELECT id FROM reader_problems WHERE (body::jsonb->'objects') @> %s::jsonb", ('[{"kind":"material","id":"item"}]',)).fetchall() == [('problem',)]
+        assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname LIKE 'journal_links_%'").fetchone() == (0,)
+        verify(db, MIGRATIONS)
+
+
+def test_journal_link_migration_rejects_inconsistent_projection(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:13])
+        db.execute("INSERT INTO reader_material_links VALUES ('action','missing','item')")
+        with pytest.raises(psycopg.errors.RaiseException, match='inconsistent journal links'):
+            migrate(db, MIGRATIONS)
+        assert db.execute('SELECT kind,record,item FROM reader_material_links').fetchone() == ('action','missing','item')
+        verify(db, MIGRATIONS[:13])
+
+
+@pytest.mark.parametrize('invalid', ['json', 'objects', 'material-id'])
+def test_journal_link_migration_rejects_unrepresentable_body(connections, invalid):
+    import json
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:13])
+        if invalid == 'json':
+            body = '{'
+            db.execute('ALTER TABLE reader_action_results DISABLE TRIGGER USER')
+        elif invalid == 'objects':
+            body = json.dumps({'objects': {'one': {'kind':'material', 'id':'item'}}})
+        else:
+            body = json.dumps({'objects': [{'kind':'material', 'id':123}]})
+        db.execute("INSERT INTO reader_action_results(id,identity,body,started,result) VALUES ('action','identity',%s,1,'failed')", (body,))
+        if invalid == 'json':
+            db.execute('ALTER TABLE reader_action_results ENABLE TRIGGER USER')
+        with pytest.raises(psycopg.errors.RaiseException, match='invalid journal'):
+            migrate(db, MIGRATIONS)
+        assert db.execute("SELECT body FROM reader_action_results WHERE id='action'").fetchone() == (body,)
+        verify(db, MIGRATIONS[:13])
