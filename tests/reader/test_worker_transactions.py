@@ -99,6 +99,33 @@ def test_new_input_rejects_old_success_and_old_error_without_harming_replacement
     asyncio.run(scenario())
 
 
+def test_changed_collection_updates_processing_job_in_same_transaction(tmp_path):
+    store, item, execution, tasks = worker_library(tmp_path)
+    try:
+        asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
+        before = dict(store.db.execute("SELECT generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone())
+        previous = saved(store,item)['content']
+        store.processing.background = True
+        material = StructuredSource(None).describe(store.publication(item), Material('Title','Changed synthetic text'))
+
+        def change():
+            CollectionService(execution.require_store).collected(item,material,manual=False)
+            after = dict(store.db.execute("SELECT generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone())
+            assert after['generation'] > before['generation']
+            assert after['input_snapshot'] != before['input_snapshot']
+
+        with pytest.raises(ValueError, match='synthetic rollback'):
+            with transaction(store.db):
+                change()
+                raise ValueError('synthetic rollback')
+        assert saved(store,item)['content'] == previous
+        assert dict(store.db.execute("SELECT generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()) == before
+        with transaction(store.db):
+            change()
+    finally:
+        store.db.close()
+
+
 def test_claim_and_saved_context_are_one_transaction_and_survive_restart(tmp_path):
     store,item,execution,tasks=worker_library(tmp_path)
     asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
@@ -311,7 +338,7 @@ def test_new_revision_does_not_shorten_source_wait(tmp_path):
     store.db.close()
 
 
-def test_input_changed_during_adapter_check_cancels_without_leaving_open_sql(tmp_path):
+def test_input_changed_during_adapter_check_preserves_replacement_without_open_sql(tmp_path):
     async def scenario():
         entered,release=asyncio.Event(),asyncio.Event()
         native=transport([],theses=True)
@@ -322,18 +349,17 @@ def test_input_changed_during_adapter_check_cancels_without_leaving_open_sql(tmp
         worker=workers(execution,tasks,httpx.MockTransport(model))[0]
         await worker.tick()
         await asyncio.wait_for(entered.wait(),2)
+        old_generation=store.db.execute("SELECT generation FROM jobs WHERE kind='filter'").fetchone()[0]
         source=StructuredSource(None)
         with store.jobs.transaction(lambda:True):
             CollectionService(execution.require_store).collected(item,source.describe(store.publication(item),Material('Title','Changed while checking')),manual=False)
+        replacement=store.db.execute("SELECT status,generation FROM jobs WHERE kind='filter'").fetchone()[:]
+        assert replacement[0]=='pending' and replacement[1]>old_generation
         release.set()
         await tasks._ai
         assert not store.db.in_transaction
         assert saved(store,item)['filtered_content']=={}
-        assert store.db.execute("SELECT status FROM jobs WHERE kind='filter'").fetchone()[0]=='cancelled'
-        with store.jobs.transaction(lambda:True):
-            worker.service.reconcile()
-            store.jobs.reconcile('filter',worker.service.candidates('filter'))
-        assert store.db.execute("SELECT status FROM jobs WHERE kind='filter'").fetchone()[0]=='pending'
+        assert store.db.execute("SELECT status,generation FROM jobs WHERE kind='filter'").fetchone()[:]==replacement
         store.db.close()
     asyncio.run(scenario())
 

@@ -304,3 +304,13 @@
 - Catalog measurement after version 22: 23 tables and 97 non-internal triggers.
   Dirty processing queues, first-started selection, reader versions, final schema,
   complete checks and independent review remain unfinished.
+- Acceptance of changed publication content now reconciles its filter and theses
+  Jobs in the same transaction, including when background processing is enabled.
+  A rollback test verifies the content and Job revision revert together; a late
+  adapter response leaves the already-created replacement generation untouched.
+  This is only one event path: the dirty tables and other event owners remain.
+- The first affected run passed 76 tests and found an old assertion expecting the
+  replacement Job to appear later. The test now checks that the new pending
+  generation exists before the late response and remains unchanged afterwards;
+  the complete 33-test worker-transaction suite passed. Types and three Playwright
+  processing/linked-publication scenarios passed; a screenshot was inspected.

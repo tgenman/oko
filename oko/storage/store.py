@@ -428,6 +428,7 @@ class Store:
                 if row['status']=='ready' and old and not (row['resource_identity'] is not None and old['source_locator']!=row['source_locator']):
                     effects.revalidate[row['id']]=True
             self.collection_history(item,material)
+            self.processing.reconcile_accepted_item(item)
         self.processing.sync()
         with self.db:
             self.publications.status(item)

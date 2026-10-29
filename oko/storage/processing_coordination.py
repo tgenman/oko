@@ -105,3 +105,24 @@ class ProcessingState:
             self.store.publications.reconcile(item)
             self.store.db.executemany('INSERT INTO processing_stage_dirty VALUES ( %s , %s ) ON CONFLICT DO NOTHING',[(kind,item) for kind in ('filter','theses')])
             self.store.db.execute('DELETE FROM processing_dirty WHERE item = %s', (item,))
+
+    def reconcile_accepted_item(self, item: str) -> None:
+        """Update both processing Jobs inside the owner's acceptance transaction."""
+        from oko.storage.processing_state import ProcessingRepository
+        from oko.storage.reading import reading_snapshot
+        if not self.store.db.in_transaction:
+            raise RuntimeError('Accepted publication requires an owned transaction')
+        repository = ProcessingRepository(self.store)
+        self.store.publications.reconcile(item)
+        self.store.db.executemany('INSERT INTO processing_stage_dirty VALUES ( %s , %s ) ON CONFLICT DO NOTHING',
+                                  [(kind,item) for kind in ('filter','theses')])
+        self.store.db.execute('DELETE FROM processing_dirty WHERE item=%s', (item,))
+        for kind in ('filter','theses'):
+            with reading_snapshot():
+                candidates = [(identity, signature, repository.satisfied(identity,kind), repository.revision(identity))
+                              for identity,signature in repository.candidates(kind,item=item)]
+            self.store.jobs.reconcile(kind,candidates)
+            # Transitional filter-job triggers mark the same item; this pass has
+            # already evaluated its dependent stage within the same transaction.
+            self.store.db.execute('DELETE FROM processing_dirty WHERE item=%s', (item,))
+        self.store.publications.status(item)
