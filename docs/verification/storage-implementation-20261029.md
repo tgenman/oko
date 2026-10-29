@@ -26,3 +26,5 @@
   наборы прерваны: checkout изменялся во время выполнения. Итоговый runner нужен
   на зафиксированном снимке после интеграции; этот запуск не считается успешным.
 - `./scripts/check python --files tests/reader/test_storage_redesign_schema.py tests/reader/test_postgres_transactions.py`: contracts и 20 тестов прошли. Проверочный SQL создаёт 20 целевых таблиц без прикладных триггеров и откатывается; это не SQL миграции.
+- `./scripts/check python --files tests/reader/test_storage_redesign_schema.py tests/reader/test_postgres_transactions.py`: contracts и 22 теста прошли на синтетическом PostgreSQL. Проверены сохранение `false`, сброс отдельного переопределения и видимость после commit/rollback с двух соединений. Новый компонент настроек пока не подключён к HTTP.
+- Повтор `python -m mypy oko tests/support/codex.py tests/support/app.py`: 151 файл, успешно.
