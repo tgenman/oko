@@ -14,5 +14,4 @@ def save_derivative(store, job, signature, result, text, *, provenance=None):
         if not store.jobs.valid(job):return
         store.publications.accept_result(job.item,job.kind,signature,result,provenance)
         store.jobs.finish(job)
-        if job.kind=='filter':store.read_versions.sync_filter(job.item,bool(result['hidden']))
         store.publications.status(job.item)

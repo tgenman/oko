@@ -291,3 +291,16 @@
   Status GET still writes problem records and must be moved to event owners.
 - Catalog measurement after version 21: 24 tables and 98 non-internal triggers.
   Full implementation, final target schema and independent review are outstanding.
+- Migration 022 moves hiddenness from `reader_visibility` to publication status,
+  preserving current visibility and rejecting invalid legacy values. A current
+  hidden filter takes precedence over a new filter attempt; a current summary
+  remains ready during regeneration. Pending Jobs remain eligible for those
+  explicit retries even when a saved result determines the publication status.
+- The regression initially showed hidden status becoming `pending_filtering`.
+  An initial broad run passed 175 tests but exposed two retries blocked by the
+  old status-based dispatch condition. After adjusting dispatch, the affected
+  tests and a broader 151-test processing, migration and cost run passed. Types
+  and 10 Playwright scenarios passed; the filter settings screenshot was inspected.
+- Catalog measurement after version 22: 23 tables and 97 non-internal triggers.
+  Dirty processing queues, first-started selection, reader versions, final schema,
+  complete checks and independent review remain unfinished.

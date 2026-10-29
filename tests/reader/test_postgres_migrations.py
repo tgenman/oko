@@ -590,3 +590,27 @@ def test_reader_counts_are_derived_from_memberships(connections):
         assert db.execute("SELECT to_regclass('reader_feed_counts'),to_regclass('reader_folder_counts'),to_regclass('reader_membership_dirty')").fetchone() == (None,None,None)
         assert db.execute("SELECT feed_id,publication_id FROM feed_publications").fetchall() == [('feed','item')]
         verify(db, MIGRATIONS)
+
+
+def test_reader_visibility_moves_to_publication_status(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:21])
+        db.execute("INSERT INTO items(id,status) VALUES ('hidden','pending_filtering'),('visible','filter_out')")
+        db.execute("UPDATE reader_visibility SET hidden=1 WHERE item='hidden'")
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT to_regclass('reader_visibility')").fetchone() == (None,)
+        assert db.execute("SELECT id,status FROM items ORDER BY id").fetchall() == [('hidden','filter_out'),('visible','pending_filtering')]
+        verify(db, MIGRATIONS)
+
+
+def test_reader_visibility_migration_rejects_invalid_value(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:21])
+        db.execute("INSERT INTO items(id) VALUES ('item')")
+        db.execute("UPDATE reader_visibility SET hidden=2 WHERE item='item'")
+        with pytest.raises(psycopg.errors.RaiseException, match='invalid reader visibility'):
+            migrate(db, MIGRATIONS)
+        assert db.execute("SELECT hidden FROM reader_visibility WHERE item='item'").fetchone() == (2,)
+        verify(db, MIGRATIONS[:21])

@@ -39,7 +39,7 @@ def current(db: Database) -> Inputs | None:
     return value if value is not None and value.db is db else None
 
 
-_ITEM = 'SELECT i . * , coalesce ( v . hidden , 0 ) AS reader_hidden FROM items_read i LEFT JOIN reader_visibility v ON v . item = i . id'
+_ITEM = "SELECT i . * , CASE WHEN i.status='filter_out' THEN 1 ELSE 0 END AS reader_hidden FROM items_read i"
 _FEED_COLUMNS = ','.join('f.' + name for name in READER_FEED_COLUMNS)
 _FEED = 'SELECT ' + _FEED_COLUMNS + ', b.binding AS reader_binding FROM feeds f LEFT JOIN telegram_bindings b ON b.feed = f.id'
 _BATCH_FEED = 'SELECT ' + _FEED_COLUMNS + ''', b.binding AS reader_binding,

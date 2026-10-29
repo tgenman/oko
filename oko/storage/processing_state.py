@@ -60,7 +60,6 @@ class ProcessingRepository:
         else:
             assert result is not None
             self.store.publications.accept_result(value.item,value.kind,value.signature,result.model_dump(),origin)
-        if value.kind=='filter':self.store.read_versions.sync_filter(value.item,bool(self.store.filters.read(value.item)['hidden']))
 
     def satisfied(self, item: str, kind: Kind) -> bool:
         return self.store.filters.read(item)['status']=='done' if kind=='filter' else self.store.processing.theses.read(item) is not None
@@ -77,7 +76,6 @@ class ProcessingRepository:
     def regenerate(self, item: str, kind: Kind) -> bool:
         row=self.store.db.execute('SELECT processing_metadata FROM items_read WHERE id = %s',(item,)).fetchone()
         if row and json.loads(row[0]).get('filter' if kind=='filter' else 'summary',{}).get('reason')=='no_input':return False
-        self.store.db.execute('UPDATE items SET status = %s WHERE id = %s',('pending_filtering' if kind=='filter' else 'pending_summary',item))
         return True
 
     def revision(self, item: str) -> str:

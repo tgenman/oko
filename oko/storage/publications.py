@@ -371,11 +371,11 @@ class Publications:
             return 'pending_collection' if row['status'] != 'pending_collection' else None
         filtered = self.store.filters.read(item)
         jobs={r['kind']:r['status'] for r in self.store.db.execute("SELECT kind , status FROM jobs WHERE item = %s AND kind IN ( 'filter' , 'theses' )",(item,))}
-        if filtered['status'] not in ('off', 'done') or self.store.filters.signature(item) and jobs.get('filter') in ('pending','running'):
-            status = 'pending_filtering'
-        elif filtered['hidden']:
+        if filtered['hidden']:
             status = 'filter_out'
-        elif self.store.processing.theses.signature(item) and (publication_input.stage_enabled(self.store, item, 'theses') or jobs.get('theses') == 'running') and (self.store.processing.theses.read(item) is None or jobs.get('theses') in ('pending','running')) and json.loads(row['processing_metadata']).get('summary',{}).get('reason')!='no_input':
+        elif filtered['status'] not in ('off', 'done') or self.store.filters.signature(item) and jobs.get('filter') in ('pending','running'):
+            status = 'pending_filtering'
+        elif self.store.processing.theses.signature(item) and (publication_input.stage_enabled(self.store, item, 'theses') or jobs.get('theses') == 'running') and self.store.processing.theses.read(item) is None and json.loads(row['processing_metadata']).get('summary',{}).get('reason')!='no_input':
             status = 'pending_summary'
         else:
             status = 'ready'
@@ -407,9 +407,7 @@ class Publications:
         if encoded != row['processing_metadata']:
             self.store.db.execute('UPDATE items SET processing_metadata = %s WHERE id = %s', (encoded, item))
         with reading_snapshot():
-            hidden = bool(self.store.filters.read(item)['hidden'])
             status = self._status_change(item)
-        self.store.read_versions.sync_filter(item,hidden)
         if status is not None:
             self.store.db.execute('UPDATE items SET status = %s WHERE id = %s', (status, item))
         return True

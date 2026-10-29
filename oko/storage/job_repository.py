@@ -195,7 +195,8 @@ class JobRepository:
             query += " AND kind=" + ("'filter'" if processing_kind=='filter' else "'theses'")
         if ai_only:
             query += """ AND kind IN ('filter','theses') AND NOT EXISTS (SELECT 1 FROM items_read i WHERE i.id=jobs.item AND i.platform IS NOT NULL
-                AND i.status!=CASE jobs.kind WHEN 'filter' THEN 'pending_filtering' ELSE 'pending_summary' END)"""
+                AND NOT ((jobs.kind='filter' AND i.status IN ('pending_filtering','filter_out'))
+                      OR (jobs.kind='theses' AND i.status IN ('pending_summary','ready'))))"""
             if self.store.processing.background:
                 query += """ AND NOT EXISTS (SELECT 1 FROM processing_dirty p WHERE p.item=jobs.item)
                     AND NOT EXISTS (SELECT 1 FROM processing_stage_dirty d WHERE d.item=jobs.item AND d.kind=jobs.kind)"""

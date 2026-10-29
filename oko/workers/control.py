@@ -166,7 +166,10 @@ class JobControl:
         repository.reconcile(kind,service.candidates(kind,item=identity))
         if not service.regenerate(identity,kind):
             return True
-        return repository.retry_processing(identity,kind)
+        accepted = repository.retry_processing(identity,kind)
+        if accepted:
+            service.refresh(identity)
+        return accepted
 
     def reconcile_cleanup(self) -> None:
         store=self.execution.require_store()

@@ -5,7 +5,6 @@ The current card list is read directly and does not maintain list digests.
 """
 from oko.storage.database import expect_row, Row
 import json
-from oko.storage.transaction import begin_write
 import uuid
 from typing import TYPE_CHECKING
 
@@ -24,7 +23,6 @@ class ReaderVersions:
                 self.db.execute('INSERT INTO reader_entities VALUES ( %s , %s , 1 , %s ) ON CONFLICT DO NOTHING', (kind, identity, store.wall_clock()))
             for kind, table in [('feed','feeds'),('folder','folders'),('card','items'),('material','items'),('filter','items'),('theses','items'),('media','items')]:
                 self.db.execute(f'INSERT INTO reader_entities SELECT %s , id , 1 , %s FROM {table} ON CONFLICT DO NOTHING', (kind, store.wall_clock()))
-            self.db.execute('INSERT INTO reader_visibility SELECT id , 0 FROM items_read ON CONFLICT DO NOTHING')
         identity = json.loads(expect_row(self.db.execute("SELECT value FROM state WHERE key='storage-id'").fetchone())[0])
         if not isinstance(identity, str):
             raise ValueError('Invalid storage identity')
@@ -45,13 +43,6 @@ class ReaderVersions:
 
 
 
-
-    def sync_filter(self, item: str, hidden: bool) -> None:
-        query='INSERT INTO reader_visibility VALUES ( %s , %s ) ON CONFLICT ( item ) DO UPDATE SET hidden = excluded . hidden WHERE reader_visibility . hidden IS DISTINCT FROM excluded . hidden'
-        if self.db.in_transaction:
-            self.db.execute(query,(item,int(hidden)))
-        else:
-            with self.db:self.db.execute(query,(item,int(hidden)))
 
     def version(self, kind: str, identity: str) -> Row | None:
         return self.db.execute('SELECT version , changed FROM reader_entities WHERE kind = %s AND identity = %s', (kind,identity)).fetchone()
