@@ -122,3 +122,29 @@ test('late settings replies do not overwrite a newer draft or reopen a closed fo
     assert.deepEqual(r.errors, []);
   } finally {await r.close();}
 });
+
+test('late initial menu loading does not cancel the catalog of a newer settings page',async()=>{
+ const r=await reader();try{
+  await r.start([]);
+  await r.page.evaluate(models=>{
+   readerTransport.replies.set('/api/v3/subscriptions',{body:{folders:[],feeds:[]}});
+   readerTransport.replies.set('/api/v3/processors/codex/models',{body:{models}});
+   readerTransport.held.set('/api/v3/subscriptions',true);
+   readerTransport.held.set('/api/v3/processors/codex/models',true);
+  },models);
+  await r.page.locator('#settings-open').click();
+  await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/subscriptions'));
+  await r.page.locator('[data-settings-target="models"]').click();
+  await r.page.locator('[data-settings-target="codex"]').click();
+  await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/processors/codex/models'));
+  await r.page.evaluate(()=>{
+   readerTransport.replies.get('/api/v3/settings/oko/global')!.body!.effective.prompt_theses.value='Initial open finished';
+   readerTransport.release('/api/v3/subscriptions',{folders:[],feeds:[]});
+  });
+  await expect(r.page.locator('#setting-prompt_theses')).toHaveValue('Initial open finished');
+  await r.page.evaluate(models=>readerTransport.release('/api/v3/processors/codex/models',{models}),models);
+  await expect(r.page.locator('#codex-save')).toBeEnabled();
+  await expect(r.page.locator('#settings-dialog')).toHaveAttribute('data-settings-view','codex');
+  expect(r.errors).toEqual([]);
+ }finally{await r.close();}
+});

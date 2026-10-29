@@ -12,7 +12,7 @@ import {createReaderSession, type ReaderMessage} from '../reader-session';
 import {reportError, type createDebugPanel} from '../status/debug';
 import {errorMessage} from '../api/errors';
 import type {ReaderApi} from '../api/reader';
-import type {AffectedResource} from '../api/generated/types.gen';
+import type {AffectedResource,RuntimeStatus} from '../api/generated/types.gen';
 import type {createMenus} from '../settings/menus';
 import type {createStatusPanel} from '../status/panel';
 import type {createReaderActions} from '../status/actions';
@@ -41,6 +41,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
   let checking:AbortController|undefined;
   let detailRequest:AbortController|undefined;
   let detailsFailed=false,settingsAppliedRevision:number|undefined;
+  let settingsAppliedDetails:RuntimeStatus|undefined;
   let unavailable=false;
   let displayedList:string|undefined;
   let contentEpoch = 0;
@@ -199,11 +200,11 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     if(detailRequest)return;
     const controller=new AbortController();detailRequest=controller;
     const settingsRevision=menus.statusRevision();
-    void resources.refreshDetails(controller.signal).then(({data:details,changed})=>{
+    void resources.refreshDetails(controller.signal).then(details=>{
       if(controller.signal.aborted||stopped||!details)return;
-      if(statusPanel.isOpen()&&(changed||detailsFailed))statusPanel.update(details.problems,details);
-      if(menus.isOpen()&&(changed||detailsFailed||settingsAppliedRevision!==settingsRevision)){
-        menus.status(details,settingsRevision);settingsAppliedRevision=settingsRevision;
+      if(statusPanel.isOpen())statusPanel.update(details.problems,details);
+      if(menus.isOpen()&&(details!==settingsAppliedDetails||detailsFailed||settingsAppliedRevision!==settingsRevision)){
+        menus.status(details,settingsRevision);settingsAppliedRevision=settingsRevision;settingsAppliedDetails=details;
       }
       detailsFailed=false;
     }).catch(error=>{
@@ -230,7 +231,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       const reply=await resources.refresh(controller.signal);
       if(!active())return;
       const accepted=resources.accept(reply);
-      if(accepted.reset){detailRequest?.abort();detailRequest=undefined;detailsFailed=false;settingsAppliedRevision=undefined;actions.reset();statusPanel.reset();pages.clear();list.clear();opened.reset();void refresh();return;}
+      if(accepted.reset){detailRequest?.abort();detailRequest=undefined;detailsFailed=false;settingsAppliedRevision=undefined;settingsAppliedDetails=undefined;actions.reset();statusPanel.reset();pages.clear();list.clear();opened.reset();void refresh();return;}
       opened.connected();
       const state=resources.status;
       if(!state)throw new Error('Reading status temporarily unavailable');

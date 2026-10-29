@@ -74,3 +74,19 @@ test('storage replacement clears old recovery actions even when new details fail
  await expect(page.locator('.status-problem')).toHaveCount(0);
  await expect(page.locator('.status-action')).toHaveCount(0);
 });
+
+test('opening Status applies details already cached by settings after a 304',{timeout:30000},async t=>{
+ const {page,api,origin,token}=await productionReader(t);
+ await api('settings/oko/global','PATCH',{theses:true});
+ const replies:number[]=[];
+ page.on('response',r=>{if(new URL(r.url()).pathname==='/api/v3/status/details')replies.push(r.status());});
+ await page.goto(origin+'/#token='+token);
+ await expect(page.locator('#status-toggle')).toContainText('Problems');
+ await page.locator('#settings-open').click();
+ await expect.poll(()=>replies.includes(304),{timeout:10000}).toBe(true);
+ await page.locator('#settings-close').click();
+ const unchanged=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/v3/status/details'&&r.status()===304);
+ await page.locator('#status-toggle').click();await unchanged;
+ await expect(page.locator('.status-problem').first()).toBeVisible();
+ await expect(page.getByRole('button',{name:'Configure Model',exact:true})).toBeVisible();
+});
