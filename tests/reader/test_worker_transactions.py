@@ -126,6 +126,35 @@ def test_changed_collection_updates_processing_job_in_same_transaction(tmp_path)
         store.db.close()
 
 
+def test_changed_linked_article_updates_parent_job_in_same_transaction(tmp_path):
+    from oko.storage import publication_links
+    store, item, execution, tasks = worker_library(tmp_path)
+    try:
+        asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
+        with transaction(store.db):
+            store.db.execute("""INSERT INTO items(id,source_id,url,platform,external_id,complete,content,title)
+                SELECT 'linked','linked-source','https://example.org/linked','other_web','linked',1,content,title FROM items WHERE id=%s""", (item,))
+            store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES (%s,'linked')", (item,))
+            store.processing.reconcile_accepted_item(item)
+        before = dict(store.db.execute("SELECT generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone())
+        content = json.loads(store.db.execute("SELECT content FROM items WHERE id='linked'").fetchone()[0])
+        next(block for block in content['blocks'] if block['type']=='text' and block['role']=='body')['text'] = 'Changed linked article'
+        def change():
+            store.db.execute("UPDATE items SET content=%s WHERE id='linked'", (json.dumps(content),))
+            publication_links.notify_parents(store,'linked')
+            after = dict(store.db.execute("SELECT generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone())
+            assert after['generation'] > before['generation'] and after['input_snapshot'] != before['input_snapshot']
+        with pytest.raises(ValueError, match='synthetic rollback'):
+            with transaction(store.db):
+                change()
+                raise ValueError('synthetic rollback')
+        assert dict(store.db.execute("SELECT generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()) == before
+        with transaction(store.db):
+            change()
+    finally:
+        store.db.close()
+
+
 def test_claim_and_saved_context_are_one_transaction_and_survive_restart(tmp_path):
     store,item,execution,tasks=worker_library(tmp_path)
     asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))

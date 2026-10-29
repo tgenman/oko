@@ -77,7 +77,7 @@ def notify_parents(store: 'Store', item: str) -> None:
         store.db.execute('INSERT INTO processing_dirty VALUES ( %s ) ON CONFLICT DO NOTHING',(row[0],))
         store.read_sync.mark_item(row[0])
         store.read_sync.saved_publication(row[0])
-        store.publications.reconcile(row[0])
+        store.processing.reconcile_accepted_item(row[0])
         store.read_versions.linked_changed(row[0])
 
 

@@ -314,3 +314,8 @@
   generation exists before the late response and remains unchanged afterwards;
   the complete 33-test worker-transaction suite passed. Types and three Playwright
   processing/linked-publication scenarios passed; a screenshot was inspected.
+- A changed linked article now reconciles each parent publication's Jobs in the
+  same transaction. A focused test first exposed the missing replacement and now
+  verifies both generation change and rollback. The linked, worker, processing
+  and reader suites passed 75 tests, types and two browser scenarios passed; the
+  synthetic linked RSS screenshot was inspected. Other dirty-queue producers remain.
