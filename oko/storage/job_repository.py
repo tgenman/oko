@@ -40,6 +40,8 @@ class JobRepository:
             (job.id,job.generation,job.kind,job.item)).rowcount
         if changed!=1:
             raise JobRejected('Attempt no longer owns this job')
+        if job.kind=='filter':
+            self.store.processing.filter_changed(job.item)
 
     def reconcile(self, kind: Kind, candidates: list[tuple[str, str | None, bool, str]]) -> None:
         db=self.store.db
@@ -60,9 +62,11 @@ class JobRepository:
                         problem_code=CASE WHEN payload::jsonb->>'preclaim_blocked'='true' THEN NULL ELSE problem_code END,
                         payload=(payload::jsonb-'preclaim_blocked')::text
                         WHERE kind=%s AND item=%s AND status='blocked'""", (kind, item))
+                    if kind=='filter':self.store.processing.filter_changed(item)
                     self.store.publications.status(item)
                 elif job['status'] == 'pending' and not enabled:
                     db.execute("UPDATE jobs SET status='blocked' WHERE kind=%s AND item=%s AND status='pending'", (kind, item))
+                    if kind=='filter':self.store.processing.filter_changed(item)
                     self.store.publications.status(item)
                 continue
             if signature is None and previous is None and (job is None or job[0]=='cancelled'):
@@ -73,11 +77,13 @@ class JobRepository:
                     if filtering and filtering['status'] in ('pending','running'):
                         continue
                 db.execute("UPDATE jobs SET status='cancelled', generation=generation+1, error=NULL, problem_code=NULL, input_snapshot=NULL WHERE kind=%s AND item=%s",(kind,item))
+                if kind=='filter' and job:self.store.processing.filter_changed(item)
                 if kind == 'filter' and previous is not None:
                     self._processing_input_changed([item])
             else:
                 db.execute("INSERT INTO jobs (kind,item,status,payload,input_snapshot) VALUES (%s,%s,%s,%s,%s::jsonb) ON CONFLICT (kind,item) DO UPDATE SET status=excluded.status,payload=excluded.payload,input_snapshot=excluded.input_snapshot,generation=jobs.generation+1,next=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.next ELSE 0 END,error=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.error ELSE NULL END,problem_code=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.problem_code ELSE NULL END",
                     (kind,item,'done' if satisfied else 'pending' if enabled else 'blocked',json.dumps(dict(input_revision=revision)),json.dumps(dict(signature=signature)),self.store.wall_clock(),self.store.wall_clock(),self.store.wall_clock()))
+                if kind=='filter' and job:self.store.processing.filter_changed(item)
                 if kind == 'filter' and previous != signature:
                     self._processing_input_changed([item])
 
@@ -115,6 +121,7 @@ class JobRepository:
             return False
         self.store.jobs.forget_execution(kind,item)
         db.execute("UPDATE jobs SET status = 'pending' , next = CASE WHEN wait_scope IS NOT NULL THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL THEN retry_at ELSE NULL END , error = CASE WHEN wait_scope IS NOT NULL THEN error ELSE NULL END , generation = generation + 1 WHERE kind = %s AND item = %s",(kind,item))
+        if kind=='filter':self.store.processing.filter_changed(item)
         return True
 
     def origin(self, job: Job, signature: str) -> dict[str, Any] | None:
@@ -130,10 +137,12 @@ class JobRepository:
             self.store.publications.status(job.item)
 
     def cancel(self, job: Job) -> None:
-        self.store.db.execute("UPDATE jobs SET status = 'cancelled' , generation = generation + 1 WHERE id = %s AND generation = %s AND status = 'running'",(job.id,job.generation))
+        changed=self.store.db.execute("UPDATE jobs SET status = 'cancelled' , generation = generation + 1 WHERE id = %s AND generation = %s AND status = 'running'",(job.id,job.generation)).rowcount
+        if changed and job.kind=='filter':self.store.processing.filter_changed(job.item)
 
     def block(self, job: Job) -> None:
-        self.store.db.execute("UPDATE jobs SET status = 'blocked' WHERE id = %s AND generation = %s AND status = 'running'", (job.id, job.generation))
+        changed=self.store.db.execute("UPDATE jobs SET status = 'blocked' WHERE id = %s AND generation = %s AND status = 'running'", (job.id, job.generation)).rowcount
+        if changed and job.kind=='filter':self.store.processing.filter_changed(job.item)
 
     def manual(self, job: Job) -> bool:
         row=self.store.db.execute('SELECT manual_once FROM jobs WHERE id = %s AND generation = %s',(job.id,job.generation)).fetchone()
@@ -353,6 +362,7 @@ class JobRepository:
             generation = max(row['generation'], int(sequence[0]) if sequence else 0) + 1
             self.store.db.execute("INSERT INTO state VALUES ( 'job-dispatch-generation' , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value", (str(generation),))
             self.store.db.execute("UPDATE jobs SET status='running', attempt=attempt+1, generation=%s WHERE id=%s", (generation, row['id']))
+            if row['kind']=='filter':self.store.processing.filter_changed(row['item'])
         current = expect_row(self.store.db.execute('SELECT * FROM jobs WHERE id = %s', (row['id'],)).fetchone())
         return Job(current['id'], current['kind'], current['item'], current['generation'])
 
@@ -360,8 +370,10 @@ class JobRepository:
     def retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None, terminal: bool = False, issue: AdapterIssue | None = None) -> None:
         if job.kind in ('discover','fetch','filter','theses'):
             with self.store.db:
+                valid=self.valid(job)
                 collection_jobs.fail(self.store,job,issue or AdapterIssue(code or 'collection-failed',error,
                     AdapterErrorKind.permanent if terminal else AdapterErrorKind.temporary))
+                if valid and job.kind=='filter':self.store.processing.filter_changed(job.item)
             return
         with self.store.db:
             self.store.db.execute("UPDATE jobs SET status = %s , next = %s , error = %s , problem_code = %s WHERE id = %s AND generation = %s AND status = 'running'",
@@ -384,7 +396,9 @@ class JobRepository:
             # A configuration cancellation is not a failed discovery request.
             self.store.db.execute(f"UPDATE jobs SET status = 'pending' , generation = generation + 1 , next = CASE WHEN wait_scope IS NULL THEN 0 ELSE next END , retry_at = CASE WHEN wait_scope IS NULL THEN NULL ELSE retry_at END WHERE kind = 'discover' AND {selection}",params)
             collection_jobs.interrupt(self.store,feeds,backoff=False)
-            self.store.db.execute(f"UPDATE jobs SET status='pending', generation=generation+1 WHERE {selection}", params)
+            changed=self.store.db.execute(f"UPDATE jobs SET status='pending', generation=generation+1 WHERE {selection} RETURNING kind,item", params).fetchall()
+            for row in changed:
+                if row['kind']=='filter':self.store.processing.filter_changed(row['item'])
 
 
     def saved_execution(self, job: Job, signature: str) -> dict[str, Any] | None:
@@ -717,8 +731,10 @@ class JobRepository:
         self.store.db.execute("UPDATE jobs SET status = 'pending' , generation = generation + 1 , next = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN next ELSE 0 END , error = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN error ELSE NULL END WHERE id = %s AND generation = %s AND status = 'running'",(self.store.wall_clock(),self.store.wall_clock(),job.id,job.generation))
 
     def invalidate_processing(self) -> None:
-        self.store.db.execute("UPDATE jobs SET status = CASE WHEN status = 'running' THEN 'pending' ELSE status END , generation = generation + 1 , error = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN error ELSE NULL END , problem_code = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN problem_code ELSE NULL END , next = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END WHERE kind IN ( 'filter' , 'theses' ) AND oko_json_extract ( payload , '$.input_revision' ) IS DISTINCT FROM ( SELECT oko_json_extract ( i . processing_metadata , '$._revision' ) FROM items_read i WHERE i . id = jobs . item )",
-            (self.store.wall_clock(),)*4)
+        changed=self.store.db.execute("UPDATE jobs SET status = CASE WHEN status = 'running' THEN 'pending' ELSE status END , generation = generation + 1 , error = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN error ELSE NULL END , problem_code = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN problem_code ELSE NULL END , next = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END WHERE kind IN ( 'filter' , 'theses' ) AND oko_json_extract ( payload , '$.input_revision' ) IS DISTINCT FROM ( SELECT oko_json_extract ( i . processing_metadata , '$._revision' ) FROM items_read i WHERE i . id = jobs . item ) RETURNING kind,item",
+            (self.store.wall_clock(),)*4).fetchall()
+        for row in changed:
+            if row['kind']=='filter':self.store.processing.filter_changed(row['item'])
 
     @contextmanager
     def cancellation(self) -> Iterator[None]:

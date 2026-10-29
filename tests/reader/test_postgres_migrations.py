@@ -614,3 +614,12 @@ def test_reader_visibility_migration_rejects_invalid_value(connections):
             migrate(db, MIGRATIONS)
         assert db.execute("SELECT hidden FROM reader_visibility WHERE item='item'").fetchone() == (2,)
         verify(db, MIGRATIONS[:21])
+
+
+def test_filter_job_change_trigger_is_removed(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:22])
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname='processing_filter_changed'").fetchone() == (0,)
+        verify(db, MIGRATIONS)

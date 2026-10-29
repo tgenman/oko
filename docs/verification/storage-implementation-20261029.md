@@ -355,3 +355,11 @@
   passed and a shared-publication screenshot was inspected. The dirty queues,
   full event-driven settings path, all-trigger removal, final schema and
   independent project review remain unfinished.
+- Migration 023 removes the filter-Job change trigger and function. The Python
+  Job owner records dependent work in the same transaction for claim, outcome,
+  retry, reconciliation and cancellation. Tests cover rollback for claim,
+  finish, retry, cancel and block. The legacy dirty queue remains in use.
+- The affected migration, worker, processing, recovery and background-cost suites
+  passed 181 tests; types and two Playwright scenarios passed, and a screenshot
+  was inspected. The synthetic version-23 catalog has 23 tables and 96
+  non-internal triggers. Remaining event paths and the target schema are open.

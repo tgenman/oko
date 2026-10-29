@@ -73,6 +73,9 @@ class ProcessingState:
         """A read can discover missing bytes without writing inside its snapshot."""
         self._repairs.add(item)
 
+    def filter_changed(self, item: str) -> None:
+        self.store.db.execute('INSERT INTO processing_dirty(item) VALUES (%s) ON CONFLICT DO NOTHING', (item,))
+
     def pending(self, *, stages: bool = False) -> bool:
         query = 'SELECT 1 FROM processing_dirty'
         if stages:
