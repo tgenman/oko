@@ -28,4 +28,5 @@ MIGRATIONS = (
     Migration(21, 'reader-counts', (Path(__file__).parent / 'postgres' / '021-reader-counts.sql').read_text()),
     Migration(22, 'publication-visibility', (Path(__file__).parent / 'postgres' / '022-publication-visibility.sql').read_text()),
     Migration(23, 'filter-job-events', (Path(__file__).parent / 'postgres' / '023-filter-job-events.sql').read_text()),
+    Migration(24, 'publication-processing-events', (Path(__file__).parent / 'postgres' / '024-publication-processing-events.sql').read_text()),
 )

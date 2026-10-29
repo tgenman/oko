@@ -363,3 +363,9 @@
   passed 181 tests; types and two Playwright scenarios passed, and a screenshot
   was inspected. The synthetic version-23 catalog has 23 tables and 96
   non-internal triggers. Remaining event paths and the target schema are open.
+- Migration 024 removes the two publication-to-processing dirty triggers. Page
+  and material acceptance already reconcile affected publications through their
+  Python owners; membership changes still have transitional dirty triggers.
+  The affected migration, worker, collection, linked/shared, reader and startup
+  suites passed 207 tests; types and four browser scenarios passed. A linked
+  publication screenshot was inspected. Version 24 has 23 tables and 94 triggers.
