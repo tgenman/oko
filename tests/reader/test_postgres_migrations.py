@@ -551,3 +551,16 @@ def test_telegram_read_reasons_reject_unknown_eligible_reason(connections, eligi
             migrate(db, MIGRATIONS)
         assert db.execute('SELECT eligible,reason FROM telegram_read_members').fetchone() == (eligible,reason)
         verify(db, MIGRATIONS[:17])
+
+
+def test_telegram_saved_backfill_is_scheduled_for_legacy_client_feeds(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:18])
+        db.execute("INSERT INTO feeds(id,kind,transport,connection) VALUES ('client','telegram','telegram','connected'),('web','telegram',NULL,'connected')")
+        db.execute("INSERT INTO telegram_bindings VALUES ('client','{\"kind\":\"client\",\"role\":\"personal\"}'),('web','{\"kind\":\"web\"}')")
+        db.execute("INSERT INTO telegram_read_state(feed,since) VALUES ('client',123)")
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT since,saved_backfill_after FROM telegram_read_state WHERE feed='client'").fetchone() == (123,'')
+        assert db.execute("SELECT count(*) FROM telegram_read_state WHERE feed='web'").fetchone() == (0,)
+        verify(db, MIGRATIONS)

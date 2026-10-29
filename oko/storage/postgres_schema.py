@@ -23,4 +23,5 @@ MIGRATIONS = (
     Migration(16, 'reader-time', (Path(__file__).parent / 'postgres' / '016-reader-time.sql').read_text()),
     Migration(17, 'telegram-sync', (Path(__file__).parent / 'postgres' / '017-telegram-sync.sql').read_text()),
     Migration(18, 'telegram-read-reasons', (Path(__file__).parent / 'postgres' / '018-telegram-read-reasons.sql').read_text()),
+    Migration(19, 'telegram-saved-backfill', (Path(__file__).parent / 'postgres' / '019-telegram-saved-backfill.sql').read_text()),
 )

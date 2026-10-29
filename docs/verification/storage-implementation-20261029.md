@@ -252,3 +252,16 @@
   a separate media failure/retry test passed, as did two Playwright scenarios.
   The partial-download screenshot was inspected. Legacy-data backfill and removal
   of the old feed scan remain unfinished.
+- Migration 019 schedules a resumable saved-fact backfill for existing Telegram
+  client feeds; switching from web to client schedules it as well. Each commit
+  advances at most eight membership keys with its saved facts; a new Store resumes
+  the cursor, and read RPC admission waits until it completes. Normal read sync
+  no longer scans publication membership for the whole feed. This cursor is a
+  transitional column and still needs alignment with the final physical schema.
+- The no-scan test failed before the old loop was removed. A first broad run
+  passed 150 Python tests but failed a source-configuration cost assertion; the
+  pending lookup was simplified and the affected cost and read-sync tests passed.
+  Separate tests cover interruption, a real Store restart, migration scheduling,
+  and withholding external calls while backfill is incomplete. Types and two
+  Playwright scenarios passed; a synthetic client-publication screenshot was
+  inspected. The full redesign and its independent review remain outstanding.

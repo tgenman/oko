@@ -57,9 +57,12 @@ class Store:
                                auto_read: bool | None) -> dict[str,Any]:
         with self.db:
             begin_write(self.db)
+            previous=self.subscriptions.telegram.binding(feed)
             result=self.subscriptions.telegram.change_access(feed,binding,info,auto_read,self.subscriptions)
             self.publications.configure_feed(feed)
             self.publications.changed_adapter(feed)
+            if previous and previous['kind']=='web' and binding['kind']=='client':
+                self.read_sync.schedule_saved_backfill(feed)
         return result
 
     def __init__(self, root: Path, fault: Callable[[str], None], *, wall_clock: Callable[[], float] = time.time, clock: Callable[[], float] = time.monotonic, database_url: str | None = None, defer_recovery: bool = False) -> None:

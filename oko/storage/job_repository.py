@@ -386,7 +386,7 @@ class JobRepository:
         if revision != self.store.read_sync._configuration:
             configs = self.store.subscriptions.feeds(transport='telegram')
         else:
-            pending = [row[0] for row in db.execute('SELECT feed FROM telegram_read_state WHERE needs_sync')]
+            pending = [row[0] for row in db.execute('SELECT feed FROM telegram_read_state WHERE needs_sync OR saved_backfill_after IS NOT NULL')]
             if not pending:
                 return
             configs = [config for feed in pending for config in self.store.subscriptions.feeds(feed, transport='telegram')]
@@ -401,38 +401,26 @@ class JobRepository:
                 # pass can insert another marker and must not be erased at its end.
                 with db:
                     db.execute('UPDATE telegram_read_state SET needs_sync=false WHERE feed = %s AND needs_sync', (feed,))
-                if config['auto_read']:
-                    identities = [row[0] for row in db.execute('SELECT id FROM unviewed_items_by_feed WHERE feed_id = %s AND complete = 1 AND viewed = 0', (feed,))]
-                    size = 8 if self.store.processing.background else 256
-                    for offset in range(0,len(identities),size):
-                        if self.store.subscriptions.source_revision() != revision:
-                            return
-                        batch = identities[offset:offset+size]
-                        marks = ','.join('%s' for _ in batch)
-                        rows = list(db.execute(f'SELECT id , members FROM unviewed_items_by_feed WHERE feed_id = %s AND complete = 1 AND viewed = 0 AND id IN ( {marks} )', (feed,*batch)))
-                        members_by_item = {row['id']:json.loads(row['members']) for row in rows}
-                        members = sorted({member for values in members_by_item.values() for member in values})
-                        eligible: set[int] = set()
-                        for start in range(0,len(members),500):
-                            part = members[start:start+500]
-                            member_marks = ','.join('%s' for _ in part)
-                            eligible.update(r[0] for r in db.execute(f'SELECT member FROM telegram_read_members WHERE feed = %s AND saved AND member IN ( {member_marks} )', (feed,*part)))
-                        saved = []
-                        from oko.storage.reading import reading_snapshot
-                        with reading_snapshot(), material_read.material_inputs(db,{row['id'] for row in rows}):
-                            for row in rows:
-                                current_members = members_by_item[row['id']]
-                                if current_members and not set(current_members) <= eligible:
-                                    try:
-                                        header, _ = self.store.original(row['id'])
-                                    except (OSError, ValueError, KeyError):
-                                        continue
-                                    if isinstance(header.get('title'), str) and header.get('full', True) and (not header.get('members') or set(header['members']) == set(current_members)):
-                                        saved.append(current_members)
-                        with db:
-                            for current_members in saved:
-                                self.store.read_sync.eligible(feed,current_members,'saved')
-                        yield
+                while True:
+                    if self.store.subscriptions.source_revision() != revision:
+                        return
+                    with db:
+                        state = db.execute('SELECT saved_backfill_after FROM telegram_read_state WHERE feed=%s', (feed,)).fetchone()
+                        if not state or state[0] is None:
+                            break
+                        batch = [row[0] for row in db.execute('''SELECT m.publication_id FROM feed_publications m
+                            WHERE m.feed_id=%s AND m.publication_id>%s
+                            ORDER BY m.publication_id LIMIT 8''', (feed,state[0]))]
+                        for item in batch:
+                            self.store.read_sync.saved_publication(item)
+                        if batch:
+                            db.execute('UPDATE telegram_read_state SET saved_backfill_after=%s WHERE feed=%s', (batch[-1],feed))
+                        else:
+                            db.execute('UPDATE telegram_read_state SET saved_backfill_after=NULL,needs_sync=true WHERE feed=%s', (feed,))
+                            db.execute(self.store.read_versions._bump('status', "'runtime'"))
+                    yield
+                    if not batch:
+                        break
                 if self.store.subscriptions.source_revision() != revision:
                     return
                 with db:
@@ -453,8 +441,8 @@ class JobRepository:
         # Deleted and non-Telegram feeds need no read-frontier work.
         with db:
             if cleared:
-                db.execute('UPDATE telegram_read_state SET needs_sync=false WHERE feed IN ( SELECT value FROM oko_json_each ( %s ) )', (json.dumps(cleared),))
-            db.execute("UPDATE telegram_read_state SET needs_sync=false WHERE needs_sync AND NOT EXISTS ( SELECT 1 FROM feeds WHERE id = telegram_read_state.feed AND transport = 'telegram' AND connection IS DISTINCT FROM 'deleting' )")
+                db.execute('UPDATE telegram_read_state SET needs_sync=false,saved_backfill_after=NULL WHERE feed IN ( SELECT value FROM oko_json_each ( %s ) )', (json.dumps(cleared),))
+            db.execute("UPDATE telegram_read_state SET needs_sync=false,saved_backfill_after=NULL WHERE (needs_sync OR saved_backfill_after IS NOT NULL) AND NOT EXISTS ( SELECT 1 FROM feeds WHERE id = telegram_read_state.feed AND transport = 'telegram' AND connection IS DISTINCT FROM 'deleting' )")
         self.store.read_sync._configuration = revision
 
 

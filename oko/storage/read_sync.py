@@ -31,12 +31,16 @@ class ReadSync:
 
     def pending(self) -> bool:
         return (self._configuration != self.store.subscriptions.source_revision()
-                or self.store.db.execute('SELECT 1 FROM telegram_read_state WHERE needs_sync LIMIT 1').fetchone() is not None)
+                or self.store.db.execute('SELECT 1 FROM telegram_read_state WHERE needs_sync OR saved_backfill_after IS NOT NULL LIMIT 1').fetchone() is not None)
 
     def mark_feed(self, feed: str) -> None:
         self.store.db.execute("""INSERT INTO telegram_read_state(feed, needs_sync)
             SELECT id, true FROM feeds WHERE id=%s AND transport='telegram' AND connection IS DISTINCT FROM 'deleting'
             ON CONFLICT(feed) DO UPDATE SET needs_sync=true WHERE NOT telegram_read_state.needs_sync""", (feed,))
+
+    def schedule_saved_backfill(self, feed: str) -> None:
+        self.mark_feed(feed)
+        self.store.db.execute("UPDATE telegram_read_state SET saved_backfill_after='' WHERE feed=%s", (feed,))
 
     def mark_item(self, item: str) -> None:
         self.store.db.execute("""INSERT INTO telegram_read_state(feed, needs_sync)
@@ -107,7 +111,7 @@ class ReadSync:
         if history and history['mode'] == 'count' and (not history['frozen'] or not history.get('scan_complete', True)):
             return None
         state = self.store.db.execute('SELECT * FROM telegram_read_state WHERE feed = %s', (feed,)).fetchone()
-        if not state or state['since'] is None or config['transport'] != 'telegram' or config['auto_read'] is None:
+        if not state or state['since'] is None or state['saved_backfill_after'] is not None or config['transport'] != 'telegram' or config['auto_read'] is None:
             return None
         if not binding or binding['kind'] != 'client' or config['connection'] == 'deleting':
             return None
