@@ -61,11 +61,18 @@ class ReadingComposition:
         """Count visible original publications in their current feeds and folders."""
         folders = self._store.subscriptions.folders()
         feeds = self._store.subscriptions.feeds()
-        folder_counts={row['folder']:row['visible'] for row in self._store.db.execute('SELECT folder , visible FROM reader_folder_counts')}
-        feed_counts={row['feed']:row for row in self._store.db.execute('SELECT feed , visible , unviewed FROM reader_feed_counts')}
+        feed_counts={row['feed']:row for row in self._store.db.execute('''SELECT m.feed_id AS feed, count(*) AS unviewed,
+            count(*) FILTER (WHERE coalesce(v.hidden,0)=0) AS visible
+            FROM feed_publications m JOIN items i ON i.id=m.publication_id
+            LEFT JOIN reader_visibility v ON v.item=i.id WHERE i.viewed=0 GROUP BY m.feed_id''')}
+        folder_counts={row['folder']:row['visible'] for row in self._store.db.execute('''SELECT f.folder_id AS folder,
+            count(DISTINCT m.publication_id) AS visible FROM feed_publications m JOIN feeds f ON f.id=m.feed_id
+            JOIN items i ON i.id=m.publication_id LEFT JOIN reader_visibility v ON v.item=i.id
+            WHERE i.viewed=0 AND coalesce(v.hidden,0)=0 GROUP BY f.folder_id''')}
         visible=expect_row(self._store.db.execute('SELECT count ( * ) FROM items_read i LEFT JOIN reader_visibility v ON v . item = i . id WHERE i . viewed = 0 AND coalesce ( v . hidden , 0 ) = 0 AND EXISTS ( SELECT 1 FROM reading_memberships m WHERE m . publication_id = i . id )').fetchone())[0]
         return dict(folders=[dict(folder,count=folder_counts.get(folder['id'],0)) for folder in folders],
-                    feeds=[dict(feed,count=feed_counts[feed['id']]['visible'],has_unviewed=bool(feed_counts[feed['id']]['unviewed'])) for feed in feeds],
+                    feeds=[dict(feed,count=feed_counts[feed['id']]['visible'] if feed['id'] in feed_counts else 0,
+                                has_unviewed=bool(feed_counts[feed['id']]['unviewed']) if feed['id'] in feed_counts else False) for feed in feeds],
                     count=visible)
 
     def _contents(self, owner: str, scope: str) -> FolderContents:

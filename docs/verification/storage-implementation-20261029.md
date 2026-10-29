@@ -277,3 +277,17 @@
 - Catalog measurement after version 20: 27 tables and 110 non-internal triggers.
   Remaining work includes direct processing Jobs, first-started feed selection,
   remaining reader projections and the final schema, checks and review.
+- Migration 021 removes persisted feed/folder counts and membership-dirty work.
+  Navigation derives counts from membership and visibility in one read snapshot;
+  a publication shared by two feeds in one folder counts once for the folder.
+  Twelve triggers and their functions were removed; the remaining visibility and
+  processing effects retain their current owners.
+- The affected run passed 160 tests including reading and database work budgets,
+  and exposed three failures: one concurrency test waited for the removed SQL,
+  while status performed per-feed settings reads and per-problem inserts. The
+  synchronization point was updated, settings and new problem writes were
+  batched, and 30 affected tests including query budgets and concurrent snapshots
+  passed. Types and 13 Playwright scenarios passed; a screenshot was inspected.
+  Status GET still writes problem records and must be moved to event owners.
+- Catalog measurement after version 21: 24 tables and 98 non-internal triggers.
+  Full implementation, final target schema and independent review are outstanding.

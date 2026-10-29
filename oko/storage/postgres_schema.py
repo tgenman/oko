@@ -25,4 +25,5 @@ MIGRATIONS = (
     Migration(18, 'telegram-read-reasons', (Path(__file__).parent / 'postgres' / '018-telegram-read-reasons.sql').read_text()),
     Migration(19, 'telegram-saved-backfill', (Path(__file__).parent / 'postgres' / '019-telegram-saved-backfill.sql').read_text()),
     Migration(20, 'remove-reader-list-projections', (Path(__file__).parent / 'postgres' / '020-remove-reader-list-projections.sql').read_text()),
+    Migration(21, 'reader-counts', (Path(__file__).parent / 'postgres' / '021-reader-counts.sql').read_text()),
 )

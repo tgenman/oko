@@ -48,6 +48,15 @@ def test_same_video_is_readable_in_both_feeds_and_viewed_everywhere(shared):
     assert client.get('/api/v3/publication/'+cards[0]['id']).status_code==404
 
 
+def test_same_folder_counts_a_shared_publication_only_once(shared):
+    client, feeds, _, _ = shared
+    assert client.patch('/api/v3/feeds/'+feeds[1]['id'], json={'folder_id':feeds[0]['folder_id']}).status_code == 200
+    navigation = client.get('/api/v3/navigation').json()
+    folder = next(folder for folder in navigation['folders'] if folder['id'] == feeds[0]['folder_id'])
+    assert navigation['total'] == 1 and folder['count'] == 1
+    assert [feed['count'] for feed in folder['feeds']] == [1,1]
+
+
 def test_deleting_primary_feed_keeps_shared_publication_and_file(shared):
     client,feeds,_,_=shared
     item=read_all_cards(client, '/api/v3/cards')[0]['id']

@@ -213,9 +213,17 @@ class SubscriptionRepository:
         return self._effective_value(scope,owner,feed)
 
     def effective_feeds(self) -> dict[str,dict[str,Any]]:
-        return {feed['id']:self._effective_value('feed',feed['id'],feed) for feed in self.feeds()}
+        feeds = self.feeds()
+        settings: dict[tuple[str,str],dict[str,Any]] = {}
+        for row in self.db.execute("""SELECT scope,owner,field,value FROM settings
+            WHERE (scope='oko' AND owner='global') OR (scope='feed' AND owner=ANY(%s))
+               OR (scope='folder' AND owner=ANY(%s))""",
+            ([feed['id'] for feed in feeds], list({feed['folder_id'] for feed in feeds}))):
+            settings.setdefault((row['scope'],row['owner']), {})[row['field']] = json.loads(row['value'])
+        return {feed['id']:self._effective_value('feed',feed['id'],feed,settings) for feed in feeds}
 
-    def _effective_value(self, scope: str, owner: str, feed: dict[str,Any] | Row | None) -> dict[str,Any]:
+    def _effective_value(self, scope: str, owner: str, feed: dict[str,Any] | Row | None,
+                         settings: dict[tuple[str,str],dict[str,Any]] | None = None) -> dict[str,Any]:
         chain = [('oko', 'global')]
         if scope == 'feed':
             assert feed is not None
@@ -229,7 +237,8 @@ class SubscriptionRepository:
             values['theses']['value'] = True
         overrides = {}
         for level, identity in chain:
-            for field, value in self._settings(level,identity).items():
+            source = settings.get((level,identity), {}) if settings is not None else self._settings(level,identity)
+            for field, value in source.items():
                 if field not in defaults:
                     continue
                 values[field] = dict(value=value, scope=level, owner=identity)

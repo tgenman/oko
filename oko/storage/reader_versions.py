@@ -3,7 +3,7 @@
 Versions are updated by the same database transaction as their inputs.
 The current card list is read directly and does not maintain list digests.
 """
-from oko.storage.database import expect_row, Connection, Row
+from oko.storage.database import expect_row, Row
 import json
 from oko.storage.transaction import begin_write
 import uuid
@@ -18,7 +18,6 @@ class ReaderVersions:
         self.store, self.db = store, store.db
         self.offset = store.wall_clock() - store.clock()
         self._next_action_cleanup = float('-inf')
-        self.db.before_commit=lambda: self.flush_reading_state(self.db)
         with self.db:
             self.db.execute("INSERT INTO state(key,value) VALUES ('storage-id',%s) ON CONFLICT DO NOTHING", (json.dumps(str(uuid.uuid4())),))
             for kind, identity in [('status', 'runtime'), ('navigation', 'navigation')]:
@@ -26,42 +25,11 @@ class ReaderVersions:
             for kind, table in [('feed','feeds'),('folder','folders'),('card','items'),('material','items'),('filter','items'),('theses','items'),('media','items')]:
                 self.db.execute(f'INSERT INTO reader_entities SELECT %s , id , 1 , %s FROM {table} ON CONFLICT DO NOTHING', (kind, store.wall_clock()))
             self.db.execute('INSERT INTO reader_visibility SELECT id , 0 FROM items_read ON CONFLICT DO NOTHING')
-            self.db.execute('INSERT INTO reader_feed_counts SELECT f . id , count ( i . id ) , coalesce ( sum ( CASE WHEN i . id IS NOT NULL AND coalesce ( v . hidden , 0 ) = 0 THEN 1 ELSE 0 END ) , 0 ) FROM feeds f LEFT JOIN reading_memberships m ON m . feed_id = f . id LEFT JOIN unviewed_items_by_feed i ON i . id = m . publication_id AND i . viewed = 0 LEFT JOIN reader_visibility v ON v . item = i . id GROUP BY f . id ON CONFLICT ( feed ) DO UPDATE SET unviewed = excluded . unviewed , visible = excluded . visible WHERE reader_feed_counts . unviewed IS DISTINCT FROM excluded . unviewed OR reader_feed_counts . visible IS DISTINCT FROM excluded . visible')
-            # SUM's synthetic LEFT JOIN row is not an actual publication.
-            self.db.execute('UPDATE reader_feed_counts SET visible = 0 WHERE unviewed = 0 AND visible != 0')
-            self.db.execute('INSERT INTO reader_folder_counts SELECT f . id , coalesce ( sum ( c . visible ) , 0 ) FROM folders f LEFT JOIN feeds s ON s . folder_id = f . id LEFT JOIN reader_feed_counts c ON c . feed = s . id GROUP BY f . id ON CONFLICT ( folder ) DO UPDATE SET visible = excluded . visible WHERE reader_folder_counts . visible IS DISTINCT FROM excluded . visible')
         identity = json.loads(expect_row(self.db.execute("SELECT value FROM state WHERE key='storage-id'").fetchone())[0])
         if not isinstance(identity, str):
             raise ValueError('Invalid storage identity')
         uuid.UUID(identity)
         self.identity = identity
-        with self.db:
-            self.db.membership_feeds={r[0] for r in self.db.execute('SELECT id FROM feeds')}
-            self.db.membership_folders={r[0] for r in self.db.execute('SELECT id FROM folders')}
-            self.refresh_memberships(self.db)
-
-    @staticmethod
-    def flush_reading_state(db: Connection) -> None:
-        for row in db.execute('SELECT kind , identity FROM reader_membership_dirty'):
-            (db.membership_feeds if row['kind']=='feed' else db.membership_folders).add(row['identity'])
-        db.execute('DELETE FROM reader_membership_dirty')
-        if getattr(db,'membership_feeds',None) or getattr(db,'membership_folders',None):
-            ReaderVersions.refresh_memberships(db)
-    @staticmethod
-    def refresh_memberships(db: Connection) -> None:
-        feeds: set[str]=getattr(db,'membership_feeds',set())
-        folders: set[str]=getattr(db,'membership_folders',set())
-        db.membership_feeds=set()
-        db.membership_folders=set()
-        for feed in feeds:
-            db.execute('UPDATE reader_feed_counts SET unviewed = ( SELECT count ( * ) FROM reading_memberships m JOIN items_read i ON i . id = m . publication_id WHERE m . feed_id = feed AND i . viewed = 0 ) , visible = ( SELECT count ( * ) FROM reading_memberships m JOIN items_read i ON i . id = m . publication_id LEFT JOIN reader_visibility v ON v . item = i . id WHERE m . feed_id = feed AND i . viewed = 0 AND coalesce ( v . hidden , 0 ) = 0 ) WHERE feed = %s',(feed,))
-            row=db.execute('SELECT folder_id FROM feeds WHERE id = %s',(feed,)).fetchone()
-            if row:
-                folders.add(row[0])
-        for folder in folders:
-            db.execute('UPDATE reader_folder_counts SET visible = ( SELECT count ( DISTINCT m . publication_id ) FROM reading_memberships m JOIN feeds f ON f . id = m . feed_id JOIN items_read i ON i . id = m . publication_id LEFT JOIN reader_visibility v ON v . item = i . id WHERE f . folder_id = folder AND i . viewed = 0 AND coalesce ( v . hidden , 0 ) = 0 ) WHERE folder = %s',(folder,))
-
-
     @staticmethod
     def _bump(kind: str, identity: str) -> str:
         return f"INSERT INTO reader_entities VALUES ( '{kind}' , {identity} , 1 , oko_reader_time ( ) ) ON CONFLICT ( kind , identity ) DO UPDATE SET version = reader_entities . version + 1 , changed = excluded . changed"

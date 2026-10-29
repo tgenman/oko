@@ -576,3 +576,17 @@ def test_unused_reader_lists_and_originals_are_removed(connections):
         assert db.execute("SELECT to_regclass('reader_lists'),to_regclass('reader_originals')").fetchone() == (None,None)
         assert db.execute("SELECT value FROM settings WHERE scope='feed' AND owner='feed' AND field='originals'").fetchone() == ('false',)
         verify(db, MIGRATIONS)
+
+
+def test_reader_counts_are_derived_from_memberships(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:20])
+        db.execute("INSERT INTO folders(id,title) VALUES ('folder','Synthetic')")
+        db.execute("INSERT INTO feeds(id,folder_id) VALUES ('feed','folder')")
+        db.execute("INSERT INTO items(id) VALUES ('item')")
+        db.execute("INSERT INTO feed_publications(feed_id,publication_id) VALUES ('feed','item')")
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT to_regclass('reader_feed_counts'),to_regclass('reader_folder_counts'),to_regclass('reader_membership_dirty')").fetchone() == (None,None,None)
+        assert db.execute("SELECT feed_id,publication_id FROM feed_publications").fetchall() == [('feed','item')]
+        verify(db, MIGRATIONS)

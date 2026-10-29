@@ -92,7 +92,7 @@ def test_navigation_counts_are_consistent_during_concurrent_membership_change(tm
         assert initial.json()['total'] == 1
         entered, release = threading.Event(), threading.Event()
         def trace(query):
-            if 'SELECT feed , visible , unviewed FROM reader_feed_counts' in query and not entered.is_set():
+            if 'SELECT m.feed_id AS feed' in query and not entered.is_set():
                 entered.set()
                 assert release.wait(5)
         client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(trace))

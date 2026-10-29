@@ -280,6 +280,7 @@ class Problems:
         feeds = feeds if feeds is not None else {f['id']: f for f in self.store.subscriptions.feeds()}
         existing = {row['identity']: row for row in self.db.execute("SELECT * FROM reader_problems WHERE finished IS NULL")}
         with self.db:
+            added: list[tuple[str,str,str,str,float]] = []
             for row in existing.values():
                 if row['identity'] not in identities:
                     body = json.loads(row['body'])
@@ -300,8 +301,12 @@ class Problems:
                     if prior_problem['body'] != encoded:
                         self.db.execute('UPDATE reader_problems SET body = %s WHERE id = %s', (encoded, prior_problem['id']))
                 else:
-                    self.db.execute('INSERT INTO reader_problems VALUES ( %s , %s , %s , %s , %s , NULL , NULL )',
-                                    (uuid.uuid4().hex, identity, 'action' if identity.startswith('action:') else 'background', json.dumps(body), now))
+                    added.append((uuid.uuid4().hex, identity, 'action' if identity.startswith('action:') else 'background', encoded, now))
+            for start in range(0, len(added), 400):
+                batch = added[start:start+400]
+                self.db.execute('''INSERT INTO reader_problems(id,identity,origin,body,created,finished,outcome)
+                    SELECT id,identity,origin,body,created,NULL,NULL FROM unnest(%s::text[],%s::text[],%s::text[],%s::text[],%s::double precision[])
+                    AS p(id,identity,origin,body,created)''', tuple([row[i] for row in batch] for i in range(5)))
         current: list[dict[str, Any]] = []
         recent: list[dict[str, Any]] = []
         for row in self.db.execute('SELECT * FROM reader_problems WHERE finished IS NULL OR finished > %s ORDER BY created DESC', (now - 86400,)).fetchall():
