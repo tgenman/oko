@@ -417,8 +417,8 @@ test('reply context is a compact separate card with safe navigation and local ex
     assert.equal(await link.getAttribute('rel'),'noopener noreferrer');
     assert.equal(await card.locator('.reply-preview-text').evaluate(e=>getComputedStyle(e).webkitLineClamp),'2');
     await r.page.screenshot({path:artifactPath('telegram-reply-compact-desktop.png')});
-    // Local expansion must not request content; regular version polling is
-    // independent of the card, as is renewing the browser presence lease.
+    // Local expansion must not request unrelated content. Collection status,
+    // version polling and the browser presence lease run independently.
     const heartbeat=await r.api('client-sessions','POST');
     const requests=await r.page.evaluate(()=>readerTransport.requests);
     const foreground=(q:(typeof requests)[number])=>!(q.method==='PUT'&&/^\/api\/v3\/client-sessions\/[^/]+$/.test(q.url)||q.method==='GET'&&(q.url.startsWith('/api/v3/cards?')||q.url.startsWith('/api/v3/publication/')||['/api/v3/status','/api/v3/navigation','/api/v3/collection-status'].includes(q.url)));
