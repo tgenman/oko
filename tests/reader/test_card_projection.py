@@ -61,3 +61,40 @@ def test_card_keeps_linked_preview_without_mutating_opened_material(tmp_path):
         assert 'Linked body' in material['text']
         repeated = client.get('/api/v3/cards').json()
         assert next(c for c in repeated['items'] if c['id']==item) == card
+
+
+def test_cards_page_keeps_membership_and_card_in_one_snapshot(tmp_path, postgres_url):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    import psycopg
+
+    store, item, _, _ = worker_library(tmp_path, database_url=postgres_url)
+    store.set_work_enabled(False)
+    store.db.close()
+    app = create_app(tmp_path, token='test', api_only=True, database_url=postgres_url)
+    with TestClient(app, headers=HEADERS) as client, psycopg.connect(postgres_url) as writer:
+        initial = client.get('/api/v3/cards')
+        assert initial.status_code == 200, initial.text
+        assert initial.json()['total'] == 1
+        assert [card['id'] for card in initial.json()['items']] == [item]
+        entered, release = threading.Event(), threading.Event()
+        def trace(query):
+            if 'SELECT i . * , d . item AS source_deleted' in query and not entered.is_set():
+                entered.set()
+                assert release.wait(5)
+        client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(trace))
+        try:
+            with ThreadPoolExecutor() as pool:
+                pending = pool.submit(client.get, '/api/v3/cards')
+                assert entered.wait(5)
+                writer.execute('DELETE FROM feed_publications WHERE publication_id=%s', (item,))
+                writer.commit()
+                release.set()
+                result = pending.result(5)
+            assert result.status_code == 200, result.text
+            assert result.json()['total'] == 1
+            assert [card['id'] for card in result.json()['items']] == [item]
+        finally:
+            release.set()
+            client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))
+        assert client.get('/api/v3/cards').json()['items'] == []

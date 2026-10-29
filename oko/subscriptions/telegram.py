@@ -59,6 +59,10 @@ class TelegramAccess:
             db.execute("UPDATE telegram_profiles SET state = 'unavailable' , message = 'Требуется проверка сессии после запуска'")
 
     def bindings(self, feeds: list[str] | None = None) -> dict[str, dict[str, Any]]:
+        return self._bindings(tuple(sorted(set(feeds))) if feeds is not None else None)
+
+    @reading_value
+    def _bindings(self, feeds: tuple[str, ...] | None) -> dict[str, dict[str, Any]]:
         query='SELECT feed , binding FROM telegram_bindings'
         params: tuple[str,...]=()
         if feeds is not None:

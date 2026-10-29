@@ -6,6 +6,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from oko.execution import read_locked
 from oko.storage.reading import reading_snapshot
+from oko.storage.transaction import read_snapshot
 from oko.application.reader import ReaderApplication
 from oko.reader.api_v3 import no_query
 from oko.reader.generated import models as wire
@@ -22,7 +23,7 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
         expected=request.headers.get('X-Oko-Storage-Id')
         if expected is not None and expected!=storage:
             return JSONResponse(dict(code='storage_changed',message='Storage changed',details=None,diagnostic_id=None,command_id=None),status_code=409)
-        with reading_snapshot(), runtime.queries.inputs({item}):
+        with read_snapshot(runtime.require_store().db), reading_snapshot(), runtime.queries.inputs({item}):
             current = runtime.queries
             raw = current.material(item)
             if raw is None:

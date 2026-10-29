@@ -150,12 +150,17 @@ class History:
             return {}
         selected=json.dumps(feeds)
         rows=self.db.execute('SELECT * FROM initial_history WHERE feed IN ( SELECT value FROM oko_json_each ( %s ) )',(selected,)).fetchall()
+        if not rows:
+            return {}
         counts: dict[str,dict[str,int]]={}
-        for row in self.db.execute('SELECT feed , outcome , count ( * ) n FROM history_members WHERE feed IN ( SELECT value FROM oko_json_each ( %s ) ) GROUP BY feed , outcome',(selected,)):
-            counts.setdefault(row['feed'],{})[row['outcome']]=row['n']
         errors: dict[str,list[dict[str,Any]]]={}
-        for row in self.db.execute("SELECT h . feed , h . item , j . error FROM history_members h JOIN jobs j ON j . item = h . item AND j . kind = 'fetch' WHERE h . feed IN ( SELECT value FROM oko_json_each ( %s ) ) AND h . outcome IN ( 'retrying' , 'unavailable' ) AND j . error IS NOT NULL",(selected,)):
-            errors.setdefault(row['feed'],[]).append(dict(item=row['item'],message=row['error']))
+        for row in self.db.execute("""SELECT h.feed, h.outcome, count(*) AS n,
+            jsonb_agg(jsonb_build_object('item',h.item,'message',j.error))
+              FILTER (WHERE h.outcome IN ('retrying','unavailable') AND j.error IS NOT NULL) AS errors
+            FROM history_members h LEFT JOIN jobs j ON j.item=h.item AND j.kind='fetch'
+            WHERE h.feed IN (SELECT value FROM oko_json_each(%s)) GROUP BY h.feed,h.outcome""", (selected,)):
+            counts.setdefault(row['feed'],{})[row['outcome']]=row['n']
+            errors.setdefault(row['feed'],[]).extend(row['errors'] or [])
         return {row['feed']:self._status(row,counts.get(row['feed'],{}),errors.get(row['feed'],[])) for row in rows}
 
     @staticmethod

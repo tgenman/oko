@@ -47,3 +47,15 @@
 - `./scripts/check browser --files tests/browser/test_settings_v3_http.ts
   tests/browser/test_settings_navigation.ts tests/browser/test_codex_settings_http.ts`:
   6 Playwright tests passed; inspected generated settings/status and model screenshots.
+- Publication, cards and navigation GETs now use read-only snapshots. Separate
+  concurrent HTTP tests first reproduced mixed parent/article content, a 500
+  during card membership removal, and inconsistent navigation counts; all three
+  pass after the change. The snapshot covers database reads, not later rendering.
+- Publication/linked-content suites: 37 Python tests and 4 Playwright tests
+  passed. Cards and pagination: 22 Python and 12 Playwright tests passed.
+- Navigation initially exceeded its existing statement budget (13 versus 11),
+  including BEGIN/COMMIT. Request-local reuse of Telegram bindings and one combined
+  history counts/errors query restored the unchanged budget. The affected
+  navigation/history suite passed 38 Python tests and 8 Playwright tests.
+- Existing `test_reading_cost.py` passed 5 tests, including its 20,000-row archive
+  index case on the old schema; it does not measure the target-schema migration.
