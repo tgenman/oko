@@ -123,8 +123,8 @@ def register(app: FastAPI, runtime: ReaderApplication, lifetime: Lifetime, wall_
             def progress(phase: str) -> dict[str, object]:
                 entries = [entry['progress'] for entry in value['work'] if entry['phase']==phase] if value['work_allowed'] else []
                 return dict(state='running' if entries else 'idle',
-                    completed=sum(entry['completed'] for entry in entries),
-                    total=None if any(entry['total'] is None for entry in entries) else sum(entry['total'] for entry in entries))
+                    completed=None if entries else 0,
+                    total=None if entries else 0)
             summary = {key:value[key] for key in ('api_version','runtime_state','lifetime','work_allowed','active_client_sessions',
                 'sources','diagnostic_count','diagnostic_persistence_error','viewed_ids')}
             summary.update(enabled=runtime.enabled,collection=progress('collecting'),processing=progress('processing'),

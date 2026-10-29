@@ -1,2 +1,2 @@
 // Generated; do not edit.
-export const CONTRACT_DIGEST = '50482fa89be76a1f7a3e547f38c1e2a544b92ae90e50f969c123900a5e492cec';
+export const CONTRACT_DIGEST = '279b96b0c7518fb36634801c26c4bae7aa0f3eea78443b623d066f35991be4c9';

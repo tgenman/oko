@@ -33,3 +33,44 @@ test('status details are fetched on demand and stop polling when the panel close
  expect(details.length).toBe(before);
  expect(checks).toHaveLength(0);
 });
+
+test('held stale details cannot block or override command admission from status',{timeout:30000},async t=>{
+ const {page,api,origin,token}=await productionReader(t);
+ await api('settings/oko/global','PATCH',{theses:false});
+ await page.goto(origin+'/#token='+token);
+ await expect(page.locator('#collect')).toBeEnabled();
+ let release:(()=>Promise<void>)|undefined;
+ await page.route('**/api/v3/status/details',async route=>{
+  const response=await route.fetch();
+  if(!release)await new Promise<void>(resolve=>{release=async()=>{await route.fulfill({response});resolve();};});
+  else await route.fulfill({response});
+ });
+ await page.locator('#status-toggle').click();
+ await expect.poll(()=>!!release).toBe(true);
+ await api('power','PUT',{enabled:false});
+ await expect(page.locator('#stop')).toHaveAttribute('data-power','start');
+ await expect(page.locator('#collect')).toBeDisabled();
+ await release!();
+ await expect(page.locator('#collect')).toBeDisabled();
+ await expect(page.locator('#add-open')).toBeDisabled();
+});
+
+test('storage replacement clears old recovery actions even when new details fail',{timeout:30000},async t=>{
+ const {page,api,origin,token}=await productionReader(t);
+ await api('settings/oko/global','PATCH',{theses:true});
+ await page.goto(origin+'/#token='+token);
+ await expect(page.locator('#status-toggle')).toContainText('Problems');
+ await page.locator('#status-toggle').click();
+ await expect(page.locator('.status-problem').first()).toBeVisible();
+ const replacement='4f003741-d0c7-4e62-8d12-55fb652f404a';
+ await page.route('**/api/v3/status/details',route=>route.fulfill({status:503,json:{code:'storage_unavailable',message:'Synthetic unavailable',details:{retry_at:null},diagnostic_id:null,command_id:null}}));
+ for(const path of ['status','navigation'])await page.route('**/api/v3/'+path,async route=>{
+  const headers={...route.request().headers()};delete headers['if-none-match'];
+  const response=await route.fetch({headers}),body=await response.json();
+  if(path==='status')body.problems=[];
+  await route.fulfill({response,json:body,headers:{...response.headers(),'x-oko-storage-id':replacement,etag:'"replacement"'}});
+ });
+ await expect(page.locator('#status-toggle')).toHaveText('Status');
+ await expect(page.locator('.status-problem')).toHaveCount(0);
+ await expect(page.locator('.status-action')).toHaveCount(0);
+});

@@ -92,9 +92,14 @@ async function reader() {
         }
         return body;
       };
+      const compactStatus=(value:import('../../frontend/src/api/generated/types.gen').RuntimeStatus)=>{
+        const progress=(phase:string)=>{const active=value.work_allowed&&value.work.some(w=>w.phase===phase);return {state:active?'running':'idle',completed:active?null:0,total:active?null:0};};
+        const {work,initial_histories,telegram_reads,youtube,ready_sources,total_sources,problems,...base}=value;
+        return {...base,enabled:value.runtime_state!=='disabled',collection:progress('collecting'),processing:progress('processing'),problems:problems.current.map(p=>({id:p.id,message:p.message,feed_id:p.affected.find(r=>r.kind==='feed')?.feed_id??null}))};
+      };
       const response = async (url: string, method: string, body: unknown, status = 200) => {
         body=window.readingFixtureReply(url,method,body,status);
-        if(status>=200&&status<300)body=v3Reply(url,method,body);
+        if(status>=200&&status<300){body=v3Reply(url,method,body);if(url==='/api/v3/status'&&body&&typeof body==='object'&&'work' in body)body=compactStatus(body as import('../../frontend/src/api/generated/types.gen').RuntimeStatus);}
         if(!(new URL(url,'http://localhost').pathname==='/api/v3/cards'&&Array.isArray(body)))await window.validateReaderReply(url, method, status, body, aliases.get(url), true);
         return new Response(JSON.stringify(body), {status, headers: {'Content-Type': 'application/json'}});
       };
@@ -156,7 +161,7 @@ async function reader() {
         if(key==='/api/v3/navigation'){
           const catalog=await fixtureRead('/api/v3/reading-composition') as import('../../frontend/src/api/generated/types.gen').ReadingComposition;
           const body={total:catalog.count,folders:catalog.folders.map(folder=>({id:folder.id,title:folder.title,count:folder.count,
-            feeds:catalog.feeds.filter(entry=>entry.feed.folder_id===folder.id).map(entry=>({id:entry.feed.id,title:entry.feed.title,
+            feeds:catalog.feeds.filter(entry=>entry.feed.folder_id===folder.id).sort((a,b)=>a.feed.title.toLocaleLowerCase().localeCompare(b.feed.title.toLocaleLowerCase())||a.feed.id.localeCompare(b.feed.id)).map(entry=>({id:entry.feed.id,title:entry.feed.title,
               avatar_url:'avatar_url' in entry.feed?entry.feed.avatar_url??null:null,count:entry.count,kind:entry.feed.kind,
               has_unviewed:entry.has_unviewed,connection:entry.feed.connection,
               telegram_access:entry.feed.kind==='telegram'?entry.feed.access.kind:null}))}))};
@@ -166,10 +171,7 @@ async function reader() {
           const result=await response(key,'GET',body);result.headers.set('ETag',etag);return result;
         }
         if(key==='/api/v3/status'||key==='/api/v3/status/details'){
-          const value=await fixtureRead('/api/v3/status/details') as import('../../frontend/src/api/generated/types.gen').RuntimeStatus;
-          const progress=(phase:string)=>{const entries=value.work.flatMap(w=>(w.phase==='collecting'||w.phase==='processing')&&w.phase===phase?[w.progress]:[]);return {state:entries.length?'running':'idle',completed:entries.reduce((n,p)=>n+p.completed,0),total:entries.some(p=>p.total===null)?null:entries.reduce((n,p)=>n+(p.total??0),0)};};
-          const {work,initial_histories,telegram_reads,youtube,ready_sources,total_sources,problems,...base}=value;
-          const body=key.endsWith('/details')?value:{...base,enabled:value.runtime_state!=='disabled',collection:progress('collecting'),processing:progress('processing'),problems:problems.current.map(p=>({id:p.id,message:p.message,feed_id:p.affected.find(r=>r.kind==='feed')?.feed_id??null}))};
+          const body=await fixtureRead(key);
           const json=JSON.stringify(body),old=entityVersions.get(key),version=old?(old.json===json?old.version:old.version+1):1;
           entityVersions.set(key,{version,json});const etag='"'+version+'"';
           if(new Headers(options?.headers).get('If-None-Match')===etag)return new Response(null,{status:304,headers:{ETag:etag,'X-Oko-Storage-Id':storageId}});

@@ -2546,7 +2546,7 @@ export type StatusProblem = {
 };
 
 export type StatusProgress = {
-    completed: number;
+    completed: number | null;
     state: 'idle' | 'running';
     total: number | null;
 };

@@ -117,6 +117,7 @@ test('offline state keeps last problems without a false zero and distinguishes a
     await r.start([]);await status(r,[modelProblem]);
     await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 1');
     await r.page.locator('#status-toggle').click();
+    await expect(r.page.locator('.status-problem')).toHaveCount(1);
     await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/status',{status:503,body:{detail:'offline'}}));
     await expect(r.page.locator('#status-panel')).toContainText('Status may be outdated');
     await expect(r.page.locator('#status-panel')).toContainText('No Codex Model Selected');
@@ -158,6 +159,7 @@ test('panel reorders only on reopening and remains a nonmodal desktop sidebar',a
     await r.start([]); await status(r,[modelProblem]);
     await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 1');
     await r.page.locator('#status-toggle').click();
+    await expect(r.page.locator('.status-problem')).toHaveCount(1);
     const newer={...modelProblem,id:'newer',title:'Новая проблема',created_at:1800000010};
     await status(r,[newer,modelProblem]);
     await expect(r.page.locator('.status-problem')).toHaveCount(2);

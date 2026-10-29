@@ -39,9 +39,9 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
   let currentOptions:ReadingListOptions|undefined;
   let moreLoading:{key:string;controller:AbortController;promise:Promise<void>}|undefined;
   let checking:AbortController|undefined;
+  let detailRequest:AbortController|undefined;
   let unavailable=false;
   let displayedList:string|undefined;
-  let settingsAppliedRevision:number|undefined;
   let contentEpoch = 0;
   let refreshSequence = 0;
   let stopped = false;
@@ -161,6 +161,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
   function stopUi(message: string) {
     if(stopped)return;
     checking?.abort();
+    detailRequest?.abort();
     session.dispose();
     menus.stop();
     stopped = true;
@@ -190,6 +191,21 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     }
   }
   function refresh() {return session.refresh();}
+  function updateDetails() {
+    if(stopped||!statusPanel.isOpen()&&!menus.isOpen()){
+      detailRequest?.abort();detailRequest=undefined;return;
+    }
+    if(detailRequest)return;
+    const controller=new AbortController();detailRequest=controller;
+    const settingsRevision=menus.statusRevision();
+    void resources.refreshDetails(controller.signal).then(details=>{
+      if(controller.signal.aborted||stopped||!details)return;
+      if(statusPanel.isOpen())statusPanel.update(details.problems,details);
+      if(menus.isOpen())menus.status(details,settingsRevision);
+    }).catch(error=>{
+      if(!controller.signal.aborted&&!stopped&&statusPanel.isOpen())statusPanel.detailsFailed(errorMessage(error));
+    }).finally(()=>{if(detailRequest===controller)detailRequest=undefined;});
+  }
   async function updateReader() {
     if (stopped) return;
     checking?.abort();
@@ -198,7 +214,6 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     const sequence = ++refreshSequence;
     const active = () => !stopped && epoch === contentEpoch && sequence === refreshSequence;
     const debugRevision = debug.revision();
-    const settingsRevision = menus.statusRevision();
     let statusAvailable = false;
     try {
       const selection=tree.selection;
@@ -208,24 +223,17 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       opened.refresh();
       const pageResult=pages.poll(options,list.visible(),list.atTop(),controller.signal)
         .then(page=>({page}),error=>({error}));
-      const reply=await resources.refresh(controller.signal,statusPanel.isOpen()||menus.isOpen());
+      const reply=await resources.refresh(controller.signal);
       if(!active())return;
       const accepted=resources.accept(reply);
-      if(accepted.reset){pages.clear();list.clear();opened.reset();void refresh();return;}
+      if(accepted.reset){detailRequest?.abort();detailRequest=undefined;actions.reset();statusPanel.reset();pages.clear();list.clear();opened.reset();void refresh();return;}
       opened.connected();
       const state=resources.status;
       if(!state)throw new Error('Reading status temporarily unavailable');
       const recovered=unavailable;unavailable=false;
       statusAvailable = true;
       onCollectionPoll();
-      const statusConfirmed=true;
-      const details=resources.details;
-      // Local form actions can replace their own optimistic state after this
-      // server version was accepted. Reapply confirmed cached status for the
-      // new owner revision, without loading an unchanged form every poll.
-      if(menus.isOpen()&&details&&!accepted.detailsError&&(recovered||accepted.changed.has('details')||settingsAppliedRevision!==settingsRevision)){
-        menus.status(details,settingsRevision);settingsAppliedRevision=settingsRevision;
-      }
+      updateDetails();
       if(recovered||accepted.changed.has('status')){
       debug.updateStatus(state.diagnostic_count, state.diagnostic_persistence_error||undefined, debugRevision);
       if (state.runtime_state==='stopped') { stopUi('Oko stopped'); return; }
@@ -239,13 +247,8 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       statusPanel.forgetMaterials(state.viewed_ids || []);
       menus.sources(state.sources || []);
       }
-      if(statusPanel.isOpen()){
-        if(accepted.detailsError)statusPanel.detailsFailed(errorMessage(accepted.detailsError));
-        else if(details)statusPanel.update(details.problems,details);
-      }
-      // A lost command response can remain pending while server status stays
-      // unchanged. Every confirmed poll admits receipt reconciliation.
-      if(statusConfirmed)void actions.flush();
+      // Receipt reconciliation remains independent of the details panel.
+      void actions.flush();
       const navigation=resources.navigation();
       if(!navigation)throw new Error('Reading navigation temporarily unavailable');
       const navigationChanged=recovered||accepted.changed.has('navigation')||accepted.changed.has('feed');
@@ -296,7 +299,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
         progress('No connection to Oko');
       }
     },
-    onClosed: () => {newsActions.close(false); invalidate(); opened.clear(); list.clear();},
+    onClosed: () => {detailRequest?.abort();detailRequest=undefined;newsActions.close(false); invalidate(); opened.clear(); list.clear();},
     onCloseError: error => reportError(error, 'Closing tab'),
   });
   input('sort').onchange = () => {newsActions.close(false); void changed();};

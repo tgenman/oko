@@ -21,14 +21,13 @@ export function createReadingResources(api:ReaderApi) {
   let nav:NavigationResponse|undefined,state:StatusSummary|undefined,details:RuntimeStatus|undefined;
   let navTag:string|undefined,statusTag:string|undefined,detailsTag:string|undefined;
   const headers=(tag?:string)=>tag?{'If-None-Match':tag}:{};
-  async function refresh(signal:AbortSignal,includeDetails:boolean) {
-    const [status,navigation,detail]=await Promise.all([
+  async function refresh(signal:AbortSignal) {
+    const [status,navigation]=await Promise.all([
       runtimeStatus({client:api.client,signal,throwOnError:false,headers:headers(statusTag)}),
       getNavigation({client:api.client,signal,throwOnError:false,headers:headers(navTag)}),
-      includeDetails?statusDetails({client:api.client,signal,throwOnError:false,headers:headers(detailsTag)}):Promise.resolve(undefined),
     ]);
     signal.throwIfAborted();
-    return {status,navigation,detail};
+    return {status,navigation};
   }
   function accept(reply:Awaited<ReturnType<typeof refresh>>) {
     const next=accepted(reply.status);
@@ -37,26 +36,27 @@ export function createReadingResources(api:ReaderApi) {
     const identity=reply.status.response?.headers.get('X-Oko-Storage-Id')||null;
     const navIdentity=reply.navigation.response?.headers.get('X-Oko-Storage-Id')||identity;
     const reset=!!identity&&(storageId!==null&&storageId!==identity||identity!==navIdentity);
-    if(reset){nav=undefined;state=undefined;details=undefined;navTag=statusTag=detailsTag=undefined;storageId=identity;return {reset:true,changed:new Set<string>(),detailsError:null};}
+    if(reset){nav=undefined;state=undefined;details=undefined;navTag=statusTag=detailsTag=undefined;storageId=identity;return {reset:true,changed:new Set<string>()};}
     if(identity)storageId=identity;
     const changed=new Set<string>();
     if(next){state=next;statusTag=reply.status.response?.headers.get('etag')??undefined;changed.add('status');}
     if(navigation){nav=navigation;navTag=reply.navigation.response?.headers.get('etag')??undefined;changed.add('navigation');}
-    let detailsError:unknown=null;
-    if(reply.detail){
-      try {
-        const detailIdentity=reply.detail.response?.headers.get('X-Oko-Storage-Id')||identity;
-        if(detailIdentity!==identity)throw new Error('Storage changed while reading status details');
-        const value=accepted(reply.detail);
-        if(value){details=value;detailsTag=reply.detail.response?.headers.get('etag')??undefined;changed.add('details');}
-      } catch(error){detailsError=error;}
-    }
-    return {reset:false,changed,detailsError};
+    return {reset:false,changed};
   }
+  async function refreshDetails(signal:AbortSignal) {
+    const identity=storageId;
+    const reply=await statusDetails({client:api.client,signal,throwOnError:false,headers:headers(detailsTag)});
+    signal.throwIfAborted();
+    if(storageId!==identity||(reply.response?.headers.get('X-Oko-Storage-Id')||identity)!==identity)throw new Error('Storage changed while reading status details');
+    const value=accepted(reply);
+    if(value){details=value;detailsTag=reply.response?.headers.get('etag')??undefined;}
+    return details;
+  }
+
   function navigation():Navigation|undefined {
     if(!nav)return;
     return {count:nav.total,folders:nav.folders.map(({id,title,count})=>({id,title,count})),
       feeds:nav.folders.flatMap(folder=>folder.feeds.map(feed=>({...feed,folder_id:folder.id})))};
   }
-  return {refresh,accept,navigation,get storageId(){return storageId;},get status(){return state;},get details(){return details;}};
+  return {refresh,refreshDetails,accept,navigation,get storageId(){return storageId;},get status(){return state;},get details(){return details;}};
 }

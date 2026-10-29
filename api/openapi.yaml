@@ -12742,7 +12742,9 @@ components:
           - idle
           - running
         completed:
-          type: integer
+          type:
+          - integer
+          - 'null'
           minimum: 0
         total:
           type:

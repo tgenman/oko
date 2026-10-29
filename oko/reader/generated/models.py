@@ -1122,7 +1122,7 @@ class StatusProblem(WireModel):
 
 class StatusProgress(WireModel):
     model_config = ConfigDict(extra="forbid")
-    completed: StrictInt = Field(..., ge=0)
+    completed: StrictInt | None = Field(..., ge=0)
     state: Literal["idle", "running"]
     total: StrictInt | None = Field(..., ge=0)
 

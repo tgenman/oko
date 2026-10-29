@@ -28,7 +28,7 @@ export function createReaderActions({readerApi,onChanged}:{readerApi:ReaderApi;o
  }
  function matchesDraft(problem:Problem,path:string,field:string):boolean{if((field==='feed_refresh_minutes'||field==='telegram_http_rps')&&path==='settings/oko/global'&&!problem.recovery.length)return problem.affected.some(resource=>resource.kind==='settings'&&resource.target.scope==='oko');return problem.recovery.some(intent=>intent.kind==='change_setting'?path==='settings/'+intent.target.scope+'/'+intent.target.owner&&intent.keys.some(key=>key===field):intent.kind==='configure_processor'?path==='processors/'+intent.processor_id:false);}
  return {
-  beginCommand,flush,
+  beginCommand,flush,reset(){pending.clear();latest.clear();sequence++;},
   forgetMaterials(ids:string[]){const removed=new Set(ids);for(const[key,entry]of pending)if(entry.problem.affected.some(r=>r.kind==='material'&&removed.has(r.material_id)))pending.delete(key);},
   failed(request:Request|null,error:unknown){if(!request||latest.get(request.key)!==request.sequence)return;request.result=error&&typeof error==='object'&&'confirmed'in error&&error.confirmed?'failed':'unknown';pending.set(request.key,{request,problem:describe(request,request.result==='unknown')});onChanged();void flush();},
   succeeded(request:Request|null){if(request&&latest.get(request.key)===request.sequence){pending.delete(request.key);onChanged();}},

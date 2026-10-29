@@ -63,3 +63,11 @@ def test_status_survives_stop_and_legacy_check_is_absent(tmp_path):
         assert stopped.status_code==200 and stopped.json()['runtime_state']=='stopped'
         assert stopped.headers['X-Oko-Storage-Id']==identity
         assert client.get('/api/v3/status',headers={'If-None-Match':stopped.headers['etag']}).status_code==304
+
+
+def test_queue_size_is_not_reported_as_completed_progress(tmp_path):
+    library(tmp_path,[2])
+    with TestClient(traced_app(tmp_path,rss_enabled=False),headers=HEADERS) as client:
+        assert client.put('/api/v3/power',json={'enabled':True}).status_code==200
+        status=client.get('/api/v3/status').json()
+        assert status['collection']=={'state':'running','completed':None,'total':None}
