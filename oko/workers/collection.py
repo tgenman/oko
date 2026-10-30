@@ -49,7 +49,7 @@ class CollectionWorker:
         self._youtube_captions = youtube_captions or LocalCaptions()
         self._youtube_history = youtube_history
         self._wall_clock = wall_clock
-        self._captions_active = False
+        self._captions_active: 'CaptionAttempt | None' = None
         self._read_sync_at = 0.0
         self._started=False
         self._source_revision: int | None = None
@@ -463,10 +463,10 @@ class CollectionWorker:
                             return
                         media.accept(job.item,download,actual,staged)
                         current.jobs.finish(job)
+                        if caption_attempt and caption_attempt.attempted:
+                            self.service.caption_completed()
                         self._finish_collection(job,current)
                     current.jobs.checkpoint('after_media_commit')
-                    if caption_attempt and caption_attempt.attempted:
-                        self.service.caption_completed()
         except CaptionsDeferred:
             pass
         except asyncio.CancelledError:
@@ -491,6 +491,8 @@ class CollectionWorker:
                     if native:
                         self._account_wait(feed,source_error,job)
         finally:
+            if caption_attempt is not None:
+                caption_attempt.release()
             media.release(download)
             attempt=self.jobs._collection_active.get(job.id)
             if attempt and attempt.job.generation==job.generation:
@@ -572,6 +574,7 @@ class CaptionAttempt:
         self.publication=publication
         self.attempted = False
         self.blocked = False
+        self.network_finished = False
 
     def current(self) -> bool:
         return self.worker.execution._store is self.store and self.worker._live() and self.store.jobs.valid(self.job)
@@ -582,6 +585,9 @@ class CaptionAttempt:
             if not self.current():
                 raise asyncio.CancelledError
             delay = worker.service.caption_ready() - worker._wall_clock()
+            active = worker._captions_active
+            if active is not None and active.network_finished and not active.current():
+                worker._captions_active = None
             if delay > 0 or worker._captions_active:
                 with store.jobs.transaction(worker._live):
                     store.jobs.defer_captions(job,worker._clock(),max(delay,.1),'Ожидание допуска получения субтитров')
@@ -590,20 +596,24 @@ class CaptionAttempt:
             client = LocalCaptions(proxy_url(config)) if isinstance(worker._youtube_captions, LocalCaptions) else worker._youtube_captions
             worker.service.caption_started(worker._wall_clock())
             self.attempted = True
-            worker._captions_active = True
+            worker._captions_active = self
         try:
             try:
                 text = await client.fetch(video)
-            except CaptionsBlocked as error:
-                async with worker.execution._actions:
-                    if not self.current():
-                        raise asyncio.CancelledError
-                    worker.service.caption_blocked(worker._wall_clock(), error.retry_after)
-                    self.blocked = True
-                raise
+            finally:
+                self.network_finished = True
+        except CaptionsBlocked as error:
             async with worker.execution._actions:
                 if not self.current():
                     raise asyncio.CancelledError
-            return text
-        finally:
-            worker._captions_active = False
+                worker.service.caption_blocked(worker._wall_clock(), error.retry_after)
+                self.blocked = True
+            raise
+        async with worker.execution._actions:
+            if not self.current():
+                raise asyncio.CancelledError
+        return text
+
+    def release(self) -> None:
+        if self.worker._captions_active is self:
+            self.worker._captions_active = None
