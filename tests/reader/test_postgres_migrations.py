@@ -996,3 +996,48 @@ def test_stage_queue_migration_preserves_pending_work(connections):
         assert db.execute("SELECT to_regclass('processing_stage_dirty')").fetchone() == (None,)
         assert db.execute('SELECT item FROM processing_dirty ORDER BY item').fetchall() == [('existing',),('other',),('pending',)]
         verify(db, MIGRATIONS)
+
+
+def test_dirty_settings_work_is_reconciled_after_restart(postgres_database_url, tmp_path):
+    from psycopg import sql
+    from psycopg.types.json import Jsonb
+    from tests.support.storage import Store
+    from tests.support.worker_library import worker_library
+    from oko.storage.postgres_schema import MIGRATIONS
+
+    root = tmp_path/'source'
+    source, item, _, _ = worker_library(root)
+    tables = ('folders','feeds','settings','items','feed_publications','jobs','state')
+    copied = {}
+    try:
+        for table in tables:
+            columns = source.db.execute("""SELECT column_name,data_type FROM information_schema.columns
+                WHERE table_schema=current_schema() AND table_name=%s AND is_identity='NO' AND is_generated='NEVER'
+                ORDER BY ordinal_position""", (table,)).fetchall()
+            names = [column['column_name'] for column in columns]
+            types = [column['data_type'] for column in columns]
+            rows = source.db.execute('SELECT '+','.join(names)+' FROM '+table).fetchall()
+            copied[table] = (names,types,[tuple(row) for row in rows])
+        original = source.db.execute("SELECT generation,input_snapshot->>'signature' FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()[:]
+    finally:
+        source.db.close()
+    with psycopg.connect(postgres_database_url,autocommit=True) as db:
+        migrate(db,MIGRATIONS[:55])
+        for table in tables:
+            names,types,rows = copied[table]
+            statement = sql.SQL('INSERT INTO {} ({}) VALUES ({}) ON CONFLICT DO NOTHING').format(
+                sql.Identifier(table),sql.SQL(',').join(map(sql.Identifier,names)),
+                sql.SQL(',').join(sql.Placeholder() for _ in names))
+            for row in rows:
+                db.execute(statement,tuple(Jsonb(value) if kind=='jsonb' and value is not None else value for kind,value in zip(types,row)))
+        db.execute("UPDATE settings SET value='\"Changed synthetic rules\"'::jsonb WHERE field='prompt_filters' AND folder_id IS NULL AND feed_id IS NULL")
+        db.execute('INSERT INTO processing_dirty(item) VALUES (%s) ON CONFLICT DO NOTHING', (item,))
+        migrate(db,MIGRATIONS)
+        assert db.execute('SELECT item FROM processing_dirty WHERE item=%s', (item,)).fetchone() == (item,)
+    recovered = Store(root,lambda _:None,database_url=postgres_database_url)
+    try:
+        current = recovered.db.execute("SELECT generation,input_snapshot->>'signature' FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()
+        assert current[0] > original[0] and current[1] != original[1]
+        assert recovered.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
+    finally:
+        recovered.db.close()

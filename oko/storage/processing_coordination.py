@@ -76,9 +76,17 @@ class ProcessingState:
         query = 'SELECT DISTINCT i . id FROM items_read i JOIN reading_memberships m ON m . publication_id = i . id JOIN feeds f ON f . id = m . feed_id WHERE i . viewed = 0'
         params: tuple[str, ...] = ()
         if scope in ('feed', 'folder'):
-            query += ' AND ' + ('f . id = %s' if scope == 'feed' else 'f . folder_id = %s')
-            params = (owner,)
-        self.store.db.execute(f'INSERT INTO processing_dirty {query} ON CONFLICT DO NOTHING', params)
+            condition = 'f.id=%s' if scope=='feed' else 'f.folder_id=%s'
+            query += ' AND ' + condition
+            # A linked source's privacy participates in its parent's AI input.
+            query += """ UNION SELECT DISTINCT parent.id FROM items_read parent
+                JOIN publication_links l ON l.source_publication_id=parent.id
+                JOIN reading_memberships m ON m.publication_id=l.target_publication_id
+                JOIN feeds f ON f.id=m.feed_id WHERE parent.viewed=0 AND """ + condition
+            params = (owner,owner)
+        items = [row[0] for row in self.store.db.execute(query, params).fetchall()]
+        from oko.storage.processing_batch import reconcile_settings
+        reconcile_settings(self.store,items)
 
     def memberships_removed(self, identities: list[str]) -> None:
         """Reconcile surviving owners and revoke own AI work when none remain."""

@@ -668,3 +668,22 @@
   Job. The targeted regression first failed on the old queue insertion; after the
   change, 48 settings and transaction tests passed, plus 28 Playwright scenarios.
   The switched open-material screenshot was inspected.
+- Settings changes now reconcile affected Jobs and publication statuses in one
+  transaction using batched reads and writes. A linked source's AI permission
+  change also includes its parents. A sequential first attempt took 13.79 seconds
+  through HTTP on 400 synthetic publications and failed the two-second check;
+  the batched version passes that check, including a bound below 100 SQL commands.
+  A separate local transaction measurement took 0.138 seconds and 47 SQL commands
+  for 400 publications; the two measurements have different boundaries.
+- The first broad batch run passed 194 tests and found one obsolete test that
+  expected settings to use background recovery. That test now injects a real
+  startup recovery failure. A repeat passed 300 tests and types. A further run
+  passed 138 tests and found two stale test-helper calls to the removed stage
+  queue; after updating the helper, 48 targeted read/HTTP tests passed. Four
+  Playwright scenarios passed and the saved-result screenshot was inspected.
+- A legacy version 55 synthetic database with pending settings work was restarted:
+  its marker remained until recovery, which updated the Job and consumed the
+  marker. Auto-review rejected the proposed unguarded removal of `processing_dirty`
+  because preservation of outstanding work was not proven; no removal was applied.
+  The table and its consumers remain in place pending a separately reviewed safe
+  cutover; no claim of the target table count is made here.

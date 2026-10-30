@@ -29,6 +29,7 @@ class Inputs:
     related_items: dict[str, Row] = field(default_factory=dict)
     children: dict[str, list[Row]] = field(default_factory=dict)
     owners: dict[str, set[str]] = field(default_factory=dict)
+    memberships: dict[str, list[str]] = field(default_factory=dict)
 
 
 _current: ContextVar[Inputs | None] = ContextVar('material_inputs', default=None)
@@ -108,6 +109,9 @@ def material_inputs(db: Database, identities: set[str], *, include_subtitles: bo
         for row in db.execute("SELECT l . source_publication_id AS reader_source , i . * , j . error AS fetch_error FROM publication_links l JOIN items_read i ON i . id = l . target_publication_id LEFT JOIN jobs j ON j . kind = 'fetch' AND j . item = i . id WHERE l . source_publication_id = ANY ( %s ) AND i . viewed = 0 ORDER BY l . rowid", (batch,)):
             value.children[row['reader_source']].append(row)
             value.related_items[row['id']] = row
+        value.memberships.update({identity: [] for identity in batch})
+        for row in db.execute('SELECT publication_id,feed_id FROM feed_publications WHERE publication_id=ANY(%s) ORDER BY publication_id,is_primary DESC,feed_id', (batch,)):
+            value.memberships[row['publication_id']].append(row['feed_id'])
         value.owners.update({identity: set() for identity in batch})
         for row in db.execute('SELECT m . publication_id AS reader_source , m . feed_id FROM reading_memberships m WHERE m . publication_id = ANY ( %s ) UNION SELECT l . source_publication_id AS reader_source , m . feed_id FROM publication_links l JOIN reading_memberships m ON m . publication_id = l . target_publication_id WHERE l . source_publication_id = ANY ( %s )', (batch, batch)):
             value.owners[row['reader_source']].add(row['feed_id'])

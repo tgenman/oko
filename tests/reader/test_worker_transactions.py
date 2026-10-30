@@ -1174,3 +1174,63 @@ def test_display_only_setting_does_not_enqueue_processing(tmp_path):
         assert tuple(store.db.execute("SELECT status,generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()) == before
     finally:
         store.db.close()
+
+
+def test_rule_change_updates_pending_job_without_a_dirty_marker(tmp_path):
+    from oko.services.subscriptions import SubscriptionService
+    from oko.subscriptions.subscriptions import Overrides
+    store, item, execution, _ = worker_library(tmp_path)
+    try:
+        store.processing.background = True
+        with store.db:
+            store.db.execute('DELETE FROM processing_dirty')
+        before = dict(store.db.execute("SELECT generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone())
+        service = SubscriptionService(execution.require_store)
+        def change():
+            service.update_settings('feed','demo',Overrides(prompt_filters='New rules'))
+            after = dict(store.db.execute("SELECT generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone())
+            assert after['generation'] > before['generation']
+            assert after['input_snapshot'] != before['input_snapshot']
+            assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
+        with pytest.raises(ValueError, match='rollback'):
+            with transaction(store.db):
+                change()
+                raise ValueError('rollback')
+        assert dict(store.db.execute("SELECT generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()) == before
+        with transaction(store.db):
+            change()
+    finally:
+        store.db.close()
+
+
+def test_linked_source_privacy_change_reconciles_parent_job_atomically(tmp_path):
+    from oko.storage import memberships
+    from oko.subscriptions.subscriptions import AddFeed, FeedPatch
+    store, item, _, _ = worker_library(tmp_path)
+    try:
+        other = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/linked-feed',title='Linked',folder='Other',verification='synthetic'))['id']
+        with transaction(store.db):
+            store.subscriptions.update_feed('demo',FeedPatch(public_ai=True))
+            store.subscriptions.update_feed(other,FeedPatch(public_ai=True))
+            memberships.lock_graph(store.db)
+            store.db.execute("""INSERT INTO items(id,source_id,url,platform,external_id,complete,content,title)
+                SELECT 'linked','linked-source','https://example.org/linked','rss','linked',1,content,title FROM items WHERE id=%s""", (item,))
+            memberships.add(store.db,other,'linked')
+            store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES (%s,'linked')", (item,))
+            store.processing.reconcile_accepted_item(item)
+        before = store.db.execute("SELECT generation,input_snapshot->>'signature' FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()[:]
+        store.processing.background = True
+        def change():
+            store.subscriptions.update_feed(other,FeedPatch(public_ai=False))
+            store.settings_changed('feed',other)
+            after = store.db.execute("SELECT generation,input_snapshot->>'signature' FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()
+            assert after[0] > before[0] and after[1] != before[1]
+        with pytest.raises(ValueError, match='rollback'):
+            with transaction(store.db):
+                change()
+                raise ValueError('rollback')
+        assert store.db.execute("SELECT generation,input_snapshot->>'signature' FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()[:] == before
+        with transaction(store.db):
+            change()
+    finally:
+        store.db.close()

@@ -88,18 +88,19 @@ def processing_feed(store: 'Store', item: str, kind: str | None = None) -> str:
     if row is None:
         raise ValueError('Publication not found')
     chosen = json.loads(row['processing_metadata']).get('_pass', {}).get('feed_id')
+    inputs = material_read.current(store.db)
+    cached = inputs.memberships.get(item) if inputs is not None else None
     if isinstance(chosen, str):
-        belongs = chosen == row['feed_id'] or bool(store.db.execute(
-            'SELECT 1 FROM feed_publications WHERE feed_id=%s AND publication_id=%s', (chosen,item)).fetchone())
+        belongs = chosen == row['feed_id'] or (chosen in cached if cached is not None else bool(store.db.execute(
+            'SELECT 1 FROM feed_publications WHERE feed_id=%s AND publication_id=%s', (chosen,item)).fetchone()))
         if belongs:
             return chosen
     if kind in ('filter','theses'):
-        owners = store.db.execute('''SELECT feed_id FROM feed_publications WHERE publication_id=%s
-            ORDER BY is_primary DESC,feed_id''', (item,)).fetchall()
+        owners = cached if cached is not None else [r[0] for r in store.db.execute(
+            'SELECT feed_id FROM feed_publications WHERE publication_id=%s ORDER BY is_primary DESC,feed_id', (item,)).fetchall()]
         if len(owners)>1:
             candidates = []
-            for owner in owners:
-                feed = owner[0]
+            for feed in owners:
                 values = store.subscriptions.effective('feed',feed,details=False)['effective']
                 filtering = bool(values['filter_enabled']['value'] and values['prompt_filters']['value'].strip())
                 if kind=='filter' and filtering or kind=='theses' and values['theses']['value'] and not filtering:

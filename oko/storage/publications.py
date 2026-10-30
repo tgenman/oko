@@ -369,7 +369,7 @@ class Publications:
         if publication_input.awaiting_input(selected) or publication_input.awaiting_linked_input(self.store,item,selected):
             return 'pending_collection' if row['status'] != 'pending_collection' else None
         filtered = self.store.filters.read(item)
-        jobs={r['kind']:r['status'] for r in self.store.db.execute("SELECT kind , status FROM jobs WHERE item = %s AND kind IN ( 'filter' , 'theses' )",(item,))}
+        jobs={kind:row['status'] for kind,row in material_read.jobs(self.store.db,item).items() if kind in ('filter','theses')}
         if filtered['hidden']:
             status = 'filter_out'
         elif filtered['status'] not in ('off', 'done') or self.store.filters.signature(item) and jobs.get('filter') in ('pending','running'):
