@@ -491,3 +491,33 @@ def test_graph_lock_serializes_membership_changes(postgres_url, tmp_path):
             other.rollback()
     finally:
         store.db.close()
+
+
+def test_viewed_membership_changes_and_rollback_together(postgres_url, tmp_path):
+    from oko.storage import memberships
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=postgres_url)
+    try:
+        store.subscriptions.ensure_demo()
+        with store.db:
+            store.db.execute("INSERT INTO items(id) VALUES ('item')")
+            memberships.lock_graph(store.db)
+            memberships.add(store.db, 'demo', 'item')
+        with pytest.raises(RuntimeError, match='rollback'):
+            with transaction(store.db):
+                memberships.lock_graph(store.db)
+                memberships.set_viewed(store.db, ['item'], True)
+                assert store.db.execute("SELECT is_unviewed FROM feed_publications WHERE publication_id='item'").fetchone()[0] is False
+                raise RuntimeError('rollback')
+        assert store.db.execute("SELECT viewed FROM items WHERE id='item'").fetchone()[0] == 0
+        assert store.db.execute("SELECT is_unviewed FROM feed_publications WHERE publication_id='item'").fetchone()[0] is True
+        with transaction(store.db):
+            memberships.lock_graph(store.db)
+            memberships.set_viewed(store.db, ['item'], True)
+        assert store.db.execute("SELECT is_unviewed FROM feed_publications WHERE publication_id='item'").fetchone()[0] is False
+        with transaction(store.db):
+            memberships.lock_graph(store.db)
+            memberships.set_viewed(store.db, ['item'], False)
+        assert store.db.execute("SELECT is_unviewed FROM feed_publications WHERE publication_id='item'").fetchone()[0] is True
+    finally:
+        store.db.close()

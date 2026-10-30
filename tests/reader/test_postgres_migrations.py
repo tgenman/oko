@@ -826,3 +826,19 @@ def test_primary_membership_migration_rejects_missing_primary(connections):
             migrate(db, MIGRATIONS)
         assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname='membership_primary_insert'").fetchone() == (1,)
         verify(db, MIGRATIONS[:41])
+
+
+def test_viewed_membership_trigger_is_removed(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:42])
+        db.execute("INSERT INTO feeds(id) VALUES ('feed')")
+        db.execute("INSERT INTO items(id) VALUES ('item')")
+        db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','item',true)")
+        db.execute("INSERT INTO items(id,viewed) VALUES ('unknown',NULL)")
+        db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','unknown',true,true)")
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT is_unviewed FROM feed_publications WHERE publication_id='unknown'").fetchone() == (False,)
+        assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname='membership_viewed_changed'").fetchone() == (0,)
+        assert db.execute("SELECT is_unviewed FROM feed_publications WHERE publication_id='item'").fetchone() == (True,)
+        verify(db, MIGRATIONS)

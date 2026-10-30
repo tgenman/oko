@@ -40,3 +40,12 @@ def remove(db: Database, *, items: list[str] | None = None, feed: str | None = N
             SELECT min(feed_id),publication_id FROM feed_publications WHERE publication_id=ANY(%s)
             GROUP BY publication_id HAVING NOT bool_or(is_primary))''', (primary,))
     return [r['publication_id'] for r in removed]
+
+
+def set_viewed(db: Database, items: list[str], viewed: bool) -> None:
+    """Update publication and transitional membership state in one transaction."""
+    if not items:
+        return
+    db.execute('UPDATE items SET viewed=%s,complete=0 WHERE id=ANY(%s)', (int(viewed),items))
+    db.execute('UPDATE feed_publications SET is_unviewed=%s::integer::boolean WHERE publication_id=ANY(%s) AND is_unviewed IS DISTINCT FROM %s::integer::boolean',
+               (not viewed,items,not viewed))

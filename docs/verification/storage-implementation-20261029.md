@@ -505,3 +505,9 @@
   scenarios passed and the shared-publication screenshot was inspected. A fresh
   version 42 schema has 23 tables and 15 non-internal triggers. Processing dirty
   queues, status reconciliation, remaining triggers and final review remain open.
+- Migration 043 moves the transitional membership viewed flag to Python and
+  repairs it from publication state, including legacy NULL values. The first
+  affected run found PostgreSQL boolean adaptation errors (186 passed, 7 failed);
+  after correction the repeat passed 193 tests and types. A targeted legacy NULL
+  migration check and three Playwright scenarios also passed; the viewed shared
+  publication screenshot was inspected. The flag itself remains transitional.

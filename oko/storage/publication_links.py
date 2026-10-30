@@ -42,7 +42,7 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
             if row['url']!=ref.url:
                 raise ValueError('Conflicting linked publication identity')
             if row['viewed'] and row['feed_id'] is None:
-                store.db.execute('UPDATE items SET viewed = 0 , complete = 0 WHERE id = %s',(identity,))
+                memberships.set_viewed(store.db,[identity],False)
                 effects.fetch[identity]=True
             elif owner['platform']=='rss':
                 effects.refresh_links.add(identity)
@@ -97,7 +97,7 @@ def prune(store: 'Store', candidates: set[str]) -> None:
         store.publications.set_source_deleted(batch, False)
         store.jobs.forget_input('filter', batch)
         store.jobs.forget_input('theses', batch)
-        store.db.execute(f'UPDATE items SET viewed = 1 , complete = 0 WHERE id IN ( {marks} )', batch)
+        memberships.set_viewed(store.db,batch,True)
 
 
 def project_header(store: 'Store', item: str, header: dict[str,Any]) -> dict[str,Any]:

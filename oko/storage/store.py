@@ -530,7 +530,7 @@ class Store:
                     self.publications.forget(item)
                 self.jobs.forget_input('theses', [item])
                 # This is local cleanup, not viewed(): never create read eligibility.
-                self.db.execute('UPDATE items SET viewed = 1 , complete = 0 WHERE id = %s', (item,))
+                membership_graph.set_viewed(self.db,[item],True)
         self.db.after_commit(lambda: self.fault('after_feed_delete_commit'))
 
     def _remember_cleanup_owner(self, item: str, feed: str) -> None:
