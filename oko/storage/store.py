@@ -249,7 +249,7 @@ class Store:
                     effects.fetch.setdefault(item,False)
             if item_status_changed:
                 status_changed(self.db)
-            self.read_versions.memberships_changed(added_memberships,enqueue=False)
+            self.read_versions.memberships_changed(added_memberships)
             if envelope or 'history_enroll' in selection:
                 self.subscriptions.history.enroll(feed,history_items,envelope.selection.scan_complete if envelope else selection['scan_complete'])
                 if envelope:
@@ -479,7 +479,7 @@ class Store:
                 if self.db.execute(f"UPDATE history_members SET outcome = 'viewed' WHERE item IN ( {marks} ) AND outcome IN ( 'pending' , 'retrying' )", batch).rowcount:
                     status_changed(self.db)
                 removed = membership_graph.remove(self.db,items=batch)
-                self.read_versions.memberships_changed(removed,enqueue=False)
+                self.read_versions.memberships_changed(removed)
             publication_links.prune(self, set(members))
             self.processing.memberships_removed(members)
             for item, row in rows.items():
@@ -503,7 +503,7 @@ class Store:
                 source_changed(self.db)
             shared=[r[0] for r in self.db.execute('SELECT id FROM items_by_feed WHERE platform IS NOT NULL AND feed_id = %s',(feed,))]
             removed = membership_graph.remove(self.db,feed=feed)
-            self.read_versions.memberships_changed(removed,enqueue=False)
+            self.read_versions.memberships_changed(removed)
             for item in shared:
                 self.read_sync.mark_item(item)
             publication_links.prune(self,set(shared))

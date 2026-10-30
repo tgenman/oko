@@ -22,14 +22,10 @@ class ReaderVersions:
             raise ValueError('Invalid storage identity')
         uuid.UUID(identity)
         self.identity = identity
-    def memberships_changed(self, identities: list[str], *, enqueue: bool = True) -> None:
+    def memberships_changed(self, identities: list[str]) -> None:
         ordered = sorted(set(identities))
         if not ordered:
             return
-        if enqueue:
-            for start in range(0,len(ordered),400):
-                batch = ordered[start:start+400]
-                self.db.execute('INSERT INTO processing_dirty(item) SELECT unnest(%s::text[]) ON CONFLICT DO NOTHING', (batch,))
         from oko.storage.reader_status import changed as status_changed
         status_changed(self.db)
 

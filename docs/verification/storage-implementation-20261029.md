@@ -631,3 +631,6 @@
   172-test processing, reading, completion and recovery run passed. Fourteen
   Playwright scenarios passed and linked RSS content was inspected. Settings,
   startup and repair paths still use the remaining dirty queue.
+- Removed the now-unused option that enqueued membership changes. Three targeted
+  discovery, shared-owner removal and linked-content rollback checks passed;
+  all membership callers now reconcile their own consequences directly.
