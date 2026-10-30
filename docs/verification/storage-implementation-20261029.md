@@ -616,3 +616,9 @@
   media, YouTube, processing and recovery suites passed 169 tests and types;
   four Playwright scenarios passed and the ready-captions screenshot was inspected.
   Membership changes, settings and startup still use the publication dirty queue.
+- Discovery membership additions now reconcile affected Jobs directly without
+  writing a temporary publication marker. A regression checks Job creation and
+  rollback in the same transaction and verifies that no marker was inserted.
+  The affected worker, shared-publication, Telegram and YouTube suites passed
+  116 tests and types; two Playwright scenarios passed and the shared publication
+  screenshot was inspected. Membership removal and settings still use the queue.

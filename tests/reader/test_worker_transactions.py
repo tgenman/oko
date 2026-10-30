@@ -176,6 +176,8 @@ def test_discovered_complete_publication_gets_job_in_same_transaction(tmp_path):
         job = store.jobs.next_job(store.clock())
         assert job is not None and job.kind == 'discover'
         packet = publication_packet(Publication('two','https://example.org/two',101), Material('Second','Synthetic new text'), needs_fetch=False)
+        statements = []
+        store.db.set_trace_callback(statements.append)
         with pytest.raises(ValueError, match='synthetic rollback'):
             with transaction(store.db):
                 store.collect_discovery([packet], '{}')
@@ -187,7 +189,9 @@ def test_discovered_complete_publication_gets_job_in_same_transaction(tmp_path):
             store.collect_discovery([packet], '{}')
             item = store.db.execute("SELECT id FROM items WHERE source_id='demo:two'").fetchone()[0]
             assert store.db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()[0] == 'pending'
+        assert not any('INSERT INTO processing_dirty' in statement for statement in statements)
     finally:
+        store.db.set_trace_callback(None)
         store.db.close()
 
 

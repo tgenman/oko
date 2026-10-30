@@ -249,7 +249,7 @@ class Store:
                     effects.fetch.setdefault(item,False)
             if item_status_changed:
                 status_changed(self.db)
-            self.read_versions.memberships_changed(added_memberships)
+            self.read_versions.memberships_changed(added_memberships,enqueue=False)
             if envelope or 'history_enroll' in selection:
                 self.subscriptions.history.enroll(feed,history_items,envelope.selection.scan_complete if envelope else selection['scan_complete'])
                 if envelope:
