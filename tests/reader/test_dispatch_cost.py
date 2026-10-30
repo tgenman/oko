@@ -11,7 +11,7 @@ def _pending_files(root, foreign):
     feeds,_=build_library(root,[10,foreign])
     store=Store(root,lambda _:None)
     with store.db:
-        for row in store.db.execute('SELECT id,content FROM items').fetchall():
+        for row in store.db.execute('SELECT id,content FROM publications').fetchall():
             content=json.loads(row['content'])
             identities=[]
             for number in range(3):
@@ -21,7 +21,7 @@ def _pending_files(root, foreign):
                 store.db.execute("INSERT INTO media_files ( id , publication_id , resource_key , source_locator , name , status ) VALUES ( %s , %s , %s , %s , %s , 'pending_download' )",(identity,row['id'],str(number),'https://cdn.test/file','file'))
                 store.db.execute("INSERT INTO jobs ( kind , item ) VALUES ( 'download_media' , %s )",(identity,))
             content['extra']['_reader'].update(full=False,reason='Media is pending')
-            store.db.execute('UPDATE items SET content = %s , media_ids = %s WHERE id = %s',(json.dumps(content),json.dumps(identities),row['id']))
+            store.db.execute('UPDATE publications SET content = %s , media_ids = %s WHERE id = %s',(json.dumps(content),json.dumps(identities),row['id']))
     return store,feeds
 
 
@@ -72,12 +72,12 @@ def test_non_youtube_subtitle_file_uses_the_common_media_worker(tmp_path):
     try:
         row=store.db.execute("SELECT m . id , m . publication_id FROM jobs j JOIN media_files m ON m . id = j . item JOIN items_read i ON i . id = m . publication_id WHERE j . kind = 'download_media' AND i . feed_id = %s ORDER BY j . id LIMIT 1",(feeds[0],)).fetchone()
         with store.db:
-            item=store.db.execute('SELECT content FROM items WHERE id = %s',(row['publication_id'],)).fetchone()
+            item=store.db.execute('SELECT content FROM publications WHERE id = %s',(row['publication_id'],)).fetchone()
             content=json.loads(item['content'])
             for block in content['blocks']:
                 if block.get('media_id')==row['id']:
                     block['role']='subtitles'
-            store.db.execute('UPDATE items SET content = %s WHERE id = %s',(json.dumps(content),row['publication_id']))
+            store.db.execute('UPDATE publications SET content = %s WHERE id = %s',(json.dumps(content),row['publication_id']))
         job=store.jobs.next_job(store.clock(),feeds=[feeds[0]],media_only=True)
         assert job is not None and job.item==row['id']
     finally:
@@ -148,9 +148,9 @@ def test_empty_dispatch_with_linked_articles_grows_linearly(tmp_path):
         store=Store(tmp_path/str(count),lambda _:None)
         try:
             with store.db:
-                for root in store.db.execute('SELECT id FROM items').fetchall():
+                for root in store.db.execute('SELECT id FROM publications').fetchall():
                     article=str(uuid4())
-                    store.db.execute('INSERT INTO items ( id , source_id , url , published ) VALUES ( %s , %s , %s , 0 )',
+                    store.db.execute('INSERT INTO publications ( id , source_id , url , published ) VALUES ( %s , %s , %s , 0 )',
                         (article,article,'https://article.test/'+article))
                     store.db.execute('INSERT INTO publication_links VALUES ( %s , %s )',(root['id'],article))
                 store.db.execute("UPDATE jobs SET status='done' WHERE kind='fetch'")

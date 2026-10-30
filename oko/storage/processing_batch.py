@@ -25,7 +25,7 @@ def reconcile_settings(store: 'Store', identities: list[str]) -> None:
         with material_read.material_inputs(store.db,set(batch)), reading_snapshot():
             changes = [(item,status) for item in batch if (status := store.publications._status_change(item)) is not None]
         if changes:
-            store.db.execute("""UPDATE items i SET status=v.status FROM unnest(%s::text[],%s::text[]) AS v(id,status)
+            store.db.execute("""UPDATE publications i SET status=v.status FROM unnest(%s::text[],%s::text[]) AS v(id,status)
                 WHERE i.id=v.id AND i.status IS DISTINCT FROM v.status""", ([r[0] for r in changes],[r[1] for r in changes]))
 
 

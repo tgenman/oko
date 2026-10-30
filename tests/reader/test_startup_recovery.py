@@ -97,10 +97,10 @@ def slow_reconciliation(dsn):
     with psycopg.connect(dsn, autocommit=True) as db:
         # A restored snapshot needs revision reconciliation even when no model
         # work is enabled; every saved root must receive its missing revision.
-        db.execute("UPDATE items SET processing_metadata='{}' WHERE viewed=0")
+        db.execute("UPDATE publications SET processing_metadata='{}' WHERE viewed=0")
         db.execute('''CREATE FUNCTION slow_recovery() RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN PERFORM pg_sleep(0.2); RETURN NEW; END $$''')
-        db.execute('CREATE TRIGGER slow_recovery BEFORE UPDATE OF processing_metadata ON items FOR EACH ROW EXECUTE FUNCTION slow_recovery()')
+        db.execute('CREATE TRIGGER slow_recovery BEFORE UPDATE OF processing_metadata ON publications FOR EACH ROW EXECUTE FUNCTION slow_recovery()')
 
 
 def test_reader_opens_reads_and_stops_while_database_reconciliation_is_slow(postgres_url, tmp_path):
@@ -173,7 +173,7 @@ def test_enabled_work_waits_for_recovery_then_runs_without_a_second_start(postgr
             # Remove the external latency before testing ordinary collection;
             # the fixture targets recovery, not normal publication writes.
             with psycopg.connect(postgres_url, autocommit=True) as db:
-                db.execute('DROP TRIGGER slow_recovery ON items')
+                db.execute('DROP TRIGGER slow_recovery ON publications')
             deadline = time.monotonic()+20
             while time.monotonic() < deadline:
                 if len(read_all_cards(client, '/api/v3/cards')) == len(cards)+3:
@@ -204,7 +204,7 @@ def test_global_settings_after_startup_queue_slow_reconciliation_without_blockin
             with psycopg.connect(postgres_url, autocommit=True) as db:
                 db.execute('''CREATE FUNCTION slow_recovery() RETURNS trigger LANGUAGE plpgsql AS $$
                     BEGIN PERFORM pg_sleep(0.2); RETURN NEW; END $$''')
-                db.execute('CREATE TRIGGER slow_recovery BEFORE UPDATE OF processing_metadata ON items FOR EACH ROW EXECUTE FUNCTION slow_recovery()')
+                db.execute('CREATE TRIGGER slow_recovery BEFORE UPDATE OF processing_metadata ON publications FOR EACH ROW EXECUTE FUNCTION slow_recovery()')
             started = time.monotonic()
             changed = client.patch('/api/v3/settings/oko/global', json={'prompt_filters':'Use the new rules'}, timeout=2)
             assert changed.status_code == 200
@@ -239,10 +239,10 @@ def test_background_reconciliation_failure_closes_work_admission_and_can_stop(po
     credential = tmp_path/'database'
     credential.write_text(postgres_url);credential.chmod(0o600)
     with psycopg.connect(postgres_url, autocommit=True) as db:
-        db.execute("UPDATE items SET processing_metadata='{}' WHERE id=%s", (cards[0]['id'],))
+        db.execute("UPDATE publications SET processing_metadata='{}' WHERE id=%s", (cards[0]['id'],))
         db.execute("""CREATE FUNCTION failed_recovery() RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN RAISE EXCEPTION 'synthetic private recovery failure'; END $$""")
-        db.execute('CREATE TRIGGER failed_recovery BEFORE UPDATE OF processing_metadata ON items FOR EACH ROW EXECUTE FUNCTION failed_recovery()')
+        db.execute('CREATE TRIGGER failed_recovery BEFORE UPDATE OF processing_metadata ON publications FOR EACH ROW EXECUTE FUNCTION failed_recovery()')
     process = start(root, credential, demo=True)
     try:
         deadline = time.monotonic()+10

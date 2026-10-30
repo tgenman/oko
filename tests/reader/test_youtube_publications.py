@@ -86,7 +86,7 @@ def test_confirmed_missing_captions_complete_without_model_but_error_does_not(tm
                 assert client.get('/api/v3/publication/'+card['id']).json()['theses']['result'] is None
             assert not any(request.url.path=='/v1/chat/completions' for request in models)
             with database(root) as db:
-                row=db.execute('SELECT status , processing_metadata FROM items WHERE id = %s',(card['id'],)).fetchone()
+                row=db.execute('SELECT status , processing_metadata FROM publications WHERE id = %s',(card['id'],)).fetchone()
                 if missing:
                     assert row[0]=='ready' and json.loads(row[1])['summary']['reason']=='no_input'
                 else:
@@ -125,7 +125,7 @@ def test_youtube_summary_uses_raw_captions_after_filtering(tmp_path):
         from tests.support.storage import database
         from oko.storage.processing_input import digest
         with database(root) as db:
-            saved=db.execute('SELECT processing_metadata , content FROM items WHERE id = %s',(card['id'],)).fetchone()
+            saved=db.execute('SELECT processing_metadata , content FROM publications WHERE id = %s',(card['id'],)).fetchone()
             metadata=json.loads(saved[0])
             blocks=json.loads(saved[1])['blocks']
             index=next(i for i,b in enumerate(blocks) if b.get('role')=='subtitles')
@@ -282,7 +282,7 @@ def test_caption_absence_then_reappearance_never_reuses_a_previous_file_url(tmp_
         assert absent['theses']['result']['points']==[] and client.get(old_file).status_code==404
         from tests.support.storage import database
         with database(root) as db:
-            ids=json.loads(db.execute('SELECT media_ids FROM items WHERE id = %s',(card['id'],)).fetchone()[0])
+            ids=json.loads(db.execute('SELECT media_ids FROM publications WHERE id = %s',(card['id'],)).fetchone()[0])
             assert old_file.rsplit('/',1)[-1] not in ids
         text[0]='Reappeared captions.'
         wall[0]+=11

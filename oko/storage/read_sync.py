@@ -94,7 +94,7 @@ class ReadSync:
             WHERE m.publication_id=%s AND f.transport='telegram' AND f.connection IS DISTINCT FROM 'deleting'""", (item,))]
         if not feeds:
             return
-        row = db.execute('SELECT complete,members FROM items WHERE id=%s AND viewed=0', (item,)).fetchone()
+        row = db.execute('SELECT complete,members FROM publications WHERE id=%s AND viewed=0', (item,)).fetchone()
         if not row or not row['complete']:
             return
         members = json.loads(row['members'])

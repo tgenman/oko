@@ -51,7 +51,7 @@ class Publications:
             row = snapshot.items.get(item) or snapshot.related_items.get(item)
             if row is not None:
                 return bool(row['source_deleted'])
-        row = self.store.db.execute('SELECT source_deleted FROM items WHERE id=%s', (item,)).fetchone()
+        row = self.store.db.execute('SELECT source_deleted FROM publications WHERE id=%s', (item,)).fetchone()
         return bool(row and row[0])
 
     def set_source_deleted(self, identities: list[str], deleted: bool) -> None:
@@ -61,7 +61,7 @@ class Publications:
         for start in range(0, len(ordered), 400):
             batch = ordered[start:start+400]
             changed = [row[0] for row in self.store.db.execute(
-                f'UPDATE items SET source_deleted={literal} WHERE id=ANY(%s) AND source_deleted IS DISTINCT FROM {literal} RETURNING id', (batch,))]
+                f'UPDATE publications SET source_deleted={literal} WHERE id=ANY(%s) AND source_deleted IS DISTINCT FROM {literal} RETURNING id', (batch,))]
             if not changed:
                 continue
             status_changed(self.store.db)
@@ -109,7 +109,7 @@ class Publications:
         row = expect_row(self.store.db.execute('SELECT * FROM items_read WHERE id = %s', (item,)).fetchone())
         if row['url'] != ref.url:
             status_changed(self.store.db)
-        self.store.db.execute('UPDATE items SET platform = %s , external_id = %s , url = %s , published_at = %s , discovered_at = COALESCE ( discovered_at , %s ) WHERE id = %s',
+        self.store.db.execute('UPDATE publications SET platform = %s , external_id = %s , url = %s , published_at = %s , discovered_at = COALESCE ( discovered_at , %s ) WHERE id = %s',
             (ref.key.platform.value, ref.key.external_id, ref.url, row['published'] if row['published_known'] else None,
              self.store.wall_clock(), item))
 
@@ -120,7 +120,7 @@ class Publications:
         db.execute("UPDATE media_files SET status = 'unavailable' , reason = 'Обновляется описание вложения после смены доступа' WHERE status != 'ready' AND publication_id IN ( SELECT id FROM unviewed_items_by_feed WHERE feed_id = %s AND viewed = 0 )",(feed,))
         marked = [row[0] for row in db.execute('SELECT id FROM items_by_feed WHERE feed_id=%s AND source_deleted', (feed,))]
         self.set_source_deleted(marked, False)
-        db.execute("UPDATE items SET status = 'pending_collection' WHERE id IN (SELECT id FROM unviewed_items_by_feed WHERE feed_id = %s AND viewed = 0)",(feed,))
+        db.execute("UPDATE publications SET status = 'pending_collection' WHERE id IN (SELECT id FROM unviewed_items_by_feed WHERE feed_id = %s AND viewed = 0)",(feed,))
         if db.execute('DELETE FROM telegram_read_state WHERE feed = %s',(feed,)).rowcount:
             status_changed(db)
 
@@ -294,7 +294,7 @@ class Publications:
         for row in media:
             if row['resource_key']=='youtube:cover' and row['status']=='ready':
                 effects.revalidate[row['id']]=False
-        store.db.execute('UPDATE items SET content = %s , media_ids = %s , title = %s , status = %s WHERE id = %s',
+        store.db.execute('UPDATE publications SET content = %s , media_ids = %s , title = %s , status = %s WHERE id = %s',
             (json.dumps(content, ensure_ascii=False), json.dumps([r['id'] for r in media]),
              content['extra']['_reader']['title'], 'pending_filtering', item))
         if same and previous:
@@ -303,7 +303,7 @@ class Publications:
             if filtered:
                 result=dict(hidden=filtered.get('hidden',False),reason=filtered['reason'],removed=[r['text'] for r in filtered['removed']])
                 refreshed=publication_input.filtered(publication_input.content(store,item),item,result)
-                store.db.execute('UPDATE items SET filtered_content = %s WHERE id = %s',(json.dumps(refreshed,ensure_ascii=False),item))
+                store.db.execute('UPDATE publications SET filtered_content = %s WHERE id = %s',(json.dumps(refreshed,ensure_ascii=False),item))
         self.reconcile(item)
         publication_links.notify_parents(store,item)
 
@@ -333,12 +333,12 @@ class Publications:
             completed_at=datetime.fromtimestamp(self.store.wall_clock(),timezone.utc).isoformat(),**(origin or {}))
         if kind=='filter':
             filtered=publication_input.filtered(content,item,result)
-            self.store.db.execute('UPDATE items SET filtered_content = %s , status = %s WHERE id = %s',
+            self.store.db.execute('UPDATE publications SET filtered_content = %s , status = %s WHERE id = %s',
                 (json.dumps(filtered,ensure_ascii=False),'filter_out' if result['hidden'] else 'pending_summary',item))
         else:
             summarized=dict(points=[dict(text=p['text'],source_publication_ids=[r['id'] for r in p['sources']]) for p in result['points']],extra={})
-            self.store.db.execute("UPDATE items SET summarized_content = %s , status = 'ready' WHERE id = %s",(json.dumps(summarized,ensure_ascii=False),item))
-        self.store.db.execute('UPDATE items SET processing_metadata = %s WHERE id = %s',(json.dumps(metadata,ensure_ascii=False),item))
+            self.store.db.execute("UPDATE publications SET summarized_content = %s , status = 'ready' WHERE id = %s",(json.dumps(summarized,ensure_ascii=False),item))
+        self.store.db.execute('UPDATE publications SET processing_metadata = %s WHERE id = %s',(json.dumps(metadata,ensure_ascii=False),item))
 
     def complete_empty(self, item: str, kind: str, signature: str) -> None:
         result=dict(hidden=False,removed=[],reason='Нет текста для обработки') if kind=='filter' else dict(points=[])
@@ -346,17 +346,17 @@ class Publications:
         row=expect_row(self.store.db.execute('SELECT processing_metadata FROM items_read WHERE id = %s',(item,)).fetchone())
         metadata=json.loads(row[0])
         metadata['filter' if kind=='filter' else 'summary']['reason']='no_input'
-        self.store.db.execute('UPDATE items SET processing_metadata = %s WHERE id = %s',(json.dumps(metadata,ensure_ascii=False),item))
+        self.store.db.execute('UPDATE publications SET processing_metadata = %s WHERE id = %s',(json.dumps(metadata,ensure_ascii=False),item))
         if kind=='filter':
             row=expect_row(self.store.db.execute('SELECT filtered_content FROM items_read WHERE id = %s',(item,)).fetchone())
             filtered=json.loads(row[0])
             filtered['blocks']=[]
-            self.store.db.execute('UPDATE items SET filtered_content = %s WHERE id = %s',(json.dumps(filtered,ensure_ascii=False),item))
+            self.store.db.execute('UPDATE publications SET filtered_content = %s WHERE id = %s',(json.dumps(filtered,ensure_ascii=False),item))
 
     def status(self, item: str) -> None:
         status = self._status_change(item)
         if status is not None:
-            self.store.db.execute('UPDATE items SET status = %s WHERE id = %s', (status, item))
+            self.store.db.execute('UPDATE publications SET status = %s WHERE id = %s', (status, item))
 
     @reading_snapshot()
     def _status_change(self, item: str) -> str | None:
@@ -398,11 +398,11 @@ class Publications:
             metadata.pop('_pass',None)
         encoded = json.dumps(metadata, ensure_ascii=False)
         if encoded != row['processing_metadata']:
-            self.store.db.execute('UPDATE items SET processing_metadata = %s WHERE id = %s', (encoded, item))
+            self.store.db.execute('UPDATE publications SET processing_metadata = %s WHERE id = %s', (encoded, item))
         with reading_snapshot():
             status = self._status_change(item)
         if status is not None:
-            self.store.db.execute('UPDATE items SET status = %s WHERE id = %s', (status, item))
+            self.store.db.execute('UPDATE publications SET status = %s WHERE id = %s', (status, item))
         return True
 
     def prune(self, item: str) -> None:
@@ -431,5 +431,5 @@ class Publications:
             self.store.read_versions.memberships_changed(removed)
             db.execute(f'DELETE FROM publication_links WHERE source_publication_id IN ( {marks} ) OR target_publication_id IN ( {marks} )', batch+batch)
             db.execute(f'DELETE FROM media_files WHERE publication_id IN ( {marks} )', batch)
-            db.execute(f"UPDATE items SET content = '{{}}' , media_ids = '[]' , filtered_content = '{{}}' , summarized_content = '{{}}' , processing_metadata = '{{}}' WHERE id IN ( {marks} )", batch)
+            db.execute(f"UPDATE publications SET content = '{{}}' , media_ids = '[]' , filtered_content = '{{}}' , summarized_content = '{{}}' , processing_metadata = '{{}}' WHERE id IN ( {marks} )", batch)
             self.store.processing.memberships_removed(removed)

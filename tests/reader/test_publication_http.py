@@ -130,14 +130,14 @@ def test_open_publication_keeps_parent_and_linked_article_in_one_snapshot(tmp_pa
     try:
         store.set_work_enabled(False)
         with store.db:
-            row = dict(store.db.execute('SELECT * FROM items WHERE id = %s', (parent,)).fetchone())
+            row = dict(store.db.execute('SELECT * FROM publications WHERE id = %s', (parent,)).fetchone())
             row.pop('source_deleted')  # New synthetic publications start as present.
             child_content = json.loads(row['content'])
             child_content['blocks'][0]['text'] = 'Child before'
             child = dict(row, id='snapshot-child', source_id='snapshot-child', external_id='snapshot-child',
                          platform='other_web', content=json.dumps(child_content))
             fields = list(child)
-            store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', [child[f] for f in fields])
+            store.db.execute('INSERT INTO publications('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', [child[f] for f in fields])
             store.db.execute('INSERT INTO publication_links VALUES (%s,%s)', (parent, 'snapshot-child'))
     finally:
         store.db.close()
@@ -159,7 +159,7 @@ def test_open_publication_keeps_parent_and_linked_article_in_one_snapshot(tmp_pa
                 pending = pool.submit(client.get, path)
                 assert entered.wait(5)
                 for identity, text in ((parent, 'Parent after'), ('snapshot-child', 'Child after')):
-                    writer.execute("UPDATE items SET content=jsonb_set(content::jsonb,'{blocks,0,text}',to_jsonb(%s::text))::text WHERE id=%s", (text, identity))
+                    writer.execute("UPDATE publications SET content=jsonb_set(content::jsonb,'{blocks,0,text}',to_jsonb(%s::text))::text WHERE id=%s", (text, identity))
                 writer.commit()
                 release.set()
                 result = pending.result(5)

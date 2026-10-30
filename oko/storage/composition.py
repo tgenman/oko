@@ -63,11 +63,11 @@ class ReadingComposition:
         feeds = self._store.subscriptions.feeds()
         feed_counts={row['feed']:row for row in self._store.db.execute('''SELECT m.feed_id AS feed, count(*) AS unviewed,
             count(*) FILTER (WHERE i.status IS DISTINCT FROM 'filter_out') AS visible
-            FROM feed_publications m JOIN items i ON i.id=m.publication_id
+            FROM feed_publications m JOIN publications i ON i.id=m.publication_id
             WHERE i.viewed=0 GROUP BY m.feed_id''')}
         folder_counts={row['folder']:row['visible'] for row in self._store.db.execute('''SELECT f.folder_id AS folder,
             count(DISTINCT m.publication_id) AS visible FROM feed_publications m JOIN feeds f ON f.id=m.feed_id
-            JOIN items i ON i.id=m.publication_id
+            JOIN publications i ON i.id=m.publication_id
             WHERE i.viewed=0 AND i.status IS DISTINCT FROM 'filter_out' GROUP BY f.folder_id''')}
         visible=expect_row(self._store.db.execute("SELECT count(*) FROM items_read i WHERE i.viewed=0 AND i.status IS DISTINCT FROM 'filter_out' AND EXISTS (SELECT 1 FROM reading_memberships m WHERE m.publication_id=i.id)").fetchone())[0]
         return dict(folders=[dict(folder,count=folder_counts.get(folder['id'],0)) for folder in folders],

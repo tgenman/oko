@@ -5,7 +5,7 @@ The card list and individual materials are read directly.
 from oko.storage.database import expect_row, Row
 import json
 import uuid
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
@@ -33,6 +33,23 @@ class ReaderVersions:
         if (kind,identity) != ('status','runtime'):
             return None
         return self.db.execute("SELECT (value::jsonb->>'version')::bigint AS version, (value::jsonb->>'changed')::double precision AS changed FROM state WHERE key='reader-status-revision'").fetchone()
+
+    def history_versions(self) -> list[Any]:
+        row = self.db.execute("SELECT coalesce(jsonb_agg(jsonb_build_array(feed,xmin::text) ORDER BY feed),'[]'::jsonb) FROM initial_history").fetchone()
+        return row[0] if row else []
+
+    def time_boundaries(self) -> tuple[Any, ...]:
+        from oko.storage.reading import reader_now, reader_wall
+        wall = reader_wall(self.store.wall_clock())
+        row = self.db.execute("""SELECT
+            (SELECT next FROM jobs WHERE status='pending' AND kind IN ('fetch','filter','theses') AND next>%s ORDER BY next LIMIT 1),
+            (SELECT blocked_until FROM youtube_access WHERE id=1 AND blocked_until>%s),
+            (SELECT finished FROM reader_problems WHERE finished>%s ORDER BY finished LIMIT 1),
+            (SELECT jsonb_build_array(next_at,blocked_until,strikes) FROM youtube_access WHERE id=1),
+            (SELECT coalesce(jsonb_agg(jsonb_build_array(key,value) ORDER BY key),'[]'::jsonb)
+             FROM state WHERE key='work-enabled' OR key='processor:codex' OR key LIKE 'feed-status:%%')""",
+            (reader_now(self.store.clock()),wall,wall-86400)).fetchone()
+        return (row[0],row[1],row[2],row[3],row[4]) if row else (None,None,None,None,None)
 
     def advance(self, now: float | None = None, wall: float | None = None) -> None:
         now=self.store.clock() if now is None else now

@@ -24,7 +24,7 @@ def test_opened_material_does_not_scan_foreign_job_archive(postgres_url, tmp_pat
     with psycopg.connect(postgres_url, autocommit=True) as seed:
         # No runtime work: archived unrelated rows are only planner ballast.
         seed.execute('SET session_replication_role=replica')
-        seed.execute("INSERT INTO items(id,platform,external_id,viewed) SELECT 'archive-'||n,'rss','archive-'||n,1 FROM generate_series(1,20000) n")
+        seed.execute("INSERT INTO publications(id,platform,external_id,viewed) SELECT 'archive-'||n,'rss','archive-'||n,1 FROM generate_series(1,20000) n")
         seed.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) SELECT 'media-'||n,'archive-'||n,'r','https://example.invalid','a','ready' FROM generate_series(1,10000) n")
         seed.execute("INSERT INTO jobs(kind,item,status) SELECT 'fetch','archive-'||n,'done' FROM generate_series(1,20000) n")
         seed.execute("INSERT INTO jobs(kind,item,status) SELECT 'download_media','media-'||n,'done' FROM generate_series(1,10000) n")

@@ -102,14 +102,14 @@ def test_completion_preserves_unreadable_and_pending_members(tmp_path, corruptio
             with store.db:
                 identity = f'{1:032x}'
                 if corruption == 'attachment':
-                    content = json.loads(store.db.execute('SELECT content FROM items WHERE id = %s', (identity,)).fetchone()[0])
+                    content = json.loads(store.db.execute('SELECT content FROM publications WHERE id = %s', (identity,)).fetchone()[0])
                     content['extra']['_reader']['attachments'] = [{'name':'missing-mime', 'kind':'image'}]
-                    store.db.execute('UPDATE items SET content = %s WHERE id = %s', (json.dumps(content), identity))
+                    store.db.execute('UPDATE publications SET content = %s WHERE id = %s', (json.dumps(content), identity))
                 elif corruption in ('media_ids', 'processing_metadata'):
-                    store.db.execute("UPDATE items SET " + corruption + "='invalid-json' WHERE id=%s", (identity,))
+                    store.db.execute("UPDATE publications SET " + corruption + "='invalid-json' WHERE id=%s", (identity,))
                 else:
-                    store.db.execute("UPDATE items SET content = '{}' WHERE id = %s", (identity,))
-                store.db.execute('UPDATE items SET complete = 0 WHERE id = %s', (f'{2:032x}',))
+                    store.db.execute("UPDATE publications SET content = '{}' WHERE id = %s", (identity,))
+                store.db.execute('UPDATE publications SET complete = 0 WHERE id = %s', (f'{2:032x}',))
         client.portal.call(damage_fixture)
         result=client.get('/api/v3/cards')
         assert result.status_code==200, result.text

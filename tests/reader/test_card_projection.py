@@ -37,7 +37,7 @@ def test_card_keeps_linked_preview_without_mutating_opened_material(tmp_path):
     store.subscriptions.update_settings('oko', 'global', Overrides(prompt_filters='', theses=False))
     store.settings_changed()
     with store.db:
-        row = dict(store.db.execute('SELECT * FROM items WHERE id=%s', (item,)).fetchone())
+        row = dict(store.db.execute('SELECT * FROM publications WHERE id=%s', (item,)).fetchone())
         row.pop('source_deleted')  # New synthetic publications start as present.
         content = json.loads(row['content'])
         content['blocks'] = [dict(type='text', role='body', text='Linked body')]
@@ -47,7 +47,7 @@ def test_card_keeps_linked_preview_without_mutating_opened_material(tmp_path):
         child = dict(row, id='child', source_id='child', external_id='child', title='Article',
                      url='https://example.org/article', content=json.dumps(content))
         fields = list(child)
-        store.db.execute('INSERT INTO items (' + ','.join(fields) + ') VALUES (' + ','.join('%s' for _ in fields) + ')', tuple(child.values()))
+        store.db.execute('INSERT INTO publications (' + ','.join(fields) + ') VALUES (' + ','.join('%s' for _ in fields) + ')', tuple(child.values()))
         store.db.execute('INSERT INTO publication_links VALUES (%s,%s)', (item, 'child'))
     store.db.close()
     with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
@@ -80,7 +80,7 @@ def test_cards_page_keeps_membership_and_card_in_one_snapshot(tmp_path, postgres
         assert [card['id'] for card in initial.json()['items']] == [item]
         entered, release = threading.Event(), threading.Event()
         def trace(query):
-            if 'SELECT i . * , coalesce ( v . hidden' in query and not entered.is_set():
+            if 'SELECT i . * , CASE WHEN i.status=' in query and not entered.is_set():
                 entered.set()
                 assert release.wait(5)
         client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(trace))

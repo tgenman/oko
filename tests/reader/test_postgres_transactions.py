@@ -500,7 +500,7 @@ def test_viewed_membership_changes_and_rollback_together(postgres_url, tmp_path)
     try:
         store.subscriptions.ensure_demo()
         with store.db:
-            store.db.execute("INSERT INTO items(id) VALUES ('item')")
+            store.db.execute("INSERT INTO publications(id) VALUES ('item')")
             memberships.lock_graph(store.db)
             memberships.add(store.db, 'demo', 'item')
         with pytest.raises(RuntimeError, match='rollback'):
@@ -509,7 +509,7 @@ def test_viewed_membership_changes_and_rollback_together(postgres_url, tmp_path)
                 memberships.set_viewed(store.db, ['item'], True)
                 assert store.db.execute("SELECT is_unviewed FROM feed_publications WHERE publication_id='item'").fetchone()[0] is False
                 raise RuntimeError('rollback')
-        assert store.db.execute("SELECT viewed FROM items WHERE id='item'").fetchone()[0] == 0
+        assert store.db.execute("SELECT viewed FROM publications WHERE id='item'").fetchone()[0] == 0
         assert store.db.execute("SELECT is_unviewed FROM feed_publications WHERE publication_id='item'").fetchone()[0] is True
         with transaction(store.db):
             memberships.lock_graph(store.db)
@@ -635,7 +635,7 @@ def test_viewed_status_version_changes_atomically(postgres_url, tmp_path):
         return store.read_versions.version('status','runtime')[0]
     try:
         with store.db:
-            store.db.execute("INSERT INTO items(id) VALUES ('item')")
+            store.db.execute("INSERT INTO publications(id) VALUES ('item')")
         before = revision()
         with pytest.raises(RuntimeError, match='rollback'):
             with transaction(store.db):

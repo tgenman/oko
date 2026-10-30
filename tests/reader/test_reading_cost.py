@@ -83,11 +83,11 @@ def test_unviewed_index_bounds_archive_work_and_survives_reopen(tmp_path):
     with store.db:
         # Keep the membership statistics stale, as immediately after a bulk import.
         store.db._db.execute('ALTER TABLE feed_publications SET (autovacuum_enabled=false)')
-        store.db.executemany("INSERT INTO items ( id , published , viewed , platform , external_id ) VALUES ( %s , %s , %s , 'other_web' , %s )",
+        store.db.executemany("INSERT INTO publications ( id , published , viewed , platform , external_id ) VALUES ( %s , %s , %s , 'other_web' , %s )",
             [(f'archive-{n:05}', n, int(n >= 100), f'archive-{n:05}') for n in range(20000)])
-        store.db.executemany("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) SELECT 'demo',id,true,viewed=0 FROM items WHERE id=%s", [(f'archive-{n:05}',) for n in range(20000)])
+        store.db.executemany("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) SELECT 'demo',id,true,viewed=0 FROM publications WHERE id=%s", [(f'archive-{n:05}',) for n in range(20000)])
         assert store.db.execute("SELECT 1 FROM pg_indexes WHERE schemaname=current_schema() AND indexname='items_unviewed_order'").fetchone()
-        store.db._db.execute('ANALYZE items')
+        store.db._db.execute('ANALYZE publications')
     store.db.close()
     for _ in range(2):
         store = Store(tmp_path, lambda _: None)
@@ -105,7 +105,7 @@ def test_unviewed_index_bounds_archive_work_and_survives_reopen(tmp_path):
         with store.db:
             store.db.begin()
             for viewed in (1, 0):
-                plan = store.db._db.execute('EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) UPDATE items SET viewed=%s WHERE id=%s',
+                plan = store.db._db.execute('EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) UPDATE publications SET viewed=%s WHERE id=%s',
                     (viewed, 'archive-00000')).fetchone()[0][0]['Plan']
                 assert scan_rows(plan) < 10, plan
                 assert plan.get('Shared Hit Blocks', 0) + plan.get('Shared Read Blocks', 0) < 1600, plan
@@ -116,11 +116,11 @@ def test_unviewed_index_bounds_archive_work_and_survives_reopen(tmp_path):
     try:
         with store.db:
             store.db.execute("INSERT INTO feeds(id) VALUES ('foreign'),('small')")
-            store.db.execute("INSERT INTO items(id,viewed) SELECT 'foreign-' || n,0 FROM generate_series(1,1500) AS n")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'foreign',id,true FROM items WHERE id LIKE 'foreign-%'")
-            store.db.execute("INSERT INTO items(id,viewed) SELECT 'small-' || n,0 FROM generate_series(1,10) AS n")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'small',id,true FROM items WHERE id LIKE 'small-%'")
-            store.db._db.execute('ANALYZE items')
+            store.db.execute("INSERT INTO publications(id,viewed) SELECT 'foreign-' || n,0 FROM generate_series(1,1500) AS n")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'foreign',id,true FROM publications WHERE id LIKE 'foreign-%'")
+            store.db.execute("INSERT INTO publications(id,viewed) SELECT 'small-' || n,0 FROM generate_series(1,10) AS n")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'small',id,true FROM publications WHERE id LIKE 'small-%'")
+            store.db._db.execute('ANALYZE publications')
         with measure_reads(store.db) as small_work:
             small_rows = store.db.execute("SELECT id FROM unviewed_items_by_feed WHERE feed_id='small'").fetchall()
         assert len(small_rows) == 10

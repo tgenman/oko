@@ -182,7 +182,7 @@ def test_hidden_result_stays_hidden_during_filter_regeneration(tmp_path):
                 store = app.state.host.require_store()
                 with store.db:
                     assert app.state.host.jobs.retry_filter(item)
-                    return store.db.execute('SELECT status FROM items WHERE id=%s', (item,)).fetchone()[0]
+                    return store.db.execute('SELECT status FROM publications WHERE id=%s', (item,)).fetchone()[0]
         assert client.portal.call(schedule) == 'filter_out'
 
 

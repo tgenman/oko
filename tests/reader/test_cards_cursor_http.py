@@ -66,7 +66,7 @@ def test_corrupt_source_url_becomes_placeholder_without_breaking_page(tmp_path):
         previous=next(card for card in first.json()['items'] if card['id']==identity)
         def damage():
             with store.db:
-                store.db.execute("UPDATE items SET url='javascript:alert(1)' WHERE id=%s", (identity,))
+                store.db.execute("UPDATE publications SET url='javascript:alert(1)' WHERE id=%s", (identity,))
         client.portal.call(damage)
         response = client.get('/api/v3/cards', headers={'If-None-Match': first.headers['etag']})
         assert response.status_code == 200
@@ -93,7 +93,7 @@ def test_corrupt_content_invalidates_page_etag(tmp_path):
         identity=f'{1:032x}'
         def damage():
             with store.db:
-                store.db.execute("UPDATE items SET content='{}' WHERE id=%s", (identity,))
+                store.db.execute("UPDATE publications SET content='{}' WHERE id=%s", (identity,))
         client.portal.call(damage)
         changed=client.get('/api/v3/cards',headers={'If-None-Match':first.headers['etag']})
         assert changed.status_code==200
@@ -114,7 +114,7 @@ def test_corrupt_timestamp_becomes_placeholder_without_breaking_page(tmp_path):
         identity=f'{1:032x}'
         def damage():
             with store.db:
-                store.db.execute('UPDATE items SET published=%s WHERE id=%s',(1e20,identity))
+                store.db.execute('UPDATE publications SET published=%s WHERE id=%s',(1e20,identity))
         client.portal.call(damage)
         response=client.get('/api/v3/cards')
         assert response.status_code==200 and response.json()['total']==3
@@ -137,11 +137,11 @@ def test_corrupt_preview_url_becomes_placeholder_without_breaking_page(tmp_path)
         identity=f'{1:032x}'
         def damage():
             with store.db:
-                content=json.loads(store.db.execute('SELECT content FROM items WHERE id=%s',(identity,)).fetchone()[0])
+                content=json.loads(store.db.execute('SELECT content FROM publications WHERE id=%s',(identity,)).fetchone()[0])
                 header=content['extra']['_reader']
                 header['attachments']=[{'name':'image','kind':'image','mime':'image/png'}]
                 header['_media_urls']={'image':'javascript:invalid'}
-                store.db.execute('UPDATE items SET content=%s WHERE id=%s',(json.dumps(content),identity))
+                store.db.execute('UPDATE publications SET content=%s WHERE id=%s',(json.dumps(content),identity))
         client.portal.call(damage)
         response=client.get('/api/v3/cards')
         assert response.status_code==200 and response.json()['total']==3

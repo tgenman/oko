@@ -35,7 +35,7 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
                              (ref.key.platform.value,ref.key.external_id)).fetchone()
         if row is None:
             identity=str(uuid4())
-            store.db.execute("INSERT INTO items ( id , source_id , url , published , members , published_known , platform , external_id , discovered_at ) VALUES ( %s , %s , %s , 0 , '[]' , 0 , %s , %s , %s )",
+            store.db.execute("INSERT INTO publications ( id , source_id , url , published , members , published_known , platform , external_id , discovered_at ) VALUES ( %s , %s , %s , 0 , '[]' , 0 , %s , %s , %s )",
                 (identity,'linked:'+identity,ref.url,ref.key.platform.value,ref.key.external_id,store.wall_clock()))
             status_changed(store.db)
             effects.fetch[identity]=False

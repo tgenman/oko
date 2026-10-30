@@ -197,7 +197,7 @@ def snapshot(store: 'Store', item: str) -> None:
     if metadata.get('_pass',{}).get('settings')!=rules or metadata.get('_pass',{}).get('revision')!=current_revision:
         metadata['_pass']=dict(feed_id=rules['feed_id'],settings=deepcopy(rules),settings_version=store.settings_version(rules['feed_id']),revision=current_revision)
         with store.db:
-            store.db.execute('UPDATE items SET processing_metadata = %s WHERE id = %s',(json.dumps(metadata,ensure_ascii=False),item))
+            store.db.execute('UPDATE publications SET processing_metadata = %s WHERE id = %s',(json.dumps(metadata,ensure_ascii=False),item))
 
 
 def request_settings(store: 'Store', item: str) -> tuple[dict[str, Any], bool, int]:

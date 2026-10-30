@@ -89,18 +89,18 @@ def test_native_library_constraints_and_persistent_job_identity(connections):
         assert db.execute("SELECT value FROM state WHERE key='work-enabled'").fetchone() == ('false',)
         with db.transaction():
             db.execute("INSERT INTO feeds(id,platform,external_id) VALUES ('first','rss','https://source.test'),('second','rss','https://other.test')")
-            db.execute("INSERT INTO items(id,platform,external_id,published) VALUES ('article','rss','https://source.test/article',1792870000.123456)")
+            db.execute("INSERT INTO publications(id,platform,external_id,published) VALUES ('article','rss','https://source.test/article',1792870000.123456)")
             db.execute("INSERT INTO feed_publications VALUES ('first','article'),('second','article')")
             db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status,size_bytes) VALUES ('media','article','image','https://media.test/image','image','pending',5000000000)")
             first_job = db.execute("INSERT INTO jobs(kind,item) VALUES ('fetch','article') RETURNING id").fetchone()[0]
         with pytest.raises(psycopg.errors.UniqueViolation), db.transaction():
-            db.execute("INSERT INTO items(id,platform,external_id) VALUES ('duplicate','rss','https://source.test/article')")
+            db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('duplicate','rss','https://source.test/article')")
         with pytest.raises(psycopg.errors.ForeignKeyViolation), db.transaction():
-            db.execute("DELETE FROM items WHERE id='article'")
+            db.execute("DELETE FROM publications WHERE id='article'")
     with connections() as restarted:
         second_job = restarted.execute("INSERT INTO jobs(kind,item) VALUES ('filter','article') RETURNING id").fetchone()[0]
         assert second_job > first_job
-        assert restarted.execute("SELECT published FROM items WHERE id='article'").fetchone()[0] == 1792870000.123456
+        assert restarted.execute("SELECT published FROM publications WHERE id='article'").fetchone()[0] == 1792870000.123456
         assert restarted.execute("SELECT size_bytes FROM media_files WHERE id='media'").fetchone()[0] == 5000000000
         assert restarted.execute("SELECT count(*) FROM reading_memberships WHERE publication_id='article'").fetchone()[0] == 2
 
@@ -600,7 +600,7 @@ def test_reader_visibility_moves_to_publication_status(connections):
         db.execute("UPDATE reader_visibility SET hidden=1 WHERE item='hidden'")
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT to_regclass('reader_visibility')").fetchone() == (None,)
-        assert db.execute("SELECT id,status FROM items ORDER BY id").fetchall() == [('hidden','filter_out'),('visible','pending_filtering')]
+        assert db.execute("SELECT id,status FROM publications ORDER BY id").fetchall() == [('hidden','filter_out'),('visible','pending_filtering')]
         verify(db, MIGRATIONS)
 
 
@@ -1011,12 +1011,13 @@ def test_dirty_settings_work_is_reconciled_after_restart(postgres_database_url, 
     copied = {}
     try:
         for table in tables:
+            source_table = 'publications' if table=='items' else table
             columns = source.db.execute("""SELECT column_name,data_type FROM information_schema.columns
                 WHERE table_schema=current_schema() AND table_name=%s AND is_identity='NO' AND is_generated='NEVER'
-                ORDER BY ordinal_position""", (table,)).fetchall()
+                ORDER BY ordinal_position""", (source_table,)).fetchall()
             names = [column['column_name'] for column in columns]
             types = [column['data_type'] for column in columns]
-            rows = source.db.execute('SELECT '+','.join(names)+' FROM '+table).fetchall()
+            rows = source.db.execute('SELECT '+','.join(names)+' FROM '+source_table).fetchall()
             copied[table] = (names,types,[tuple(row) for row in rows])
         original = source.db.execute("SELECT generation,input_snapshot->>'signature' FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()[:]
     finally:
@@ -1041,3 +1042,17 @@ def test_dirty_settings_work_is_reconciled_after_restart(postgres_database_url, 
         assert recovered.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
     finally:
         recovered.db.close()
+
+
+def test_publication_table_rename_preserves_data_and_views(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db,MIGRATIONS[:55])
+        db.execute("INSERT INTO feeds(id) VALUES ('feed')")
+        db.execute("INSERT INTO items(id,url,content) VALUES ('item','https://example.test','{\"blocks\":[]}')")
+        db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','item',true)")
+        migrate(db,MIGRATIONS)
+        assert db.execute("SELECT to_regclass('items'),to_regclass('publications')").fetchone() == (None,'publications')
+        assert db.execute("SELECT url,content FROM publications WHERE id='item'").fetchone() == ('https://example.test','{"blocks":[]}')
+        assert db.execute("SELECT feed_id FROM items_read WHERE id='item'").fetchone() == ('feed',)
+        verify(db,MIGRATIONS)

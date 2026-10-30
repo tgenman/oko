@@ -257,7 +257,7 @@ def test_unreachable_link_cycle_does_not_retain_files_after_last_root_is_viewed(
     try:
         with store.db:
             for identity in ('cycle-a','cycle-b'):
-                store.db.execute("INSERT INTO items ( id , source_id , url , platform , external_id ) VALUES ( %s , %s , %s , 'other_web' , %s )",(identity,identity,'https://example.test/'+identity,'https://example.test/'+identity))
+                store.db.execute("INSERT INTO publications ( id , source_id , url , platform , external_id ) VALUES ( %s , %s , %s , 'other_web' , %s )",(identity,identity,'https://example.test/'+identity,'https://example.test/'+identity))
             store.db.executemany('INSERT INTO publication_links VALUES ( %s , %s )',[(item,'cycle-a'),('cycle-a','cycle-b'),('cycle-b','cycle-a')])
     finally:
         store.db.close()

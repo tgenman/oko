@@ -102,13 +102,13 @@ def test_compact_cards_batch_links_and_processing_permissions(postgres_url, tmp_
     store.set_work_enabled(False)
     store.processing.background = True
     with store.db:
-        template = dict(store.db.execute('SELECT * FROM items WHERE id = %s', (first,)).fetchone())
+        template = dict(store.db.execute('SELECT * FROM publications WHERE id = %s', (first,)).fetchone())
         template.pop('source_deleted')  # New synthetic publications start as present.
         fields = list(template)
         for n in range(1, count):
             identity = f'{n:032x}'
             row = dict(template, id=identity, source_id=identity, external_id=identity)
-            store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', tuple(row[f] for f in fields))
+            store.db.execute('INSERT INTO publications('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', tuple(row[f] for f in fields))
             store.db.execute('INSERT INTO feed_publications (feed_id,publication_id,is_primary) VALUES ( %s , %s , true )', ('demo', identity))
     store.db.close()
     queries = request_queries(monkeypatch)
@@ -137,7 +137,7 @@ def test_saved_summary_sources_reuse_batched_related_rows(postgres_url, tmp_path
     store.processing.background = True
     store.subscriptions.update_settings('oko', 'global', Overrides(prompt_filters=''))
     with store.db:
-        template = dict(store.db.execute('SELECT * FROM items WHERE id = %s', (parent,)).fetchone())
+        template = dict(store.db.execute('SELECT * FROM publications WHERE id = %s', (parent,)).fetchone())
         template.pop('source_deleted')  # New synthetic publications start as present.
         fields = list(template)
         children = []
@@ -145,7 +145,7 @@ def test_saved_summary_sources_reuse_batched_related_rows(postgres_url, tmp_path
             identity = f'{n+1:032x}'
             children.append(identity)
             row = dict(template, id=identity, source_id=identity, external_id=identity)
-            store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', [row[f] for f in fields])
+            store.db.execute('INSERT INTO publications('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', [row[f] for f in fields])
             store.db.execute('INSERT INTO publication_links VALUES ( %s , %s )', (parent, identity))
         signature = store.processing.theses.signature(parent)
         assert signature
@@ -189,7 +189,7 @@ def test_saved_subtitles_batch_paths_but_recheck_files(postgres_url, tmp_path, m
     store.processing.background = True
     store.subscriptions.update_settings('oko', 'global', Overrides(prompt_filters='', theses=False))
     with store.db:
-        template = dict(store.db.execute('SELECT * FROM items WHERE id = %s', (parent,)).fetchone())
+        template = dict(store.db.execute('SELECT * FROM publications WHERE id = %s', (parent,)).fetchone())
         template.pop('source_deleted')  # New synthetic publications start as present.
         fields = list(template)
         for n in range(count):
@@ -200,10 +200,10 @@ def test_saved_subtitles_batch_paths_but_recheck_files(postgres_url, tmp_path, m
             content['blocks'].append(dict(type='media', role='subtitles', media_id=media))
             if n:
                 row = dict(template, id=identity, source_id=identity, external_id=identity, platform='youtube', content=json.dumps(content))
-                store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', [row[f] for f in fields])
+                store.db.execute('INSERT INTO publications('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', [row[f] for f in fields])
                 store.db.execute('INSERT INTO feed_publications (feed_id,publication_id,is_primary) VALUES ( %s , %s , true )', ('demo', identity))
             else:
-                store.db.execute('UPDATE items SET content = %s , platform = %s WHERE id = %s', (json.dumps(content), 'youtube', identity))
+                store.db.execute('UPDATE publications SET content = %s , platform = %s WHERE id = %s', (json.dumps(content), 'youtube', identity))
             (tmp_path / 'media' / media).write_text('Synthetic captions')
             store.db.execute("INSERT INTO media_files ( id , publication_id , resource_key , source_locator , name , storage_key , status ) VALUES ( %s , %s , %s , %s , %s , %s , 'ready' )", (media, identity, 'captions', 'synthetic:'+media, 'captions.txt', 'media/'+media))
     store.db.close()

@@ -210,7 +210,7 @@ class Store:
                 if plan is None:
                     continue
                 item=plan.item
-                item_status_changed |= bool(self.db.execute('INSERT INTO items ( id , source_id , url , published , members , published_known ) VALUES ( %s , %s , %s , %s , %s , %s ) ON CONFLICT DO NOTHING',
+                item_status_changed |= bool(self.db.execute('INSERT INTO publications ( id , source_id , url , published , members , published_known ) VALUES ( %s , %s , %s , %s , %s , %s ) ON CONFLICT DO NOTHING',
                     (item,plan.source_id,publication.url,publication.published,json.dumps(publication.members),publication.published_known)).rowcount)
                 membership=membership_graph.add(self.db,feed,item)
                 if membership:
@@ -221,16 +221,16 @@ class Store:
                     raise ValueError('Adapter did not return a publication external key')
                 rank=orders.get(publication.adapter_reference.key)
                 if rank is not None and not publication.published_known:
-                    item_status_changed |= bool(self.db.execute('UPDATE items SET source_order = %s WHERE id = %s AND source_order IS DISTINCT FROM %s',(rank,item,rank)).rowcount)
+                    item_status_changed |= bool(self.db.execute('UPDATE publications SET source_order = %s WHERE id = %s AND source_order IS DISTINCT FROM %s',(rank,item,rank)).rowcount)
                 self.publications.identify(item,publication.adapter_reference)
                 if plan.content is not None:
                     assert plan.fingerprint is not None
                     self.publications.publish(item,plan.content,plan.fingerprint,effects)
-                    item_status_changed |= bool(self.db.execute('UPDATE items SET complete = 1 WHERE id = %s AND complete IS DISTINCT FROM 1',(item,)).rowcount)
+                    item_status_changed |= bool(self.db.execute('UPDATE publications SET complete = 1 WHERE id = %s AND complete IS DISTINCT FROM 1',(item,)).rowcount)
                     saved_items.add(item)
                 row=expect_row(self.db.execute('SELECT * FROM items_read WHERE id = %s',(item,)).fetchone())
                 if publication.published_known and not row['published_known']:
-                    self.db.execute('UPDATE items SET published = %s , published_known = 1 , published_at = %s WHERE id = %s',(publication.published,publication.published,item))
+                    self.db.execute('UPDATE publications SET published = %s , published_known = 1 , published_at = %s WHERE id = %s',(publication.published,publication.published,item))
                     item_status_changed = True
                 if publication.id in enrolled:
                     history_items.append(item)
@@ -242,7 +242,7 @@ class Store:
                 if needs_fetch and not self.publications.source_deleted(item):
                     members=sorted(set(json.loads(row['members']))|set(publication.members))
                     if members!=json.loads(row['members']):
-                        self.db.execute('UPDATE items SET members = %s WHERE id = %s',(json.dumps(members),item))
+                        self.db.execute('UPDATE publications SET members = %s WHERE id = %s',(json.dumps(members),item))
                         item_status_changed = True
                         saved_items.add(item)
                         effects.fetch[item]=True
@@ -385,7 +385,7 @@ class Store:
                 with self.db:
                     for row in missing:
                         self.db.execute("UPDATE media_files SET status = 'unavailable' , reason = %s , storage_key = NULL WHERE id = %s",(error.label,row['id']))
-                    self.db.execute('UPDATE items SET content = %s WHERE id = %s',(json.dumps(content,ensure_ascii=False),item))
+                    self.db.execute('UPDATE publications SET content = %s WHERE id = %s',(json.dumps(content,ensure_ascii=False),item))
                     self.collection_history(item,replace(material,collection_error=error))
                 return error,effects
         if (material.source_manifest and material.source_manifest.post_web_unavailable
@@ -413,9 +413,9 @@ class Store:
             if material.adapter_content and material.adapter_content.metadata.reference.key.platform==Platform.telegram:
                 self.publications.identify(item,material.adapter_content.metadata.reference)
             self.publications.publish(item,prepared,fingerprint,effects)
-            item_status_changed = bool(self.db.execute('UPDATE items SET complete = 1 WHERE id = %s AND complete IS DISTINCT FROM 1',(item,)).rowcount)
+            item_status_changed = bool(self.db.execute('UPDATE publications SET complete = 1 WHERE id = %s AND complete IS DISTINCT FROM 1',(item,)).rowcount)
             if material.members:
-                item_status_changed |= bool(self.db.execute('UPDATE items SET members = %s WHERE id = %s AND members IS DISTINCT FROM %s',(json.dumps(material.members),item,json.dumps(material.members))).rowcount)
+                item_status_changed |= bool(self.db.execute('UPDATE publications SET members = %s WHERE id = %s AND members IS DISTINCT FROM %s',(json.dumps(material.members),item,json.dumps(material.members))).rowcount)
             if item_status_changed:
                 status_changed(self.db)
             self.read_sync.mark_item(item)
@@ -493,12 +493,12 @@ class Store:
         self.subscriptions.check_owner('feed', feed)
         with self.db:
             membership_graph.lock_graph(self.db)
-            selected = [r[0] for r in self.db.execute("""SELECT i.id FROM feed_publications m JOIN items i ON i.id=m.publication_id
+            selected = [r[0] for r in self.db.execute("""SELECT i.id FROM feed_publications m JOIN publications i ON i.id=m.publication_id
                 WHERE m.feed_id=%s AND i.processing_metadata::jsonb->'_pass'->>'feed_id'=%s""", (feed,feed))]
             if selected:
                 job_write(self.db, """UPDATE jobs SET status='cancelled',generation=generation+1,input_snapshot=NULL
                     WHERE item=ANY(%s) AND kind IN ('filter','theses') AND status!='done'""", (selected,))
-                self.db.execute("UPDATE items SET processing_metadata=(processing_metadata::jsonb-'_pass')::text WHERE id=ANY(%s)", (selected,))
+                self.db.execute("UPDATE publications SET processing_metadata=(processing_metadata::jsonb-'_pass')::text WHERE id=ANY(%s)", (selected,))
             if self.db.execute("UPDATE feeds SET connection = 'deleting' WHERE id = %s AND connection IS DISTINCT FROM 'deleting'", (feed,)).rowcount:
                 source_changed(self.db)
             shared=[r[0] for r in self.db.execute('SELECT id FROM items_by_feed WHERE platform IS NOT NULL AND feed_id = %s',(feed,))]
@@ -524,7 +524,7 @@ class Store:
 
     def _remember_cleanup_owner(self, item: str, feed: str) -> None:
         job_write(self.db, """INSERT INTO jobs(kind,item,payload)
-            SELECT 'delete',id,jsonb_build_object('cleanup_feed',%s::text)::text FROM items WHERE id=%s AND viewed=1
+            SELECT 'delete',id,jsonb_build_object('cleanup_feed',%s::text)::text FROM publications WHERE id=%s AND viewed=1
             ON CONFLICT(kind,item) DO UPDATE SET payload=jsonb_set(jobs.payload::jsonb,'{cleanup_feed}',to_jsonb(%s::text))::text""", (feed,item,feed))
 
 

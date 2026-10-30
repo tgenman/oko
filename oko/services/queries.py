@@ -37,23 +37,11 @@ class VersionQueries:
 
     @repository_access
     def history_versions(self) -> list[Any]:
-        row = self._storage().db.execute("SELECT coalesce(jsonb_agg(jsonb_build_array(feed,xmin::text) ORDER BY feed),'[]'::jsonb) FROM initial_history").fetchone()
-        return row[0] if row else []
+        return self._storage().read_versions.history_versions()
 
     @repository_access
     def time_boundaries(self) -> tuple[Any, ...]:
-        from oko.storage.reading import reader_now, reader_wall
-        store = self._storage()
-        wall = reader_wall(store.wall_clock())
-        row = store.db.execute("""SELECT
-            (SELECT next FROM jobs WHERE status='pending' AND kind IN ('fetch','filter','theses') AND next>%s ORDER BY next LIMIT 1),
-            (SELECT blocked_until FROM youtube_access WHERE id=1 AND blocked_until>%s),
-            (SELECT finished FROM reader_problems WHERE finished>%s ORDER BY finished LIMIT 1),
-            (SELECT jsonb_build_array(next_at,blocked_until,strikes) FROM youtube_access WHERE id=1),
-            (SELECT coalesce(jsonb_agg(jsonb_build_array(key,value) ORDER BY key),'[]'::jsonb)
-             FROM state WHERE key='work-enabled' OR key='processor:codex' OR key LIKE 'feed-status:%%')""",
-            (reader_now(store.clock()), wall, wall-86400)).fetchone()
-        return (row[0], row[1], row[2], row[3], row[4]) if row else (None, None, None, None, None)
+        return self._storage().read_versions.time_boundaries()
 
     @repository_access
     def advance(self) -> None:

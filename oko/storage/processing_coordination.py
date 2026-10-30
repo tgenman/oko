@@ -54,7 +54,7 @@ class ProcessingState:
             # it does not materialize another persistent queue for every item.
             after: str | None = None
             while True:
-                query = 'SELECT id FROM items WHERE viewed=0' + (' AND id>%s' if after is not None else '') + ' ORDER BY id LIMIT 1'
+                query = 'SELECT id FROM publications WHERE viewed=0' + (' AND id>%s' if after is not None else '') + ' ORDER BY id LIMIT 1'
                 row = self.store.db.execute(query, (after,) if after is not None else ()).fetchone()
                 if row is None:
                     break
@@ -94,13 +94,13 @@ class ProcessingState:
         for start in range(0,len(ordered),400):
             batch = ordered[start:start+400]
             rows = self.store.db.execute("""SELECT i.id,EXISTS(SELECT 1 FROM feed_publications m
-                WHERE m.publication_id=i.id) AS has_owner FROM items i WHERE i.id=ANY(%s)""", (batch,)).fetchall()
+                WHERE m.publication_id=i.id) AS has_owner FROM publications i WHERE i.id=ANY(%s)""", (batch,)).fetchall()
             feedless = [row['id'] for row in rows if not row['has_owner']]
             if feedless:
                 job_write(self.store.db, """UPDATE jobs SET status='cancelled',generation=generation+1,
                     input_snapshot=NULL,error=NULL,problem_code=NULL WHERE item=ANY(%s) AND kind IN ('filter','theses')
                     AND (status IS DISTINCT FROM 'cancelled' OR input_snapshot IS NOT NULL OR error IS NOT NULL OR problem_code IS NOT NULL)""", (feedless,))
-                self.store.db.execute("""UPDATE items SET filtered_content='{}',summarized_content='{}',
+                self.store.db.execute("""UPDATE publications SET filtered_content='{}',summarized_content='{}',
                     processing_metadata=(processing_metadata::jsonb-'filter'-'summary'-'_pass'-'_revision'-'_revision_input')::text,
                     status=CASE WHEN viewed=0 THEN 'ready' ELSE status END WHERE id=ANY(%s)
                     AND (filtered_content IS DISTINCT FROM '{}' OR summarized_content IS DISTINCT FROM '{}'

@@ -251,7 +251,7 @@ def test_media_urls_and_publication_media_ids_follow_source_order(tmp_path):
         attachments=[media for media in client.get('/api/v3/publication/'+item).json()['media'] if media['role'] == 'attachment']
         assert [client.get(value['url']).content for value in attachments]==[b'one',b'two',b'three']
         with database(root) as db:
-            media_ids=json.loads(db.execute('SELECT media_ids FROM items WHERE id = %s',(item,)).fetchone()[0])
+            media_ids=json.loads(db.execute('SELECT media_ids FROM publications WHERE id = %s',(item,)).fetchone()[0])
         assert [value['url'].rsplit('/',1)[1] for value in attachments]==media_ids
 
 
@@ -684,7 +684,7 @@ def test_partial_article_fetch_retries_automatically_after_restart(tmp_path,extr
         item=wait_for(client,lambda:(c[0]['id'] if (c:=read_all_cards(client, '/api/v3/cards')) else None))
         wait_for(client,lambda:any(a.get('error') and a['source_url']=='https://telegra.ph/Fixture' for a in (client.get('/api/v3/publication/'+item).json().get('linked_content') or {}).get('articles',[])))
         with database(root) as db:
-            article=db.execute("SELECT i . id FROM publication_links l JOIN items i ON i . id = l . target_publication_id WHERE l . source_publication_id = %s AND i . url = 'https://telegra.ph/Fixture'",(item,)).fetchone()[0]
+            article=db.execute("SELECT i . id FROM publication_links l JOIN publications i ON i . id = l . target_publication_id WHERE l . source_publication_id = %s AND i . url = 'https://telegra.ph/Fixture'",(item,)).fetchone()[0]
             job=db.execute("SELECT status , retry_at , error FROM jobs WHERE kind = 'fetch' AND item = %s",(article,)).fetchone()
         assert job[0]=='pending' and job[1]>time.time() and job[2]
         assert 'Useful post' in client.get('/api/v3/publication/'+item).json()['text']
@@ -694,7 +694,7 @@ def test_partial_article_fetch_retries_automatically_after_restart(tmp_path,extr
         with database(root) as db:
             assert db.execute("SELECT status , retry_at FROM jobs WHERE kind = 'fetch' AND item = %s",(article,)).fetchone()==('done',None)
             if 'Missing' in extra:
-                assert db.execute("SELECT j.status FROM jobs j JOIN items i ON i.id=j.item WHERE j.kind='fetch' AND i.url='https://telegra.ph/Missing'").fetchone()==('unavailable',)
+                assert db.execute("SELECT j.status FROM jobs j JOIN publications i ON i.id=j.item WHERE j.kind='fetch' AND i.url='https://telegra.ph/Missing'").fetchone()==('unavailable',)
     assert len(calls)>=2
 
 

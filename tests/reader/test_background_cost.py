@@ -50,7 +50,7 @@ def test_idle_reader_does_not_reconcile_entire_library(tmp_path, count):
             if len(queries) < 1000 and not any(any(f'SELECT id FROM {table} WHERE viewed=0' in q for table in ('items', 'items_read', 'items_by_feed', 'unviewed_items_by_feed')) and 'feed_id=ANY(' not in q for q in queries):
                 break
         else:
-            raise AssertionError(f'Reader never reached bounded idle work: {len(queries)} queries; {[q for q in queries if "SELECT id FROM items WHERE viewed=0" in q]}')
+            raise AssertionError(f'Reader never reached bounded idle work: {len(queries)} queries; {[q for q in queries if "SELECT id FROM publications WHERE viewed=0" in q]}')
         queries.clear()
         time.sleep(.65)
         client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))

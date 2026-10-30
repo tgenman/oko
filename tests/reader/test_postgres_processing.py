@@ -630,7 +630,7 @@ def test_http_rule_change_rejects_old_model_response_and_starts_replacement(post
             release.set()
             wait_for(client,lambda: len(requests)>=2 and client.get('/api/v3/publication/'+item).json()['filter']['state']=='ready')
             with psycopg.connect(postgres_url) as db:
-                filtered = json.loads(db.execute('SELECT filtered_content FROM items WHERE id=%s',(item,)).fetchone()[0])
+                filtered = json.loads(db.execute('SELECT filtered_content FROM publications WHERE id=%s',(item,)).fetchone()[0])
             assert filtered['hidden'] is False
             assert requests[0]['prompt'] != requests[1]['prompt']
         finally:

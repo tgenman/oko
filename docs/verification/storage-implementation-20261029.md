@@ -687,3 +687,13 @@
   because preservation of outstanding work was not proven; no removal was applied.
   The table and its consumers remain in place pending a separately reviewed safe
   cutover; no claim of the target table count is made here.
+- Migration 056 renames the existing `items` relation to `publications` in place;
+  a migration test verifies rows and dependent views survive. The full Python
+  run passed 1,215 tests and skipped two, with nine failures. Seven failures were
+  stale schema/trace fixtures or service-layer SQL; the SQL was moved into Store
+  and all seven targeted checks passed. Two review-scenario failures concern
+  retained versus stale processing results and remain open for the next change.
+  Types passed; three Playwright scenarios passed and the viewed shared-publication
+  screenshot was inspected. The guarded queue-removal draft was not installed:
+  auto-review rejected removal of its remaining consumers as potentially losing
+  pending work, so `processing_dirty` remains in the active schema.

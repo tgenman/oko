@@ -39,7 +39,7 @@ def coordinated_transport(calls):
 
 def stored(root,item):
     with database(root) as db:
-        row=dict(db.execute('SELECT * FROM items WHERE id = %s',(item,)).fetchone())
+        row=dict(db.execute('SELECT * FROM publications WHERE id = %s',(item,)).fetchone())
     for key in ('content','filtered_content','summarized_content','processing_metadata'):
         row[key]=json.loads(row[key])
     return row
@@ -504,7 +504,7 @@ def test_persisted_empty_job_completes_without_a_model_after_restart(tmp_path):
         item=settled(client)[0]['id']
         wait_for(client,lambda:stored(root,item)['status']=='ready')
     with database(root) as db:
-        db.execute("UPDATE items SET filtered_content = '{}' , summarized_content = '{}' , processing_metadata = '{}' , status = 'pending_filtering' WHERE id = %s",(item,))
+        db.execute("UPDATE publications SET filtered_content = '{}' , summarized_content = '{}' , processing_metadata = '{}' , status = 'pending_filtering' WHERE id = %s",(item,))
         db.execute("UPDATE jobs SET status = 'pending' , generation = generation + 1 WHERE kind = 'filter' AND item = %s",(item,))
         db.execute("DELETE FROM jobs WHERE kind = 'theses' AND item = %s",(item,))
     with TestClient(create_app(root,**options),headers=HEADERS) as client:

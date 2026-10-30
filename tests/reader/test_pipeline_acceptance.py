@@ -47,7 +47,7 @@ def test_postgres_runs_all_workers_http_media_and_restart(tmp_path):
         assert client.get([media for media in material['media'] if media['role'] == 'attachment'][0]['url']).content==b'synthetic-image'
         assert client.get('/api/v3/status').status_code==200
     with database(target) as db:
-        assert json.loads(db.execute('SELECT processing_metadata FROM items WHERE id=%s',(item,)).fetchone()[0])['_pass']==context
+        assert json.loads(db.execute('SELECT processing_metadata FROM publications WHERE id=%s',(item,)).fetchone()[0])['_pass']==context
         assert db.execute("SELECT count(*) FROM jobs WHERE kind='filter' AND status='done'").fetchone()[0]==2
         assert db.execute("SELECT count(*) FROM jobs WHERE kind='theses' AND status='done'").fetchone()[0]==2
         assert db.execute("SELECT count(*) FROM jobs WHERE kind='download_media' AND status='done'").fetchone()[0]==1

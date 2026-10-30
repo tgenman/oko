@@ -184,7 +184,7 @@ class JobRepository:
                 if row['members'] != '[]' and material and material.get('full',False):
                     continue
                 if row['error'] or unavailable or not material or not material.get('full',False):
-                    job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , manual_once = CASE WHEN ( status = 'done' AND error IS NOT NULL ) OR EXISTS ( SELECT 1 FROM items i WHERE i.id=jobs.item AND i.source_deleted ) THEN 1 ELSE manual_once END , status = 'pending' , next = CASE WHEN problem_code LIKE '%%FloodWaitError' OR problem_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'fetch' AND item = %s", (self.store.wall_clock(),self.store.wall_clock(),row['id']))
+                    job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , manual_once = CASE WHEN ( status = 'done' AND error IS NOT NULL ) OR EXISTS ( SELECT 1 FROM publications i WHERE i.id=jobs.item AND i.source_deleted ) THEN 1 ELSE manual_once END , status = 'pending' , next = CASE WHEN problem_code LIKE '%%FloodWaitError' OR problem_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'fetch' AND item = %s", (self.store.wall_clock(),self.store.wall_clock(),row['id']))
             for kind in ('filter','theses'):
                 for row in self.store.db.execute('SELECT j . item FROM jobs j JOIN items_by_feed i ON i . id = j . item WHERE i . feed_id = %s AND j . kind = %s AND j . error IS NOT NULL',(feed,kind)).fetchall():
                     self.retry_processing(row[0],kind)
@@ -251,10 +251,10 @@ class JobRepository:
                 SELECT id FROM jobs WHERE status='pending' AND kind IN ('delete','feed-delete')
                 UNION SELECT id FROM jobs WHERE status='pending' AND kind IN ('discover','read') AND item IN ({placeholders})
                 UNION SELECT id FROM jobs WHERE status='pending' AND kind='fetch' AND item IN (
-                    SELECT own.id FROM feed_publications owner JOIN items own ON own.id=owner.publication_id
+                    SELECT own.id FROM feed_publications owner JOIN publications own ON own.id=owner.publication_id
                         WHERE owner.is_primary AND owner.is_unviewed AND owner.feed_id IN ({placeholders}) AND own.viewed=0
-                    UNION SELECT i.id FROM feed_publications owner JOIN items root ON root.id=owner.publication_id
-                        JOIN publication_links l ON l.source_publication_id=root.id JOIN items i ON i.id=l.target_publication_id
+                    UNION SELECT i.id FROM feed_publications owner JOIN publications root ON root.id=owner.publication_id
+                        JOIN publication_links l ON l.source_publication_id=root.id JOIN publications i ON i.id=l.target_publication_id
                         WHERE owner.is_primary AND owner.is_unviewed AND owner.feed_id IN ({dependency_keys}) AND root.viewed=0 AND i.viewed=0
                         AND NOT EXISTS (SELECT 1 FROM feed_publications m WHERE m.publication_id=i.id AND m.is_primary)))"""
         if media_only:
@@ -283,7 +283,7 @@ class JobRepository:
         """Choose shared-publication rules in the same transaction as its claim."""
         db = self.store.db
         memberships.lock_graph(db)
-        item = db.execute('SELECT processing_metadata FROM items WHERE id=%s FOR UPDATE', (job['item'],)).fetchone()
+        item = db.execute('SELECT processing_metadata FROM publications WHERE id=%s FOR UPDATE', (job['item'],)).fetchone()
         if item is None:
             return job
         owners = db.execute('SELECT feed_id FROM feed_publications WHERE publication_id=%s ORDER BY feed_id', (job['item'],)).fetchall()
@@ -312,7 +312,7 @@ class JobRepository:
                     WHERE id=%s AND status='pending'""", (0 if denied else self.store.clock()+30,message,code,job['id']))
                 return None
             metadata['_pass'] = dict(feed_id=chosen)
-            db.execute('UPDATE items SET processing_metadata=%s WHERE id=%s', (json.dumps(metadata,ensure_ascii=False),job['item']))
+            db.execute('UPDATE publications SET processing_metadata=%s WHERE id=%s', (json.dumps(metadata,ensure_ascii=False),job['item']))
             self.store.processing.reconcile_accepted_item(job['item'])
             if job['kind']=='filter' and processing_input.stage_enabled(self.store,job['item'],'theses'):
                 job_write(db, """INSERT INTO jobs(kind,item,status) VALUES ('theses',%s,'blocked')
@@ -335,15 +335,15 @@ class JobRepository:
         # LATERAL keeps the indexed search scoped to each selected publication.
         # Each media identity has one job of this kind. Keep parameterized
         # index probes instead of joining the entire foreign pending archive.
-        caption = """EXISTS (SELECT 1 FROM items own,
+        caption = """EXISTS (SELECT 1 FROM publications own,
             LATERAL jsonb_array_elements(own.content::jsonb->'blocks') block
             WHERE own.id=m.publication_id AND own.platform='youtube'
                 AND block->>'media_id'=m.id AND block->>'role'='subtitles')"""
         query = """WITH selected AS MATERIALIZED (
-            SELECT i.id FROM feed_publications owner JOIN items i ON i.id=owner.publication_id
+            SELECT i.id FROM feed_publications owner JOIN publications i ON i.id=owner.publication_id
             WHERE owner.is_primary AND owner.is_unviewed AND owner.feed_id=ANY(%s) AND i.viewed=0
-            UNION SELECT article.id FROM feed_publications owner JOIN items root ON root.id=owner.publication_id
-            JOIN publication_links link ON link.source_publication_id=root.id JOIN items article ON article.id=link.target_publication_id
+            UNION SELECT article.id FROM feed_publications owner JOIN publications root ON root.id=owner.publication_id
+            JOIN publication_links link ON link.source_publication_id=root.id JOIN publications article ON article.id=link.target_publication_id
             WHERE owner.is_primary AND owner.is_unviewed AND owner.feed_id=ANY(%s) AND root.viewed=0 AND article.viewed=0
                 AND NOT EXISTS (SELECT 1 FROM feed_publications m WHERE m.publication_id=article.id AND m.is_primary))
             SELECT candidate.* FROM selected
@@ -657,7 +657,7 @@ class JobRepository:
                 if resource and resource['status']=='unavailable':
                     store.db.execute("UPDATE media_files SET status = 'pending_download' , reason = '' WHERE id = %s",(subtitles,))
                     content['extra']['youtube']['captions']='pending'
-                    store.db.execute('UPDATE items SET content = %s WHERE id = %s',(json.dumps(content,ensure_ascii=False),item))
+                    store.db.execute('UPDATE publications SET content = %s WHERE id = %s',(json.dumps(content,ensure_ascii=False),item))
                     job_write(store.db, "INSERT INTO jobs ( kind , item , queued_wall ) VALUES ( 'download_media' , %s , extract(epoch FROM clock_timestamp()) ) ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , generation = jobs . generation + 1 , next = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . next ELSE 0 END , retry_at = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . retry_at ELSE NULL END WHERE jobs . status != 'running'",(subtitles,store.wall_clock(),store.wall_clock()))
                     store.processing.reconcile_accepted_item(item)
 
@@ -685,7 +685,7 @@ class JobRepository:
             memberships.lock_graph(self.store.db)
             owned = "SELECT item FROM jobs WHERE kind='delete' AND payload::jsonb->>'cleanup_feed' = %s"
             job_write(self.store.db, f"DELETE FROM jobs WHERE kind != 'delete' AND item IN ({owned})", (feed,))
-            if self.store.db.execute(f'DELETE FROM items WHERE id IN ({owned})', (feed,)).rowcount:
+            if self.store.db.execute(f'DELETE FROM publications WHERE id IN ({owned})', (feed,)).rowcount:
                 status_changed(self.store.db)
             job_write(self.store.db, "DELETE FROM jobs WHERE item = %s OR (kind='delete' AND payload::jsonb->>'cleanup_feed' = %s)", (feed, feed))
             for table in ('history_members', 'initial_history', 'telegram_read_members', 'telegram_read_state'):
@@ -715,7 +715,7 @@ class JobRepository:
             memberships.lock_graph(self.store.db)
             self.store.db.execute('UPDATE jobs SET execution_settings=NULL WHERE item=%s AND execution_settings IS NOT NULL', (job.item,))
             self.finish(job)
-            if self.store.db.execute('DELETE FROM items WHERE id = %s AND viewed = 1 AND platform IS NOT NULL ',(job.item,)).rowcount:
+            if self.store.db.execute('DELETE FROM publications WHERE id = %s AND viewed = 1 AND platform IS NOT NULL ',(job.item,)).rowcount:
                 status_changed(self.store.db)
 
 

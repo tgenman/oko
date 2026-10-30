@@ -192,7 +192,7 @@ class MediaFiles:
                 raise ValueError('Media owner changed')
             store.db.execute("UPDATE media_files SET id = %s , status = 'ready' , reason = '' , storage_key = %s , size_bytes = %s , source_locator = %s , mime_type = %s , name = %s WHERE id = %s",
                 (identity,str(saved.relative_to(store.root)),size,actual.locator,actual.mime_type,actual.name,media_id))
-            store.db.execute('UPDATE items SET content = %s , media_ids = %s WHERE id = %s', (json.dumps(content,ensure_ascii=False),json.dumps([value['id'] for value in media]),download.publication_id))
+            store.db.execute('UPDATE publications SET content = %s , media_ids = %s WHERE id = %s', (json.dumps(content,ensure_ascii=False),json.dumps([value['id'] for value in media]),download.publication_id))
             store.subscriptions.history.saved(download.publication_id, bool(content['extra']['_reader']['full']))
             store.read_sync.mark_item(download.publication_id)
             store.read_sync.saved_publication(download.publication_id)
@@ -251,7 +251,7 @@ class MediaFiles:
         with store.db:
             memberships.lock_graph(store.db)
             store.db.execute("UPDATE media_files SET id = %s , status = 'unavailable' , reason = %s , storage_key = NULL , size_bytes = NULL WHERE id = %s",(identity,issue.message,media_id))
-            store.db.execute('UPDATE items SET content = %s , media_ids = %s WHERE id = %s',(json.dumps(content,ensure_ascii=False),json.dumps([value['id'] for value in media]),owner))
+            store.db.execute('UPDATE publications SET content = %s , media_ids = %s WHERE id = %s',(json.dumps(content,ensure_ascii=False),json.dumps([value['id'] for value in media]),owner))
             store.processing.reconcile_accepted_item(owner)
             publication_links.notify_parents(store,owner)
         store.processing.sync()
@@ -291,7 +291,7 @@ class MediaFiles:
                 assert owner is not None
                 store.db.execute('UPDATE media_files SET reason = %s , status = %s WHERE id = %s',
                     (issue.message,'ready' if keep_file else 'unavailable' if status=='unavailable' or changed else 'pending_download',media_id))
-                store.db.execute('UPDATE items SET content = %s WHERE id = %s', (json.dumps(content,ensure_ascii=False),owner))
+                store.db.execute('UPDATE publications SET content = %s WHERE id = %s', (json.dumps(content,ensure_ascii=False),owner))
                 store.subscriptions.history.saved(owner,False)
                 if subtitles:
                     store.processing.reconcile_accepted_item(owner)

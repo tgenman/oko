@@ -137,15 +137,15 @@ def test_changed_linked_article_updates_parent_job_in_same_transaction(tmp_path)
     try:
         asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
         with transaction(store.db):
-            store.db.execute("""INSERT INTO items(id,source_id,url,platform,external_id,complete,content,title)
-                SELECT 'linked','linked-source','https://example.org/linked','other_web','linked',1,content,title FROM items WHERE id=%s""", (item,))
+            store.db.execute("""INSERT INTO publications(id,source_id,url,platform,external_id,complete,content,title)
+                SELECT 'linked','linked-source','https://example.org/linked','other_web','linked',1,content,title FROM publications WHERE id=%s""", (item,))
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES (%s,'linked')", (item,))
             store.processing.reconcile_accepted_item(item)
         before = dict(store.db.execute("SELECT generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone())
-        content = json.loads(store.db.execute("SELECT content FROM items WHERE id='linked'").fetchone()[0])
+        content = json.loads(store.db.execute("SELECT content FROM publications WHERE id='linked'").fetchone()[0])
         next(block for block in content['blocks'] if block['type']=='text' and block['role']=='body')['text'] = 'Changed linked article'
         def change():
-            store.db.execute("UPDATE items SET content=%s WHERE id='linked'", (json.dumps(content),))
+            store.db.execute("UPDATE publications SET content=%s WHERE id='linked'", (json.dumps(content),))
             statements = []
             store.db.set_trace_callback(statements.append)
             try:
@@ -181,13 +181,13 @@ def test_discovered_complete_publication_gets_job_in_same_transaction(tmp_path):
         with pytest.raises(ValueError, match='synthetic rollback'):
             with transaction(store.db):
                 store.collect_discovery([packet], '{}')
-                item = store.db.execute("SELECT id FROM items WHERE source_id='demo:two'").fetchone()[0]
+                item = store.db.execute("SELECT id FROM publications WHERE source_id='demo:two'").fetchone()[0]
                 assert store.db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()[0] == 'pending'
                 raise ValueError('synthetic rollback')
-        assert store.db.execute("SELECT id FROM items WHERE source_id='demo:two'").fetchone() is None
+        assert store.db.execute("SELECT id FROM publications WHERE source_id='demo:two'").fetchone() is None
         with transaction(store.db):
             store.collect_discovery([packet], '{}')
-            item = store.db.execute("SELECT id FROM items WHERE source_id='demo:two'").fetchone()[0]
+            item = store.db.execute("SELECT id FROM publications WHERE source_id='demo:two'").fetchone()[0]
             assert store.db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()[0] == 'pending'
         assert not any('INSERT INTO processing_dirty' in statement for statement in statements)
     finally:
@@ -218,10 +218,10 @@ def test_saved_processing_feed_is_used_instead_of_display_owner(tmp_path):
         with transaction(store.db):
             store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
             store.subscriptions.update_settings('feed',second,Overrides(prompt_filters='Second feed rules',filter_enabled=False))
-            row = store.db.execute('SELECT processing_metadata FROM items WHERE id=%s', (item,)).fetchone()
+            row = store.db.execute('SELECT processing_metadata FROM publications WHERE id=%s', (item,)).fetchone()
             metadata = json.loads(row[0])
             metadata['_pass'] = {'feed_id':second}
-            store.db.execute('UPDATE items SET processing_metadata=%s WHERE id=%s', (json.dumps(metadata),item))
+            store.db.execute('UPDATE publications SET processing_metadata=%s WHERE id=%s', (json.dumps(metadata),item))
         assert store.item_feed(item) == 'demo'
         assert processing_input.live_settings(store,item)['feed_id'] == second
         assert processing_input.live_settings(store,item)['values']['prompt_filters'] == 'Second feed rules'
@@ -798,7 +798,7 @@ def test_uncommitted_result_is_invisible_to_an_independent_reader(tmp_path):
     def observe(point):
         if point=='processing_after_result':
             with database(tmp_path) as db:
-                observed.append(db.execute("SELECT filtered_content,(SELECT status FROM jobs WHERE kind='filter') FROM items").fetchone())
+                observed.append(db.execute("SELECT filtered_content,(SELECT status FROM jobs WHERE kind='filter') FROM publications").fetchone())
     store,item,execution,tasks=worker_library(tmp_path,fault=observe)
     asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
     assert observed==[('{}','running')]
@@ -895,7 +895,7 @@ def test_preparation_distinguishes_all_four_domain_outcomes(tmp_path,outcome):
     store,item,execution,tasks=worker_library(tmp_path,text='' if outcome=='no_input' else 'Useful text')
     worker=workers(execution,tasks)[0]
     with store.jobs.transaction(lambda:True):
-        if outcome=='waiting':store.db.execute('UPDATE items SET complete = 0 WHERE id = %s',(item,))
+        if outcome=='waiting':store.db.execute('UPDATE publications SET complete = 0 WHERE id = %s',(item,))
         if outcome=='disabled':
             store.subscriptions.update_settings('oko','global',Overrides(prompt_filters=''))
             store.settings_changed()
@@ -1004,20 +1004,20 @@ def test_viewed_publication_kept_as_link_revokes_own_processing_atomically(tmp_p
     try:
         with transaction(store.db):
             memberships.lock_graph(store.db)
-            store.db.execute("""INSERT INTO items(id,source_id,url,platform,external_id,complete,content,title)
-                SELECT 'root','root-source','https://example.org/root','rss','root',1,content,title FROM items WHERE id=%s""", (item,))
+            store.db.execute("""INSERT INTO publications(id,source_id,url,platform,external_id,complete,content,title)
+                SELECT 'root','root-source','https://example.org/root','rss','root',1,content,title FROM publications WHERE id=%s""", (item,))
             memberships.add(store.db,'demo','root')
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root',%s)", (item,))
             job = store.jobs.claim_processing('filter',store.clock())
             assert job is not None and job.item == item
         with store.db:
-            store.db.execute("UPDATE items SET filtered_content=%s,summarized_content=%s WHERE id=%s", ('{"hidden":false,"reason":"","removed":[]}','{"points":[]}',item))
-        original = store.db.execute('SELECT content FROM items WHERE id=%s', (item,)).fetchone()[0]
+            store.db.execute("UPDATE publications SET filtered_content=%s,summarized_content=%s WHERE id=%s", ('{"hidden":false,"reason":"","removed":[]}','{"points":[]}',item))
+        original = store.db.execute('SELECT content FROM publications WHERE id=%s', (item,)).fetchone()[0]
         store.processing.background = True
         def view():
             assert store.viewed_set([item])
             assert not store.jobs.valid(job)
-            row = store.db.execute('SELECT complete,viewed,content,filtered_content,summarized_content FROM items WHERE id=%s', (item,)).fetchone()
+            row = store.db.execute('SELECT complete,viewed,content,filtered_content,summarized_content FROM publications WHERE id=%s', (item,)).fetchone()
             assert row[:] == (1,0,original,'{}','{}')
             assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
         with pytest.raises(ValueError, match='rollback'):
@@ -1025,7 +1025,7 @@ def test_viewed_publication_kept_as_link_revokes_own_processing_atomically(tmp_p
                 view()
                 raise ValueError('rollback')
         assert store.jobs.valid(job)
-        assert store.db.execute('SELECT filtered_content FROM items WHERE id=%s', (item,)).fetchone()[0] != '{}'
+        assert store.db.execute('SELECT filtered_content FROM publications WHERE id=%s', (item,)).fetchone()[0] != '{}'
         assert store.db.execute('SELECT 1 FROM feed_publications WHERE publication_id=%s', (item,)).fetchone()
         with transaction(store.db):
             view()
@@ -1213,8 +1213,8 @@ def test_linked_source_privacy_change_reconciles_parent_job_atomically(tmp_path)
             store.subscriptions.update_feed('demo',FeedPatch(public_ai=True))
             store.subscriptions.update_feed(other,FeedPatch(public_ai=True))
             memberships.lock_graph(store.db)
-            store.db.execute("""INSERT INTO items(id,source_id,url,platform,external_id,complete,content,title)
-                SELECT 'linked','linked-source','https://example.org/linked','rss','linked',1,content,title FROM items WHERE id=%s""", (item,))
+            store.db.execute("""INSERT INTO publications(id,source_id,url,platform,external_id,complete,content,title)
+                SELECT 'linked','linked-source','https://example.org/linked','rss','linked',1,content,title FROM publications WHERE id=%s""", (item,))
             memberships.add(store.db,other,'linked')
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES (%s,'linked')", (item,))
             store.processing.reconcile_accepted_item(item)

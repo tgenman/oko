@@ -14,11 +14,11 @@ def lock_graph(db: Database) -> None:
 
 def add(db: Database, feed: str, item: str) -> bool:
     """Add a membership after acquiring the graph lock in the caller."""
-    if db.execute('SELECT id FROM items WHERE id=%s FOR UPDATE', (item,)).fetchone() is None:
+    if db.execute('SELECT id FROM publications WHERE id=%s FOR UPDATE', (item,)).fetchone() is None:
         raise ValueError('Publication not found')
     row = db.execute('''INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed)
         SELECT %s,i.id,NOT EXISTS (SELECT 1 FROM feed_publications m WHERE m.publication_id=i.id AND m.is_primary),i.viewed=0
-        FROM items i WHERE i.id=%s ON CONFLICT(feed_id,publication_id) DO NOTHING RETURNING publication_id''', (feed,item)).fetchone()
+        FROM publications i WHERE i.id=%s ON CONFLICT(feed_id,publication_id) DO NOTHING RETURNING publication_id''', (feed,item)).fetchone()
     return row is not None
 
 
@@ -30,7 +30,7 @@ def remove(db: Database, *, items: list[str] | None = None, feed: str | None = N
         'SELECT publication_id FROM feed_publications WHERE feed_id=%s ORDER BY publication_id', (feed,)).fetchall()]
     if not ids:
         return []
-    db.execute('SELECT id FROM items WHERE id=ANY(%s) ORDER BY id FOR UPDATE', (ids,)).fetchall()
+    db.execute('SELECT id FROM publications WHERE id=ANY(%s) ORDER BY id FOR UPDATE', (ids,)).fetchall()
     if feed is None:
         removed = db.execute('DELETE FROM feed_publications WHERE publication_id=ANY(%s) RETURNING publication_id,is_primary', (ids,)).fetchall()
     else:
@@ -47,7 +47,7 @@ def set_viewed(db: Database, items: list[str], viewed: bool) -> None:
     """Update publication and transitional membership state in one transaction."""
     if not items:
         return
-    changed = db.execute('UPDATE items SET viewed=%s,complete=0 WHERE id=ANY(%s) AND (viewed IS DISTINCT FROM %s OR complete IS DISTINCT FROM 0)', (int(viewed),items,int(viewed))).rowcount
+    changed = db.execute('UPDATE publications SET viewed=%s,complete=0 WHERE id=ANY(%s) AND (viewed IS DISTINCT FROM %s OR complete IS DISTINCT FROM 0)', (int(viewed),items,int(viewed))).rowcount
     if changed:
         status_changed(db)
     db.execute('UPDATE feed_publications SET is_unviewed=%s::integer::boolean WHERE publication_id=ANY(%s) AND is_unviewed IS DISTINCT FROM %s::integer::boolean',
