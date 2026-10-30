@@ -37,4 +37,5 @@ MIGRATIONS = (
     Migration(30, 'telegram-source-revision', (Path(__file__).parent / 'postgres' / '030-telegram-source-revision.sql').read_text()),
     Migration(31, 'history-source-revision', (Path(__file__).parent / 'postgres' / '031-history-source-revision.sql').read_text()),
     Migration(32, 'settings-status', (Path(__file__).parent / 'postgres' / '032-settings-status.sql').read_text()),
+    Migration(33, 'telegram-status', (Path(__file__).parent / 'postgres' / '033-telegram-status.sql').read_text()),
 )

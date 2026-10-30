@@ -714,3 +714,13 @@ def test_settings_status_triggers_are_removed(connections):
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname LIKE 'reader_v_settings_status_%'").fetchone() == (0,)
         verify(db, MIGRATIONS)
+
+
+def test_telegram_binding_and_profile_status_triggers_are_removed(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:32])
+        migrate(db, MIGRATIONS)
+        names = ['reader_v_telegram_bindings_delete','reader_v_telegram_bindings_insert','reader_v_telegram_bindings_update','reader_v_profile','reader_v_profile_delete','reader_v_profile_insert']
+        assert db.execute('SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname=ANY(%s)', (names,)).fetchone() == (0,)
+        verify(db, MIGRATIONS)

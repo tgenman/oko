@@ -434,3 +434,10 @@
   tests; types and ten Playwright scenarios passed, and a status screenshot was
   inspected. Version 32 has 23 tables and 48 triggers. GET reconciliation of
   problem records and other status version triggers remain to move.
+- Migration 033 removes six Telegram binding/profile status triggers. Their
+  observable changes already advance the Python-owned source revision included
+  in the status ETag; the separate profile-message trigger remains.
+- The affected migration, Telegram, status and recovery suites passed 197
+  tests; types and ten Playwright scenarios passed, and a synthetic Telegram
+  screenshot was inspected. Version 33 has 23 tables and 42 triggers. The
+  remaining status, membership and collection triggers and dirty queues remain.
