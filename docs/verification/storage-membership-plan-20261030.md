@@ -25,3 +25,16 @@ Further work must inspect the complete dispatch and reading plans with realistic
 feed distributions, test empty and heavily active feeds, verify pagination and
 concurrent viewing, and validate a migration including view/index changes before
 removing the flag. The experiment did not change application code or schema.
+
+## Candidate: start from pending fetch Jobs
+
+A later experiment in the same script compares a **fetch-only candidate** using
+correlated membership checks and no `is_unviewed`. With one pending fetch, the
+candidate scanned three relation rows (0.062 ms); with `--foreign-jobs`, which
+adds 10,000 earlier pending fetches owned by another feed, it scanned 20,002
+rows (36.406 ms). The corresponding current full dispatch calls scanned 40,011
+and 60,011 relation rows across three SELECTs. These totals are useful evidence
+of different work shapes, not an equivalent latency comparison: the candidate
+is one SELECT and does not include all dispatch kinds, priority, locking and
+claim behavior of `next_job`. Both runs used synthetic data and EXPLAIN ANALYZE;
+they do not prove a production improvement or justify migration yet.
