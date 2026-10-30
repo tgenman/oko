@@ -31,4 +31,5 @@ MIGRATIONS = (
     Migration(24, 'publication-processing-events', (Path(__file__).parent / 'postgres' / '024-publication-processing-events.sql').read_text()),
     Migration(25, 'membership-effects', (Path(__file__).parent / 'postgres' / '025-membership-effects.sql').read_text()),
     Migration(26, 'unused-job-versions', (Path(__file__).parent / 'postgres' / '026-unused-job-versions.sql').read_text()),
+    Migration(27, 'card-job-versions', (Path(__file__).parent / 'postgres' / '027-card-job-versions.sql').read_text()),
 )

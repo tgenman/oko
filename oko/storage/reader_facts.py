@@ -25,16 +25,27 @@ class ReaderFacts:
         with self.storage().db.access_lock, material_read.material_inputs(self.storage().db, identities, include_subtitles=include_subtitles):
             yield
 
-    def card_validators(self, identities: list[str]) -> dict[str, tuple[str, int | None, float | None]]:
+    def card_validators(self, identities: list[str]) -> dict[str, tuple[Any, ...]]:
         if not identities:
             return {}
         store = self.storage()
-        rows=store.db.execute("""SELECT i.id, i.xmin::text AS row_generation, e.version,
-            CASE WHEN j.status='pending' AND j.next>%s THEN j.next ELSE NULL END AS future_deadline
-            FROM items i LEFT JOIN reader_entities e ON e.kind='card' AND e.identity=i.id
-            LEFT JOIN jobs j ON j.kind='fetch' AND j.item=i.id WHERE i.id=ANY(%s)""",
-            (reader_now(store.clock()), identities))
-        return {row['id']:(row['row_generation'],row['version'],row['future_deadline']) for row in rows}
+        now = reader_now(store.clock())
+        rows=store.db.execute("""SELECT i.id,i.xmin::text AS row_generation,owner.feed_id,f.kind,f.transport,
+            j.status AS fetch_status,CASE WHEN j.status='pending' AND j.next>%s THEN j.next END AS fetch_deadline,
+            media.loading AS media_loading,media.deadline AS media_deadline,linked.children
+            FROM items i
+            LEFT JOIN LATERAL (SELECT m.feed_id FROM feed_publications m WHERE m.publication_id=i.id AND m.is_primary LIMIT 1) owner ON true
+            LEFT JOIN feeds f ON f.id=owner.feed_id
+            LEFT JOIN jobs j ON j.kind='fetch' AND j.item=i.id
+            LEFT JOIN LATERAL (SELECT coalesce(bool_or(mj.status='running' OR (mj.status='pending' AND mj.next<=%s)),false) AS loading,
+                min(mj.next) FILTER (WHERE mj.status='pending' AND mj.next>%s) AS deadline
+                FROM media_files m JOIN jobs mj ON mj.item=m.id AND mj.kind='download_media' WHERE m.publication_id=i.id) media ON true
+            LEFT JOIN LATERAL (SELECT coalesce(jsonb_agg(jsonb_build_array(child.id,child.xmin::text) ORDER BY child.id),'[]'::jsonb) AS children
+                FROM publication_links l JOIN items child ON child.id=l.target_publication_id
+                WHERE l.source_publication_id=i.id AND child.viewed=0) linked ON true
+            WHERE i.id=ANY(%s)""", (now,now,now,identities))
+        return {row['id']:(row['row_generation'],row['feed_id'],row['kind'],row['transport'],
+                row['fetch_status'],row['fetch_deadline'],row['media_loading'],row['media_deadline'],row['children']) for row in rows}
 
     def feed_resources(self, identities: set[str] | None = None) -> dict[str, tuple[dict[str, Any], dict[str, Any] | None]]:
         subscriptions = self.storage().subscriptions

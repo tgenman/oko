@@ -12,7 +12,7 @@ from uuid import UUID,uuid4
 from typing import Any, TYPE_CHECKING
 
 from oko.collection.adapters import AdapterIssue, AdapterErrorKind, ExternalKey, ExternalReference, MediaReference, Platform
-from oko.storage.reading import reading_value
+from oko.storage.reading import reading_value, reader_now
 from oko.storage import collection_jobs, publication_links, youtube_media, files, material_read
 
 if TYPE_CHECKING:
@@ -108,10 +108,10 @@ class MediaFiles:
     def loading(self, item: str) -> bool:
         snapshot=material_read.current(self.store.db)
         if snapshot and item in snapshot.items:
-            now=self.store.clock()
+            now=reader_now(self.store.clock())
             return any(row['status']=='running' or row['status']=='pending' and row['next']<=now for row in snapshot.media_jobs.get(item,[]))
         return self.store.db.execute("SELECT 1 FROM jobs j JOIN media_files m ON m . id = j . item WHERE m . publication_id = %s AND j . kind = 'download_media' AND ( j . status = 'running' OR j . status = 'pending' AND j . next <= %s ) LIMIT 1",
-            (item, self.store.clock())).fetchone() is not None
+            (item, reader_now(self.store.clock()))).fetchone() is not None
 
     def begin(self, identity: str, attempt: str, revalidate: bool) -> MediaDownload | None:
         store = self.store

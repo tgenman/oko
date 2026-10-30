@@ -386,3 +386,13 @@
   Python tests; types and 12 Playwright scenarios passed, and a feed-details
   screenshot was inspected. Version 26 has 23 tables and 76 non-internal
   triggers. Remaining dirty queues, status GET writes and final review are open.
+- Migration 027 replaces the card's Job-version dependency with validators
+  derived from its own row, selected feed, fetch/media deadlines and linked
+  publication rows. Nine Job triggers/functions were removed. A new regression
+  exposed a stale 304 when a media retry became due; it now changes the ETag
+  without a background write. Linked content changes also invalidate the card
+  without a parent-version write, and card/media use one clock snapshot.
+- The migration, reading and query-cost suites passed 165 tests; three focused
+  clock/link tests and six Playwright scenarios passed, and a screenshot was
+  inspected. Version 27 has 23 tables and 67 non-internal triggers. Status
+  versions, dirty queues and GET problem reconciliation remain unfinished.

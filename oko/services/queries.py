@@ -145,7 +145,7 @@ class ReadingQueries:
         return self._storage().reading.page(options, cursor, limit)
 
     @repository_access
-    def card_validators(self, identities: list[str]) -> dict[str, tuple[str, int | None, float | None]]:
+    def card_validators(self, identities: list[str]) -> dict[str, tuple[Any, ...]]:
         return self._facts.card_validators(identities)
 
     @repository_access

@@ -315,6 +315,61 @@ def test_card_etag_changes_when_retry_becomes_due_without_background_write(tmp_p
             client.portal.call(app.state.host.execution._actions.release)
 
 
+def test_card_etag_changes_when_media_retry_becomes_due_without_background_write(tmp_path):
+    _, items = library(tmp_path, [1])
+    clock = [0.0]
+    app = traced_app(tmp_path, clock=lambda: clock[0], wall_clock=lambda: 1800000000 + clock[0])
+    with TestClient(app, headers=HEADERS) as client:
+        async def hold():
+            await app.state.host.execution._actions.acquire()
+        client.portal.call(hold)
+        try:
+            def schedule():
+                store = app.state.host.require_store()
+                app.state.host.execution.reader_advance = None
+                with store.db:
+                    store.db.execute("UPDATE jobs SET status='done' WHERE kind='fetch' AND item=%s", (items[0],))
+                    store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('media',%s,'image','https://fixture.test/image','image','pending_download')", (items[0],))
+                    store.db.execute("INSERT INTO jobs(kind,item,status,next) VALUES ('download_media','media','pending',10)")
+            client.portal.call(schedule)
+            first = client.get('/api/v3/cards')
+            assert first.status_code == 200 and first.json()['items'][0]['loading'] is False
+            assert client.get('/api/v3/cards', headers={'If-None-Match':first.headers['ETag']}).status_code == 304
+            clock[0] = 11.0
+            after = client.get('/api/v3/cards', headers={'If-None-Match':first.headers['ETag']})
+            assert after.status_code == 200 and after.json()['items'][0]['loading'] is True
+        finally:
+            client.portal.call(app.state.host.execution._actions.release)
+
+
+def test_card_etag_tracks_linked_content_without_parent_version_write(tmp_path):
+    _, items = library(tmp_path, [1])
+    app = traced_app(tmp_path)
+    with TestClient(app, headers=HEADERS) as client:
+        async def hold():
+            await app.state.host.execution._actions.acquire()
+        client.portal.call(hold)
+        try:
+            def add_link():
+                store = app.state.host.require_store()
+                with store.db:
+                    store.db.execute("""INSERT INTO items(id,source_id,url,platform,external_id,complete,content,title)
+                        SELECT 'linked','linked-source','https://example.org/linked','other_web','linked',1,content,title FROM items WHERE id=%s""", (items[0],))
+                    store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES (%s,'linked')", (items[0],))
+            client.portal.call(add_link)
+            first = client.get('/api/v3/cards')
+            assert first.status_code == 200 and first.json()['items'][0]['changed'] is False
+            def change_child():
+                store = app.state.host.require_store()
+                with store.db:
+                    store.db.execute("UPDATE items SET content=jsonb_set(content::jsonb,'{extra,_reader,changed}','true'::jsonb)::text WHERE id='linked'")
+            client.portal.call(change_child)
+            after = client.get('/api/v3/cards', headers={'If-None-Match':first.headers['ETag']})
+            assert after.status_code == 200 and after.json()['items'][0]['changed'] is True
+        finally:
+            client.portal.call(app.state.host.execution._actions.release)
+
+
 def test_status_etag_changes_when_retry_becomes_due_without_background_write(tmp_path):
     _, items = library(tmp_path, [1])
     clock = [0.0]
