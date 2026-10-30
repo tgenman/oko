@@ -553,3 +553,85 @@ def test_processing_input_snapshot_is_atomic_and_does_not_copy_publication_text(
         assert tuple(after) == tuple(before)
     finally:
         store.db.close()
+
+
+def test_http_theses_rule_change_does_not_cancel_running_filter(postgres_url, tmp_path):
+    import threading
+    import httpx
+    from fastapi.testclient import TestClient
+    from tests.support.app import create_app
+    from tests.support.filters import transport
+    from tests.support.reader import HEADERS, wait_for
+
+    store, item, _, _ = worker_library(tmp_path, database_url=postgres_url)
+    store.set_work_enabled(False)
+    store.db.close()
+    started, release = threading.Event(), threading.Event()
+    calls = []
+    attempts = []
+    upstream = transport(calls)
+    async def respond(request):
+        if request.url.path == '/v1/chat/completions' and json.loads(json.loads(request.content)['messages'][1]['content'])['operation'] == 'filter':
+            attempts.append(request)
+            started.set()
+            await asyncio.to_thread(release.wait, 10)
+        return upstream.handler(request)
+    app = create_app(tmp_path, token='test', api_only=True, database_url=postgres_url, ai_transport=httpx.MockTransport(respond))
+    with TestClient(app, headers=HEADERS) as client:
+        try:
+            assert client.put('/api/v3/power', json={'enabled': True}).status_code == 200
+            assert started.wait(5)
+            response = client.patch('/api/v3/settings/oko/global', json={'prompt_theses': 'Updated summary rules'})
+            assert response.status_code == 200, response.text
+            release.set()
+            result = wait_for(client, lambda: (value if (value := client.get('/api/v3/publication/' + item).json())['filter']['state'] == 'ready' else None))
+            assert result['filter']['result'] is not None
+            assert len(attempts) == 1
+        finally:
+            release.set()
+
+
+def test_http_rule_change_rejects_old_model_response_and_starts_replacement(postgres_url, tmp_path):
+    import threading
+    import psycopg
+    import httpx
+    from fastapi.testclient import TestClient
+    from tests.support.app import create_app
+    from tests.support.filters import transport
+    from tests.support.reader import HEADERS, wait_for
+
+    store, item, _, _ = worker_library(tmp_path, database_url=postgres_url)
+    store.set_work_enabled(False)
+    store.db.close()
+    started, release = threading.Event(), threading.Event()
+    requests = []
+    upstream = transport([],theses=True)
+    async def respond(request):
+        if request.url.path == '/v1/chat/completions':
+            task = json.loads(json.loads(request.content)['messages'][1]['content'])
+            if task['operation'] == 'filter':
+                requests.append(task)
+                if len(requests) == 1:
+                    started.set()
+                    try:
+                        await asyncio.to_thread(release.wait,10)
+                    except asyncio.CancelledError:
+                        await asyncio.to_thread(release.wait,10)
+                    payload = json.dumps(dict(hidden=True,reason='Old rules',removed=[]))
+                    return httpx.Response(200,json={'choices':[{'finish_reason':'stop','message':{'role':'assistant','content':payload}}]})
+        return upstream.handler(request)
+    app = create_app(tmp_path,token='test',api_only=True,database_url=postgres_url,ai_transport=httpx.MockTransport(respond))
+    with TestClient(app,headers=HEADERS) as client:
+        try:
+            assert client.put('/api/v3/power',json={'enabled':True}).status_code == 200
+            assert started.wait(5)
+            response = client.patch('/api/v3/settings/oko/global',json={'prompt_filters':'New rules'})
+            assert response.status_code == 200, response.text
+            release.set()
+            wait_for(client,lambda: len(requests)>=2 and client.get('/api/v3/publication/'+item).json()['filter']['state']=='ready')
+            with psycopg.connect(postgres_url) as db:
+                filtered = json.loads(db.execute('SELECT filtered_content FROM items WHERE id=%s',(item,)).fetchone()[0])
+            assert filtered['hidden'] is False
+            assert requests[0]['prompt'] != requests[1]['prompt']
+        finally:
+            release.set()

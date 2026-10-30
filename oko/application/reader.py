@@ -450,15 +450,12 @@ class ReaderApplication:
         async with self._actions:
             try:
                 current = self.require_store()
-                switch_only = bool(body.model_fields_set) and body.model_fields_set <= {'filter_enabled', 'theses'}
                 with transaction(current.db):
                     change = self.subscriptions.update_settings(scope, owner, body)
-                    if change.changed and not switch_only:
-                        self.jobs.invalidate(change.affected)
                     current.fault('settings_after_jobs')
                 self._interval_changed(change.interval)
-                if change.changed and not switch_only:
-                    await self.jobs.cancel(change.affected, invalidate=False)
+                if change.changed:
+                    await self.jobs.cancel_stale_ai()
                 return change.value
             except LookupError as error:
                 record_caught('runtime.update_settings')

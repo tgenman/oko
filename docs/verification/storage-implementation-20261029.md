@@ -650,3 +650,17 @@
   Playwright scenarios passed, with the unavailable-captions screenshot inspected.
   This tests the repair mechanism directly; the current code has no caller that
   schedules it from a read, so end-to-end read-detected repair remains open.
+- Settings writes now compare each running AI attempt's stage-specific signature
+  with its actual current input and revoke a changed generation in the settings
+  transaction. A -> B -> A and rollback are covered; a late cancellation-resistant
+  model response is rejected over HTTP and a replacement is run. Disabling a stage,
+  changing only summary rules or an overridden ancestor rule does not cancel an
+  unchanged filter attempt; display-only settings do not interrupt collection.
+  Acceptance still checks the owned Job generation and the stage signature.
+- The first broad run passed 175 tests and found one prior test expecting a restart
+  for unchanged input plus three legacy-schema test queries. Those assertions were
+  updated to the agreed unchanged-input behavior and new settings schema. The full
+  affected repeat passed 181 tests and types; seven focused transaction/HTTP checks
+  passed after removing the unused affected-feed result. Three Playwright scenarios
+  passed and the filter-switch screenshot was inspected. The settings dirty queue
+  remains and this does not finish the target schema.

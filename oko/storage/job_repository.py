@@ -52,7 +52,7 @@ class JobRepository:
             job=db.execute("SELECT status,payload,problem_code,input_snapshot->>'signature' AS signature FROM jobs WHERE kind=%s AND item=%s",(kind,item)).fetchone()
             previous=job['signature'] if job else None
             enabled = processing_input.stage_enabled(self.store, item, kind) if signature is not None else False
-            if previous is not None and previous==signature and job and json.loads(job['payload']).get('input_revision')==revision:
+            if previous is not None and previous==signature and job and (job['status']=='running' or json.loads(job['payload']).get('input_revision')==revision):
                 # Reconsider blocked work only on an input/settings event. Running
                 # attempts are allowed to finish when the switch is turned off.
                 if job['status'] == 'blocked' and enabled:
@@ -103,6 +103,20 @@ class JobRepository:
     def claim_processing(self, kind: Kind, now: float) -> Job | None:
         # The common claim code retains monotonic generations and interrupted choices.
         return self.store.jobs.next_job(now,ai_only=True,processing_kind=kind)
+
+    def revoke_changed_running_inputs(self) -> None:
+        """Settings writes revoke only running attempts whose stage input changed."""
+        from oko.storage.processing_input import signature
+        rows = self.store.db.execute("""SELECT id,kind,item,generation,input_snapshot->>'signature' AS signature
+            FROM jobs WHERE status='running' AND kind IN ('filter','theses')""").fetchall()
+        for row in rows:
+            if row['signature'] is None or signature(self.store,row['item'],row['kind']) != row['signature']:
+                job_write(self.store.db, """UPDATE jobs SET status='pending',generation=generation+1,input_snapshot=NULL,
+                    next=CASE WHEN wait_scope IS NOT NULL AND retry_at>%s THEN next ELSE 0 END,
+                    error=CASE WHEN wait_scope IS NOT NULL AND retry_at>%s THEN error ELSE NULL END,
+                    problem_code=CASE WHEN wait_scope IS NOT NULL AND retry_at>%s THEN problem_code ELSE NULL END
+                    WHERE id=%s AND status='running' AND generation=%s""",
+                    (self.store.wall_clock(),self.store.wall_clock(),self.store.wall_clock(),row['id'],row['generation']))
 
     def retry_processing(self, item: str, kind: Kind) -> bool:
         db=self.store.db

@@ -689,6 +689,7 @@ class Store:
                 query = 'SELECT id FROM feeds WHERE ' + ('id = %s' if scope == 'feed' else 'folder_id = %s')
                 keys = ['settings-version:' + row[0] for row in self.db.execute(query, (owner,))]
             self.db.executemany('INSERT INTO state VALUES ( %s , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value', [(key, str(sequence)) for key in keys])
+            self.jobs.revoke_changed_running_inputs()
             self.processing.invalidate(scope, owner)
         self.processing.sync()
 

@@ -34,6 +34,7 @@ class JobControl:
         self._media_jobs: dict[str, Job] = {}
         self._lane_feeds: dict[str, str] = {}
         self._ai_feed: str | None = None
+        self._ai_job: Job | None = None
         self._cancelling = 0
         self._detached: set[asyncio.Task[None]] = set()
         self._detached_ai: set[asyncio.Task[None]] = set()
@@ -85,6 +86,7 @@ class JobControl:
             if self._ai and (feeds is None or self._ai_feed in feeds):
                 tasks.append(self._ai)
                 self._ai = None
+                self._ai_job = None
             for task in tasks:
                 task.cancel()
                 done, _ = await asyncio.wait({task}, timeout=.25)
@@ -106,6 +108,22 @@ class JobControl:
             if feeds is None:
                 self._cancelling -= 1
 
+
+    async def cancel_stale_ai(self) -> None:
+        """Interrupt only the model call whose persisted generation was revoked."""
+        if not self._ai or not self._ai_job or not self._store or self._store.jobs.valid(self._ai_job):
+            return
+        task = self._ai
+        self._ai = None
+        self._ai_job = None
+        task.cancel()
+        done, _ = await asyncio.wait({task}, timeout=.25)
+        if task not in done:
+            self._detach_task(task, ai=True)
+        elif not task.cancelled():
+            error = task.exception()
+            if error and self.diagnostics and not getattr(error, '_oko_diagnostic_group', None):
+                self.diagnostics.capture(error, 'Завершение фоновой задачи')
 
     def _detach_task(self, task: asyncio.Task[None], *, ai: bool = False) -> None:
         self._detached.add(task)

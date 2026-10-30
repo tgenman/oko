@@ -21,7 +21,7 @@ def test_failed_settings_change_rolls_back_values_versions_and_jobs(tmp_path, po
     def saved():
         with database(tmp_path) as db:
             return (
-                [tuple(r) for r in db.execute('SELECT scope,owner,field,value FROM settings ORDER BY scope,owner,field')],
+                [tuple(r) for r in db.execute('SELECT folder_id,feed_id,field,value FROM settings ORDER BY folder_id NULLS FIRST,feed_id NULLS FIRST,field')],
                 [tuple(r) for r in db.execute("SELECT key,value FROM state WHERE key LIKE 'settings-%' ORDER BY key")],
                 [tuple(r) for r in db.execute("SELECT id,status,generation FROM jobs ORDER BY id")],
             )
@@ -44,7 +44,8 @@ def test_failed_settings_change_rolls_back_values_versions_and_jobs(tmp_path, po
         assert response.json()['effective']['originals']['value'] is False
         with database(tmp_path) as db:
             status, generation = db.execute("SELECT status , generation FROM jobs WHERE kind = 'fetch' AND item = %s", (identity,)).fetchone()
-        assert status == 'pending' and generation > 42
+        # Display-only settings do not interrupt an unrelated fetch.
+        assert status == 'running' and generation == 42
 
 
 def test_nested_repository_commit_cannot_escape_action_transaction(tmp_path):

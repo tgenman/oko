@@ -47,6 +47,7 @@ class ProcessingWorker:
                 if not self.tasks._ai.cancelled():
                     await self.tasks._ai
                 self.tasks._ai=None
+                self.tasks._ai_job=None
             if self.tasks._ai or self.tasks._detached_ai:
                 return True
             if jobs.deleting():
@@ -82,6 +83,7 @@ class ProcessingWorker:
                     request=request.model_copy(update={'codex_choice':CodexChoice.model_validate({k:origin[k] for k in ('model','reasoning_effort','fast')})})
                 work=ProcessingInput(work.item,work.kind,work.signature,work.revision,request,work.public_ai,work.no_input)
                 self.tasks._ai_feed=self.service.feed(job.item)
+                self.tasks._ai_job=job
             self.tasks._ai=asyncio.create_task(self.execute_attempt(store,job,work,origin))
             return True
 

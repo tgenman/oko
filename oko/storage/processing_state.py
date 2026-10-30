@@ -47,7 +47,9 @@ class ProcessingRepository:
 
     def current(self, value: ProcessingInput) -> bool:
         operation=self.store.filters if value.kind=='filter' else self.store.processing.theses
-        return value.signature==operation.signature(value.item) and value.revision==publication_input.revision(self.store,value.item)
+        # The Job owner checks generation before acceptance; signature is scoped
+        # to this stage so unrelated settings do not invalidate an active call.
+        return value.signature==operation.signature(value.item)
 
     def apply(self, value: ProcessingInput, result: FilterResult | Theses | None, origin: dict[str,Any] | None) -> None:
         if value.no_input:

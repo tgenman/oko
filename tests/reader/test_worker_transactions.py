@@ -741,7 +741,7 @@ def test_common_feed_context_survives_restart_without_second_feed_substitution(t
     reopened.db.close()
 
 
-def test_revision_change_without_filter_signature_change_replaces_old_attempt(tmp_path):
+def test_unchanged_filter_input_does_not_replace_running_attempt(tmp_path):
     from oko.subscriptions.subscriptions import FeedPatch
     async def scenario():
         entered,release=asyncio.Event(),asyncio.Event()
@@ -761,11 +761,11 @@ def test_revision_change_without_filter_signature_change_replaces_old_attempt(tm
             worker.service.reconcile()
         replacement=dict(store.db.execute("SELECT * FROM jobs WHERE kind='filter'").fetchone())
         assert store.filters.signature(item)==signature
-        assert replacement['generation']>original['generation'] and replacement['status']=='pending'
+        assert replacement['generation']==original['generation'] and replacement['status']=='running'
         release.set()
         await tasks._ai
-        assert saved(store,item)['filtered_content']=={}
-        assert store.db.execute("SELECT generation,status FROM jobs WHERE kind='filter'").fetchone()[:]==(replacement['generation'],'pending')
+        assert saved(store,item)['filtered_content']
+        assert store.db.execute("SELECT generation,status FROM jobs WHERE kind='filter'").fetchone()[:]==(replacement['generation'],'done')
         store.db.close()
     asyncio.run(scenario())
 
@@ -1068,3 +1068,92 @@ def test_read_repair_reconciles_without_queue_and_survives_rollback(tmp_path):
         assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
     finally:
         store.db.close()
+
+
+def test_rule_round_trip_revokes_running_attempt_before_background_reconciliation(tmp_path):
+    from oko.services.processing import ProcessingService
+    from oko.services.subscriptions import SubscriptionService
+    from oko.subscriptions.subscriptions import Overrides
+    store, item, execution, _ = worker_library(tmp_path)
+    try:
+        store.processing.background = True
+        with transaction(store.db):
+            job = store.jobs.claim_processing('filter',store.clock())
+            assert job is not None
+            prepared = ProcessingService(execution.require_store).prepare(item,'filter')
+            assert prepared.input is not None
+            store.jobs.save_input(job,prepared.input)
+        original = store.subscriptions.effective('feed','demo',details=False)['effective']['prompt_filters']['value']
+        service = SubscriptionService(execution.require_store)
+        with pytest.raises(ValueError, match='rollback'):
+            with transaction(store.db):
+                service.update_settings('feed','demo',Overrides(prompt_filters='New rules'))
+                assert not store.jobs.valid(job)
+                raise ValueError('rollback')
+        assert store.jobs.valid(job)
+        with transaction(store.db):
+            service.update_settings('feed','demo',Overrides(prompt_filters='New rules'))
+        with transaction(store.db):
+            service.update_settings('feed','demo',Overrides(prompt_filters=original))
+        assert not store.jobs.valid(job)
+    finally:
+        store.db.close()
+
+
+def test_inherited_noop_and_theses_rule_do_not_revoke_running_filter(tmp_path):
+    from oko.services.processing import ProcessingService
+    from oko.services.subscriptions import SubscriptionService
+    from oko.subscriptions.subscriptions import Overrides
+    store, item, execution, _ = worker_library(tmp_path)
+    try:
+        service = SubscriptionService(execution.require_store)
+        original = store.subscriptions.effective('feed','demo',details=False)['effective']['prompt_filters']['value']
+        with transaction(store.db):
+            service.update_settings('feed','demo',Overrides(prompt_filters=original))
+            store.processing.reconcile_accepted_item(item)
+            job = store.jobs.claim_processing('filter',store.clock())
+            assert job is not None
+            prepared = ProcessingService(execution.require_store).prepare(item,'filter')
+            assert prepared.input is not None
+            store.jobs.save_input(job,prepared.input)
+        store.processing.background = True
+        with transaction(store.db):
+            service.update_settings('oko','global',Overrides(prompt_filters='Overridden global rule'))
+        assert store.jobs.valid(job)
+        with transaction(store.db):
+            service.update_settings('feed','demo',Overrides(prompt_theses='New summary rules'))
+        assert store.jobs.valid(job)
+    finally:
+        store.db.close()
+
+
+def test_content_round_trip_rejects_old_filter_attempt(tmp_path):
+    async def scenario():
+        entered, release = asyncio.Event(), asyncio.Event()
+        native = transport([],theses=True)
+        async def model(request):
+            if request.url.path == '/v1/chat/completions':
+                entered.set()
+                await release.wait()
+            return native.handler(request)
+        store, item, execution, tasks = worker_library(tmp_path)
+        try:
+            worker = workers(execution,tasks,httpx.MockTransport(model))[0]
+            await worker.tick()
+            await asyncio.wait_for(entered.wait(),2)
+            old = dict(store.db.execute("SELECT id,generation FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone())
+            source = StructuredSource(None)
+            for text in ('Temporary change','Useful text'):
+                material = source.describe(store.publication(item),Material('Title',text))
+                with transaction(store.db):
+                    CollectionService(execution.require_store).collected(item,material,manual=False)
+            current = dict(store.db.execute("SELECT generation,status FROM jobs WHERE id=%s", (old['id'],)).fetchone())
+            assert current['generation'] > old['generation'] and current['status'] == 'pending'
+            release.set()
+            await tasks._ai
+            assert saved(store,item)['filtered_content'] == {}
+            assert store.db.execute('SELECT generation,status FROM jobs WHERE id=%s', (old['id'],)).fetchone()[:] == (current['generation'],'pending')
+        finally:
+            release.set()
+            store.db.close()
+    asyncio.run(scenario())

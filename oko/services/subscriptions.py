@@ -12,7 +12,6 @@ from oko.subscriptions.subscriptions import Overrides, GLOBAL_SERVICE_SETTINGS, 
 class SettingsChange:
     value: dict[str, Any]
     changed: bool
-    affected: set[str] | None
     interval: float
 
 
@@ -35,14 +34,10 @@ class SubscriptionService:
                 raise ValueError('Для включённой фильтрации нужен непустой промпт')
         repository.fault('settings_after_values')
         changed = bool(patch.model_fields_set - GLOBAL_SERVICE_SETTINGS and value != previous)
-        affected = None
         if changed:
             repository.settings_changed(scope, owner)
-            if scope != 'oko':
-                affected = {f['id'] for f in repository.subscriptions.feeds(
-                    owner if scope == 'feed' else None, folder=owner if scope == 'folder' else None)}
         repository.fault('settings_after_invalidation')
-        return SettingsChange(value, changed, affected, repository.subscriptions.feed_refresh_minutes() * 60)
+        return SettingsChange(value, changed, repository.subscriptions.feed_refresh_minutes() * 60)
 
     @repository_access
     def rename_folder(self, identity: str, title: str) -> dict[str, Any]:
