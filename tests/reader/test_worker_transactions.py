@@ -1348,3 +1348,28 @@ def test_discovery_page_shares_linked_article_with_its_own_membership(tmp_path,p
         assert store.publication(child_id).id == 'child'
     finally:
         store.db.close()
+
+
+def test_changed_title_discards_old_results_and_rolls_back_atomically(tmp_path):
+    store, item, execution, tasks = worker_library(tmp_path)
+    try:
+        asyncio.run(pass_worker(workers(execution, tasks)[0], tasks))
+        asyncio.run(pass_worker(workers(execution, tasks)[1], tasks))
+        before = saved(store, item)
+        assert before['filtered_content'] and before['summarized_content']
+        material = StructuredSource(None).describe(store.publication(item), Material('New title', 'Useful text'))
+        def change():
+            CollectionService(execution.require_store).collected(item, material, manual=False)
+            after = saved(store, item)
+            assert after['filtered_content'] == {} and after['summarized_content'] == {}
+            assert 'filter' not in after['processing_metadata'] and 'summary' not in after['processing_metadata']
+        with pytest.raises(ValueError, match='rollback'):
+            with transaction(store.db):
+                change()
+                raise ValueError('rollback')
+        assert saved(store, item)['filtered_content'] == before['filtered_content']
+        assert saved(store, item)['summarized_content'] == before['summarized_content']
+        with transaction(store.db):
+            change()
+    finally:
+        store.db.close()

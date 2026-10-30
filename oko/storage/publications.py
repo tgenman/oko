@@ -297,6 +297,14 @@ class Publications:
         store.db.execute('UPDATE publications SET content = %s , media_ids = %s , title = %s , status = %s WHERE id = %s',
             (json.dumps(content, ensure_ascii=False), json.dumps([r['id'] for r in media]),
              content['extra']['_reader']['title'], 'pending_filtering', item))
+        if previous and old['platform'] != 'youtube' and old_header.get('title') != content['extra']['_reader']['title']:
+            row = expect_row(store.db.execute('SELECT processing_metadata FROM items_read WHERE id = %s', (item,)).fetchone())
+            metadata = json.loads(row[0])
+            for operation in ('filter', 'summary'):
+                if operation in metadata:
+                    metadata[operation].setdefault('source_title', old_header.get('title'))
+            store.db.execute('UPDATE publications SET processing_metadata=%s WHERE id=%s',
+                             (json.dumps(metadata, ensure_ascii=False), item))
         if same and previous:
             filtered_row=expect_row(store.db.execute('SELECT filtered_content FROM items_read WHERE id = %s',(item,)).fetchone())
             filtered=json.loads(filtered_row[0])
@@ -323,12 +331,13 @@ class Publications:
 
     def accept_result(self, item: str, kind: str, signature: str, result: dict[str,Any], origin: dict[str,Any] | None) -> None:
         """Publish a validated result and its provenance in the caller's transaction."""
-        row=expect_row(self.store.db.execute('SELECT processing_metadata FROM items_read WHERE id = %s',(item,)).fetchone())
+        row=expect_row(self.store.db.execute('SELECT processing_metadata, title, platform FROM items_read WHERE id = %s',(item,)).fetchone())
         content=publication_input.content(self.store,item)
         metadata=json.loads(row[0])
         operation='filter' if kind=='filter' else 'summary'
         input_content=publication_input.selected_content(self.store,item,kind)
         metadata[operation]=dict(input_hash=publication_input.digest(publication_input.blocks(input_content or content)),signature=signature,
+            source_title=None if row['platform']=='youtube' else row['title'],
             settings_hash=publication_input.digest(publication_input.settings(self.store,item)),
             completed_at=datetime.fromtimestamp(self.store.wall_clock(),timezone.utc).isoformat(),**(origin or {}))
         if kind=='filter':
@@ -400,7 +409,9 @@ class Publications:
         prior_source = saved_filter.get('input_hash')
         if prior_source is None and row['filtered_content']=='{}':
             prior_source = saved_summary.get('input_hash')
-        if source_hash is not None and prior_source is not None and source_hash != prior_source:
+        saved_title = saved_filter.get('source_title', saved_summary.get('source_title'))
+        title_changed = row['platform'] != 'youtube' and saved_title is not None and saved_title != row['title']
+        if source_hash is not None and ((prior_source is not None and source_hash != prior_source) or title_changed):
             self.store.db.execute("UPDATE publications SET filtered_content='{}',summarized_content='{}' WHERE id=%s", (item,))
             metadata.pop('filter',None)
             metadata.pop('summary',None)
