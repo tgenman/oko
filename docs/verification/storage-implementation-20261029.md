@@ -879,3 +879,13 @@ by its saved ID, 76 affected tests, 17 focused tests and the shared-profile case
 passed. Mypy and seven Playwright cases passed; the Telegram profile screenshot
 was inspected. Other problem producers remain on the old status-reconciliation
 path, so GET status is still not generally read-only.
+
+Profile reconciliation for a changed role now loads feed details only for its
+bindings and prior problem references; startup may still enumerate profiles.
+A synthetic check with 150 unrelated feeds verified that it does not issue the
+unfiltered feed-details query. A second check compared the saved and read
+problem ordering across 405 dependent feeds. The affected suites passed 79
+tests; the two new focused cases passed separately, as did seven Playwright
+cases with the Telegram profile screenshot inspected. Mypy passed. Binding
+lookup itself still scans its existing relation; no role index was added or
+performance claim made for an arbitrarily large number of bindings.
