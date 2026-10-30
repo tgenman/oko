@@ -696,3 +696,12 @@ def test_telegram_source_revision_triggers_are_removed(connections):
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND (t.tgname LIKE 'source_configuration_telegram_bindings_%' OR t.tgname LIKE 'source_configuration_telegram_profiles_%')").fetchone() == (0,)
         verify(db, MIGRATIONS)
+
+
+def test_history_source_revision_triggers_are_removed(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:30])
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND (t.tgname LIKE 'source_configuration_initial_history_%' OR t.tgname='source_read_initial')").fetchone() == (0,)
+        verify(db, MIGRATIONS)

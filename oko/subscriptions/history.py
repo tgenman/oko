@@ -1,5 +1,6 @@
 """Durable initial-history selection, independent from processing and reading."""
 from oko.storage.database import expect_row, Database, Row
+from oko.storage.source_configuration import changed as source_changed
 from datetime import date, datetime, time
 import json
 import secrets
@@ -78,6 +79,7 @@ class History:
 
     def configure(self, feed: str, selection: InitialHistory) -> None:
         self.db.execute('INSERT INTO initial_history ( feed , selection ) VALUES ( %s , %s )', (feed, json.dumps(dict(selection.selection(),run=secrets.token_hex(16)))))
+        source_changed(self.db)
 
     def start(self, feed: str, selection: InitialHistory) -> dict[str, Any]:
         current = self.status(feed)
@@ -87,6 +89,7 @@ class History:
         value = dict(**selection.selection(), run=secrets.token_hex(16), resume=0)
         self.db.execute('INSERT INTO initial_history ( feed , selection ) VALUES ( %s , %s ) ON CONFLICT ( feed ) DO UPDATE SET selection = excluded . selection , frozen = 0 , paused = 0 , scan_complete = 0',
             (feed, json.dumps(value)))
+        source_changed(self.db)
         result = self.status(feed)
         assert result is not None
         return result
@@ -99,6 +102,8 @@ class History:
         value = json.loads(row['selection'])
         value.update(cancelled=True, waiting=False, stop_reason='cancelled')
         self.db.execute('UPDATE initial_history SET selection = %s , paused = 1 WHERE feed = %s', (json.dumps(value), feed))
+        if not current.get('cancelled') or not current['paused']:
+            source_changed(self.db)
         result = self.status(feed)
         assert result is not None
         return result
@@ -109,10 +114,12 @@ class History:
             return
         self.db.executemany('INSERT INTO history_members ( feed , item ) VALUES ( %s , %s ) ON CONFLICT DO NOTHING', ((feed, item) for item in items))
         self.db.execute('UPDATE initial_history SET frozen = 1 WHERE feed = %s', (feed,))
+        source_changed(self.db)
 
     def enroll(self, feed: str, items: list[str], complete: bool) -> None:
         self.db.executemany('INSERT INTO history_members ( feed , item ) VALUES ( %s , %s ) ON CONFLICT DO NOTHING', ((feed, item) for item in items))
-        self.db.execute('UPDATE initial_history SET frozen = 1 , scan_complete = %s WHERE feed = %s', (complete, feed))
+        if self.db.execute('UPDATE initial_history SET frozen = 1 , scan_complete = %s WHERE feed = %s AND (frozen IS DISTINCT FROM 1 OR scan_complete IS DISTINCT FROM %s)', (complete, feed, complete)).rowcount:
+            source_changed(self.db)
 
     def pause(self, feed: str, paused: bool) -> dict[str, Any]:
         status = self.status(feed)
@@ -120,13 +127,17 @@ class History:
             raise ValueError('Начальная история не настроена')
         if status.get('cancelled'):
             raise ValueError('История остановлена; начните новый подбор')
+        changed = False
         if not paused and not status.get('stop_reason'):
             row = expect_row(self.db.execute('SELECT selection FROM initial_history WHERE feed = %s', (feed,)).fetchone())
             selection = json.loads(row['selection'])
             selection.update(resume=selection.get('resume', 0) + 1, waiting=False, discovery_error=None)
             self.db.execute('UPDATE initial_history SET selection = %s WHERE feed = %s', (json.dumps(selection), feed))
+            changed = True
         if status['state'] != 'done':
-            self.db.execute('UPDATE initial_history SET paused = %s WHERE feed = %s', (paused, feed))
+            changed = bool(self.db.execute('UPDATE initial_history SET paused = %s WHERE feed = %s AND paused IS DISTINCT FROM %s', (paused, feed, paused)).rowcount) or changed
+        if changed:
+            source_changed(self.db)
         result = self.status(feed)
         assert result is not None
         return result

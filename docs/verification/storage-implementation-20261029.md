@@ -419,3 +419,11 @@
   Python tests; types and eight Playwright scenarios passed, and a mobile
   settings screenshot was inspected. Version 30 has 23 tables and 55 triggers.
   History revision, remaining projections and the full redesign are still open.
+- Migration 031 moves history-selection and Telegram initial-boundary revision
+  updates into their Python owners. Progress-only writes do not advance the
+  revision; selection, pause/resume, initial boundary and rollback are covered.
+  Four triggers/functions were removed.
+- The affected history, Telegram, migration and recovery suites passed 186
+  tests; types and six Playwright scenarios passed. A history-outcomes screenshot
+  was added and inspected. Version 31 has 23 tables and 51 triggers; dirty queues,
+  status projections and final project verification remain open.

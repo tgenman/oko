@@ -1,0 +1,9 @@
+-- History and read-state owners advance source revision on configuration changes.
+DROP TRIGGER source_configuration_initial_history_delete ON initial_history;
+DROP TRIGGER source_configuration_initial_history_insert ON initial_history;
+DROP TRIGGER source_configuration_initial_history_update ON initial_history;
+DROP TRIGGER source_read_initial ON telegram_read_state;
+DROP FUNCTION oko_trigger_source_configuration_initial_history_delete();
+DROP FUNCTION oko_trigger_source_configuration_initial_history_insert();
+DROP FUNCTION oko_trigger_source_configuration_initial_history_update();
+DROP FUNCTION oko_trigger_source_read_initial();

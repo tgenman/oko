@@ -231,6 +231,70 @@ def test_telegram_profile_restart_marks_source_revision_once(tmp_path, settings_
         store.db.close()
 
 
+def test_history_source_revision_ignores_progress_but_tracks_selection(tmp_path, settings_database):
+    from tests.support.storage import Store
+    from oko.storage.transaction import transaction
+    from oko.subscriptions.history import InitialHistory
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        before = store.subscriptions.source_revision()
+        with transaction(store.db):
+            store.subscriptions.history.configure('synthetic',InitialHistory(count=2))
+        configured = store.subscriptions.source_revision()
+        assert configured > before
+        with transaction(store.db):
+            store.subscriptions.history.warnings('synthetic',['Synthetic warning'])
+            store.subscriptions.history.discovery_state('synthetic',{'history_requests':2})
+        assert store.subscriptions.source_revision() == configured
+        with pytest.raises(ValueError,match='synthetic rollback'):
+            with transaction(store.db):
+                store.subscriptions.history.enroll('synthetic',[],False)
+                assert store.subscriptions.source_revision() > configured
+                raise ValueError('synthetic rollback')
+        assert store.subscriptions.source_revision() == configured
+        with transaction(store.db):
+            store.subscriptions.history.enroll('synthetic',[],False)
+        selected = store.subscriptions.source_revision()
+        with transaction(store.db):
+            store.subscriptions.history.enroll('synthetic',[],False)
+        assert store.subscriptions.source_revision() == selected
+        with transaction(store.db):
+            store.subscriptions.history.pause('synthetic',True)
+        paused = store.subscriptions.source_revision()
+        with transaction(store.db):
+            store.subscriptions.history.pause('synthetic',False)
+        assert store.subscriptions.source_revision() > paused > selected
+    finally:
+        store.db.close()
+
+
+def test_telegram_initial_boundary_advances_source_revision_atomically(tmp_path, settings_database):
+    from tests.support.storage import Store
+    from oko.storage.read_sync import ReadPlan
+    from oko.storage.transaction import transaction
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        with transaction(store.db):
+            store.db.execute("INSERT INTO telegram_read_state(feed,since) VALUES ('synthetic',0)")
+        before = store.subscriptions.source_revision()
+        plan = ReadPlan(initial=5,confirmed=0,until=5,candidate=5)
+        with pytest.raises(ValueError,match='synthetic rollback'):
+            with transaction(store.db):
+                store.read_sync.completed('synthetic',plan,5)
+                assert store.subscriptions.source_revision() > before
+                raise ValueError('synthetic rollback')
+        assert store.subscriptions.source_revision() == before
+        with transaction(store.db):
+            store.read_sync.completed('synthetic',plan,5)
+        changed = store.subscriptions.source_revision()
+        assert changed > before
+        with transaction(store.db):
+            store.read_sync.completed('synthetic',plan,5)
+        assert store.subscriptions.source_revision() == changed
+    finally:
+        store.db.close()
+
+
 def test_folder_settings_follow_rollback_and_new_folder_identity(tmp_path, settings_database):
     from tests.support.storage import Store
     from oko.storage.transaction import transaction

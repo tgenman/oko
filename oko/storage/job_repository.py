@@ -680,7 +680,9 @@ class JobRepository:
             self.store.db.execute(f'DELETE FROM items WHERE id IN ({owned})', (feed,))
             self.store.db.execute("DELETE FROM jobs WHERE item = %s OR (kind='delete' AND payload::jsonb->>'cleanup_feed' = %s)", (feed, feed))
             for table in ('history_members', 'initial_history', 'telegram_read_members', 'telegram_read_state'):
-                self.store.db.execute(f'DELETE FROM {table} WHERE feed = %s', (feed,))
+                deleted = self.store.db.execute(f'DELETE FROM {table} WHERE feed = %s', (feed,)).rowcount
+                if table=='initial_history' and deleted:
+                    source_changed(self.store.db)
             self.store.db.execute('UPDATE jobs SET feed_id=NULL, collection_attempt=NULL WHERE feed_id=%s AND collection_attempt IS NOT NULL', (feed,))
             self.store.subscriptions.clear_settings('feed', feed)
             self.store.db.execute('DELETE FROM state WHERE key = %s', ('feed-status:'+feed,))

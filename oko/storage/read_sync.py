@@ -1,6 +1,7 @@
 """Durable, content-free eligibility and cumulative Telegram confirmation."""
 import json
 from oko.storage.reading import reading_value
+from oko.storage.source_configuration import changed as source_changed
 from dataclasses import dataclass
 from oko.collection.contracts import SourceError
 from oko.collection.telegram.contracts import HistoryEnvelope
@@ -56,7 +57,8 @@ class ReadSync:
                    (feed, envelope.selection.since))
         selection = envelope.selection
         if selection.scan_complete and selection.oldest:
-            db.execute('UPDATE telegram_read_state SET initial = %s WHERE feed = %s AND initial IS NULL', (selection.oldest - 1, feed))
+            if db.execute('UPDATE telegram_read_state SET initial = %s WHERE feed = %s AND initial IS NULL', (selection.oldest - 1, feed)).rowcount:
+                source_changed(db)
         db.execute('UPDATE telegram_read_state SET signature = NULL WHERE feed = %s', (feed,))
         # Re-observing an unchanged page still requires checking the remote
         # read frontier. Member upserts alone may not change any row.
@@ -159,8 +161,11 @@ class ReadSync:
 
 
     def completed(self, feed: str, plan: ReadPlan, confirmed: int) -> None:
+        previous = self.store.db.execute('SELECT initial FROM telegram_read_state WHERE feed=%s', (feed,)).fetchone()
         self.store.db.executemany('UPDATE telegram_read_members SET missing = 1 WHERE feed = %s AND member = %s',[(feed,member) for member in plan.missing])
         self.store.db.execute('UPDATE telegram_read_state SET initial = COALESCE ( initial , %s ) , confirmed = oko_max ( confirmed , %s ) , waiting = %s , error = NULL WHERE feed = %s',(plan.initial,confirmed,plan.waiting,feed))
+        if previous is not None and previous[0] is None:
+            source_changed(self.store.db)
         if plan.missing:
             self.mark_feed(feed)
 
