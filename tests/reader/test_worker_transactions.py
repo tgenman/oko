@@ -1281,3 +1281,31 @@ def test_viewing_one_component_does_not_clear_unrelated_orphan(tmp_path):
         assert store.db.execute("SELECT content,complete,viewed FROM publications WHERE id='unrelated'").fetchone()[:] == before
     finally:
         store.db.close()
+
+
+def test_discovery_page_and_continuation_roll_back_together(tmp_path):
+    from oko.collection.contracts import DiscoveryResult, Publication
+    from tests.support.worker_library import collection_worker
+
+    def fault(point):
+        if point=='collection_after_continuation':
+            raise RuntimeError('synthetic continuation failure')
+    class Paginated:
+        changes = None
+        async def discover(self,cursor):
+            return DiscoveryResult((Publication('next','https://example.org/next',123,Material('Next','Synthetic page')),),
+                                   'page-two',continuation=30)
+    store, _, _, _ = worker_library(tmp_path,fault=fault)
+    try:
+        with store.db:
+            store.db.execute("UPDATE feeds SET cursor='' WHERE id='demo'")
+            store.jobs.enqueue_discovery()
+        job=store.jobs.next_job(store.clock(),feeds=['demo'])
+        assert job and job.kind=='discover'
+        worker=collection_worker(tmp_path,store,StructuredSource(Paginated()))
+        asyncio.run(worker._execute(job))
+        assert store.db.execute("SELECT cursor FROM feeds WHERE id='demo'").fetchone()[0] == ''
+        assert store.db.execute("SELECT 1 FROM publications WHERE url='https://example.org/next'").fetchone() is None
+        assert store.db.execute("SELECT status FROM jobs WHERE id=%s", (job.id,)).fetchone()[0] != 'done'
+    finally:
+        store.db.close()

@@ -281,9 +281,10 @@ class CollectionWorker:
                             current.jobs.checkpoint('collection_after_result')
                             current.jobs.finish(job)
                             current.jobs.checkpoint('collection_after_finish')
-                        if outcome.continuation is not None:
-                            delay = outcome.continuation
-                            current.jobs.enqueue_discovery(feed, self._clock() + delay if delay else 0)
+                            if outcome.continuation is not None:
+                                delay = outcome.continuation
+                                current.jobs.enqueue_discovery(feed, self._clock() + delay if delay else 0)
+                                current.jobs.checkpoint('collection_after_continuation')
                         self.service.feed_status(feed, error=None, gap=outcome.observation.gap, changes=outcome.observation.changes)
                         self._finish_collection(job, current, collection_error)
             elif publication:

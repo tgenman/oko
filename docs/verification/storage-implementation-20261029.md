@@ -741,3 +741,8 @@
   YouTube and recovery suites passed 78 tests and types; three Playwright scenarios
   passed, and the mobile collection-status screenshot was inspected. The final
   `next_run_at` physical schema remains to be implemented.
+- A discovery page, its finished Job and a delayed continuation now commit in the
+  same transaction. A fault after continuation scheduling first exposed the old
+  gap; the corrected path rolls back the page and continuation together. The
+  affected worker, history, Telegram, YouTube and recovery suites passed 150 tests
+  and types; two Playwright scenarios passed, and a Telegram screenshot was inspected.
