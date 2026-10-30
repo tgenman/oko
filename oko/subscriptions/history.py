@@ -175,8 +175,8 @@ class History:
     def statuses(self, feeds: list[str]) -> dict[str,dict[str,Any]]:
         if not feeds:
             return {}
-        selected=json.dumps(feeds)
-        rows=self.db.execute('SELECT * FROM initial_history WHERE feed IN ( SELECT value FROM oko_json_each ( %s ) )',(selected,)).fetchall()
+        selected=feeds
+        rows=self.db.execute('SELECT * FROM initial_history WHERE feed = ANY(%s)',(selected,)).fetchall()
         if not rows:
             return {}
         counts: dict[str,dict[str,int]]={}
@@ -185,7 +185,7 @@ class History:
             jsonb_agg(jsonb_build_object('item',h.item,'message',j.error))
               FILTER (WHERE h.outcome IN ('retrying','unavailable') AND j.error IS NOT NULL) AS errors
             FROM history_members h LEFT JOIN jobs j ON j.item=h.item AND j.kind='fetch'
-            WHERE h.feed IN (SELECT value FROM oko_json_each(%s)) GROUP BY h.feed,h.outcome""", (selected,)):
+            WHERE h.feed = ANY(%s) GROUP BY h.feed,h.outcome""", (selected,)):
             counts.setdefault(row['feed'],{})[row['outcome']]=row['n']
             errors.setdefault(row['feed'],[]).extend(row['errors'] or [])
         return {row['feed']:self._status(row,counts.get(row['feed'],{}),errors.get(row['feed'],[])) for row in rows}

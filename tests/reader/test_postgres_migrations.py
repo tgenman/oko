@@ -913,3 +913,12 @@ def test_clock_and_max_helpers_are_removed(connections):
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=current_schema() AND p.proname IN ('oko_max','oko_reader_clock','oko_reader_time')").fetchone() == (0,)
         verify(db, MIGRATIONS)
+
+
+def test_json_compatibility_helpers_are_removed(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:50])
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=current_schema() AND p.proname LIKE 'oko_json_%'").fetchone() == (0,)
+        verify(db, MIGRATIONS)

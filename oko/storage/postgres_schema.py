@@ -55,4 +55,5 @@ MIGRATIONS = (
     Migration(48, 'job-status', (Path(__file__).parent / 'postgres' / '048-job-status.sql').read_text()),
     Migration(49, 'status-revision', (Path(__file__).parent / 'postgres' / '049-status-revision.sql').read_text()),
     Migration(50, 'native-time-max', (Path(__file__).parent / 'postgres' / '050-native-time-max.sql').read_text()),
+    Migration(51, 'native-json', (Path(__file__).parent / 'postgres' / '051-native-json.sql').read_text()),
 )

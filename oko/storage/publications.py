@@ -138,7 +138,7 @@ class Publications:
                 (ref.key.platform.value, ref.key.external_id, source_id)).fetchall()
             if not existing and publication.members:
                 placeholders = ','.join('%s' for _ in publication.members)
-                existing = self.store.db.execute(f'SELECT DISTINCT i . id , i . source_id FROM items_by_feed i CROSS JOIN oko_json_each ( i . members ) m WHERE i . feed_id = %s AND CAST ( m . value AS BIGINT ) IN ( {placeholders} )', (feed, *publication.members)).fetchall()
+                existing = self.store.db.execute(f'SELECT DISTINCT i . id , i . source_id FROM items_by_feed i CROSS JOIN jsonb_array_elements_text(i.members::jsonb) m(value) WHERE i . feed_id = %s AND CAST ( m . value AS BIGINT ) IN ( {placeholders} )', (feed, *publication.members)).fetchall()
             if len(existing)>1:
                 raise ValueError('Conflicting publication identity or Telegram album membership')
             if publication.observed_only and not existing:

@@ -246,11 +246,11 @@ class JobRepository:
                         WHERE owner.is_primary AND owner.is_unviewed AND owner.feed_id IN ({dependency_keys}) AND root.viewed=0 AND i.viewed=0
                         AND NOT EXISTS (SELECT 1 FROM feed_publications m WHERE m.publication_id=i.id AND m.is_primary)))"""
         if media_only:
-            subtitles="SELECT 1 FROM media_files m JOIN items_read i ON i . id = m . publication_id JOIN oko_json_each ( i . content , '$.blocks' ) b ON oko_json_extract ( b . value , '$.media_id' ) = m . id WHERE m . id = jobs . item AND i . platform = 'youtube' AND oko_json_extract ( b . value , '$.role' ) = 'subtitles'"
+            subtitles="SELECT 1 FROM media_files m JOIN items_read i ON i . id = m . publication_id JOIN jsonb_array_elements(CASE WHEN jsonb_typeof(i.content::jsonb->'blocks')='array' THEN i.content::jsonb->'blocks' ELSE '[]'::jsonb END) b(value) ON b.value->>'media_id' = m.id WHERE m . id = jobs . item AND i . platform = 'youtube' AND b.value->>'role' = 'subtitles'"
             query += ' AND '+('EXISTS' if captions_only else 'NOT EXISTS')+' ('+subtitles+')'
         if not include_deletions:
             query += " AND kind NOT IN ('delete','feed-delete')"
-        blocked_history = "SELECT m . item FROM history_members m JOIN initial_history h ON h . feed = m . feed WHERE ( h . paused = 1 OR ( h . scan_complete = 0 AND ( oko_json_extract ( h . selection , '$.mode' ) = 'count' OR h . feed IN ( SELECT id FROM feeds WHERE transport = 'rss' ) ) ) )"
+        blocked_history = "SELECT m . item FROM history_members m JOIN initial_history h ON h . feed = m . feed WHERE ( h . paused = 1 OR ( h . scan_complete = 0 AND ( h.selection::jsonb->>'mode' = 'count' OR h . feed IN ( SELECT id FROM feeds WHERE transport = 'rss' ) ) ) )"
         # PostgreSQL primary keys reject NULL history memberships. A malformed
         # fetch without an item is never dispatchable; valid work uses the index.
         query += f""" AND NOT (kind='fetch' AND
@@ -517,7 +517,7 @@ class JobRepository:
         # Deleted and non-Telegram feeds need no read-frontier work.
         with db:
             if cleared:
-                db.execute('UPDATE telegram_read_state SET needs_sync=false,saved_backfill_after=NULL WHERE feed IN ( SELECT value FROM oko_json_each ( %s ) )', (json.dumps(cleared),))
+                db.execute('UPDATE telegram_read_state SET needs_sync=false,saved_backfill_after=NULL WHERE feed = ANY(%s)', (cleared,))
             db.execute("UPDATE telegram_read_state SET needs_sync=false,saved_backfill_after=NULL WHERE (needs_sync OR saved_backfill_after IS NOT NULL) AND NOT EXISTS ( SELECT 1 FROM feeds WHERE id = telegram_read_state.feed AND transport = 'telegram' AND connection IS DISTINCT FROM 'deleting' )")
         self.store.read_sync._configuration = revision
 
@@ -736,7 +736,7 @@ class JobRepository:
         job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , generation = generation + 1 , next = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN next ELSE 0 END , error = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN error ELSE NULL END WHERE id = %s AND generation = %s AND status = 'running'",(self.store.wall_clock(),self.store.wall_clock(),job.id,job.generation))
 
     def invalidate_processing(self) -> None:
-        changed=job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status='running' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = CASE WHEN status = 'running' THEN 'pending' ELSE status END , generation = generation + 1 , error = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN error ELSE NULL END , problem_code = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN problem_code ELSE NULL END , next = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END WHERE kind IN ( 'filter' , 'theses' ) AND oko_json_extract ( payload , '$.input_revision' ) IS DISTINCT FROM ( SELECT oko_json_extract ( i . processing_metadata , '$._revision' ) FROM items_read i WHERE i . id = jobs . item ) RETURNING kind,item",
+        changed=job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status='running' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = CASE WHEN status = 'running' THEN 'pending' ELSE status END , generation = generation + 1 , error = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN error ELSE NULL END , problem_code = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN problem_code ELSE NULL END , next = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END WHERE kind IN ( 'filter' , 'theses' ) AND payload::jsonb->>'input_revision' IS DISTINCT FROM ( SELECT i.processing_metadata::jsonb->>'_revision' FROM items_read i WHERE i . id = jobs . item ) RETURNING kind,item",
             (self.store.wall_clock(),)*4).fetchall()
         for row in changed:
             if row['kind']=='filter':self.store.processing.filter_changed(row['item'])

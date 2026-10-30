@@ -567,3 +567,10 @@
   and media retry deadlines. Migration, Telegram, media and CLI suites passed
   195 tests and types; two Playwright scenarios passed, and a media screenshot
   was inspected. Four JSON compatibility helpers remain installed.
+- Migration 051 replaces the four JSON compatibility functions with native
+  PostgreSQL JSON operators and array parameters, and removes the functions.
+  The affected migration, history, Telegram, YouTube, status, media and worker
+  suites passed 314 tests and types; eight Playwright scenarios passed and the
+  Telegram publication screenshot was inspected. A fresh schema has 22 tables,
+  zero non-internal triggers and zero schema-local functions. The two dirty
+  tables and remaining physical/model changes are still unfinished.

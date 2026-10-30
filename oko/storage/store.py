@@ -219,8 +219,8 @@ class Store:
             enrolled=set(envelope.selection.enrolled_ids) if envelope else set(selection.get('history_enroll',[]))
             ordered=source_order
             known={ExternalKey(platform,row['external_id']):row['source_order'] for platform in {key.platform for key in ordered}
-                for row in self.db.execute('SELECT external_id , source_order FROM items_read WHERE platform = %s AND source_order IS NOT NULL AND external_id IN ( SELECT value FROM oko_json_each ( %s ) )',
-                    (platform.value,json.dumps([key.external_id for key in ordered if key.platform==platform])))}
+                for row in self.db.execute('SELECT external_id , source_order FROM items_read WHERE platform = %s AND source_order IS NOT NULL AND external_id = ANY(%s)',
+                    (platform.value,[key.external_id for key in ordered if key.platform==platform]))}
             anchor=next((index for index in reversed(range(len(ordered))) if ordered[index] in known),None)
             # Positive ranks leave room for later uploads and earlier history.
             base_order=known[ordered[anchor]]+anchor if anchor is not None else 1_000_000_000

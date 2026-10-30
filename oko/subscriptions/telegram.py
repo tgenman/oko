@@ -73,10 +73,10 @@ class TelegramAccess:
     @reading_value
     def _bindings(self, feeds: tuple[str, ...] | None) -> dict[str, dict[str, Any]]:
         query='SELECT feed , binding FROM telegram_bindings'
-        params: tuple[str,...]=()
+        params: tuple[list[str],...]=()
         if feeds is not None:
-            query+=' WHERE feed IN ( SELECT value FROM oko_json_each ( %s ) )'
-            params=(json.dumps(feeds),)
+            query+=' WHERE feed = ANY(%s)'
+            params=(list(feeds),)
         return {row['feed']:json.loads(row['binding']) for row in self.db.execute(query,params)}
 
     def profiles(self) -> dict[str, dict[str, Any]]:
@@ -100,7 +100,7 @@ class TelegramAccess:
         return dict(row) if row else None
 
     def dependents(self, role: str) -> list[str]:
-        return [r['feed'] for r in self.db.execute("SELECT feed FROM telegram_bindings WHERE oko_json_extract ( binding , '$.role' ) = %s", (role,))]
+        return [r['feed'] for r in self.db.execute("SELECT feed FROM telegram_bindings WHERE binding::jsonb->>'role' = %s", (role,))]
 
     def save_profile(self, role: str, account: str, user_id: int, generation: int, checked: float) -> dict[str, Any]:
         with self.db:
