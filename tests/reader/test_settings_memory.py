@@ -725,3 +725,48 @@ def test_shared_telegram_profile_problem_keeps_remaining_feed(tmp_path, settings
         assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s',(before['id'],)).fetchone()[0]=='irrelevant'
     finally:
         store.db.close()
+
+
+def test_profile_check_does_not_load_unrelated_feed_details(tmp_path, settings_database):
+    import json
+    from oko.services.connections import ConnectionService
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        with store.db:
+            store.db.executemany("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES (%s,%s,%s,'default','rss','rss','connected','[]')", [(f'other-{i}',f'other-{i}',f'Other {i}') for i in range(150)])
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('telegram','telegram','Telegram','default','telegram','telegram','connected','[]')")
+            store.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'ready',1)")
+            store.db.execute("INSERT INTO telegram_bindings(feed,binding) VALUES ('telegram',%s)", (json.dumps(dict(kind='client',role='personal',account_user_id='101',peer_id='123')),))
+        statements=[]
+        store.db.set_trace_callback(statements.append)
+        try:
+            assert not ConnectionService(lambda:store).checked('personal',1,202,2)
+        finally:
+            store.db.set_trace_callback(None)
+        assert not any('FROM feeds ORDER BY rowid' in query for query in statements), statements
+    finally:
+        store.db.close()
+
+
+def test_profile_problem_order_is_stable_across_feed_batches(tmp_path, settings_database):
+    import json
+    from oko.services.connections import ConnectionService
+    from oko.storage.reading import reading_snapshot
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'ready',1)")
+            for i in range(405):
+                feed=f'feed-{404-i:04}'
+                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES (%s,%s,%s,'default','telegram','telegram','connected','[]')",(feed,feed,feed))
+                store.db.execute('INSERT INTO telegram_bindings(feed,binding) VALUES (%s,%s)',(feed,json.dumps(dict(kind='client',role='personal',account_user_id='101',peer_id=feed))))
+        assert not ConnectionService(lambda:store).checked('personal',1,202,2)
+        saved=json.loads(store.db.execute("SELECT body FROM reader_problems WHERE identity='profile:personal' AND finished IS NULL").fetchone()[0])
+        with reading_snapshot():
+            candidate=next(c for c in store.problems.candidates(2) if c['id']=='profile:personal')
+        assert saved['objects']==candidate['objects']
+        assert len(saved['objects'])==405
+    finally:
+        store.db.close()

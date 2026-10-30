@@ -148,20 +148,32 @@ class Problems:
         return groups
 
     def sync_profiles(self, now: float, roles: set[str] | None = None) -> None:
+        if roles is None:
+            previous = {row['identity']:row['body'] for row in self.db.execute("SELECT identity,body FROM reader_problems WHERE identity LIKE 'profile:%%' AND finished IS NULL")}
+            identities = set(previous)
+        else:
+            identities = {'profile:'+role for role in roles}
+            previous = {row['identity']:row['body'] for row in self.db.execute('SELECT identity,body FROM reader_problems WHERE identity=ANY(%s) AND finished IS NULL', (sorted(identities),))}
         with reading_snapshot():
-            feeds = {feed['id']: feed for feed in self.store.subscriptions.feeds()}
+            if roles is None:
+                feeds = {feed['id']: feed for feed in self.store.subscriptions.feeds()}
+            else:
+                role_list = sorted(roles)
+                ids = set(roles)
+                ids.update(row['feed'] for row in self.db.execute("SELECT feed FROM telegram_bindings WHERE binding::jsonb->>'role'=ANY(%s) OR (binding::jsonb->>'role' IS NULL AND feed=ANY(%s))", (role_list,role_list)))
+                ids.update(obj['id'] for body in previous.values() for obj in json.loads(body)['objects'] if obj['kind']=='feed')
+                ordered = [row['id'] for row in self.db.execute('SELECT id FROM feeds WHERE id=ANY(%s) ORDER BY rowid', (sorted(ids),))]
+                by_id = {feed['id']:feed for feed in self.store.subscriptions.feeds_many(set(ordered))}
+                feeds = {identity:by_id[identity] for identity in ordered}
             bindings = self.store.subscriptions.telegram.bindings(list(feeds))
             candidates = self.profile_candidates(now,feeds,bindings)
         if roles is None:
-            identities = set(candidates) | {row['identity'] for row in self.db.execute("SELECT identity FROM reader_problems WHERE identity LIKE 'profile:%%' AND finished IS NULL")}
-        else:
-            identities = {'profile:'+role for role in roles}
+            identities.update(candidates)
         for identity in sorted(identities):
             candidate = candidates.get(identity)
             outcome = 'resolved'
-            if candidate is None:
-                previous = self.db.execute('SELECT body FROM reader_problems WHERE identity=%s AND finished IS NULL', (identity,)).fetchone()
-                if previous and any(obj['kind']=='feed' and feeds.get(obj['id'],{}).get('connection','deleting')=='deleting' for obj in json.loads(previous['body'])['objects']):
+            if candidate is None and identity in previous:
+                if any(obj['kind']=='feed' and feeds.get(obj['id'],{}).get('connection','deleting')=='deleting' for obj in json.loads(previous[identity])['objects']):
                     outcome = 'irrelevant'
             self.sync_candidate(identity,candidate,now,removed_outcome=outcome)
 
