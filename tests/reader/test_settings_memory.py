@@ -744,7 +744,7 @@ def test_profile_check_does_not_load_unrelated_feed_details(tmp_path, settings_d
             assert not ConnectionService(lambda:store).checked('personal',1,202,2)
         finally:
             store.db.set_trace_callback(None)
-        assert not any('FROM feeds ORDER BY rowid' in query for query in statements), statements
+        assert not any('FROM feeds ORDER BY sort_order' in query for query in statements), statements
     finally:
         store.db.close()
 

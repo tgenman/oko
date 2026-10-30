@@ -91,7 +91,7 @@ class SubscriptionRepository:
         if transport is not None:
             conditions.append('transport = %s')
             parameters.append(transport)
-        query = 'SELECT ' + ','.join(READER_FEED_COLUMNS) + ' FROM feeds' + (' WHERE ' + ' AND '.join(conditions) if conditions else '') + ' ORDER BY rowid'
+        query = 'SELECT ' + ','.join(READER_FEED_COLUMNS) + ' FROM feeds' + (' WHERE ' + ' AND '.join(conditions) if conditions else '') + ' ORDER BY sort_order'
         return self._feeds(list(self.db.execute(query,parameters)))
 
     def feeds_many(self, identities: set[str]) -> list[dict[str, Any]]:
@@ -99,7 +99,7 @@ class SubscriptionRepository:
         ids = sorted(identities)
         for start in range(0, len(ids), 400):
             batch = ids[start:start+400]
-            rows.extend(self.db.execute(f"SELECT {','.join(READER_FEED_COLUMNS)} FROM feeds WHERE id IN ( {','.join(('%s' for _ in batch))} ) ORDER BY rowid", batch))
+            rows.extend(self.db.execute(f"SELECT {','.join(READER_FEED_COLUMNS)} FROM feeds WHERE id IN ( {','.join(('%s' for _ in batch))} ) ORDER BY sort_order", batch))
         return self._feeds(rows)
 
     def _feeds(self, rows: list[Row]) -> list[dict[str, Any]]:
@@ -220,7 +220,7 @@ class SubscriptionRepository:
     def effective_feeds(self) -> dict[str,dict[str,Any]]:
         # This settings projection needs only inheritance owners and source kind.
         # Loading reader details would also decode unrelated history and profiles.
-        feeds = [dict(row) for row in self.db.execute('SELECT id,kind,folder_id FROM feeds ORDER BY rowid')]
+        feeds = [dict(row) for row in self.db.execute('SELECT id,kind,folder_id FROM feeds ORDER BY sort_order')]
         settings: dict[tuple[str,str],dict[str,Any]] = {}
         for row in self.db.execute("""SELECT CASE WHEN feed_id IS NOT NULL THEN 'feed' WHEN folder_id IS NOT NULL THEN 'folder' ELSE 'oko' END AS scope,
                 COALESCE(feed_id,folder_id,'global') AS owner,field,value FROM settings

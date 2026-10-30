@@ -1032,14 +1032,14 @@ class Problems:
             previous = {row['identity']:row['body'] for row in self.db.execute('SELECT identity,body FROM reader_problems WHERE identity=ANY(%s) AND finished IS NULL', (sorted(identities),))}
         with reading_snapshot():
             if roles is None:
-                feeds = {row['id']:dict(row) for row in self.db.execute('SELECT id,kind,connection FROM feeds ORDER BY rowid')}
+                feeds = {row['id']:dict(row) for row in self.db.execute('SELECT id,kind,connection FROM feeds ORDER BY sort_order')}
             else:
                 role_list = sorted(roles)
                 ids = set(roles)
                 ids.update(row['feed'] for row in self.db.execute("SELECT feed FROM telegram_bindings WHERE indexed_role=ANY(%s) OR (indexed_role IS NULL AND feed=ANY(%s))", (role_list,role_list)))
                 ids.update(obj['id'] for body in previous.values() for obj in json.loads(body)['objects'] if obj['kind']=='feed')
                 feeds = {row['id']:dict(row) for row in self.db.execute(
-                    'SELECT id,kind,connection FROM feeds WHERE id=ANY(%s) ORDER BY rowid', (sorted(ids),))}
+                    'SELECT id,kind,connection FROM feeds WHERE id=ANY(%s) ORDER BY sort_order', (sorted(ids),))}
             bindings = self.store.subscriptions.telegram.bindings(list(feeds))
             if roles is None:
                 indexed = [(feed, binding.get('role') if isinstance(binding,dict) else None) for feed,binding in bindings.items()]

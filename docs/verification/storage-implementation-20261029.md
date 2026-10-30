@@ -1160,3 +1160,11 @@ discovery/delete/status suite passed 54 PostgreSQL tests and mypy for four chang
 modules. Six Playwright status scenarios passed and desktop/mobile screenshots
 were inspected; no browser scenario specifically exercised a discover error.
 No working database was migrated; full acceptance and other GET writers remain.
+
+
+Migration 068 renames feeds.rowid to sort_order without recalculating existing
+values or changing the identity sequence. Synthetic upgrade and rollback tests
+passed; the integrated checkout passed 134 Python/HTTP tests, six Playwright
+status scenarios and mypy on the three changed modules. A screenshot was
+inspected. The target identity-generation mode and sequence alignment remain
+separate work; no working database was migrated.
