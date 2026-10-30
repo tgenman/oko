@@ -390,7 +390,7 @@ class CollectionWorker:
                 else:current.jobs.replace_media_input(job)
         return True
 
-    def _media_failure(self, current: Store, job: Job, issue: AdapterIssue) -> None:
+    def _media_failure(self, current: Store, job: Job, issue: AdapterIssue, error: BaseException | None = None) -> None:
         with current.jobs.transaction(self._live):
             if not self._live() or not current.jobs.valid(job):
                 return
@@ -405,6 +405,7 @@ class CollectionWorker:
                     owner=self.media.owner(job.item)
                     if owner:
                         current.jobs.enqueue_fetch(owner)
+            self._finish_collection(job, current, error)
 
     async def _execute_media(self, job: Job, capture: Capture) -> None:
         async with self.execution._actions:
@@ -485,8 +486,7 @@ class CollectionWorker:
                             'youtube:captions',datetime.fromtimestamp(self.service.caption_ready(),timezone.utc))
                     if issue.kind!=AdapterErrorKind.notice:
                         record_caught('runtime._execute_media')
-                    self._media_failure(current,job, issue)
-                    self._finish_collection(job,current,None if issue.kind==AdapterErrorKind.notice else source_error or error)
+                    self._media_failure(current,job, issue,None if issue.kind==AdapterErrorKind.notice else source_error or error)
                     if native:
                         self._account_wait(feed,source_error,job)
         finally:

@@ -255,3 +255,29 @@ def test_reader_http_does_not_serve_a_media_key_outside_the_library(tmp_path):
         assert response.status_code == 404
         assert 'private' not in response.text
         assert client.get('/api/v3/publication/'+item).status_code == 200
+
+
+def test_failed_media_attempt_and_diagnostic_roll_back_together(tmp_path, monkeypatch):
+    class Failing(StructuredSource):
+        def publication_adapter(self):
+            class Provider:
+                async def download_media(self,publication,media,output):
+                    raise AdapterException(AdapterIssue('synthetic-failure','Synthetic failure',AdapterErrorKind.temporary))
+            return Provider()
+    store,item,execution,tasks=worker_library(tmp_path)
+    try:
+        source=Failing(None)
+        worker=collection_worker(tmp_path,store,source)
+        accept_material(store,worker.service,item,image_material(source,store,item))
+        job=store.jobs.next_job(store.clock(),feeds=['demo'],media_only=True)
+        def fail_diagnostic(*args, **kwargs):
+            raise RuntimeError('diagnostic failure')
+        monkeypatch.setattr(worker,'_finish_collection',fail_diagnostic)
+        with pytest.raises(RuntimeError, match='diagnostic failure'):
+            asyncio.run(worker._execute(job))
+        row=store.db.execute('SELECT status,error FROM jobs WHERE id=%s',(job.id,)).fetchone()
+        assert row[:] == ('running',None)
+        media=store.db.execute('SELECT status,reason FROM media_files WHERE id=%s',(job.item,)).fetchone()
+        assert media[:] == ('pending_download','')
+    finally:
+        store.db.close()
