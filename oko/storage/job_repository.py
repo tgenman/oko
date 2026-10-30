@@ -1051,8 +1051,8 @@ class JobRepository:
     def invalidate_processing(self) -> None:
         affected=[row['id'] for row in self.store.db.execute("SELECT j.id FROM jobs j WHERE (j.processor_visible OR j.problem_code='processor-config') AND j.kind IN ('filter','theses') AND j.payload::jsonb->>'input_revision' IS DISTINCT FROM (SELECT i.processing_metadata::jsonb->>'_revision' FROM publications i WHERE i.id=j.item)")]
         processor_previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
-        ids=[row['id'] for row in self.store.db.execute("""SELECT id FROM jobs WHERE kind IN ('filter','theses') AND problem_code IS NOT NULL AND problem_code<>'' AND problem_code NOT LIKE 'source-%'
-            AND problem_code NOT IN ('processor-config','ai-permission','codex-choice','youtube-admission','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')
+        ids=[row['id'] for row in self.store.db.execute("""SELECT id FROM jobs WHERE kind IN ('filter','theses') AND (((problem_code='' OR (problem_code IS NULL AND error IS NOT NULL))) OR (problem_code IS NOT NULL AND problem_code<>'' AND problem_code NOT LIKE 'source-%'
+            AND problem_code NOT IN ('processor-config','ai-permission','codex-choice','youtube-admission','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')))
             AND payload::jsonb->>'input_revision' IS DISTINCT FROM (SELECT i.processing_metadata::jsonb->>'_revision' FROM publications i WHERE i.id=jobs.item)""")]
         stage_previous: dict[int,list[dict[str,Any]]]={}
         for start in range(0,len(ids),400):stage_previous.update(self.store.problems.saved_processing_candidates(ids[start:start+400]))

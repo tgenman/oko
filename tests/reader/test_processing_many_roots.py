@@ -6,7 +6,7 @@ def test_processing_recovery_hundred_moved_roots_has_bounded_sql(tmp_path,postgr
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id) SELECT 'f-'||n FROM generate_series(1,100) n")
             store.db.execute("INSERT INTO publications(id,viewed) SELECT 'r-'||n,0 FROM generate_series(1,100) n")
             store.db.execute("INSERT INTO publications(id,viewed) VALUES ('target',0)")
@@ -26,7 +26,7 @@ def test_processing_recovery_maps_old_occurrence_to_its_matching_root(tmp_path,p
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected','[]'),('y','y','Y','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('root-x'),('root-y'),('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('x','root-x',true),('y','root-y',true)")

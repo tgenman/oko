@@ -77,4 +77,5 @@ MIGRATIONS = (
     Migration(70, 'media-problem-index', (Path(__file__).parent / 'postgres' / '070-media-problem-index.sql').read_text()),
     Migration(71, 'processor-visible-index', (Path(__file__).parent / 'postgres' / '071-processor-visible-index.sql').read_text()),
     Migration(72, 'processing-problem-index', (Path(__file__).parent / 'postgres' / '072-processing-problem-index.sql').read_text()),
+    Migration(73, 'processing-implicit-index', (Path(__file__).parent / 'postgres' / '073-processing-implicit-index.sql').read_text()),
 )

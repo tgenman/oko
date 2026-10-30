@@ -45,7 +45,7 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
     for ref in references:
         if (ref.key.platform.value,ref.key.external_id)==(owner['platform'],owner['external_id']):
             continue
-        row=store.db.execute(f"SELECT i.*, {owner_expr('i')} AS feed_id, (SELECT j.id FROM jobs j WHERE j.kind='delete' AND j.item=i.id AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)) AS delete_problem_job, (SELECT j.id FROM jobs j WHERE j.kind='fetch' AND j.item=i.id AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','work-fetch')) AS fetch_problem_job, EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=i.id AND m.resource_key IS DISTINCT FROM 'youtube:subtitles' AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%') AS media_problem_exists, EXISTS (SELECT 1 FROM jobs j WHERE j.kind IN ('filter','theses') AND j.item=i.id AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('processor-config','ai-permission','codex-choice','youtube-admission')) AS processing_problem_exists FROM publications i WHERE i.platform = %s AND i.external_id = %s",
+        row=store.db.execute(f"SELECT i.*, {owner_expr('i')} AS feed_id, (SELECT j.id FROM jobs j WHERE j.kind='delete' AND j.item=i.id AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)) AS delete_problem_job, (SELECT j.id FROM jobs j WHERE j.kind='fetch' AND j.item=i.id AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','work-fetch')) AS fetch_problem_job, EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=i.id AND m.resource_key IS DISTINCT FROM 'youtube:subtitles' AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%') AS media_problem_exists, EXISTS (SELECT 1 FROM jobs j WHERE j.kind IN ('filter','theses') AND j.item=i.id AND (((j.problem_code='' OR (j.problem_code IS NULL AND j.error IS NOT NULL))) OR (j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('processor-config','ai-permission','codex-choice','youtube-admission')))) AS processing_problem_exists FROM publications i WHERE i.platform = %s AND i.external_id = %s",
                              (ref.key.platform.value,ref.key.external_id)).fetchone()
         if row is None:
             identity=str(uuid4())
@@ -121,8 +121,8 @@ def capture_processing_problems(store: 'Store', effects: CollectionEffects, item
     ordered=sorted(items)
     for start in range(0,len(ordered),400):
         rows=store.db.execute("""SELECT id FROM jobs j WHERE kind=ANY(%s) AND item=ANY(%s)
-            AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%'
-            AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')""",(list(kinds),ordered[start:start+400])).fetchall()
+            AND (((j.problem_code='' OR (j.problem_code IS NULL AND j.error IS NOT NULL))) OR (j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%'
+            AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')))""",(list(kinds),ordered[start:start+400])).fetchall()
         ids=[row['id'] for row in rows if row['id'] not in effects.processing_problems_checked]
         effects.processing_problems_checked.update(ids)
         if ids:
@@ -173,7 +173,7 @@ def capture_root_deletion_problems(store: 'Store', effects: CollectionEffects, r
         capture_processing_problems(store,effects,set(batch))
         processing_children=store.db.execute("""SELECT DISTINCT j.item FROM unnest(%s::text[]) root(id)
             CROSS JOIN LATERAL (SELECT target_publication_id FROM publication_links WHERE source_publication_id=root.id OFFSET 0) link
-            CROSS JOIN LATERAL (SELECT item FROM jobs j WHERE j.kind IN ('filter','theses') AND j.item=link.target_publication_id AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%' OFFSET 0) j""",(batch,)).fetchall()
+            CROSS JOIN LATERAL (SELECT item FROM jobs j WHERE j.kind IN ('filter','theses') AND j.item=link.target_publication_id AND (((j.problem_code='' OR (j.problem_code IS NULL AND j.error IS NOT NULL))) OR (j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%')) OFFSET 0) j""",(batch,)).fetchall()
         capture_processing_problems(store,effects,{row['item'] for row in processing_children})
         media_children=store.db.execute("""SELECT DISTINCT m.publication_id FROM unnest(%s::text[]) root(id)
             CROSS JOIN LATERAL (SELECT target_publication_id FROM publication_links WHERE source_publication_id=root.id OFFSET 0) link

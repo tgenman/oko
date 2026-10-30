@@ -65,7 +65,7 @@ def test_processing_failure_is_recovered_at_startup(tmp_path,postgres_url,kind):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','article',true)")
@@ -98,7 +98,7 @@ def test_recovery_keeps_filter_and_theses_as_independent_occurrences(tmp_path,po
     body=dict(code='model-invalid',section='object',title='legacy',consequence='saved',next_step='retry',objects=[dict(kind='material',id='article')],action=None,operation='producer:status',state='current',next_at=None)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','article',true)")
@@ -175,7 +175,7 @@ def test_explicit_work_code_is_not_lost(tmp_path,postgres_url,kind):
 
 
 @pytest.mark.parametrize('kind',['filter','theses'])
-def test_null_error_code_remains_on_existing_get_path(tmp_path,postgres_url,kind):
+def test_null_error_code_owned_by_processing_event(tmp_path,postgres_url,kind):
     from oko.storage.processing_job_problems import managed_candidates
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
@@ -184,8 +184,10 @@ def test_null_error_code_remains_on_existing_get_path(tmp_path,postgres_url,kind
             store.db.execute("INSERT INTO publications(id) VALUES ('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','article',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES (%s,'article','failed','failure',NULL) RETURNING id",(kind,)).fetchone()[0]
-        assert managed_candidates(store,job,1)==[]
-        assert any(c['code']=='work-'+kind for c in store.problems.candidates(1))
+        with store.db:store.problems.sync_processing_problem(job,[],1)
+        assert managed_candidates(store,job,1)[0]['code']=='work-'+kind
+        assert any(c['code']=='work-'+kind for c in store.problems.snapshot(1)['current'])
+        assert not any(c['code']=='work-'+kind for c in store.problems.candidates(1))
     finally:store.db.close()
 
 
@@ -193,7 +195,7 @@ def test_recovery_mixed_processing_jobs_is_batched(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v2'")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) SELECT CASE WHEN n%2=0 THEN 'filter' ELSE 'theses' END,'f-'||n,'failed','failure','model-invalid' FROM generate_series(1,1000) n")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) SELECT 'old-'||n,'job:model-invalid:f-'||n||':'||CASE WHEN n%2=0 THEN 'filter' ELSE 'theses' END||':f-'||n,'background',jsonb_build_object('code','model-invalid','section','object','title','x','consequence','c','next_step','n','operation','producer:status','state','current','objects',jsonb_build_array(jsonb_build_object('kind','material','id','f-'||n)))::text,1 FROM generate_series(1,1000,100) n")
         sql=[];store.db.set_trace_callback(sql.append)
@@ -233,7 +235,7 @@ def test_processing_recovery_resumes_after_batch_including_nonpositive_ids(tmp_p
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v2'")
             store.db.execute("INSERT INTO jobs(id,kind,item,status,error,problem_code) SELECT n,'filter','f-'||n,'failed','failure','model-invalid' FROM generate_series(-1,100) n")
         store.db.close()
         def fault(point):
@@ -241,7 +243,7 @@ def test_processing_recovery_resumes_after_batch_including_nonpositive_ids(tmp_p
         with pytest.raises(RuntimeError,match='interrupted'):Store(tmp_path,fault,database_url=postgres_url)
         store=Store(tmp_path,lambda _:None,database_url=postgres_url)
         assert store.db.execute("SELECT count(*) FROM reader_problems WHERE body::jsonb->>'operation'='producer:filter' AND finished IS NULL").fetchone()[0]==102
-        assert store.db.execute("SELECT 1 FROM state WHERE key='processing-problems-recovered-v1'").fetchone()
+        assert store.db.execute("SELECT 1 FROM state WHERE key='processing-problems-recovered-v2'").fetchone()
     finally:store.db.close()
 
 
@@ -319,7 +321,7 @@ def test_recovery_existing_processing_errors_is_batched(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v2'")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) SELECT 'filter','f-'||n,'failed','failure','model-invalid' FROM generate_series(1,1000) n")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) SELECT 'old-'||n,'job:model-invalid:f-'||n||':filter:f-'||n,'background',jsonb_build_object('code','model-invalid','section','object','title','x','consequence','c','next_step','n','operation','producer:filter','state','current','objects',jsonb_build_array(jsonb_build_object('kind','material','id','f-'||n)))::text,1 FROM generate_series(1,1000) n")
         sql=[];store.db.set_trace_callback(sql.append)
@@ -336,7 +338,7 @@ def test_inconsistent_legacy_stage_is_preserved(tmp_path,postgres_url):
     body=dict(code='model-invalid',section='object',title='old',consequence='c',next_step='n',state='current',operation='producer:filter',objects=[dict(kind='material',id='article')])
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v2'")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('old','job:model-invalid:feed:theses:article','background',%s,1)",(json.dumps(body),))
         store.problems.recover_processing_problems();store.problems.snapshot(2)
         row=store.db.execute("SELECT finished,body FROM reader_problems WHERE id='old'").fetchone()
@@ -350,7 +352,7 @@ def test_unverified_legacy_processing_without_job_survives_recovery_and_get(tmp_
     body=dict(code='model-invalid',section='object',title='old',consequence='c',next_step='n',state='current',operation='producer:status',objects=[dict(kind='material',id='unrelated')])
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('unrelated')")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('old',%s,'background',%s,1)",('job:model-invalid:feed:'+kind+':ghost',json.dumps(body)))
@@ -398,7 +400,7 @@ def test_unverified_mixed_materials_are_not_reassigned(tmp_path,postgres_url,kin
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('article'),('unrelated')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','article',true)")
@@ -521,7 +523,7 @@ def test_unidentifiable_legacy_processing_identity_survives_get(tmp_path,postgre
     body=dict(code='model-invalid',section='object',title='old',consequence='c',next_step='n',state='current',operation='producer:status',objects=[dict(kind='material',id='article')])
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v2'")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('old','job:model-invalid:feed:filter','background',%s,1)",(json.dumps(body),))
         store.problems.recover_processing_problems();store.problems.snapshot(2)
         row=store.db.execute("SELECT finished,body FROM reader_problems WHERE id='old'").fetchone()
@@ -558,7 +560,7 @@ def test_recovery_keeps_oldest_processing_occurrence_when_current_identity_exist
     body=dict(code='model-invalid',section='object',title='legacy',consequence='saved',next_step='retry',objects=[dict(kind='material',id='article')],action=None,operation='producer:filter',state='current',next_at=None)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),('b','b','B','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('b','article',true)")
@@ -574,7 +576,7 @@ def test_recovery_isolates_ambiguous_stage_identity(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('item:theses:part')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','item:theses:part',true)")
@@ -675,7 +677,7 @@ def test_recovery_closes_missing_filter_even_when_theses_active(tmp_path,postgre
     body=dict(code='model-invalid',section='object',title='old',consequence='c',next_step='n',state='current',operation='producer:filter',processing_kind='filter',processing_job_id='123',objects=[dict(kind='material',id='article')])
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='processing-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','article',true)")

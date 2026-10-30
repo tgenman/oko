@@ -1249,3 +1249,15 @@ mypy passed on 160 files and 10 Playwright status scenarios passed with a
 screenshot inspected. The existing global cleanup probe still reads all active
 processor-config Jobs in a 10,000-Job synthetic case; this change did not
 introduce that cost. No working database was changed.
+
+
+Filter/theses errors with absent or empty problem codes now follow the same
+event-owned lifecycle as explicit stage errors. Recovery retains confirmed
+occurrence IDs across changes between implicit and explicit codes; ambiguous
+legacy records are not reassigned. A targeted index avoids paging through 10,000
+unrelated legacy fetch problems during the one-time recovery. The integrated
+stage/processor/worker/status suite passed 303 PostgreSQL tests, mypy passed
+for six modules, and 10 Playwright status scenarios passed with a screenshot
+inspected. The NULL-code behavior was tested through HTTP, not a dedicated
+browser scenario. One Starlette/httpx deprecation warning was emitted. No
+working database was migrated; other status categories remain.
