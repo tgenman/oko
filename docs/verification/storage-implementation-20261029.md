@@ -858,3 +858,13 @@ this does not establish the target read-only status contract as complete.
 The targeted Playwright status, settings and Codex HTTP suites subsequently
 passed 10 tests with two workers. The status screenshot showing the missing
 Codex model was inspected. Other problem categories remain outside this slice.
+
+Command-result problems are now created, updated and resolved alongside their
+individual command outcome. Pending commands from a previous process are
+recovered in bounded batches; a rollback restores the in-memory pending marker.
+Synthetic HTTP checks cover failure, successful retry and restart without status
+GET writes for these cases. The affected status, command, settings, archive and
+transaction suites passed 80 tests, followed by three focused recovery/rollback
+cases after batching. Mypy passed. Ten Playwright cases passed with two workers;
+the mobile status screenshot was inspected. Other problem producers still need
+migration, so status GET as a whole is not yet read-only.
