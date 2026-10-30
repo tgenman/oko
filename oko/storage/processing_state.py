@@ -16,17 +16,10 @@ class ProcessingRepository:
     def __init__(self, store: 'Store') -> None:
         self.store=store
 
-    def candidates(self, kind: Kind, *, limit: int | None = None, item: str | None = None) -> list[tuple[str,str | None]]:
-        eligibility = "i.viewed=0 AND i.platform IS NOT NULL AND i.feed_id IS NOT NULL AND i.complete=1 AND NOT EXISTS (SELECT 1 FROM processing_dirty p WHERE p.item=i.id)"
-        if item is None:
-            query = f'SELECT i.id FROM processing_stage_dirty d JOIN items_read i ON i.id=d.item WHERE d.kind=%s AND {eligibility}'
-            parameters: tuple[str | int, ...] = (kind,)
-        else:
-            query = f'SELECT i.id FROM items_read i WHERE i.id=%s AND {eligibility}'
-            parameters = (item,)
-        if limit is not None:
-            query += ' ORDER BY i . id LIMIT %s'
-            parameters += (limit,)
+    def candidates(self, kind: Kind, *, item: str) -> list[tuple[str,str | None]]:
+        # Reconciliation is publication-owned; there is no stage queue to scan.
+        query = "SELECT i.id FROM items_read i WHERE i.id=%s AND i.viewed=0 AND i.platform IS NOT NULL AND i.feed_id IS NOT NULL AND i.complete=1 AND NOT EXISTS (SELECT 1 FROM processing_dirty p WHERE p.item=i.id)"
+        parameters: tuple[str | int, ...] = (item,)
         rows=self.store.db.execute(query,parameters).fetchall()
         operation=self.store.filters if kind=='filter' else self.store.processing.theses
         return [(row[0],operation.signature(row[0])) for row in rows]

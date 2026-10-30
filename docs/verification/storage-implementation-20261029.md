@@ -588,3 +588,16 @@
   settings win. Migration and inheritance suites passed 164 tests and types;
   eight Playwright scenarios passed and feed details were inspected. The two
   processing dirty queues and the rest of the physical schema remain open.
+- Migration 054 replaces the per-stage dirty table with publication-owned
+  reconciliation of both Jobs in one transaction. Pending stage markers are
+  copied to the remaining publication queue before the table is dropped; the
+  workers no longer scan a separate stage queue. Legacy attempt revision backfill
+  precedes startup reconciliation so terminal failures are retained.
+- The first broad run was interrupted after exposing a missing transaction
+  boundary; a second passed 231 tests and exposed three legacy terminal-outcome
+  regressions. After fixing recovery ordering, all 234 affected tests passed;
+  after removing the obsolete global candidate API, 186 targeted tests and types
+  passed again. Four Playwright scenarios passed and the saved result screenshot
+  was inspected. A fresh schema has 21 tables, no application triggers and no
+  schema-local functions. The remaining `processing_dirty` queue and final
+  physical schema still require work.

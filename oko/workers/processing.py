@@ -43,7 +43,6 @@ class ProcessingWorker:
                     if not self.execution._live():
                         return False
                     self.service.reconcile()
-                    jobs.reconcile(self.kind,self.service.candidates(self.kind))
             if self.tasks._ai and self.tasks._ai.done():
                 if not self.tasks._ai.cancelled():
                     await self.tasks._ai

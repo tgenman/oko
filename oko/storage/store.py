@@ -105,7 +105,7 @@ class Store:
             self.read_versions = ReaderVersions(self)
             self.processing.background = defer_recovery
             self.processing.recovering = True
-            self._recovery: Generator[None,None,None] | None = self._recover_steps(reconcile_stages=defer_recovery)
+            self._recovery: Generator[None,None,None] | None = self._recover_steps()
             if not defer_recovery:
                 while self.recover_step():
                     pass
@@ -114,54 +114,34 @@ class Store:
                 self.db.close()
             raise
 
-    def _recover_steps(self, *, reconcile_stages: bool) -> Generator[None,None,None]:
+    def _recover_steps(self) -> Generator[None,None,None]:
         initial = True
         while True:
+            # Legacy attempts need their revision before direct reconciliation,
+            # otherwise a saved terminal outcome could be mistaken for new input.
+            yield from self.jobs.backfill_processing_steps()
             yield from self.processing.recovery_steps(seed=initial)
             initial = False
-            yield from self.jobs.backfill_processing_steps()
             yield from self.jobs.sync_reads_steps()
-            if reconcile_stages:
-                # The host must not hand a full startup queue to the first
-                # synchronous worker tick after the reader is already serving.
-                yield from self._prepare_processing_steps()
             # User commands may have changed settings or membership between steps.
             if (not self.processing.pending()
                     and self.read_sync._configuration == self.subscriptions.source_revision()):
                 break
         self.processing.recovering = False
 
-    def _prepare_processing_steps(self) -> Generator[None,None,None]:
-        from oko.storage.processing_state import ProcessingRepository
-        from oko.storage.reading import reading_snapshot
-        from oko.domain.processing import Kind
-        stages: tuple[Kind, ...] = ('filter','theses')
-        processing = ProcessingRepository(self)
-        for kind in stages:
-            while True:
-                with self.db:
-                    with reading_snapshot():
-                        candidates = [(item, signature, processing.satisfied(item,kind), processing.revision(item))
-                                      for item,signature in processing.candidates(kind, limit=1)]
-                    if not candidates:
-                        break
-                    self.jobs.reconcile(kind, candidates)
-                yield
-
     def _reconcile_steps(self) -> Generator[None,None,None]:
         """Runtime changes use the same bounded owner without repeating startup scans."""
         while True:
             yield from self.processing.recovery_steps(seed=False)
             yield from self.jobs.sync_reads_steps()
-            yield from self._prepare_processing_steps()
-            if not self.processing.pending(stages=True) and not self.read_sync.pending():
+            if not self.processing.pending() and not self.read_sync.pending():
                 break
         self.processing.recovering = False
 
     def recover_step(self) -> bool:
         """Advance owned recovery without leaving an SQL transaction open."""
         if self._recovery is None:
-            if not self.processing.background or not (self.processing.pending(stages=True) or self.read_sync.pending()):
+            if not self.processing.background or not (self.processing.pending() or self.read_sync.pending()):
                 return False
             self._recovery = self._reconcile_steps()
         try:

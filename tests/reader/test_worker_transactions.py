@@ -87,7 +87,6 @@ def test_new_input_rejects_old_success_and_old_error_without_harming_replacement
         assert changed['processing_metadata']['_revision']!=old_revision
         with store.jobs.transaction(execution._live):
             worker.service.reconcile()
-            store.jobs.reconcile('filter',worker.service.candidates('filter'))
         replacement=dict(store.db.execute("SELECT * FROM jobs WHERE kind='filter'").fetchone())
         assert replacement['generation']>old['generation']
         release.set()
@@ -687,7 +686,6 @@ def test_periodic_pass_keeps_stopped_work_and_source_wait_after_restart(tmp_path
     worker=workers(execution,tasks)[0]
     with store.jobs.transaction(lambda:True):
         worker.service.reconcile()
-        store.jobs.reconcile('filter',worker.service.candidates('filter'))
         job=store.jobs.claim_processing('filter',store.clock())
         assert job
         worker.service.prepare(item,'filter')
@@ -745,7 +743,6 @@ def test_revision_change_without_filter_signature_change_replaces_old_attempt(tm
             store.subscriptions.update_feed('demo',FeedPatch(importance='high'))
             store.settings_changed('feed','demo')
             worker.service.reconcile()
-            store.jobs.reconcile('filter',worker.service.candidates('filter'))
         replacement=dict(store.db.execute("SELECT * FROM jobs WHERE kind='filter'").fetchone())
         assert store.filters.signature(item)==signature
         assert replacement['generation']>original['generation'] and replacement['status']=='pending'
@@ -799,7 +796,6 @@ def test_recovery_preserves_old_choice_without_reusing_it_for_a_new_attempt(tmp_
     worker=workers(execution,tasks)[0]
     with store.jobs.transaction(lambda:True):
         worker.service.reconcile()
-        store.jobs.reconcile('filter',worker.service.candidates('filter'))
         old=store.jobs.claim_processing('filter',store.clock())
         prepared=worker.service.prepare(item,'filter').input
         chosen=dict(processor='codex',model='saved-model',reasoning_effort='low',fast=False)
@@ -821,14 +817,12 @@ def test_new_revision_does_not_shorten_source_wait(tmp_path):
     worker=workers(execution,tasks)[0]
     with store.jobs.transaction(lambda:True):
         worker.service.reconcile()
-        store.jobs.reconcile('filter',worker.service.candidates('filter'))
         deadline=store.wall_clock()+120
         next_at=store.clock()+120
         store.db.execute("UPDATE jobs SET status = 'pending' , wait_scope = 'source:synthetic' , retry_at = %s , next = %s , error = 'source wait' WHERE kind = 'filter'",(deadline,next_at))
         store.subscriptions.update_feed('demo',FeedPatch(importance='high'))
         store.settings_changed('feed','demo')
         worker.service.reconcile()
-        store.jobs.reconcile('filter',worker.service.candidates('filter'))
     row=store.db.execute("SELECT retry_at,next,wait_scope,error FROM jobs WHERE kind='filter'").fetchone()
     assert tuple(row)==(deadline,next_at,'source:synthetic','source wait')
     assert store.jobs.claim_processing('filter',store.clock()) is None
@@ -867,7 +861,6 @@ def test_terminal_job_is_not_reopened_by_missing_payload_revision(tmp_path,statu
     worker=workers(execution,tasks)[0]
     with store.jobs.transaction(lambda:True):
         worker.service.reconcile()
-        store.jobs.reconcile('filter',worker.service.candidates('filter'))
         store.db.execute("UPDATE jobs SET status = %s , error = 'Permanent failure' WHERE kind = 'filter'",(status,))
         store.db.execute("UPDATE jobs SET payload='{}' WHERE kind='filter'")
     store.db.close()
@@ -891,7 +884,6 @@ def test_preparation_distinguishes_all_four_domain_outcomes(tmp_path,outcome):
             store.subscriptions.update_settings('oko','global',Overrides(prompt_filters=''))
             store.settings_changed()
         worker.service.reconcile()
-        store.jobs.reconcile('filter',worker.service.candidates('filter'))
         value=worker.service.prepare(item,'filter')
         assert value.outcome==outcome
         assert (value.input is not None)==(outcome in ('model','no_input'))
@@ -937,7 +929,6 @@ def test_restart_after_new_input_before_the_processing_cron_keeps_the_work(tmp_p
     worker=workers(execution,tasks)[0]
     with store.jobs.transaction(lambda:True):
         worker.service.reconcile()
-        store.jobs.reconcile('filter',worker.service.candidates('filter'))
         interrupted=store.jobs.claim_processing('filter',store.clock())
         worker.service.prepare(item,'filter')
         source=StructuredSource(None)

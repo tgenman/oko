@@ -430,7 +430,6 @@ def test_interrupted_attempt_provenance_is_not_reused_by_next_claim(postgres_url
         worker = workers(execution, tasks)[0]
         with store.jobs.transaction(lambda: True):
             worker.service.reconcile()
-            store.jobs.reconcile('filter', worker.service.candidates('filter'))
             job = store.jobs.claim_processing('filter', store.clock())
             assert job is not None
             prepared = worker.service.prepare(item, 'filter')
@@ -474,7 +473,6 @@ def test_interrupted_attempt_uses_new_model_on_next_attempt(postgres_url, tmp_pa
         worker = workers(execution, tasks)[0]
         with store.jobs.transaction(lambda: True):
             worker.service.reconcile()
-            store.jobs.reconcile('filter', worker.service.candidates('filter'))
             job = store.jobs.claim_processing('filter', store.clock())
             assert job is not None
             prepared = worker.service.prepare(item, 'filter')
@@ -537,7 +535,6 @@ def test_processing_input_snapshot_is_atomic_and_does_not_copy_publication_text(
         worker = workers(execution, tasks)[0]
         with store.jobs.transaction(lambda: True):
             worker.service.reconcile()
-            store.jobs.reconcile('filter', worker.service.candidates('filter'))
         before = store.db.execute("SELECT status,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()
         with pytest.raises(RuntimeError, match='rollback'), store.jobs.transaction(lambda: True):
             job = store.jobs.claim_processing('filter', store.clock())

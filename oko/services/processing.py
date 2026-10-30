@@ -21,9 +21,9 @@ class ProcessingService:
 
     @repository_access
     @reading_snapshot()
-    def candidates(self, kind: Kind, *, limit: int | None = None, item: str | None = None) -> list[tuple[str, str | None, bool, str]]:
+    def candidates(self, kind: Kind, *, item: str) -> list[tuple[str, str | None, bool, str]]:
         repository=ProcessingRepository(self._storage())
-        return [(identity,signature,repository.satisfied(identity,kind),repository.revision(identity)) for identity,signature in repository.candidates(kind,limit=limit,item=item)]
+        return [(identity,signature,repository.satisfied(identity,kind),repository.revision(identity)) for identity,signature in repository.candidates(kind,item=item)]
 
     @repository_access
     def prepare(self, item: str, kind: Kind) -> ProcessingPreparation:

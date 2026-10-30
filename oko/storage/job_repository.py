@@ -49,7 +49,6 @@ class JobRepository:
     def reconcile(self, kind: Kind, candidates: list[tuple[str, str | None, bool, str]]) -> None:
         db=self.store.db
         for item,signature,satisfied,revision in candidates:
-            db.execute('DELETE FROM processing_stage_dirty WHERE kind = %s AND item = %s',(kind,item))
             job=db.execute("SELECT status,payload,problem_code,input_snapshot->>'signature' AS signature FROM jobs WHERE kind=%s AND item=%s",(kind,item)).fetchone()
             previous=job['signature'] if job else None
             enabled = processing_input.stage_enabled(self.store, item, kind) if signature is not None else False
@@ -214,8 +213,7 @@ class JobRepository:
                       OR (jobs.kind='theses' AND (i.status IN ('pending_summary','ready')
                           OR (i.status='pending_filtering' AND i.processing_metadata::jsonb->'_pass'->>'feed_id' IS NULL)))))"""
             if self.store.processing.background:
-                query += """ AND NOT EXISTS (SELECT 1 FROM processing_dirty p WHERE p.item=jobs.item)
-                    AND NOT EXISTS (SELECT 1 FROM processing_stage_dirty d WHERE d.item=jobs.item AND d.kind=jobs.kind)"""
+                query += " AND NOT EXISTS (SELECT 1 FROM processing_dirty p WHERE p.item=jobs.item)"
         elif deleting_only:
             query += " AND kind IN ('delete','feed-delete')"
         elif media_only:

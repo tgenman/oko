@@ -984,3 +984,15 @@ def test_feed_processing_copy_migration_rejects_nonempty_legacy_data(connections
             migrate(db, MIGRATIONS)
         assert db.execute(f"SELECT {column} FROM feeds WHERE id='feed'").fetchone() == ('{"prompt":"saved"}',)
         verify(db, MIGRATIONS[:52])
+
+
+def test_stage_queue_migration_preserves_pending_work(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:53])
+        db.execute("INSERT INTO processing_stage_dirty(kind,item) VALUES ('filter','pending'),('theses','pending'),('filter','other')")
+        db.execute("INSERT INTO processing_dirty(item) VALUES ('existing')")
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT to_regclass('processing_stage_dirty')").fetchone() == (None,)
+        assert db.execute('SELECT item FROM processing_dirty ORDER BY item').fetchall() == [('existing',),('other',),('pending',)]
+        verify(db, MIGRATIONS)
