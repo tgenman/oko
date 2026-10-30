@@ -832,3 +832,9 @@ fixture preparation timeout and one independent feed-details case failed. The
 first timed-out case and the independent feed-details case each passed in
 isolated repeats; neither repeat proves the full concurrent browser run. A new
 browser-only run with two workers is in progress and is not reported as passed.
+
+A browser-only repeat with two workers completed 254 tests successfully and
+skipped three, but the runner reported `checkout_changed`: documentation and a
+scratch draft were written while it ran. Therefore the browser test results are
+useful evidence, but the command as a whole did not pass; repeat on a stable
+checkout. This does not erase the failed concurrent full-browser run.

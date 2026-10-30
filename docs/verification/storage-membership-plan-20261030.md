@@ -52,3 +52,23 @@ proof. The change was rejected on this evidence and reverted; its patch and
 regression scenario remain in `.scratch/storage-redesign/` as a local draft.
 Any replacement must address both workload shapes and verify all dispatch kinds,
 linked ownership, history waits, priority, concurrent claims and cancellation.
+
+## Follow-up: statistics and owner-first candidate
+
+The first `--foreign-jobs` experiment above collected statistics before adding
+those Jobs. A corrected repeat collects statistics after adding them: the current
+full dispatch and the predicate-removed version each scanned 50,011 relation
+rows. The pending-first fetch-only candidate scanned 80,004 relation rows in
+that repeat (10.75 ms); the planner chose a different plan. This supersedes the
+previous experiment as evidence for analyzed Jobs, without invalidating the
+separate full-query draft measurement above.
+
+A second, owner-first fetch-only experiment uses a materialized selected-owner
+set and lateral point lookups. With analyzed Jobs it scanned 20,003 relation
+rows, 136 shared buffers, and took 0.767 ms in one EXPLAIN execution. Its owner
+scan still read 20,001 membership rows; this is not a bounded solution and still
+uses `is_unviewed`. Creating multivariate statistics in the isolated schema
+(`--extended-stats`) reduced the current full dispatch to 20,011 relation rows,
+while the predicate-removed form remained at 50,011. Plans and figures depend on
+data and statistics; neither candidate covers the entire dispatcher or proves a
+safe field removal. No production index or statistics were created.

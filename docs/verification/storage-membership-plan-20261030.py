@@ -6,6 +6,7 @@ from tests.support.storage import Store, analyze
 
 parser=argparse.ArgumentParser()
 parser.add_argument('--foreign-jobs', action='store_true')
+parser.add_argument('--extended-stats', action='store_true')
 args=parser.parse_args()
 
 with TemporaryDirectory(prefix='oko-membership-plan-') as root:
@@ -29,6 +30,9 @@ with TemporaryDirectory(prefix='oko-membership-plan-') as root:
             store.db.executemany("INSERT INTO jobs(kind,item,status,next) VALUES ('fetch',%s,'pending',0)", [(f'foreign-{i}',) for i in range(10000)])
         store.db.execute("INSERT INTO jobs(kind,item,status,next) VALUES ('fetch','live','pending',0)")
         store.db.commit()
+        if args.extended_stats:
+            store.db._db.execute('CREATE STATISTICS experimental_membership_correlation (mcv, dependencies) ON feed_id,is_unviewed,is_primary FROM feed_publications')
+        analyze(store.db)
         from oko.storage.transaction import transaction
         from tests.support.postgres_work import scan_rows
         class Rollback(Exception):
@@ -69,6 +73,20 @@ with TemporaryDirectory(prefix='oko-membership-plan-') as root:
             ORDER BY j.id LIMIT 1"""
         plan=store.db._db.execute('EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) '+correlated).fetchone()[0][0]
         print('candidate_correlated_fetch',{'rows_scanned':scan_rows(plan['Plan']),'execution_ms':round(plan['Execution Time'],3),'output':plan['Plan']['Actual Rows']},flush=True)
+        owner_first = """WITH owners AS MATERIALIZED (SELECT publication_id FROM feed_publications
+                WHERE feed_id='archive' AND is_primary AND is_unviewed)
+            SELECT j.id FROM owners owner CROSS JOIN LATERAL (SELECT id FROM publications WHERE id=owner.publication_id AND viewed=0 OFFSET 0) i
+            CROSS JOIN LATERAL (SELECT id,item FROM jobs WHERE item=i.id AND kind='fetch' AND status='pending' AND next<=0 OFFSET 0) j
+            WHERE NOT EXISTS (SELECT 1 FROM history_members m JOIN initial_history h ON h.feed=m.feed
+                WHERE (h.paused=1 OR (h.scan_complete=0 AND (h.selection::jsonb->>'mode'='count'
+                    OR h.feed IN (SELECT id FROM feeds WHERE transport='rss')))) AND m.item=j.item OFFSET 0)
+            ORDER BY j.id LIMIT 1"""
+        plan=store.db._db.execute('EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) '+owner_first).fetchone()[0][0]
+        print('candidate_owner_first_fetch',{'rows_scanned':scan_rows(plan['Plan']),'buffers':plan['Plan'].get('Shared Hit Blocks',0)+plan['Plan'].get('Shared Read Blocks',0),'execution_ms':round(plan['Execution Time'],3),'output':plan['Plan']['Actual Rows']},flush=True)
+        def show(node):
+            if 'Relation Name' in node: print('node',node['Node Type'],node['Relation Name'],node.get('Index Name'),node['Actual Rows'],node.get('Rows Removed by Filter',0),node['Actual Loops'],flush=True)
+            for child in node.get('Plans',[]): show(child)
+        show(plan['Plan'])
         for name,query in queries.items():
             plan=store.db._db.execute('EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) '+query).fetchone()[0][0]
             def total(node): return node['Actual Rows']*node['Actual Loops']+sum(total(child) for child in node.get('Plans',[]))
