@@ -821,3 +821,14 @@ wait: a power test expected processor configuration to close Telegram, which
 is no longer its behavior. The test now uses a real cancellation action and a
 bounded wait; all six power tests passed. The full run did not verify the newer
 fixes and must be repeated.
+
+The next full run at `e8ebcdc9` finished with 1,270 Python tests passed, two
+skipped and one failed: the collection worker directly accessed `Store.db` to
+register a completion callback, violating the layer boundary. The callback now
+passes through JobRepository; 11 affected boundary, rollback and crash cases
+passed, and mypy passed. Node (116), tooling (315), build, types and HTTP passed.
+Playwright reported 214 passed, three skipped and 36 failed: 35 followed a
+fixture preparation timeout and one independent feed-details case failed. The
+first timed-out case and the independent feed-details case each passed in
+isolated repeats; neither repeat proves the full concurrent browser run. A new
+browser-only run with two workers is in progress and is not reported as passed.
