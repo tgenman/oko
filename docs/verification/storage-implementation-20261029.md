@@ -1125,3 +1125,15 @@ rollback, restart, collisions and bounded lookup. The integrated checkout passed
 inspected. Mypy passed on 157 files using a temporary cache after its default cache
 location produced an internal error. No working database was migrated. Other
 status categories still reconcile on GET and the full target remains incomplete.
+
+
+Action recovery now includes nonpositive legacy receipt sequences and retains
+malformed receipts and problems without exposing their raw content or unsafe
+recovery actions. Invalid legacy command errors return an unknown outcome;
+replay and abandonment reject ambiguous context. The empty stored problem ID
+uses a response-only surrogate that cannot collide with PostgreSQL text IDs.
+Synthetic recovery tests cover interruption, HTTP behavior and indexed latest
+receipt selection; a combined action/settings/status/cost suite passed 118 tests.
+Mypy passed for 157 files and a Playwright surrogate-card scenario passed using
+a substituted status response; a separate HTTP test exercised the server path.
+No working database was changed. Other status problem categories remain.

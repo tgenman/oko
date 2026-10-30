@@ -31,6 +31,6 @@ class CommandJournal:
         return self._storage().problems.report_action(identity, context, result, self._clock())
 
     @repository_access
-    def abandon(self, identity: str) -> None:
-        if not self._storage().problems.abandon(identity, self._clock()):
+    def abandon(self, identity: str, validate_context: Callable[[Any,str,Any],bool] | None = None) -> None:
+        if not self._storage().problems.abandon(identity, self._clock(), validate_context):
             raise ActionError('invalid', 'Отмена доступна только ошибке соответствующего черновика', expected=True)

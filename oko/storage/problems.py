@@ -3,6 +3,9 @@ from oko.storage.publication_owners import owner_expr
 from oko.storage.database import expect_row
 import json
 import hashlib
+import math
+import re
+from datetime import datetime, timezone
 from oko.collection.contracts import SourceManifest
 from oko.collection.external_media import expected_incomplete
 from oko.storage.reading import reading_snapshot
@@ -10,10 +13,111 @@ from oko.storage import problem_links
 from oko.storage.reader_status import changed as status_changed
 from dataclasses import dataclass
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
+
+
+def _action_context(raw: str) -> dict[str, Any] | None:
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(value,dict) or not isinstance(value.get('title'),str):
+        return None
+    action = value.get('action')
+    if 'action' not in value or (action is not None and (not isinstance(action,dict) or not isinstance(action.get('kind'),str))):
+        return None
+    objects = value.get('objects')
+    if not isinstance(objects,list) or any(not isinstance(obj,dict) or obj.get('kind') not in ('settings','feed','folder','material') or not isinstance(obj.get('id'),str) or not obj['id'] or set(obj)-{'kind','id','label'} for obj in objects):
+        return None
+    attempt = value.get('request_attempt')
+    if attempt is not None and not isinstance(attempt,str):
+        return None
+    error = value.get('command_error')
+    if error is not None:
+        if not isinstance(error,str):
+            return None
+        try:
+            if not isinstance(json.loads(error),dict):
+                return None
+        except (TypeError,ValueError):
+            return None
+    return value
+
+
+def _action_receipt_context(raw: str, identity: str) -> dict[str, Any] | None:
+    context = _action_context(raw)
+    if context is None:
+        return None
+    if 'command_context' not in context:
+        return context
+    saved = context['command_context']
+    if not isinstance(saved,dict):
+        return None
+    try:
+        expected = json.loads(identity)
+    except (TypeError,ValueError):
+        return None
+    if not isinstance(expected,dict):
+        return None
+    def canonical(value: dict[str,Any]) -> dict[str,Any]:
+        result=dict(value)
+        field = 'keys' if result.get('operation')=='settings_patch' else 'fields' if result.get('operation')=='feed_patch' else None
+        if field and isinstance(result.get(field),list) and all(isinstance(item,str) for item in result[field]):
+            result[field]=sorted(result[field])
+        return result
+    return context if canonical(expected)==canonical(saved) else None
+
+
+def _action_problem_body(raw: str) -> dict[str, Any] | None:
+    try:
+        body = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(body,dict) or body.get('code') not in ('action-failed','action-unknown'):
+        return None
+    if any(not isinstance(body.get(field),str) for field in ('title','consequence','next_step')):
+        return None
+    if body.get('state') not in ('current','retrying','finished'):
+        return None
+    if body.get('next_at') is not None and (not isinstance(body['next_at'],(int,float)) or isinstance(body['next_at'],bool) or not math.isfinite(body['next_at'])):
+        return None
+    if not isinstance(body.get('operation'),str):
+        return None
+    if 'reason' in body and not isinstance(body['reason'],str):
+        return None
+    if 'request_id' in body and (not isinstance(body['request_id'],str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}',body['request_id'])):
+        return None
+    objects = body.get('objects')
+    if not isinstance(objects,list) or any(not isinstance(obj,dict) or obj.get('kind') not in ('settings','feed','folder','material') or not isinstance(obj.get('id'),str) or not obj['id'] or set(obj)-{'kind','id','label'} for obj in objects):
+        return None
+    return body
+
+
+def _generic_action(*, unknown: bool, request_id: str | None = None) -> dict[str, Any]:
+    value: dict[str, Any] = dict(code='action-unknown' if unknown else 'action-failed',section='wait' if unknown else 'action',
+        title='Результат старого действия требует проверки',consequence='Исходные сведения сохранены.',
+        next_step='Проверьте результат действия вручную.',objects=[],action=None,operation='legacy-action',
+        state='current',next_at=None)
+    if isinstance(request_id,str) and re.fullmatch(r'[A-Za-z0-9_-]{1,100}',request_id):
+        value['request_id']=request_id
+    return value
+
+
+def _readable_timestamp(value: Any) -> bool:
+    if not isinstance(value,(int,float)) or isinstance(value,bool) or not math.isfinite(value):
+        return False
+    try:
+        datetime.fromtimestamp(value,timezone.utc)
+    except (ValueError,OverflowError,OSError):
+        return False
+    return True
+
+
+def _legacy_problem_id(identity: str) -> str:
+    return 'legacy-unaddressable-\x00' + hashlib.sha256(identity.encode('utf-8')).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -38,6 +142,7 @@ class Problems:
         self.store = store
         self.db = store.db
         self._receipt_cleanup_cursor: tuple[float, int] | None = None
+        self._recovering_actions = True
         # Recovery projection only: preserve the original service records for rollback.
         self._startup_pending = {row[0] for row in self.db.execute("SELECT id FROM reader_action_results WHERE result = 'pending'")}
         pending = sorted(self._startup_pending)
@@ -48,31 +153,35 @@ class Problems:
                     if receipt:
                         self.sync_action(receipt['identity'], self.store.wall_clock())
         self.recover_action_problems()
+        self._recovering_actions = False
 
     def recover_action_problems(self) -> None:
-        if self.db.execute("SELECT 1 FROM state WHERE key='action-problems-recovered-v1'").fetchone():
+        if self.db.execute("SELECT 1 FROM state WHERE key='action-problems-recovered-v2'").fetchone():
             return
-        # Reconcile existing problems first, including ones whose latest receipt
-        # succeeded or disappeared. Batches bound each write transaction.
-        cursor = ''
+        legacy_done = self.db.execute("SELECT 1 FROM state WHERE key='action-problems-recovered-v1'").fetchone() is not None
+        # Version 1 had already reconciled current problems and positive receipts.
+        if not legacy_done:
+            cursor = ''
+            while True:
+                rows = self.db.execute("SELECT identity FROM reader_problems WHERE finished IS NULL AND identity LIKE 'action:%%' AND identity>%s ORDER BY identity LIMIT 100", (cursor,)).fetchall()
+                if not rows:
+                    break
+                with self.db:
+                    for row in rows:
+                        self.sync_action(row['identity'][7:], self.store.wall_clock())
+                cursor = rows[-1]['identity']
+        sequence: int | None = None
         while True:
-            rows = self.db.execute("SELECT identity FROM reader_problems WHERE finished IS NULL AND identity LIKE 'action:%%' AND identity>%s ORDER BY identity LIMIT 100", (cursor,)).fetchall()
-            if not rows:
-                break
-            with self.db:
-                for row in rows:
-                    self.sync_action(row['identity'][7:], self.store.wall_clock())
-            cursor = rows[-1]['identity']
-        sequence = 0
-        while True:
-            rows = self.db.execute("""SELECT r.sequence, r.identity FROM reader_action_results r
-                WHERE r.sequence>%s AND r.result IN ('failed','unknown')
-                AND NOT EXISTS (SELECT 1 FROM reader_action_results newer WHERE newer.identity=r.identity AND newer.sequence>r.sequence)
+            boundary = ("AND r.sequence<=0" if legacy_done else '') + ('' if sequence is None else ' AND r.sequence>%s')
+            parameters = () if sequence is None else (sequence,)
+            rows = self.db.execute(f"""SELECT r.sequence, r.identity FROM reader_action_results r
+                WHERE r.result IN ('failed','unknown') {boundary}
+                AND NOT EXISTS (SELECT 1 FROM reader_action_results newer WHERE newer.identity=r.identity AND newer.sequence>r.sequence OFFSET 0)
                 AND NOT EXISTS (SELECT 1 FROM reader_problems p WHERE p.identity='action:'||r.identity
                     AND (p.finished IS NULL OR (p.outcome='irrelevant' AND p.finished>=r.started
                         AND p.body::jsonb->>'request_id'=r.id
-                        AND p.body::jsonb->>'request_attempt' IS NOT DISTINCT FROM r.body::jsonb->>'request_attempt')))
-                ORDER BY r.sequence LIMIT 100""", (sequence,)).fetchall()
+                        AND p.body::jsonb->>'request_attempt' IS NOT DISTINCT FROM r.body::jsonb->>'request_attempt')) OFFSET 0)
+                ORDER BY r.sequence LIMIT 100""", parameters).fetchall()
             if not rows:
                 break
             with self.db:
@@ -81,7 +190,8 @@ class Problems:
             sequence = rows[-1]['sequence']
             self.store.fault('action_problem_recovery_batch')
         with self.db:
-            self.db.execute("INSERT INTO state(key,value) VALUES ('action-problems-recovered-v1','true') ON CONFLICT DO NOTHING")
+            self.db.execute("INSERT INTO state(key,value) VALUES ('action-problems-recovered-v2','true') ON CONFLICT DO NOTHING")
+            self.db.execute("DELETE FROM state WHERE key='action-problems-recovered-v1'")
 
     def cleanup_receipts(self, cutoff: float) -> None:
         previous = self._receipt_cleanup_cursor
@@ -114,6 +224,8 @@ class Problems:
     def sync_candidate(self, identity: str, candidate: dict[str, Any] | None, now: float, *, removed_outcome: str = 'resolved') -> None:
         """Persist one producer's problem in the same transaction as its cause."""
         existing = self.db.execute('SELECT id,body FROM reader_problems WHERE identity=%s AND finished IS NULL', (identity,)).fetchone()
+        if existing and identity.startswith('action:') and _action_problem_body(existing['body']) is None:
+            return
         if candidate is None:
             if existing:
                 outcome = 'irrelevant' if identity=='processor:codex-choice' and self.store.codex_config() is None else removed_outcome
@@ -146,7 +258,12 @@ class Problems:
     def action_candidate(self, receipt: Any) -> dict[str, Any] | None:
         if receipt['result'] not in ('failed','unknown','pending'):
             return None
-        context = json.loads(receipt['body'])
+        context = _action_receipt_context(receipt['body'],receipt['identity'])
+        if context is None:
+            unknown = receipt['result']=='unknown' or receipt['result']=='pending' and receipt['id'] in self._startup_pending
+            candidate = _generic_action(unknown=unknown,request_id=receipt['id'])
+            candidate.update(id='action:'+receipt['identity'],created_at=receipt['started'],finished_at=None,outcome=None)
+            return candidate
         if receipt['id'] in self._startup_pending and self.db.execute(
             "SELECT 1 FROM reader_problems WHERE identity=%s AND outcome='irrelevant' AND finished >= %s AND body::jsonb->>'request_id'=%s AND body::jsonb->>'request_attempt' IS NOT DISTINCT FROM %s LIMIT 1",
             ('action:'+receipt['identity'], receipt['started'], receipt['id'], context.get('request_attempt'))).fetchone():
@@ -174,6 +291,13 @@ class Problems:
     def sync_action(self, identity: str, now: float) -> None:
         receipt = self.db.execute('SELECT * FROM reader_action_results WHERE identity=%s ORDER BY sequence DESC LIMIT 1', (identity,)).fetchone()
         candidate = self.action_candidate(receipt) if receipt else None
+        existing_action = self.db.execute('SELECT body FROM reader_problems WHERE identity=%s AND finished IS NULL',('action:'+identity,)).fetchone()
+        if existing_action and (receipt is None or _action_problem_body(existing_action['body']) is None or _action_receipt_context(receipt['body'],receipt['identity']) is None):
+            return
+        if self._recovering_actions and existing_action and receipt and receipt['result'] in ('failed','unknown','pending'):
+            recovered_context = _action_receipt_context(receipt['body'],receipt['identity'])
+            if recovered_context and recovered_context.get('command_error') is not None:
+                return
         outcome = 'resolved'
         if candidate is None:
             existing = self.db.execute('SELECT body FROM reader_problems WHERE identity=%s AND finished IS NULL', ('action:'+identity,)).fetchone()
@@ -622,14 +746,16 @@ class Problems:
         row = self.db.execute('SELECT * FROM reader_action_results WHERE id = %s', (identity,)).fetchone()
         if row is None:
             return None
-        body = json.loads(row['body'])
-        return CommandRecord(row['identity'], json.dumps(body['command_context']) if 'command_context' in body else None,
-                             body.get('command_error'), 'unknown' if row['result']=='pending' and identity in self._startup_pending else row['result'], row['completed'] or row['started'])
+        body = _action_receipt_context(row['body'],row['identity'])
+        return CommandRecord(row['identity'], json.dumps(body['command_context']) if body and 'command_context' in body else None,
+                             body.get('command_error') if body else None, 'unknown' if row['result']=='pending' and identity in self._startup_pending else row['result'], row['completed'] or row['started'])
 
     def command_error(self, identity: str, error_json: str) -> None:
         row = self.db.execute('SELECT identity,body FROM reader_action_results WHERE id = %s', (identity,)).fetchone()
         if row:
-            body = json.loads(row['body'])
+            body = _action_receipt_context(row['body'],row['identity'])
+            if body is None:
+                return
             body['command_error'] = error_json
             with self.db:
                 self.db.execute('UPDATE reader_action_results SET body = %s WHERE id = %s', (json.dumps(body), identity))
@@ -682,12 +808,17 @@ class Problems:
             return result
         return str(row['result'])
 
-    def abandon(self, identity: str, now: float) -> bool:
+    def abandon(self, identity: str, now: float, validate_context: Callable[[Any,str,Any],bool] | None = None) -> bool:
+        if '\x00' in identity:
+            return False
         row = self.db.execute("SELECT * FROM reader_problems WHERE id = %s AND origin = 'action' AND finished IS NULL", (identity,)).fetchone()
-        if not row:
+        if not row or not row['identity'].startswith('action:') or _action_problem_body(row['body']) is None:
             return False
         receipt = self.db.execute('SELECT * FROM reader_action_results WHERE identity = %s ORDER BY sequence DESC LIMIT 1', (row['identity'][7:],)).fetchone()
-        if not receipt or receipt['result'] != 'failed' or not json.loads(receipt['body'])['discardable']:
+        context = _action_context(receipt['body']) if receipt else None
+        if not receipt or receipt['result'] != 'failed' or context is None or context.get('discardable') is not True:
+            return False
+        if validate_context is not None and not validate_context(context.get('command_context'),receipt['identity'],context.get('command_error')):
             return False
         with self.db:
             self.db.execute("UPDATE reader_action_results SET result = 'abandoned' WHERE id = %s", (receipt['id'],))
@@ -698,6 +829,10 @@ class Problems:
     def forget_materials(self, members: set[str], now: float) -> None:
         """Deletion wins over keeping an expanded/history row; retain only service facts."""
         for row in problem_links.material_records(self.db, 'problem', members):
+            if row['origin']=='action' or row['identity'].startswith('action:'):
+                receipt = self.db.execute('SELECT identity,body FROM reader_action_results WHERE identity=%s ORDER BY sequence DESC LIMIT 1',(row['identity'][7:],)).fetchone() if row['identity'].startswith('action:') else None
+                if _action_problem_body(row['body']) is None or not receipt or _action_receipt_context(receipt['body'],receipt['identity']) is None:
+                    continue
             body = json.loads(row['body'])
             before = body['objects']
             body['objects'] = [obj for obj in before if not (obj['kind'] == 'material' and obj['id'] in members)]
@@ -712,6 +847,8 @@ class Problems:
                 self.db.execute('UPDATE reader_problems SET body = %s WHERE id = %s', (json.dumps(body), row['id']))
             status_changed(self.db)
         for row in problem_links.material_records(self.db, 'action', members):
+            if _action_receipt_context(row['body'],row['identity']) is None:
+                continue
             body = json.loads(row['body'])
             before = body['objects']
             body['objects'] = [obj for obj in before if not (obj['kind'] == 'material' and obj['id'] in members)]
@@ -801,19 +938,49 @@ class Problems:
                 status_changed(self.db)
         current: list[dict[str, Any]] = []
         recent: list[dict[str, Any]] = []
-        for row in self.db.execute('SELECT * FROM reader_problems WHERE finished IS NULL OR finished > %s ORDER BY created DESC', (now - 86400,)).fetchall():
-            problem = json.loads(row['body'])
+        rows = self.db.execute('SELECT * FROM reader_problems WHERE finished IS NULL OR finished > %s ORDER BY created DESC', (now - 86400,)).fetchall()
+        action_identities=sorted({row['identity'][7:] for row in rows if row['identity'].startswith('action:')})
+        receipts: dict[str,Any] = {}
+        for start in range(0,len(action_identities),400):
+            for saved_receipt in self.db.execute('SELECT r.identity,r.id,r.body,r.result,r.started FROM unnest(%s::text[]) target(identity) CROSS JOIN LATERAL (SELECT identity,id,body,result,started FROM reader_action_results WHERE identity=target.identity ORDER BY sequence DESC LIMIT 1) r',(action_identities[start:start+400],)):
+                receipts[saved_receipt['identity']]=saved_receipt
+        for row in rows:
+            current_receipt=receipts.get(row['identity'][7:]) if row['identity'].startswith('action:') else None
+            bad_receipt=bool(row['finished'] is None and (current_receipt is None or current_receipt['result'] in ('failed','unknown','pending') and _action_receipt_context(current_receipt['body'],current_receipt['identity']) is None))
+            is_action=row['origin']=='action' or row['identity'].startswith('action:')
+            parsed=_action_problem_body(row['body']) if is_action else None
+            bad_created=not _readable_timestamp(row['created'])
+            bad_finished=(row['finished'] is not None and not _readable_timestamp(row['finished']))
+            bad_outcome=(row['finished'] is None and row['outcome'] is not None or
+                         row['finished'] is not None and row['outcome'] not in ('resolved','irrelevant'))
+            generic=is_action and (parsed is None or bad_receipt or bad_created or bad_finished or bad_outcome)
+            if generic:
+                unknown=not current_receipt or current_receipt['result']!='failed' or bad_created or bad_finished or bad_outcome
+                problem=_generic_action(unknown=unknown,request_id=current_receipt['id'] if current_receipt else None)
+                if bad_created:
+                    problem['consequence']='Исходные сведения сохранены; время создания неизвестно, показано время проверки.'
+            else:
+                problem=parsed if parsed is not None else json.loads(row['body'])
+                if is_action and row['finished'] is None and current_receipt:
+                    receipt_context = _action_receipt_context(current_receipt['body'],current_receipt['identity'])
+                    if receipt_context and receipt_context.get('command_error') is not None:
+                        latest = self.action_candidate(current_receipt)
+                        if latest is not None:
+                            problem=latest
             if row['finished'] is None:
                 candidate = by_identity.get(row['identity'], {})
                 if candidate.get('reason'):
                     problem['reason'] = candidate['reason']
             for obj in problem['objects']:
                 obj.pop('label',None)
-            problem.update(id=row['id'], created_at=row['created'], finished_at=row['finished'],
-                           outcome=row['outcome'], state='finished' if row['finished'] is not None else problem['state'])
-            if row['finished'] is not None:
-                pass  # Keep the recorded consequence and cause; outcome owns completion.
-            (recent if row['finished'] is not None else current).append(problem)
+            visible_id = row['id']
+            if not visible_id:
+                visible_id = _legacy_problem_id(row['identity'])
+            finished = None if generic and (bad_finished or bad_outcome) else row['finished']
+            created = now if generic and bad_created else row['created']
+            problem.update(id=visible_id, created_at=created, finished_at=finished,
+                           outcome=None if finished is None else row['outcome'], state='finished' if finished is not None else problem['state'])
+            (recent if finished is not None else current).append(problem)
         return dict(current=current, recent=recent, count=len(current), updated_at=now)
 
     @staticmethod

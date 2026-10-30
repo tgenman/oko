@@ -74,10 +74,19 @@ def stored_context(value: str | None) -> wire.CommandContext | None:
         return None
 
 
+def stored_error(value: str | None) -> wire.ErrorEnvelope | None:
+    if value is None:
+        return None
+    try:
+        return wire.ErrorEnvelope.model_validate_json(value)
+    except (ValueError,TypeError):
+        return None
+
+
 def check_context(runtime: ReaderApplication, identity: str, context: wire.CommandContext) -> None:
     row = runtime.queries.command_record(identity)
     old = stored_context(row.context_json) if row else None
-    if row is not None and (old is None or canonical_context(old) != canonical_context(context)):
+    if row is not None and (old is None or canonical_context(old) != canonical_context(context) or row.error_json is not None and stored_error(row.error_json) is None):
         raise mismatch(identity)
 
 
@@ -95,7 +104,9 @@ def receipt(runtime: ReaderApplication, identity: str) -> wire.CommandReceipt:
     if row.result == 'abandoned':
         return wire.CommandReceipt(wire.CommandReceiptAbandoned(id=command_id, context=saved_context, outcome='abandoned', updated_at=updated))
     if row.result == 'failed':
-        error = wire.ErrorEnvelope.model_validate_json(row.error_json) if row.error_json else wire.ErrorEnvelope(wire.ActionInvalidError(code='action_invalid', message='Действие не выполнено', details=wire.ActionInvalidErrorDetails(reason='command_failed'), diagnostic_id=None, command_id=command_id))
+        error = stored_error(row.error_json) if row.error_json is not None else wire.ErrorEnvelope(wire.ActionInvalidError(code='action_invalid', message='Действие не выполнено', details=wire.ActionInvalidErrorDetails(reason='command_failed'), diagnostic_id=None, command_id=command_id))
+        if error is None:
+            return wire.CommandReceipt(wire.CommandReceiptUnknown(id=command_id,outcome='unknown'))
         return wire.CommandReceipt(wire.CommandReceiptFailed(id=command_id, context=saved_context, outcome='failed', updated_at=updated, error=error))
     return wire.CommandReceipt(wire.CommandReceiptPending(id=command_id, context=saved_context, outcome='pending', updated_at=updated))
 
@@ -105,7 +116,16 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
     router = APIRouter(route_class=SchemaRoute, dependencies=[Depends(no_query)])
     @router.post('/api/v3/problems/{identity}/abandon', response_model=wire.CommandAcknowledgement)
     async def abandon(request: Request, identity: str) -> wire.CommandAcknowledgement:
-        await runtime.abandon_problem(identity)
+        def safe_context(value: object, saved_identity: str, error: object) -> bool:
+            try:
+                parsed=wire.CommandContext.model_validate(value)
+                saved=wire.CommandContext.model_validate_json(saved_identity)
+            except (ValueError,TypeError):
+                return False
+            if error is not None and (not isinstance(error,str) or stored_error(error) is None):
+                return False
+            return isinstance(parsed.root,(wire.CommandSettingsPatch,wire.CommandCodexSave,wire.CommandProcessorSave)) and canonical_context(parsed)==canonical_context(saved)
+        await runtime.abandon_problem(identity,safe_context)
         return wire.CommandAcknowledgement(ok=True, command_id=wire.CommandId(request.state.command_id))
 
     @router.get('/api/v3/commands/{identity}', response_model=wire.CommandReceipt)

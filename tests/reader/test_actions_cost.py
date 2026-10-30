@@ -84,15 +84,21 @@ def test_latest_outcomes_scale_and_survive_restart(tmp_path):
     import json
     from tests.support.storage import Store
     from tests.support.reading_cost import request_sql
+    from oko.reader.commands_v3 import context_record
+    from oko.reader.generated.models import CommandContext
 
     store = Store(tmp_path, lambda _: None)
     rows = []
     for n in range(3000):
-        context = json.dumps(dict(identity=f'fixture-{n}', title='Synthetic failure', objects=[], action=None,command_context={'operation':'retry_material','material_id':f'fixture-{n}'}))
-        rows.append((f'old-{n:032x}', f'fixture-{n}', context, store.wall_clock(), 'failed'))
-        rows.append((f'new-{n:032x}', f'fixture-{n}', context, store.wall_clock(), {0: 'succeeded', 1: 'unknown', 2: 'pending'}.get(n, 'failed')))
+        context = context_record(CommandContext.model_validate({'operation':'retry_material','material_id':f'fixture-{n}'}))
+        identity = context['identity']
+        encoded = json.dumps(context)
+        rows.append((f'old-{n:032x}', identity, encoded, store.wall_clock(), 'failed'))
+        rows.append((f'new-{n:032x}', identity, encoded, store.wall_clock(), {0: 'succeeded', 1: 'unknown', 2: 'pending'}.get(n, 'failed')))
     with store.db:
         store.db.executemany('INSERT INTO reader_action_results ( id , identity , body , started , result ) VALUES ( %s , %s , %s , %s , %s )', rows)
+        # Model the pre-migration state: the v2 recovery marker does not yet exist.
+        store.db.execute("DELETE FROM state WHERE key IN ('action-problems-recovered-v1','action-problems-recovered-v2')")
         assert store.db.execute("SELECT 1 FROM pg_indexes WHERE schemaname=current_schema() AND indexname='reader_action_identity_sequence'").fetchone()
     store.set_work_enabled(False)
     store.db.close()
@@ -100,9 +106,11 @@ def test_latest_outcomes_scale_and_survive_restart(tmp_path):
         app = traced_app(tmp_path)
         with TestClient(app, headers=HEADERS) as client:
             tracing(client, app)
+            assert app.state.host.require_store().db.execute("SELECT count(*) FROM reader_problems WHERE identity LIKE 'action:%%' AND finished IS NULL").fetchone()[0]==2999
             with measure_reads(app.state.host.require_store().db, enabled=lambda: request_sql.get() is not None) as work:
                 response = client.get('/api/v3/status/details')
             assert response.status_code == 200
+            assert not any(q.lstrip().upper().startswith(('INSERT','UPDATE','DELETE')) for q in app.state.last_sql)
             problems = response.json()['problems']['current']
             assert len(problems) == 2999
             assert all(p['command_id'].startswith('new-') for p in problems)
@@ -196,9 +204,11 @@ def test_interrupted_command_problem_is_recovered_before_status_read(tmp_path):
     from tests.support.storage import Store
     store=Store(tmp_path,lambda _:None)
     try:
-        context=dict(identity='synthetic-operation',title='Synthetic failure',objects=[],action=None,discardable=True,command_context={'operation':'collect','target':{'scope':'all'}})
+        from oko.reader.commands_v3 import context_record
+        from oko.reader.generated.models import CommandContext
+        context=context_record(CommandContext.model_validate({'operation':'collect','target':{'scope':'all'}}))
         store.problems.action_started('synthetic-pending',context,store.wall_clock())
-        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='action:synthetic-operation'").fetchone() is None
+        assert store.db.execute('SELECT 1 FROM reader_problems WHERE identity=%s',('action:'+context['identity'],)).fetchone() is None
     finally:
         store.db.close()
     app=traced_app(tmp_path)

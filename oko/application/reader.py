@@ -199,10 +199,10 @@ class ReaderApplication:
                 return self.commands.report(identity, context, result)
 
 
-    async def abandon_problem(self, identity: str) -> None:
+    async def abandon_problem(self, identity: str, validate_context: Callable[[Any,str,Any],bool] | None = None) -> None:
         async with self._actions:
             with transaction(self.require_store().db):
-                self.commands.abandon(identity)
+                self.commands.abandon(identity,validate_context)
 
 
     async def collect(self, feed: str | None = None, *, folder: str | None = None) -> None:
