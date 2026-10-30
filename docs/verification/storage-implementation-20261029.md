@@ -838,3 +838,20 @@ skipped three, but the runner reported `checkout_changed`: documentation and a
 scratch draft were written while it ran. Therefore the browser test results are
 useful evidence, but the command as a whole did not pass; repeat on a stable
 checkout. This does not erase the failed concurrent full-browser run.
+
+The full run at `2e6a0953` with two browser workers passed 254 browser tests
+(three skipped), 116 Node tests, 315 tooling tests, build, HTTP, and type checks.
+Python had 1,270 passed, two skipped and one failure: a clock test advanced both
+session expiry and shutdown to the same deadline, so it could observe either 410
+or the stopped-runtime 409. The test now separates those deadlines; its seven
+lifecycle tests passed and the individual case passed eight consecutive repeats.
+The full run preceded subsequent application changes and is not a final pass.
+
+For the missing Codex configuration problem, settings/configuration writes now
+persist or resolve that problem within their transaction. A focused HTTP test
+observed no SQL writes from status for this scenario, including clearing it;
+rollback and restart were checked. The isolated prototype passed 143 related
+settings/transaction/worker tests, 24 status/settings tests, and the 400-item
+settings cost case. After transfer to the branch three focused tests, layer
+boundaries and mypy passed. Status GET can still write other problem categories;
+this does not establish the target read-only status contract as complete.
