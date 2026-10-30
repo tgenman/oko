@@ -1098,3 +1098,18 @@ EXPLAIN measurement, not a production latency claim. The integrated task
 checkout passed 213 transaction, status and linked-publication tests; mypy
 passed on 158 files. Twelve Playwright feed/status scenarios passed and the
 feed screenshot was inspected. Status GET still reconciles remaining Job problems.
+
+
+Migration 064 removes the redundant `reader_problems.rowid` and replaces the
+expiry index with `(finished,id)`. The permanent problem ID and rows are
+preserved. Cleanup selects at most 200 expired IDs, then deletes them by primary
+key with a fresh expiry check inside the transaction. Synthetic tests covered
+equal timestamps, inserts and deletes between batches, concurrent expiry
+extension and rollback. In one analyzed synthetic plan with 10,000 unrelated
+records, the two steps read 200 rows each; the earlier single-statement variant
+read 10,650 and was rejected. These are plan measurements, not production
+latencies.
+
+The task checkout passed 59 migration, status, reading-version and release
+tests, plus six Playwright status scenarios; the status screenshot was
+inspected. Mypy passed on 158 files. No working database was migrated.

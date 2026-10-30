@@ -3,6 +3,7 @@
 The card list and individual materials are read directly.
 """
 from oko.storage.database import expect_row, Row
+from oko.storage.transaction import begin_write
 import json
 import uuid
 from typing import Any, TYPE_CHECKING
@@ -55,7 +56,10 @@ class ReaderVersions:
         now=self.store.clock() if now is None else now
         wall=self.store.wall_clock() if wall is None else wall
         with self.db:
-            removed = self.db.execute('DELETE FROM reader_problems WHERE rowid IN ( SELECT rowid FROM reader_problems WHERE finished <= %s ORDER BY finished LIMIT 200 )',(wall-86400,)).rowcount
+            begin_write(self.db)
+            cutoff = wall-86400
+            expired = [row['id'] for row in self.db.execute('SELECT id FROM reader_problems WHERE finished <= %s ORDER BY finished,id LIMIT 200',(cutoff,))]
+            removed = self.db.execute('DELETE FROM reader_problems WHERE id=ANY(%s) AND finished <= %s',(expired,cutoff)).rowcount if expired else 0
             if removed:
                 from oko.storage.reader_status import changed as status_changed
                 status_changed(self.db)
