@@ -46,7 +46,7 @@ class ReadSync:
 
     def mark_item(self, item: str) -> None:
         self.store.db.execute("""INSERT INTO telegram_read_state(feed, needs_sync)
-            SELECT DISTINCT f.id, true FROM reading_memberships m JOIN feeds f ON f.id=m.feed_id
+            SELECT DISTINCT f.id, true FROM feed_publications m JOIN feeds f ON f.id=m.feed_id
             WHERE m.publication_id=%s AND f.transport='telegram' AND f.connection IS DISTINCT FROM 'deleting'
             ON CONFLICT(feed) DO UPDATE SET needs_sync=true WHERE NOT telegram_read_state.needs_sync""", (item,))
 
@@ -90,7 +90,7 @@ class ReadSync:
 
     def saved_publication(self, item: str) -> None:
         db = self.store.db
-        feeds = [r[0] for r in db.execute("""SELECT f.id FROM reading_memberships m JOIN feeds f ON f.id=m.feed_id
+        feeds = [r[0] for r in db.execute("""SELECT f.id FROM feed_publications m JOIN feeds f ON f.id=m.feed_id
             WHERE m.publication_id=%s AND f.transport='telegram' AND f.connection IS DISTINCT FROM 'deleting'""", (item,))]
         if not feeds:
             return

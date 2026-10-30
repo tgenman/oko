@@ -64,4 +64,5 @@ MIGRATIONS = (
     Migration(57, 'status-constraints', (Path(__file__).parent / 'postgres' / '057-status-constraints.sql').read_text()),
     Migration(58, 'job-constraints', (Path(__file__).parent / 'postgres' / '058-job-constraints.sql').read_text()),
     Migration(59, 'remove-processing-dirty', (Path(__file__).parent / 'postgres' / '059-remove-processing-dirty.sql').read_text()),
+    Migration(60, 'remove-reading-memberships-view', (Path(__file__).parent / 'postgres' / '060-remove-reading-memberships-view.sql').read_text()),
 )

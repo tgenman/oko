@@ -974,3 +974,14 @@ A synthetic checkout run passed 76 settings, status and Telegram tests; an
 expanded temporary-copy run passed 130 tests. Mypy passed on 157 files. Seven
 Playwright Telegram and status scenarios passed, and the Telegram profile
 screenshot was inspected. Status GET still reconciles other problem categories.
+
+
+Migration 060 removes the `reading_memberships` view after application queries
+were changed to read the same `feed_publications` rows directly. On synthetic
+PostgreSQL, migration from version 59 preserved two memberships including their
+primary and unread flags. A forced migration failure restored the view and left
+the ledger at 59. No working database was migrated. The temporary-copy suites
+passed 254 tests; the task checkout passed 204 migration and transaction tests.
+Mypy passed on 157 files. Thirty-two Playwright reading and status scenarios
+passed, and the opened-publication screenshot was inspected. Other compatibility
+views and status reconciliation are still present.

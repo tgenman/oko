@@ -114,7 +114,7 @@ def material_inputs(db: Database, identities: set[str], *, include_subtitles: bo
         for row in db.execute('SELECT publication_id,feed_id FROM feed_publications WHERE publication_id=ANY(%s) ORDER BY publication_id,is_primary DESC,feed_id', (batch,)):
             value.memberships[row['publication_id']].append(row['feed_id'])
         value.owners.update({identity: set() for identity in batch})
-        for row in db.execute('SELECT m . publication_id AS reader_source , m . feed_id FROM reading_memberships m WHERE m . publication_id = ANY ( %s ) UNION SELECT l . source_publication_id AS reader_source , m . feed_id FROM publication_links l JOIN reading_memberships m ON m . publication_id = l . target_publication_id WHERE l . source_publication_id = ANY ( %s )', (batch, batch)):
+        for row in db.execute('SELECT m . publication_id AS reader_source , m . feed_id FROM feed_publications m WHERE m . publication_id = ANY ( %s ) UNION SELECT l . source_publication_id AS reader_source , m . feed_id FROM publication_links l JOIN feed_publications m ON m . publication_id = l . target_publication_id WHERE l . source_publication_id = ANY ( %s )', (batch, batch)):
             value.owners[row['reader_source']].add(row['feed_id'])
     feeds = sorted({r['feed_id'] for r in value.items.values() if r['feed_id'] is not None}
                    | {feed for owners in value.owners.values() for feed in owners})

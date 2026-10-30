@@ -102,7 +102,7 @@ def test_native_library_constraints_and_persistent_job_identity(connections):
         assert second_job > first_job
         assert restarted.execute("SELECT published FROM publications WHERE id='article'").fetchone()[0] == 1792870000.123456
         assert restarted.execute("SELECT size_bytes FROM media_files WHERE id='media'").fetchone()[0] == 5000000000
-        assert restarted.execute("SELECT count(*) FROM reading_memberships WHERE publication_id='article'").fetchone()[0] == 2
+        assert restarted.execute("SELECT count(*) FROM feed_publications WHERE publication_id='article'").fetchone()[0] == 2
 
 
 def test_telegram_claim_migration_preserves_owners(connections):
@@ -1145,3 +1145,33 @@ def test_dirty_queue_cutover_failure_rolls_back_schema_and_markers(connections):
         assert db.execute('SELECT item FROM processing_dirty').fetchall()==[('item',)]
         assert db.execute("SELECT status,generation FROM jobs WHERE kind='filter' AND item='item'").fetchone()==('pending',7)
         verify(db,MIGRATIONS[:58])
+
+
+def test_removing_reading_memberships_view_preserves_memberships(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:59])
+        db.execute("INSERT INTO feeds(id,platform,external_id) VALUES ('first','rss','https://first.test'),('second','rss','https://second.test')")
+        db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','rss','article')")
+        db.execute("INSERT INTO feed_publications(feed_id,publication_id) VALUES ('first','article'),('second','article')")
+        before = db.execute("SELECT feed_id,publication_id,is_primary,is_unviewed FROM feed_publications ORDER BY feed_id").fetchall()
+        assert db.execute("SELECT count(*) FROM reading_memberships WHERE publication_id='article'").fetchone()[0] == 2
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT to_regclass('reading_memberships')").fetchone()[0] is None
+        assert db.execute("SELECT feed_id,publication_id,is_primary,is_unviewed FROM feed_publications ORDER BY feed_id").fetchall() == before
+        verify(db, MIGRATIONS)
+
+
+def test_reading_memberships_removal_rolls_back_on_migration_failure(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:59])
+        db.execute("INSERT INTO feeds(id,platform,external_id) VALUES ('first','rss','https://first.test')")
+        db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','rss','article')")
+        db.execute("INSERT INTO feed_publications(feed_id,publication_id) VALUES ('first','article')")
+        failing = Migration(60, MIGRATIONS[59].name, MIGRATIONS[59].sql + '; SELECT missing_column FROM feed_publications')
+        with pytest.raises(psycopg.errors.UndefinedColumn):
+            migrate(db, (*MIGRATIONS[:59], failing))
+        assert db.execute("SELECT count(*) FROM reading_memberships WHERE publication_id='article'").fetchone()[0] == 1
+        assert db.execute('SELECT max(version) FROM oko_schema_migrations').fetchone()[0] == 59
+        verify(db, MIGRATIONS[:59])

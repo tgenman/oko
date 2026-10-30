@@ -507,7 +507,7 @@ class Store:
                 marks = ','.join('%s' for _ in batch)
                 rows.update({row['id']: row for row in self.db.execute(
                     f'SELECT id , members , feed_id FROM items_read WHERE id IN ( {marks} )', batch)})
-                for row in self.db.execute(f'SELECT m . publication_id , m . feed_id FROM reading_memberships m JOIN items_read i ON i . id = m . publication_id WHERE i . viewed = 0 AND m . publication_id IN ( {marks} )', batch):
+                for row in self.db.execute(f'SELECT m . publication_id , m . feed_id FROM feed_publications m JOIN items_read i ON i . id = m . publication_id WHERE i . viewed = 0 AND m . publication_id IN ( {marks} )', batch):
                     memberships.setdefault(row['publication_id'], []).append(row['feed_id'])
             if len(rows) != len(members):
                 return False

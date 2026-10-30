@@ -42,9 +42,9 @@ class ReadingComposition:
         target=options['target']
         scope=target['scope']
         membership={
-            'all': 'EXISTS (SELECT 1 FROM reading_memberships m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE m.publication_id=i.id)',
-            'feed': 'EXISTS (SELECT 1 FROM reading_memberships m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE m.publication_id=i.id AND m.feed_id=%(owner)s)',
-            'folder': 'EXISTS (SELECT 1 FROM reading_memberships m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE m.publication_id=i.id AND owner_feed.folder_id=%(owner)s)',
+            'all': 'EXISTS (SELECT 1 FROM feed_publications m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE m.publication_id=i.id)',
+            'feed': 'EXISTS (SELECT 1 FROM feed_publications m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE m.publication_id=i.id AND m.feed_id=%(owner)s)',
+            'folder': 'EXISTS (SELECT 1 FROM feed_publications m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE m.publication_id=i.id AND owner_feed.folder_id=%(owner)s)',
         }[scope]
         selected=f"SELECT i.id, i.published, i.published_known FROM items_read i JOIN feeds f ON f.id=i.feed_id WHERE i.viewed=0 AND (%(hidden)s=1 OR i.status IS DISTINCT FROM 'filter_out') AND {membership}"
         cte=f"WITH selected AS ({selected}), ordered AS (SELECT id, CASE WHEN published_known=0 THEN 1 ELSE 0 END AS missing, CASE WHEN published_known=0 THEN 0 WHEN %(sort)s='oldest' THEN published ELSE -published END AS stamp FROM selected)"
@@ -69,7 +69,7 @@ class ReadingComposition:
             count(DISTINCT m.publication_id) AS visible FROM feed_publications m JOIN feeds f ON f.id=m.feed_id
             JOIN publications i ON i.id=m.publication_id
             WHERE i.viewed=0 AND i.status IS DISTINCT FROM 'filter_out' GROUP BY f.folder_id''')}
-        visible=expect_row(self._store.db.execute("SELECT count(*) FROM items_read i WHERE i.viewed=0 AND i.status IS DISTINCT FROM 'filter_out' AND EXISTS (SELECT 1 FROM reading_memberships m WHERE m.publication_id=i.id)").fetchone())[0]
+        visible=expect_row(self._store.db.execute("SELECT count(*) FROM items_read i WHERE i.viewed=0 AND i.status IS DISTINCT FROM 'filter_out' AND EXISTS (SELECT 1 FROM feed_publications m WHERE m.publication_id=i.id)").fetchone())[0]
         return dict(folders=[dict(folder,count=folder_counts.get(folder['id'],0)) for folder in folders],
                     feeds=[dict(feed,count=feed_counts[feed['id']]['visible'] if feed['id'] in feed_counts else 0,
                                 has_unviewed=bool(feed_counts[feed['id']]['unviewed']) if feed['id'] in feed_counts else False) for feed in feeds],
@@ -78,7 +78,7 @@ class ReadingComposition:
     def _contents(self, owner: str, scope: str) -> FolderContents:
         self._store.subscriptions.check_owner(scope, owner)
         condition = 'm . feed_id = %s' if scope == 'feed' else 'f . folder_id = %s'
-        rows = list(self._store.db.execute(f'SELECT DISTINCT i . id , i . members , i . feed_id FROM items_read i JOIN reading_memberships m ON m . publication_id = i . id JOIN feeds f ON f . id = m . feed_id WHERE i . viewed = 0 AND {condition} ORDER BY i . id', (owner,)))
+        rows = list(self._store.db.execute(f'SELECT DISTINCT i . id , i . members , i . feed_id FROM items_read i JOIN feed_publications m ON m . publication_id = i . id JOIN feeds f ON f . id = m . feed_id WHERE i . viewed = 0 AND {condition} ORDER BY i . id', (owner,)))
         # Pending and damaged publications both have a visible card. Completion
         # still captures every member, including those with no current feed.
         return FolderContents(tuple((row['id'], row['members']) for row in rows),
