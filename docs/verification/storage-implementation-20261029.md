@@ -622,3 +622,12 @@
   The affected worker, shared-publication, Telegram and YouTube suites passed
   116 tests and types; two Playwright scenarios passed and the shared publication
   screenshot was inspected. Membership removal and settings still use the queue.
+- Membership removal now reconciles surviving shared owners directly and revokes
+  own filter/theses Jobs when the last membership disappears. A viewed article
+  kept as another publication's dependency retains its source content while its
+  own results and context are cleared; rollback restores both membership and Job.
+  The first broad run passed 155 tests and failed the slow-database reader timeout;
+  after avoiding an unnecessary metadata write, the isolated regression and a
+  172-test processing, reading, completion and recovery run passed. Fourteen
+  Playwright scenarios passed and linked RSS content was inspected. Settings,
+  startup and repair paths still use the remaining dirty queue.

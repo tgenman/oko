@@ -479,8 +479,9 @@ class Store:
                 if self.db.execute(f"UPDATE history_members SET outcome = 'viewed' WHERE item IN ( {marks} ) AND outcome IN ( 'pending' , 'retrying' )", batch).rowcount:
                     status_changed(self.db)
                 removed = membership_graph.remove(self.db,items=batch)
-                self.read_versions.memberships_changed(removed)
+                self.read_versions.memberships_changed(removed,enqueue=False)
             publication_links.prune(self, set(members))
+            self.processing.memberships_removed(members)
             for item, row in rows.items():
                 if row['feed_id'] is not None:
                     self._remember_cleanup_owner(item, row['feed_id'])
@@ -502,7 +503,7 @@ class Store:
                 source_changed(self.db)
             shared=[r[0] for r in self.db.execute('SELECT id FROM items_by_feed WHERE platform IS NOT NULL AND feed_id = %s',(feed,))]
             removed = membership_graph.remove(self.db,feed=feed)
-            self.read_versions.memberships_changed(removed)
+            self.read_versions.memberships_changed(removed,enqueue=False)
             for item in shared:
                 self.read_sync.mark_item(item)
             publication_links.prune(self,set(shared))
@@ -518,6 +519,7 @@ class Store:
                 self.jobs.forget_input('theses', [item])
                 # This is local cleanup, not viewed(): never create read eligibility.
                 membership_graph.set_viewed(self.db,[item],True)
+            self.processing.memberships_removed(removed)
         self.db.after_commit(lambda: self.fault('after_feed_delete_commit'))
 
     def _remember_cleanup_owner(self, item: str, feed: str) -> None:

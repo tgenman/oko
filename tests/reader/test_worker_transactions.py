@@ -426,7 +426,7 @@ def test_membership_removal_records_effects_and_rolls_back_together(tmp_path):
         def remove():
             store.remove_feed(second)
             assert store.read_versions.version('status','runtime')['version'] > before
-            assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone()
+            assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
         with pytest.raises(ValueError,match='synthetic rollback'):
             with transaction(store.db):
                 remove()
@@ -994,5 +994,40 @@ def test_filter_claim_revokes_obsolete_theses_atomically(tmp_path):
         with transaction(store.db):
             assert store.jobs.claim_processing('filter',store.clock()) is not None
         assert store.db.execute("SELECT status,generation FROM jobs WHERE kind='theses' AND item=%s", (item,)).fetchone()[:] == ('cancelled',8)
+    finally:
+        store.db.close()
+
+
+def test_viewed_publication_kept_as_link_revokes_own_processing_atomically(tmp_path):
+    from oko.storage import memberships
+    store, item, _, _ = worker_library(tmp_path)
+    try:
+        with transaction(store.db):
+            memberships.lock_graph(store.db)
+            store.db.execute("""INSERT INTO items(id,source_id,url,platform,external_id,complete,content,title)
+                SELECT 'root','root-source','https://example.org/root','rss','root',1,content,title FROM items WHERE id=%s""", (item,))
+            memberships.add(store.db,'demo','root')
+            store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root',%s)", (item,))
+            job = store.jobs.claim_processing('filter',store.clock())
+            assert job is not None and job.item == item
+        with store.db:
+            store.db.execute("UPDATE items SET filtered_content=%s,summarized_content=%s WHERE id=%s", ('{"hidden":false,"reason":"","removed":[]}','{"points":[]}',item))
+        original = store.db.execute('SELECT content FROM items WHERE id=%s', (item,)).fetchone()[0]
+        store.processing.background = True
+        def view():
+            assert store.viewed_set([item])
+            assert not store.jobs.valid(job)
+            row = store.db.execute('SELECT complete,viewed,content,filtered_content,summarized_content FROM items WHERE id=%s', (item,)).fetchone()
+            assert row[:] == (1,0,original,'{}','{}')
+            assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
+        with pytest.raises(ValueError, match='rollback'):
+            with transaction(store.db):
+                view()
+                raise ValueError('rollback')
+        assert store.jobs.valid(job)
+        assert store.db.execute('SELECT filtered_content FROM items WHERE id=%s', (item,)).fetchone()[0] != '{}'
+        assert store.db.execute('SELECT 1 FROM feed_publications WHERE publication_id=%s', (item,)).fetchone()
+        with transaction(store.db):
+            view()
     finally:
         store.db.close()

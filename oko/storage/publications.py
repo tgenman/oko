@@ -428,7 +428,8 @@ class Publications:
             batch = items[start:start+400]
             marks = ','.join('%s' for _ in batch)
             removed = memberships.remove(db,items=batch)
-            self.store.read_versions.memberships_changed(removed)
+            self.store.read_versions.memberships_changed(removed,enqueue=False)
             db.execute(f'DELETE FROM publication_links WHERE source_publication_id IN ( {marks} ) OR target_publication_id IN ( {marks} )', batch+batch)
             db.execute(f'DELETE FROM media_files WHERE publication_id IN ( {marks} )', batch)
             db.execute(f"UPDATE items SET content = '{{}}' , media_ids = '[]' , filtered_content = '{{}}' , summarized_content = '{{}}' , processing_metadata = '{{}}' WHERE id IN ( {marks} )", batch)
+            self.store.processing.memberships_removed(removed)

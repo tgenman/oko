@@ -2,6 +2,7 @@
 from oko.storage import material_read
 from oko.storage.reading import retry_time
 from oko.storage.transaction import begin_write
+from oko.storage.job_writes import execute as job_write
 from dataclasses import dataclass
 from typing import Literal, TYPE_CHECKING
 from collections.abc import Iterator
@@ -67,6 +68,29 @@ class ProcessingState:
             query += ' AND ' + ('f . id = %s' if scope == 'feed' else 'f . folder_id = %s')
             params = (owner,)
         self.store.db.execute(f'INSERT INTO processing_dirty {query} ON CONFLICT DO NOTHING', params)
+
+    def memberships_removed(self, identities: list[str]) -> None:
+        """Reconcile surviving owners and revoke own AI work when none remain."""
+        ordered = sorted(set(identities))
+        for start in range(0,len(ordered),400):
+            batch = ordered[start:start+400]
+            rows = self.store.db.execute("""SELECT i.id,EXISTS(SELECT 1 FROM feed_publications m
+                WHERE m.publication_id=i.id) AS has_owner FROM items i WHERE i.id=ANY(%s)""", (batch,)).fetchall()
+            feedless = [row['id'] for row in rows if not row['has_owner']]
+            if feedless:
+                job_write(self.store.db, """UPDATE jobs SET status='cancelled',generation=generation+1,
+                    input_snapshot=NULL,error=NULL,problem_code=NULL WHERE item=ANY(%s) AND kind IN ('filter','theses')
+                    AND (status IS DISTINCT FROM 'cancelled' OR input_snapshot IS NOT NULL OR error IS NOT NULL OR problem_code IS NOT NULL)""", (feedless,))
+                self.store.db.execute("""UPDATE items SET filtered_content='{}',summarized_content='{}',
+                    processing_metadata=(processing_metadata::jsonb-'filter'-'summary'-'_pass'-'_revision'-'_revision_input')::text,
+                    status=CASE WHEN viewed=0 THEN 'ready' ELSE status END WHERE id=ANY(%s)
+                    AND (filtered_content IS DISTINCT FROM '{}' OR summarized_content IS DISTINCT FROM '{}'
+                         OR processing_metadata::jsonb ?| ARRAY['filter','summary','_pass','_revision','_revision_input']
+                         OR (viewed=0 AND status IS DISTINCT FROM 'ready'))""", (feedless,))
+                self.store.db.execute('DELETE FROM processing_dirty WHERE item=ANY(%s)', (feedless,))
+            for row in rows:
+                if row['has_owner']:
+                    self.reconcile_accepted_item(row['id'])
 
     def repair(self, item: str) -> None:
         """A read can discover missing bytes without writing inside its snapshot."""
