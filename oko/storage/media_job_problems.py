@@ -35,7 +35,8 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
         if group not in results:
             body: dict[str,Any]=dict(id=identity,code=code,section='object',title='Не удалось загрузить вложение',
                 consequence='Сохранённое содержимое остаётся доступным.',next_step='Включите обработку, чтобы повторить попытку.' if row['status']=='blocked' else 'Повторите загрузку вручную.' if row['status'] in ('done','failed') else 'Проверьте доступность источника.' if row['status']=='unavailable' else 'Око повторит попытку автоматически.',
-                objects=[],action=None,operation='producer:download_media',media_owner=feed,media_file_id=item,media_orphan=row['publication_id'] is None,created_at=now,state='retrying' if row['status']=='running' or not row['error'] else 'current',finished_at=None,outcome=None,next_at=None)
+                objects=[],action=None,operation='producer:download_media',media_owner=feed,_code_present=row['problem_code'] is not None,_subtitle=row['resource_key']=='youtube:subtitles',media_file_id=item,media_orphan=row['publication_id'] is None,created_at=now,state='retrying' if row['status']=='running' or not row['error'] else 'current',finished_at=None,outcome=None,next_at=None)
+            if code=='work-download_media':body['media_implicit_code']=row['problem_code'] in (None,'')
             if row['error']:body['reason']=row['error']
             if code=='source-reconnect':body.update(section='action',next_step='Проверьте привязку источника; доступ не изменяется автоматически.')
             results[group]=body
@@ -57,11 +58,21 @@ def managed_candidates(store: 'Store', job_id: int, now: float) -> list[dict[str
     """Only per-publication failures with explicit, non-shared codes."""
     rows=candidates(store,job_id,now)
     excluded={'codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'}
-    return [dict(row,media_job_id=str(job_id)) for row in rows
-            if row['code'] and row['code']!='work-download_media' and row['code'] not in excluded and not row['code'].startswith('source-')]
+    return [dict({k:v for k,v in row.items() if k not in ('_code_present','_subtitle')},media_job_id=str(job_id)) for row in rows
+            if row['_code_present'] and row['code'] and row['code'] not in excluded and not row['code'].startswith('source-')]
 
 
 def managed_candidates_many(store: 'Store', job_ids: list[int], now: float) -> dict[int,list[dict[str, Any]]]:
     excluded={'codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'}
     groups=candidates_many(store,job_ids,now)
-    return {job_id:[dict(row,media_job_id=str(job_id)) for row in rows if row['code'] and row['code']!='work-download_media' and row['code'] not in excluded and not row['code'].startswith('source-')] for job_id,rows in groups.items()}
+    return {job_id:[dict({k:v for k,v in row.items() if k not in ('_code_present','_subtitle')},media_job_id=str(job_id)) for row in rows if row['_code_present'] and row['code'] and row['code'] not in excluded and not row['code'].startswith('source-')] for job_id,rows in groups.items()}
+
+
+def previous_candidates(store: 'Store', job_id: int, now: float) -> list[dict[str, Any]]:
+    """Capture a prior GET-owned error before an event changes its owner."""
+    excluded={'codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'}
+    rows=candidates_many(store,[job_id],now,include_subtitles=True).get(job_id,[])
+    if rows and rows[0]['_subtitle']:
+        if store.youtube.status(now)['paused'] or (not rows[0]['_code_present'] and store.youtube.ready_at()>now):return []
+    return [dict({k:v for k,v in row.items() if k not in ('_code_present','_subtitle')},media_job_id=str(job_id)) for row in rows
+            if row['code'] not in excluded and not row['code'].startswith('source-')]

@@ -21,7 +21,7 @@ def test_unexpected_media_retry_saves_problem_without_status_get(tmp_path,postgr
         assert after==before,(json.loads(before['body']),json.loads(after['body']))
     finally:store.db.close()
 
-def test_work_download_media_is_not_managed_by_explicit_error_owner(tmp_path,postgres_url):
+def test_explicit_work_download_media_is_managed_by_event_owner(tmp_path,postgres_url):
     from oko.storage.media_job_problems import managed_candidates
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
@@ -29,7 +29,8 @@ def test_work_download_media_is_not_managed_by_explicit_error_owner(tmp_path,pos
             store.db.execute("INSERT INTO publications(id,viewed) VALUES ('p',0)")
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','image','x','img','pending')")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('download_media','m','failed','failure','work-download_media') RETURNING id").fetchone()[0]
-        assert managed_candidates(store,job,1)==[]
+        candidates=managed_candidates(store,job,1)
+        assert len(candidates)==1 and candidates[0]['code']=='work-download_media' and candidates[0]['media_implicit_code'] is False
     finally:store.db.close()
 
 
@@ -58,7 +59,7 @@ def test_work_fetch_error_code_is_not_silently_lost_from_media(tmp_path,postgres
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id,viewed) VALUES ('p',0)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")

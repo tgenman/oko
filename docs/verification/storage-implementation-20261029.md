@@ -1306,3 +1306,14 @@ and after, equality at the boundary, the maximum of the two deadlines and
 rollback. The integrated suite passed 135 PostgreSQL tests, mypy on 161 files
 and 16 Playwright status scenarios with a screenshot inspected. One
 Starlette/httpx warning was emitted. No working database was changed.
+
+
+Media Jobs with an empty code or explicit work-download_media code now use
+event-owned problem updates. NULL codes and YouTube subtitles retain their
+previous path. Synthetic coverage includes orphan files, linked roots, legacy
+identity conflicts, rollback, GET behavior and indexed recovery. The integrated
+media/fetch/worker/status/incomplete suite passed 321 PostgreSQL tests, mypy
+passed for nine modules and 10 Playwright status scenarios passed with a
+screenshot inspected. Media errors were exercised through HTTP, not a dedicated
+browser scenario. One Starlette/httpx warning was emitted. No working database
+was migrated.

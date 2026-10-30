@@ -27,7 +27,7 @@ def interrupt(store: 'Store', feeds: set[str] | None = None, *, backoff: bool = 
             else row['retry_at'] if row['wait_scope'] else None)
         from oko.storage.fetch_job_problems import previous_candidates as managed_candidates
         previous_fetch=managed_candidates(store,row['id'],store.wall_clock()) if row['kind']=='fetch' and (row['error'] is not None or row['problem_code'] is not None) else []
-        from oko.storage.media_job_problems import managed_candidates as media_candidates
+        from oko.storage.media_job_problems import previous_candidates as media_candidates
         previous_media=media_candidates(store,row['id'],store.wall_clock()) if row['kind']=='download_media' and (row['error'] is not None or row['problem_code'] is not None) else []
         from oko.storage.processing_job_problems import managed_candidates as processing_candidates
         previous_processing=processing_candidates(store,row['id'],store.wall_clock()) if row['kind'] in ('filter','theses') and (row['error'] is not None or row['problem_code'] is not None) else []
@@ -62,7 +62,7 @@ def fail(store: 'Store', job: 'Job', issue: AdapterIssue, *, cancelled: bool = F
         return
     from oko.storage.fetch_job_problems import previous_candidates as managed_candidates
     previous=managed_candidates(store,job.id,store.wall_clock()) if job.kind=='fetch' else []
-    from oko.storage.media_job_problems import managed_candidates as media_candidates
+    from oko.storage.media_job_problems import previous_candidates as media_candidates
     previous_media=media_candidates(store,job.id,store.wall_clock()) if job.kind=='download_media' else []
     processor_previous=store.problems.prepare_processor_change([job.id],store.wall_clock())
     from oko.storage.processing_job_problems import managed_candidates as processing_candidates

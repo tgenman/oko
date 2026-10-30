@@ -165,7 +165,7 @@ def test_restart_recovers_orphan_media_with_original_wire_identity(tmp_path,post
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v2'")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('download_media','orphan','failed','failure','media-too-large')")
         store.db.close();store=Store(tmp_path,lambda _:None,database_url=postgres_url)
         row=store.db.execute("SELECT body FROM reader_problems WHERE identity='job:media-too-large:orphan:download_media:orphan' AND finished IS NULL").fetchone()
@@ -177,7 +177,7 @@ def test_linked_media_failure_recovers_all_root_owners(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected','[]'),('y','y','Y','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('root-x'),('root-y'),('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('x','root-x',true),('y','root-y',true)")
@@ -208,7 +208,7 @@ def test_orphan_legacy_history_is_preserved_and_reused(tmp_path,postgres_url):
     body=dict(code='media-too-large',section='object',title='legacy',consequence='saved',next_step='retry',objects=[dict(kind='material',id='orphan')],action=None,operation='producer:status',state='current',next_at=None)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v2'")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('download_media','orphan','failed','failure','media-too-large')")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('old','job:media-too-large:orphan:download_media:orphan','background',%s,1)",(json.dumps(body),))
         store.db.close();store=Store(tmp_path,lambda _:None,database_url=postgres_url)
@@ -222,7 +222,7 @@ def test_orphan_ambiguous_legacy_without_file_survives_recovery_and_get(tmp_path
     body=dict(code='media-too-large',section='object',title='old',consequence='c',next_step='n',state='current',operation='producer:status',objects=[dict(kind='material',id='unrelated')])
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('unrelated')")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('old','job:media-too-large:feed:download_media:ghost','background',%s,1)",(json.dumps(body),))
@@ -238,7 +238,7 @@ def test_legacy_media_with_unrelated_object_remains_unchanged(tmp_path,postgres_
     body=dict(code='media-too-large',section='object',title='old',consequence='c',next_step='n',state='current',operation='producer:status',objects=[dict(kind='material',id='article'),dict(kind='material',id='unrelated')])
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('article'),('unrelated')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','article',true)")
@@ -276,7 +276,7 @@ def test_recovery_thousand_orphan_media_jobs_is_batched(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v2'")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) SELECT 'download_media','orphan-'||n,'failed','failure','media-too-large' FROM generate_series(1,1000) n")
         sql=[];store.db.set_trace_callback(sql.append)
         try:store.problems.recover_media_problems()
@@ -291,7 +291,7 @@ def test_recovery_mixed_orphan_media_preserves_old_ids_in_batches(tmp_path,postg
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v2'")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) SELECT 'download_media','orphan-'||n,'failed','failure','media-too-large' FROM generate_series(1,1000) n")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) SELECT 'old-'||n,'job:media-too-large:orphan-'||n||':download_media:orphan-'||n,'background',jsonb_build_object('code','media-too-large','section','object','title','x','consequence','c','next_step','n','operation','producer:download_media','state','current','objects',jsonb_build_array(jsonb_build_object('kind','material','id','orphan-'||n)))::text,1 FROM generate_series(1,1000,100) n")
         sql=[];store.db.set_trace_callback(sql.append)
@@ -309,7 +309,7 @@ def test_unverified_legacy_media_without_job_is_preserved(tmp_path,postgres_url)
     body=dict(code='media-too-large',section='object',title='old',consequence='c',next_step='n',state='current',operation='producer:status',objects=[dict(kind='material',id='unrelated')])
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('unrelated')")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('old','job:media-too-large:feed:download_media:ghost','background',%s,1)",(json.dumps(body),))
@@ -339,7 +339,7 @@ def test_unidentifiable_legacy_media_is_preserved_after_get(tmp_path,postgres_ur
     body=dict(code='media-too-large',section='object',title='old',consequence='c',next_step='n',state='current',operation='producer:download_media',objects=[dict(kind='material',id='unknown')])
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v2'")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('old','job:legacy-unparseable','background',%s,1)",(json.dumps(body),))
         store.problems.recover_media_problems();store.problems.snapshot(2)
         row=store.db.execute("SELECT finished,body FROM reader_problems WHERE id='old'").fetchone()
@@ -406,7 +406,7 @@ def test_recovery_hundred_moved_media_roots_is_bounded(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id) SELECT 'f-'||n FROM generate_series(1,100) n")
             store.db.execute("INSERT INTO publications(id,viewed) SELECT 'r-'||n,0 FROM generate_series(1,100) n")
             store.db.execute("INSERT INTO publications(id,viewed) VALUES ('target',0)")
@@ -479,7 +479,7 @@ def test_restart_reassigns_old_orphan_problem_when_file_now_exists(tmp_path,post
             store.problems.sync_media_problem(job,[],1)
             old=store.db.execute("SELECT id FROM reader_problems WHERE body::jsonb->>'media_job_id'=%s AND finished IS NULL",(str(job),)).fetchone()[0]
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('file','article','image:1','https://example.test/file','file','unavailable')")
-            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v2'")
         store.db.close();store=Store(tmp_path,lambda _:None,database_url=postgres_url)
         row=store.db.execute("SELECT id,body FROM reader_problems WHERE identity='job:media-too-large:feed:download_media:file' AND finished IS NULL").fetchone()
         assert row and row['id']==old and json.loads(row['body'])['objects']==[dict(kind='material',id='article')]
@@ -515,7 +515,7 @@ def test_ghost_media_legacy_with_active_publication_is_not_finished(tmp_path,pos
     body=dict(code='media-too-large',section='object',title='old',consequence='c',next_step='n',state='current',operation='producer:status',objects=[dict(kind='material',id='article')])
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','article',true)")
@@ -532,7 +532,7 @@ def test_marked_media_record_with_unrelated_object_is_preserved(tmp_path,postgre
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='media-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('article'),('unrelated')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','article',true)")

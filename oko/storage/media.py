@@ -201,7 +201,7 @@ class MediaFiles:
             if not self.current(media_id,download,problem_jobs):
                 raise ValueError('Media owner changed')
             # Capture the real owner and affected roots before the file ID changes.
-            from oko.storage.media_job_problems import managed_candidates
+            from oko.storage.media_job_problems import previous_candidates as managed_candidates
             problem_job=problem_jobs[0] if problem_jobs else None
             previous_problem=managed_candidates(store,problem_job,store.wall_clock()) if problem_job is not None else []
             if identity!=media_id:
