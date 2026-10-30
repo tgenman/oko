@@ -211,8 +211,13 @@ def test_lost_local_file_does_not_turn_into_a_normal_external_notice(tmp_path):
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         url='/api/v3/materials/'+settled(client)[0]['id']
         attachment=[media for media in client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['media'] if media['role'] == 'attachment'][0]
-        filename=attachment['url'].rsplit('/',1)[-1]
-        for path in tmp_path.rglob(filename):path.unlink()
+        from tests.support.storage import database
+        media_id=attachment['url'].rsplit('/',1)[-1]
+        with database(tmp_path) as db:
+            key=db.execute('SELECT storage_key FROM media_files WHERE id=%s',(media_id,)).fetchone()[0]
+        local_file=tmp_path/key
+        assert local_file.is_file()
+        local_file.unlink()
         restricted[0]=True
         client.post(url+'/retry');settled(client)
         assert client.get('/api/v3/status/details').json()['problems']['count']>0
