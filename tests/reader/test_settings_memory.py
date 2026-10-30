@@ -451,6 +451,27 @@ def test_processor_configuration_memory_follows_transaction_rollback(tmp_path, s
         store.db.close()
 
 
+def test_processor_configuration_rolls_back_when_processing_reconciliation_fails(tmp_path, settings_database, monkeypatch):
+    from oko.processing.llamacpp import ProcessorConfig
+    from tests.support.storage import Store
+
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    initial = ProcessorConfig(endpoint='http://localhost:9931', model='local:one', local_execution=True)
+    changed = initial.model_copy(update={'endpoint': 'http://localhost:9932'})
+    try:
+        store.configure_processor(initial)
+        version = store.settings_version()
+        def fail():
+            raise RuntimeError('reconciliation failed')
+        monkeypatch.setattr(store.processing, 'sync', fail)
+        with pytest.raises(RuntimeError, match='reconciliation failed'):
+            store.configure_processor(changed)
+        assert store.processor_config() == initial
+        assert store.settings_version() == version
+    finally:
+        store.db.close()
+
+
 def test_feed_configuration_memory_follows_edits_and_rollback(tmp_path, settings_database):
     from tests.support.storage import Store
     from oko.storage.transaction import transaction

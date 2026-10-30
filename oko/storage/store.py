@@ -15,6 +15,7 @@ from pathlib import Path
 import shutil
 import time
 from collections.abc import Callable, Generator
+from contextlib import nullcontext
 from typing import Any
 
 from oko.storage.publications import Publications
@@ -33,7 +34,7 @@ from oko.storage.processing_coordination import ProcessingState
 from oko.collection.contracts import ReplyPreview, SourceError, Material, Publication, SourceManifest
 from oko.storage.subscriptions import SubscriptionRepository
 from oko.storage.job_writes import execute as job_write
-from oko.storage.transaction import begin_write
+from oko.storage.transaction import begin_write, transaction
 from oko.storage.job_repository import JobRepository
 from oko.domain.collection import CollectionEffects
 from oko.subscriptions.history import InitialHistory
@@ -671,10 +672,11 @@ class Store:
         return ProcessorConfig.model_validate_json(value) if value else None
 
     def configure_processor(self, config: ProcessorConfig) -> bool:
-        if self.processor_config() == config:
-            return False
-        with self.db:
+        boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
+        with boundary:
             membership_graph.lock_graph(self.db)
+            if self.processor_config() == config:
+                return False
             self.subscriptions.settings.set_state('processor:llamacpp', config.model_dump_json())
             self.settings_changed()
         return True
