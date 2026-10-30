@@ -655,3 +655,47 @@ def test_viewed_status_version_changes_atomically(postgres_url, tmp_path):
         assert revision() == after
     finally:
         store.db.close()
+
+
+def test_job_status_version_tracks_queue_and_rollback(postgres_url, tmp_path):
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=postgres_url)
+    def revision():
+        return store.db.execute("SELECT version FROM reader_entities WHERE kind='status' AND identity='runtime'").fetchone()[0]
+    try:
+        store.subscriptions.ensure_demo()
+        before = revision()
+        with pytest.raises(RuntimeError, match='rollback'):
+            with transaction(store.db):
+                store.jobs.enqueue_discovery('demo')
+                assert revision() > before
+                raise RuntimeError('rollback')
+        assert revision() == before
+        store.jobs.enqueue_discovery('demo')
+        added = revision()
+        assert added > before
+        store.jobs.enqueue_discovery('demo')
+        assert revision() == added
+        job = store.jobs.next_job(0)
+        assert job is not None
+        claimed = revision()
+        assert claimed > added
+        with store.db:
+            store.jobs.finish(job)
+        assert revision() > claimed
+    finally:
+        store.db.close()
+
+
+def test_repeated_fetch_enqueue_keeps_status_revision(postgres_url, tmp_path):
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=postgres_url)
+    try:
+        with store.db:
+            store.jobs.enqueue_fetch('item')
+        before = store.db.execute("SELECT version FROM reader_entities WHERE kind='status' AND identity='runtime'").fetchone()[0]
+        with store.db:
+            store.jobs.enqueue_fetch('item')
+        assert store.db.execute("SELECT version FROM reader_entities WHERE kind='status' AND identity='runtime'").fetchone()[0] == before
+    finally:
+        store.db.close()

@@ -539,3 +539,12 @@
   types; nine Playwright scenarios passed, and the viewed shared-publication
   screenshot was inspected. Job status triggers, dirty queues, the final schema
   and full review remain open.
+- Migration 048 removes the last three Job status triggers. Explicit Job writes
+  update status freshness in the same transaction; repeated unchanged fetch
+  admission and unchanged recovery deadlines avoid a false status update. The
+  broad lifecycle and SQL-cost run passed 233 tests. An added no-op test exposed
+  a false invalidation; after correction, 97 lifecycle and recovery tests passed.
+  Types and nine Playwright scenarios passed; the collection screenshot was
+  inspected. The fresh version 48 schema has 23 tables and zero non-internal
+  triggers. This is not completion: dirty queues, the target physical schema,
+  problem reconciliation, full validation and independent review remain open.

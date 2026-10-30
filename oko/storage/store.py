@@ -32,6 +32,7 @@ from oko.storage.filter_results import FilterResults
 from oko.storage.processing_coordination import ProcessingState
 from oko.collection.contracts import ReplyPreview, SourceError, Material, Publication, SourceManifest
 from oko.storage.subscriptions import SubscriptionRepository
+from oko.storage.job_writes import execute as job_write
 from oko.storage.transaction import begin_write
 from oko.storage.job_repository import JobRepository
 from oko.domain.collection import CollectionEffects
@@ -95,8 +96,8 @@ class Store:
                 (root / name).mkdir(exist_ok=True)
             with self.db:
                 collection_jobs.interrupt(self)
-                self.db.execute("UPDATE jobs SET status='pending', generation=generation+1 WHERE status='running'")
-                self.db.execute("UPDATE jobs SET next = 0 WHERE status = 'pending'")
+                job_write(self.db, "UPDATE jobs SET status='pending', generation=generation+1 WHERE status='running'")
+                job_write(self.db, "UPDATE jobs SET next = 0 WHERE status = 'pending' AND next IS DISTINCT FROM 0")
             collection_jobs.recover(self)
             self.recover_files()
             if self.db.execute("SELECT 1 FROM items_by_feed WHERE feed_id = 'demo' LIMIT 1").fetchone():
@@ -515,7 +516,7 @@ class Store:
             selected = [r[0] for r in self.db.execute("""SELECT i.id FROM feed_publications m JOIN items i ON i.id=m.publication_id
                 WHERE m.feed_id=%s AND i.processing_metadata::jsonb->'_pass'->>'feed_id'=%s""", (feed,feed))]
             if selected:
-                self.db.execute("""UPDATE jobs SET status='cancelled',generation=generation+1,input_snapshot=NULL
+                job_write(self.db, """UPDATE jobs SET status='cancelled',generation=generation+1,input_snapshot=NULL
                     WHERE item=ANY(%s) AND kind IN ('filter','theses') AND status!='done'""", (selected,))
                 self.db.execute("UPDATE items SET processing_metadata=(processing_metadata::jsonb-'_pass')::text WHERE id=ANY(%s)", (selected,))
             if self.db.execute("UPDATE feeds SET connection = 'deleting' WHERE id = %s AND connection IS DISTINCT FROM 'deleting'", (feed,)).rowcount:
@@ -541,7 +542,7 @@ class Store:
         self.db.after_commit(lambda: self.fault('after_feed_delete_commit'))
 
     def _remember_cleanup_owner(self, item: str, feed: str) -> None:
-        self.db.execute("""INSERT INTO jobs(kind,item,payload)
+        job_write(self.db, """INSERT INTO jobs(kind,item,payload)
             SELECT 'delete',id,jsonb_build_object('cleanup_feed',%s::text)::text FROM items WHERE id=%s AND viewed=1
             ON CONFLICT(kind,item) DO UPDATE SET payload=jsonb_set(jobs.payload::jsonb,'{cleanup_feed}',to_jsonb(%s::text))::text""", (feed,item,feed))
 
@@ -674,7 +675,7 @@ class Store:
         # Future execution choice does not invalidate inputs or cancel work.
         with self.db:
             self.subscriptions.settings.set_state('processor:codex', config.model_dump_json())
-            self.db.execute("""UPDATE jobs SET status='pending',next=0,error=NULL,problem_code=NULL,
+            job_write(self.db, """UPDATE jobs SET status='pending',next=0,error=NULL,problem_code=NULL,
                 payload=(payload::jsonb-'preclaim_blocked')::text
                 WHERE status='pending' AND problem_code='processor-config' AND payload::jsonb->>'preclaim_blocked'='true'""")
 

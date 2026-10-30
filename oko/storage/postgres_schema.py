@@ -52,4 +52,5 @@ MIGRATIONS = (
     Migration(45, 'action-status', (Path(__file__).parent / 'postgres' / '045-action-status.sql').read_text()),
     Migration(46, 'problem-status', (Path(__file__).parent / 'postgres' / '046-problem-status.sql').read_text()),
     Migration(47, 'item-status', (Path(__file__).parent / 'postgres' / '047-item-status.sql').read_text()),
+    Migration(48, 'job-status', (Path(__file__).parent / 'postgres' / '048-job-status.sql').read_text()),
 )
