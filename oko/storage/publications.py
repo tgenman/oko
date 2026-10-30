@@ -21,6 +21,7 @@ from oko.collection.adapters import ExternalReference
 from oko.collection.telegram.adapter import reference
 from oko.storage import publication_links,material_read
 from oko.storage.reading import reading_value
+from oko.storage.reader_status import changed as status_changed
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
@@ -120,7 +121,8 @@ class Publications:
         marked = [row[0] for row in db.execute('SELECT id FROM items_by_feed WHERE feed_id=%s AND source_deleted', (feed,))]
         self.set_source_deleted(marked, False)
         db.execute("UPDATE items SET status = 'pending_collection' WHERE id IN (SELECT id FROM unviewed_items_by_feed WHERE feed_id = %s AND viewed = 0)",(feed,))
-        db.execute('DELETE FROM telegram_read_state WHERE feed = %s',(feed,))
+        if db.execute('DELETE FROM telegram_read_state WHERE feed = %s',(feed,)).rowcount:
+            status_changed(db)
 
     def plan(self, feed: str, publications: list[Publication]) -> dict[str, DiscoveryProjection]:
         """Prepare cache output before the short page acceptance transaction."""

@@ -2,6 +2,7 @@
 import json
 from oko.storage.reading import reading_value
 from oko.storage.source_configuration import changed as source_changed
+from oko.storage.reader_status import changed as status_changed
 from dataclasses import dataclass
 from oko.collection.contracts import SourceError
 from oko.collection.telegram.contracts import HistoryEnvelope
@@ -53,18 +54,26 @@ class ReadSync:
     def observed(self, feed: str, members: tuple[int, ...], cursor: str) -> None:
         db = self.store.db
         envelope = HistoryEnvelope.decode(cursor, adapter='client')
+        previous = db.execute('SELECT since,initial FROM telegram_read_state WHERE feed=%s', (feed,)).fetchone()
         db.execute('INSERT INTO telegram_read_state ( feed , since ) VALUES ( %s , %s ) ON CONFLICT (feed) DO UPDATE SET since=COALESCE(telegram_read_state.since,excluded.since)',
                    (feed, envelope.selection.since))
         selection = envelope.selection
+        boundary_changed = False
         if selection.scan_complete and selection.oldest:
             if db.execute('UPDATE telegram_read_state SET initial = %s WHERE feed = %s AND initial IS NULL', (selection.oldest - 1, feed)).rowcount:
                 source_changed(db)
+                boundary_changed = True
         db.execute('UPDATE telegram_read_state SET signature = NULL WHERE feed = %s', (feed,))
         # Re-observing an unchanged page still requires checking the remote
         # read frontier. Member upserts alone may not change any row.
         self.mark_feed(feed)
-        db.executemany('INSERT INTO telegram_read_members ( feed , member ) VALUES ( %s , %s ) ON CONFLICT ( feed , member ) DO UPDATE SET missing = 0',
-                       [(feed, member) for member in members])
+        member_changed = False
+        if members:
+            member_changed = db.execute('''INSERT INTO telegram_read_members(feed,member)
+                SELECT %s,unnest(%s::bigint[]) ON CONFLICT(feed,member) DO UPDATE SET missing=0
+                WHERE telegram_read_members.missing IS DISTINCT FROM 0 RETURNING member''', (feed,sorted(set(members)))).fetchone() is not None
+        if previous is None or previous['since'] is None or boundary_changed or member_changed:
+            status_changed(db)
 
     def eligible(self, feed: str, members: list[int], reason: str) -> None:
         if reason not in ('saved', 'viewed'):
@@ -77,6 +86,7 @@ class ReadSync:
             RETURNING member''', (feed, sorted(set(members)))).fetchone()
         if changed:
             self.mark_feed(feed)
+            status_changed(self.store.db)
 
     def saved_publication(self, item: str) -> None:
         db = self.store.db
@@ -161,17 +171,23 @@ class ReadSync:
 
 
     def completed(self, feed: str, plan: ReadPlan, confirmed: int) -> None:
-        previous = self.store.db.execute('SELECT initial FROM telegram_read_state WHERE feed=%s', (feed,)).fetchone()
-        self.store.db.executemany('UPDATE telegram_read_members SET missing = 1 WHERE feed = %s AND member = %s',[(feed,member) for member in plan.missing])
+        previous = self.store.db.execute('SELECT initial,confirmed,waiting,error FROM telegram_read_state WHERE feed=%s', (feed,)).fetchone()
+        member_changed = False
+        if plan.missing:
+            member_changed = bool(self.store.db.execute('UPDATE telegram_read_members SET missing=1 WHERE feed=%s AND member=ANY(%s) AND missing IS DISTINCT FROM 1', (feed,list(plan.missing))).rowcount)
         self.store.db.execute('UPDATE telegram_read_state SET initial = COALESCE ( initial , %s ) , confirmed = oko_max ( confirmed , %s ) , waiting = %s , error = NULL WHERE feed = %s',(plan.initial,confirmed,plan.waiting,feed))
         if previous is not None and previous[0] is None:
             source_changed(self.store.db)
+        current = self.store.db.execute('SELECT initial,confirmed,waiting,error FROM telegram_read_state WHERE feed=%s', (feed,)).fetchone()
+        if member_changed or previous != current:
+            status_changed(self.store.db)
         if plan.missing:
             self.mark_feed(feed)
 
     def failed(self, feed: str, label: str) -> None:
         with self.store.db:
-            self.store.db.execute('UPDATE telegram_read_state SET error = %s WHERE feed = %s', (label, feed))
+            if self.store.db.execute('UPDATE telegram_read_state SET error = %s WHERE feed = %s AND error IS DISTINCT FROM %s', (label,feed,label)).rowcount:
+                status_changed(self.store.db)
 
     @reading_value
     def statuses(self) -> list[dict[str, Any]]:

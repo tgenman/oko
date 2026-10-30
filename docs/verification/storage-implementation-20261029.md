@@ -456,3 +456,11 @@
   tests; types and eight Playwright scenarios passed, and the history screenshot
   was inspected. Version 35 has 23 tables and 36 triggers. Status GET writes and
   processing queues still require the remaining implementation.
+- Migration 036 moves Telegram read-state and member status signals into their
+  Python owners. Inserts, changed eligibility, confirmed boundaries, missing
+  messages, errors and deletion update status in the owning transaction; no-op
+  and rollback behavior are covered. Six triggers/functions were removed.
+- The affected Telegram, status, migration and recovery suites passed 238 tests;
+  types and ten Playwright scenarios passed, and a Telegram access screenshot was
+  inspected. Version 36 has 23 tables and 30 triggers. The remaining status
+  owners, processing dirty queues and final review are still open.

@@ -321,6 +321,32 @@ def test_history_member_status_signal_is_idempotent_and_rolls_back(tmp_path, set
         store.db.close()
 
 
+def test_telegram_read_status_signal_is_idempotent_and_rolls_back(tmp_path, settings_database):
+    from tests.support.storage import Store
+    from oko.storage.transaction import transaction
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        with transaction(store.db):
+            store.db.execute("INSERT INTO feeds(id,kind,transport,connection) VALUES ('synthetic','telegram','telegram','connected')")
+        before = store.read_versions.version('status','runtime')['version']
+        with transaction(store.db):
+            store.read_sync.eligible('synthetic',[11],'viewed')
+        viewed = store.read_versions.version('status','runtime')['version']
+        assert viewed > before
+        with transaction(store.db):
+            store.read_sync.eligible('synthetic',[11],'viewed')
+        assert store.read_versions.version('status','runtime')['version'] == viewed
+        with pytest.raises(ValueError,match='synthetic rollback'):
+            with transaction(store.db):
+                store.read_sync.eligible('synthetic',[29],'viewed')
+                assert store.read_versions.version('status','runtime')['version'] > viewed
+                raise ValueError('synthetic rollback')
+        assert store.read_versions.version('status','runtime')['version'] == viewed
+        assert store.db.execute("SELECT 1 FROM telegram_read_members WHERE feed='synthetic' AND member=29").fetchone() is None
+    finally:
+        store.db.close()
+
+
 def test_folder_settings_follow_rollback_and_new_folder_identity(tmp_path, settings_database):
     from tests.support.storage import Store
     from oko.storage.transaction import transaction

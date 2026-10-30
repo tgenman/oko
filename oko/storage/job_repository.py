@@ -684,7 +684,7 @@ class JobRepository:
                 deleted = self.store.db.execute(f'DELETE FROM {table} WHERE feed = %s', (feed,)).rowcount
                 if table=='initial_history' and deleted:
                     source_changed(self.store.db)
-                if table=='history_members' and deleted:
+                if table in ('history_members','telegram_read_members','telegram_read_state') and deleted:
                     status_changed(self.store.db)
             self.store.db.execute('UPDATE jobs SET feed_id=NULL, collection_attempt=NULL WHERE feed_id=%s AND collection_attempt IS NOT NULL', (feed,))
             self.store.subscriptions.clear_settings('feed', feed)
