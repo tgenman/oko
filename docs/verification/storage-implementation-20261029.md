@@ -427,3 +427,10 @@
   tests; types and six Playwright scenarios passed. A history-outcomes screenshot
   was added and inspected. Version 31 has 23 tables and 51 triggers; dirty queues,
   status projections and final project verification remain open.
+- Migration 032 removes three settings-to-status triggers. The status ETag now
+  includes the transaction-owned source revision, so a settings change is
+  reflected without an extra status-version write.
+- The affected status, settings, migration, cost and recovery suites passed 166
+  tests; types and ten Playwright scenarios passed, and a status screenshot was
+  inspected. Version 32 has 23 tables and 48 triggers. GET reconciliation of
+  problem records and other status version triggers remain to move.

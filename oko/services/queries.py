@@ -32,6 +32,10 @@ class VersionQueries:
         return dict(row) if row else None
 
     @repository_access
+    def source_revision(self) -> int:
+        return self._storage().subscriptions.source_revision()
+
+    @repository_access
     def time_boundaries(self) -> tuple[float | None, float | None, float | None]:
         from oko.storage.reading import reader_now, reader_wall
         store = self._storage()

@@ -105,12 +105,14 @@ def register(app: FastAPI, runtime: ReaderApplication, lifetime: Lifetime, wall_
         nonlocal status_storage,status_version,status_changed
         queries=runtime.final_queries if runtime.has_storage and runtime._error is None else None
         boundaries = None
+        source_revision = None
         if queries is not None:
             status_storage=queries.versions.identity
             version=queries.versions.version('status','runtime')
             if version is not None:status_version=version['version'];status_changed=version['changed']
             boundaries = queries.versions.time_boundaries()
-        stamp=json.dumps([status_storage,status_version,details,metadata(),boundaries],sort_keys=True,separators=(',',':')).encode()
+            source_revision = queries.versions.source_revision()
+        stamp=json.dumps([status_storage,status_version,details,metadata(),boundaries,source_revision],sort_keys=True,separators=(',',':')).encode()
         return '"'+hashlib.sha256(stamp).hexdigest()+'"'
 
     def status_response(request: Request, details: bool) -> Response:

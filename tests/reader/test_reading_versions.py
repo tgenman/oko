@@ -105,6 +105,17 @@ def test_originals_inheritance_changes_publication_etag(tmp_path):
         assert override.status_code == 200 and override.json()['originals'] is True
 
 
+def test_status_etag_tracks_settings_without_status_trigger(tmp_path):
+    library(tmp_path,[1])
+    app=traced_app(tmp_path)
+    with TestClient(app,headers=HEADERS) as client:
+        wait_for_recovery(app)
+        first=client.get('/api/v3/status/details')
+        assert client.patch('/api/v3/settings/oko/global',json={'originals':False}).status_code==200
+        changed=client.get('/api/v3/status/details',headers={'If-None-Match':first.headers['ETag']})
+        assert changed.status_code==200 and changed.headers['ETag']!=first.headers['ETag']
+
+
 def test_due_fetch_changes_publication_etag_without_dispatch(tmp_path):
     _,items=library(tmp_path,[1])
     clock=[0.0]
