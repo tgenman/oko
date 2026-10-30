@@ -237,7 +237,7 @@ class Store:
             enrolled=set(envelope.selection.enrolled_ids) if envelope else set(selection.get('history_enroll',[]))
             ordered=source_order
             known={ExternalKey(platform,row['external_id']):row['source_order'] for platform in {key.platform for key in ordered}
-                for row in self.db.execute('SELECT external_id , source_order FROM items_read WHERE platform = %s AND source_order IS NOT NULL AND external_id = ANY(%s)',
+                for row in self.db.execute('SELECT external_id , source_order FROM publications WHERE platform = %s AND source_order IS NOT NULL AND external_id = ANY(%s)',
                     (platform.value,[key.external_id for key in ordered if key.platform==platform]))}
             anchor=next((index for index in reversed(range(len(ordered))) if ordered[index] in known),None)
             # Positive ranks leave room for later uploads and earlier history.
@@ -302,7 +302,7 @@ class Store:
                 if envelope:
                     self.subscriptions.history.telegram_state(feed,envelope.selection)
                 for item in history_items:
-                    row=expect_row(self.db.execute('SELECT complete FROM items_read WHERE id = %s',(item,)).fetchone())
+                    row=expect_row(self.db.execute('SELECT complete FROM publications WHERE id = %s',(item,)).fetchone())
                     if self.publications.source_deleted(item):
                         self.subscriptions.history.failed(item,unavailable=True)
                     elif row['complete']:
@@ -360,7 +360,7 @@ class Store:
         return previous.post_web_unavailable!=current.post_web_unavailable or (not current.post_web_unavailable and previous.post!=current.post) or {r.key:r.external for r in previous.resources if r.status=='external'}!={r.key:r.external for r in current.resources if r.status=='external'}
 
     def _has_unviewed(self, item: str) -> bool:
-        return self.db.execute('SELECT 1 FROM items_read WHERE id = %s AND viewed = 0',(item,)).fetchone() is not None
+        return self.db.execute('SELECT 1 FROM publications WHERE id = %s AND viewed = 0',(item,)).fetchone() is not None
 
 
     @reading_value
@@ -425,7 +425,7 @@ class Store:
             missing=[row for row in media if row['storage_key'] and existing_file(self.root,row['storage_key']) is None or row['status']=='unavailable' and row['reason']=='Локальный файл вложения недоступен']
             if missing:
                 error=SourceError('Локальный файл вложения недоступен',code='media-unavailable',retryable=False)
-                content=json.loads(expect_row(self.db.execute('SELECT content FROM items_read WHERE id = %s',(item,)).fetchone())[0])
+                content=json.loads(expect_row(self.db.execute('SELECT content FROM publications WHERE id = %s',(item,)).fetchone())[0])
                 content['extra']['_reader']['source_manifest']['post_web_unavailable']=True
                 for row in missing:
                     row.update(status='unavailable',reason=error.label,storage_key=None)

@@ -142,7 +142,7 @@ class ProcessingState:
                 begin_write(self.store.db)
                 self.store.db.after_rollback(lambda: self._repairs.add(item))
                 memberships.lock_graph(self.store.db)
-                row = self.store.db.execute("SELECT content FROM items_read WHERE id=%s AND viewed=0", (item,)).fetchone()
+                row = self.store.db.execute("SELECT content FROM publications WHERE id=%s AND viewed=0", (item,)).fetchone()
                 content = json.loads(row[0]) if row else {}
                 identity = youtube_media.subtitle_id(content)
                 media = self.store.db.execute("SELECT storage_key FROM media_files WHERE id=%s AND publication_id=%s AND status='ready'", (identity,item)).fetchone() if identity else None

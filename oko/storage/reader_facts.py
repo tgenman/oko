@@ -67,11 +67,11 @@ class ReaderFacts:
         return publication_links.reading(store,identity,store.publications.original(identity)[1])
 
     def was_viewed(self, identity: str) -> bool:
-        row=self.storage().db.execute('SELECT viewed FROM items_read WHERE id = %s', (identity,)).fetchone()
+        row=self.storage().db.execute('SELECT viewed FROM publications WHERE id = %s', (identity,)).fetchone()
         return row is None or bool(row['viewed'])
 
     def viewed_ids(self) -> list[str]:
-        return [row['id'] for row in self.storage().db.execute('SELECT id FROM items_read WHERE viewed = 1')]
+        return [row['id'] for row in self.storage().db.execute('SELECT id FROM publications WHERE viewed = 1')]
 
     def feed_members(self, identity: str) -> set[str]:
         return {row[0] for row in self.storage().db.execute('''SELECT publication_id FROM feed_publications WHERE feed_id=%s

@@ -69,7 +69,7 @@ class ReadingComposition:
             count(DISTINCT m.publication_id) AS visible FROM feed_publications m JOIN feeds f ON f.id=m.feed_id
             JOIN publications i ON i.id=m.publication_id
             WHERE i.viewed=0 AND i.status IS DISTINCT FROM 'filter_out' GROUP BY f.folder_id''')}
-        visible=expect_row(self._store.db.execute("SELECT count(*) FROM items_read i WHERE i.viewed=0 AND i.status IS DISTINCT FROM 'filter_out' AND EXISTS (SELECT 1 FROM feed_publications m WHERE m.publication_id=i.id)").fetchone())[0]
+        visible=expect_row(self._store.db.execute("SELECT count(*) FROM publications i WHERE i.viewed=0 AND i.status IS DISTINCT FROM 'filter_out' AND EXISTS (SELECT 1 FROM feed_publications m WHERE m.publication_id=i.id)").fetchone())[0]
         return dict(folders=[dict(folder,count=folder_counts.get(folder['id'],0)) for folder in folders],
                     feeds=[dict(feed,count=feed_counts[feed['id']]['visible'] if feed['id'] in feed_counts else 0,
                                 has_unviewed=bool(feed_counts[feed['id']]['unviewed']) if feed['id'] in feed_counts else False) for feed in feeds],
@@ -114,5 +114,5 @@ class ReadingComposition:
             batch = selected[start:start+400]
             marks = ','.join('%s' for _ in batch)
             members.update(row[0] for row in self._store.db.execute(
-                f'SELECT id FROM items_read WHERE viewed = 0 AND id IN ( {marks} )', batch))
+                f'SELECT id FROM publications WHERE viewed = 0 AND id IN ( {marks} )', batch))
         return members

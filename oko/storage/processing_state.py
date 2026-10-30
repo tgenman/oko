@@ -71,7 +71,7 @@ class ProcessingRepository:
         self.store.publications.status(item)
 
     def regenerate(self, item: str, kind: Kind) -> bool:
-        row=self.store.db.execute('SELECT processing_metadata FROM items_read WHERE id = %s',(item,)).fetchone()
+        row=self.store.db.execute('SELECT processing_metadata FROM publications WHERE id = %s',(item,)).fetchone()
         if row and json.loads(row[0]).get('filter' if kind=='filter' else 'summary',{}).get('reason')=='no_input':return False
         return True
 

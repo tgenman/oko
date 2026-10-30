@@ -996,3 +996,13 @@ regression passed 259 tests, including bounded reading-cost checks; the task
 checkout passed 217 migration and transaction tests. Mypy passed on 157 files.
 Eight Playwright collection/status scenarios passed in the task checkout; the
 collection screenshot was inspected. No working database was migrated.
+
+
+Queries that use only publication fields now read `publications` directly;
+queries requiring the computed feed still use `items_read`. `source_id` remains
+unchanged. An expanded synthetic run had 186 passes and one test failure because
+the graph-lock test matched the old SQL relation name. After updating that
+assertion, the affected transaction suites passed 118 tests; a checkout run of
+transaction, status and reading suites passed 60. Mypy passed on 157 files.
+Twenty-six Playwright material scenarios passed and the opened-publication
+screenshot was inspected. The `items_read` view itself remains in use.

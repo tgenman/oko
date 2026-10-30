@@ -857,7 +857,7 @@ def test_discovery_locks_graph_before_identity_resolution(postgres_url, tmp_path
         with transaction(store.db):
             store.collect_discovery([packet],'{}')
         lock = next(i for i,query in enumerate(statements) if 'pg_advisory_xact_lock' in query)
-        identity = next(i for i,query in enumerate(statements) if 'SELECT id , source_id FROM items_read' in query)
+        identity = next(i for i,query in enumerate(statements) if 'SELECT id , source_id FROM publications' in query)
         assert lock < identity
     finally:
         store.db.set_trace_callback(None)

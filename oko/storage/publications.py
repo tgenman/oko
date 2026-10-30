@@ -135,7 +135,7 @@ class Publications:
             if publication.id in plans:
                 continue
             source_id = feed+':'+publication.id
-            existing = self.store.db.execute('SELECT id , source_id FROM items_read WHERE ( platform = %s AND external_id = %s ) OR source_id = %s',
+            existing = self.store.db.execute('SELECT id , source_id FROM publications WHERE ( platform = %s AND external_id = %s ) OR source_id = %s',
                 (ref.key.platform.value, ref.key.external_id, source_id)).fetchall()
             if not existing and publication.members:
                 placeholders = ','.join('%s' for _ in publication.members)
@@ -146,7 +146,7 @@ class Publications:
                 continue
             item=existing[0]['id'] if existing else str(uuid4())
             plan=DiscoveryProjection(item,existing[0]['source_id'] if existing else source_id)
-            current=self.store.db.execute('SELECT viewed , members , complete FROM items_read WHERE id = %s',(item,)).fetchone() if existing else None
+            current=self.store.db.execute('SELECT viewed , members , complete FROM publications WHERE id = %s',(item,)).fetchone() if existing else None
             described=publication.teaser.adapter_content if publication.teaser else None
             album_changed=bool(current and described and ref.key.platform.value=='telegram'
                 and described.content.get('extra',{}).get('telegram',{}).get('album_id') is not None
@@ -166,7 +166,7 @@ class Publications:
         header=reading_header(material)
         if material.adapter_content and 'blocks' in material.adapter_content.content:
             return self._prepare_adapter(item,material,header)
-        row=self.store.db.execute('SELECT content FROM items_read WHERE id = %s',(item,)).fetchone()
+        row=self.store.db.execute('SELECT content FROM publications WHERE id = %s',(item,)).fetchone()
         if row and row[0]!='{}':
             content=json.loads(row[0])
             content['extra'].update(_reader=header,_collection_reason=material.reason)
@@ -188,7 +188,7 @@ class Publications:
         identities={}
         known={row['resource_key']:dict(row) for row in self.store.db.execute('SELECT * FROM media_files WHERE publication_id = %s',(item,))}
         youtube=content.get('extra',{}).get('youtube')
-        old_content=self.store.db.execute('SELECT content FROM items_read WHERE id = %s',(item,)).fetchone() if youtube is not None else None
+        old_content=self.store.db.execute('SELECT content FROM publications WHERE id = %s',(item,)).fetchone() if youtube is not None else None
         old_youtube=json.loads(old_content[0]).get('extra',{}).get('youtube',{}) if old_content else {}
         for ref in value.media:
             previous=known.get(ref.key)
@@ -258,7 +258,7 @@ class Publications:
         from oko.collection.adapters import ExternalKey,Platform
         links=content['extra'].pop('_links',[])
         links_changed=publication_links.sync(store,item,tuple(ExternalReference(ExternalKey(Platform(ref['platform']),ref['external_id']),ref['url']) for ref in links),effects)
-        old = expect_row(store.db.execute('SELECT content , platform FROM items_read WHERE id = %s', (item,)).fetchone())
+        old = expect_row(store.db.execute('SELECT content , platform FROM publications WHERE id = %s', (item,)).fetchone())
         previous = json.loads(old['content'])
         same = not links_changed and publication_input.blocks(previous)==publication_input.blocks(content) and previous.get('extra',{}).get('_reader',{}).get('title')==content['extra']['_reader']['title']
         if 'youtube' in content.get('extra',{}):
@@ -299,7 +299,7 @@ class Publications:
             (json.dumps(content, ensure_ascii=False), json.dumps([r['id'] for r in media]),
              content['extra']['_reader']['title'], 'pending_filtering', item))
         if previous and old['platform'] != 'youtube' and old_header.get('title') != content['extra']['_reader']['title']:
-            metadata_row = expect_row(store.db.execute('SELECT processing_metadata FROM items_read WHERE id = %s', (item,)).fetchone())
+            metadata_row = expect_row(store.db.execute('SELECT processing_metadata FROM publications WHERE id = %s', (item,)).fetchone())
             metadata = json.loads(metadata_row[0])
             for operation in ('filter', 'summary'):
                 if operation in metadata:
@@ -307,7 +307,7 @@ class Publications:
             store.db.execute('UPDATE publications SET processing_metadata=%s WHERE id=%s',
                              (json.dumps(metadata, ensure_ascii=False), item))
         if same and previous:
-            filtered_row=expect_row(store.db.execute('SELECT filtered_content FROM items_read WHERE id = %s',(item,)).fetchone())
+            filtered_row=expect_row(store.db.execute('SELECT filtered_content FROM publications WHERE id = %s',(item,)).fetchone())
             filtered=json.loads(filtered_row[0])
             if filtered:
                 result=dict(hidden=filtered.get('hidden',False),reason=filtered['reason'],removed=[r['text'] for r in filtered['removed']])
@@ -332,7 +332,7 @@ class Publications:
 
     def accept_result(self, item: str, kind: str, signature: str, result: dict[str,Any], origin: dict[str,Any] | None) -> None:
         """Publish a validated result and its provenance in the caller's transaction."""
-        row=expect_row(self.store.db.execute('SELECT processing_metadata, title, platform FROM items_read WHERE id = %s',(item,)).fetchone())
+        row=expect_row(self.store.db.execute('SELECT processing_metadata, title, platform FROM publications WHERE id = %s',(item,)).fetchone())
         content=publication_input.content(self.store,item)
         metadata=json.loads(row[0])
         operation='filter' if kind=='filter' else 'summary'
@@ -353,12 +353,12 @@ class Publications:
     def complete_empty(self, item: str, kind: str, signature: str) -> None:
         result=dict(hidden=False,removed=[],reason='Нет текста для обработки') if kind=='filter' else dict(points=[])
         self.accept_result(item,kind,signature,result,None)
-        row=expect_row(self.store.db.execute('SELECT processing_metadata FROM items_read WHERE id = %s',(item,)).fetchone())
+        row=expect_row(self.store.db.execute('SELECT processing_metadata FROM publications WHERE id = %s',(item,)).fetchone())
         metadata=json.loads(row[0])
         metadata['filter' if kind=='filter' else 'summary']['reason']='no_input'
         self.store.db.execute('UPDATE publications SET processing_metadata = %s WHERE id = %s',(json.dumps(metadata,ensure_ascii=False),item))
         if kind=='filter':
-            row=expect_row(self.store.db.execute('SELECT filtered_content FROM items_read WHERE id = %s',(item,)).fetchone())
+            row=expect_row(self.store.db.execute('SELECT filtered_content FROM publications WHERE id = %s',(item,)).fetchone())
             filtered=json.loads(row[0])
             filtered['blocks']=[]
             self.store.db.execute('UPDATE publications SET filtered_content = %s WHERE id = %s',(json.dumps(filtered,ensure_ascii=False),item))
