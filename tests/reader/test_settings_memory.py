@@ -139,6 +139,38 @@ def test_settings_source_revision_tracks_real_changes_and_rolls_back(tmp_path, s
         store.db.close()
 
 
+def test_feed_source_revision_changes_only_for_source_configuration(tmp_path, settings_database):
+    from tests.support.storage import Store
+    from oko.storage.transaction import transaction
+    from oko.subscriptions.subscriptions import AddFeed, FeedPatch
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        before = store.subscriptions.source_revision()
+        feed = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/feed',title='First',folder='Folder',verification='synthetic'))
+        created = store.subscriptions.source_revision()
+        assert created > before
+        store.subscriptions.update_feed(feed['id'],FeedPatch(title='Renamed'))
+        assert store.subscriptions.source_revision() == created
+        with transaction(store.db):
+            destination = store.subscriptions.ensure_folder('Other')
+        with pytest.raises(ValueError,match='synthetic rollback'):
+            with transaction(store.db):
+                store.subscriptions.update_feed(feed['id'],FeedPatch(folder_id=destination))
+                assert store.subscriptions.source_revision() > created
+                raise ValueError('synthetic rollback')
+        assert store.subscriptions.source_revision() == created
+        store.subscriptions.update_feed(feed['id'],FeedPatch(folder_id=destination))
+        moved = store.subscriptions.source_revision()
+        store.subscriptions.update_feed(feed['id'],FeedPatch(folder_id=feed['folder_id']))
+        assert store.subscriptions.source_revision() > moved > created
+        restored = store.subscriptions.source_revision()
+        with transaction(store.db):
+            store.remove_feed(feed['id'])
+        assert store.subscriptions.source_revision() > restored
+    finally:
+        store.db.close()
+
+
 def test_folder_settings_follow_rollback_and_new_folder_identity(tmp_path, settings_database):
     from tests.support.storage import Store
     from oko.storage.transaction import transaction

@@ -33,4 +33,5 @@ MIGRATIONS = (
     Migration(26, 'unused-job-versions', (Path(__file__).parent / 'postgres' / '026-unused-job-versions.sql').read_text()),
     Migration(27, 'card-job-versions', (Path(__file__).parent / 'postgres' / '027-card-job-versions.sql').read_text()),
     Migration(28, 'settings-source-revision', (Path(__file__).parent / 'postgres' / '028-settings-source-revision.sql').read_text()),
+    Migration(29, 'feed-source-revision', (Path(__file__).parent / 'postgres' / '029-feed-source-revision.sql').read_text()),
 )

@@ -19,6 +19,7 @@ from typing import Any
 from oko.storage.publications import Publications
 from oko.storage.media import MediaFiles
 from oko.storage.reader_versions import ReaderVersions
+from oko.storage.source_configuration import changed as source_changed
 from oko.storage.postgres_connection import PostgresConnection
 from oko.storage.problems import Problems
 from oko.storage.youtube import YouTubeAccess
@@ -502,7 +503,8 @@ class Store:
                 self.db.execute("""UPDATE jobs SET status='cancelled',generation=generation+1,input_snapshot=NULL
                     WHERE item=ANY(%s) AND kind IN ('filter','theses') AND status!='done'""", (selected,))
                 self.db.execute("UPDATE items SET processing_metadata=(processing_metadata::jsonb-'_pass')::text WHERE id=ANY(%s)", (selected,))
-            self.db.execute("UPDATE feeds SET connection = 'deleting' WHERE id = %s", (feed,))
+            if self.db.execute("UPDATE feeds SET connection = 'deleting' WHERE id = %s AND connection IS DISTINCT FROM 'deleting'", (feed,)).rowcount:
+                source_changed(self.db)
             shared=[r[0] for r in self.db.execute('SELECT id FROM items_by_feed WHERE platform IS NOT NULL AND feed_id = %s',(feed,))]
             removed = [row[0] for row in self.db.execute('DELETE FROM feed_publications WHERE feed_id = %s RETURNING publication_id',(feed,))]
             self.read_versions.memberships_changed(removed)

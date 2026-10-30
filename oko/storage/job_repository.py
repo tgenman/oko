@@ -8,6 +8,7 @@ from typing import Any
 from collections.abc import Callable,Iterator
 from contextlib import contextmanager
 from oko.storage.transaction import transaction
+from oko.storage.source_configuration import changed as source_changed
 from typing import TYPE_CHECKING
 from oko.storage import collection_jobs, material_read, processing_input
 from oko.collection.adapters import AdapterIssue, AdapterErrorKind
@@ -684,7 +685,8 @@ class JobRepository:
             self.store.subscriptions.clear_settings('feed', feed)
             self.store.db.execute('DELETE FROM state WHERE key = %s', ('feed-status:'+feed,))
             self.store.subscriptions.telegram.release(feed)
-            self.store.db.execute('DELETE FROM feeds WHERE id = %s', (feed,))
+            if self.store.db.execute('DELETE FROM feeds WHERE id = %s', (feed,)).rowcount:
+                source_changed(self.store.db)
 
 
     def delete(self, job: Job) -> None:

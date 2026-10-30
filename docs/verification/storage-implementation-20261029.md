@@ -403,3 +403,11 @@
   passed 229 tests; types and five Playwright scenarios passed, and a settings
   screenshot was inspected. Version 28 has 23 tables and 64 triggers. Other
   source-configuration triggers and the remaining project work are still open.
+- Migration 029 moves feed source-revision changes to the Python mutation
+  owners, including creation, source settings, access change and deletion.
+  Rename alone does not advance the revision; source changes, A → B → A and
+  rollback are tested. Three feed triggers/functions were removed.
+- The affected migration, settings, Telegram, shared-feed, worker and recovery
+  suites passed 246 tests; types and eight Playwright scenarios passed, and a
+  Telegram access screenshot was inspected. Version 29 has 23 tables and 61
+  triggers. Other revision owners and the complete redesign remain unfinished.

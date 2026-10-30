@@ -678,3 +678,12 @@ def test_settings_source_revision_triggers_are_removed(connections):
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname LIKE 'source_configuration_settings_%'").fetchone() == (0,)
         verify(db, MIGRATIONS)
+
+
+def test_feed_source_revision_triggers_are_removed(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:28])
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname LIKE 'source_configuration_feeds_%'").fetchone() == (0,)
+        verify(db, MIGRATIONS)
