@@ -957,3 +957,17 @@ def test_restart_after_new_input_before_the_processing_cron_keeps_the_work(tmp_p
     row=reopened.db.execute('SELECT status , generation FROM jobs WHERE id = %s',(interrupted.id,)).fetchone()
     assert row['status']=='done' and row['generation']>interrupted.generation
     reopened.db.close()
+
+
+def test_accepted_publication_reconciles_jobs_without_stage_queue(tmp_path):
+    store, item, _, _ = worker_library(tmp_path)
+    statements = []
+    try:
+        store.db.set_trace_callback(statements.append)
+        with transaction(store.db):
+            store.processing.reconcile_accepted_item(item)
+            assert store.db.execute("SELECT 1 FROM jobs WHERE item=%s AND kind='filter'", (item,)).fetchone()
+        assert not any('INSERT INTO processing_stage_dirty' in statement for statement in statements)
+    finally:
+        store.db.set_trace_callback(None)
+        store.db.close()

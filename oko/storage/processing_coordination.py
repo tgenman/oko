@@ -117,15 +117,13 @@ class ProcessingState:
             raise RuntimeError('Accepted publication requires an owned transaction')
         repository = ProcessingRepository(self.store)
         self.store.publications.reconcile(item)
-        self.store.db.executemany('INSERT INTO processing_stage_dirty VALUES ( %s , %s ) ON CONFLICT DO NOTHING',
-                                  [(kind,item) for kind in ('filter','theses')])
         self.store.db.execute('DELETE FROM processing_dirty WHERE item=%s', (item,))
         for kind in ('filter','theses'):
             with reading_snapshot():
                 candidates = [(identity, signature, repository.satisfied(identity,kind), repository.revision(identity))
                               for identity,signature in repository.candidates(kind,item=item)]
             self.store.jobs.reconcile(kind,candidates)
-            # Transitional filter-job triggers mark the same item; this pass has
-            # already evaluated its dependent stage within the same transaction.
+            # The filter transition can invalidate the dependent stage; this
+            # transaction evaluates it immediately.
             self.store.db.execute('DELETE FROM processing_dirty WHERE item=%s', (item,))
         self.store.publications.status(item)

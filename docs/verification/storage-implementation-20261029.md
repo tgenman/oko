@@ -555,3 +555,10 @@
   design. Migration, status, settings, recovery and SQL-cost suites passed 248
   tests; types and nine Playwright scenarios passed, with the status screenshot
   inspected. The fresh schema has 22 tables and zero non-internal triggers.
+- Accepted publications now reconcile filter and theses Jobs directly, without
+  writing a temporary stage marker; existing queued stage markers are still
+  consumed by the same transaction. Targeted worker, shared-publication and
+  transaction suites passed 99 tests and types; processing-idle and recovery
+  suites passed 26 tests. Two Playwright scenarios passed and the retained
+  result after failed regeneration screenshot was inspected. Settings and
+  recovery still use both transitional dirty tables and remain unfinished.

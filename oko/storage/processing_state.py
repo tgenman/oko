@@ -17,11 +17,13 @@ class ProcessingRepository:
         self.store=store
 
     def candidates(self, kind: Kind, *, limit: int | None = None, item: str | None = None) -> list[tuple[str,str | None]]:
-        query='SELECT i . id FROM processing_stage_dirty d JOIN items_read i ON i . id = d . item WHERE d . kind = %s AND i . viewed = 0 AND i . platform IS NOT NULL AND i . feed_id IS NOT NULL AND i . complete = 1 AND NOT EXISTS ( SELECT 1 FROM processing_dirty p WHERE p . item = i . id )'
-        parameters: tuple[str | int, ...] = (kind,)
-        if item is not None:
-            query += ' AND i . id = %s'
-            parameters += (item,)
+        eligibility = "i.viewed=0 AND i.platform IS NOT NULL AND i.feed_id IS NOT NULL AND i.complete=1 AND NOT EXISTS (SELECT 1 FROM processing_dirty p WHERE p.item=i.id)"
+        if item is None:
+            query = f'SELECT i.id FROM processing_stage_dirty d JOIN items_read i ON i.id=d.item WHERE d.kind=%s AND {eligibility}'
+            parameters: tuple[str | int, ...] = (kind,)
+        else:
+            query = f'SELECT i.id FROM items_read i WHERE i.id=%s AND {eligibility}'
+            parameters = (item,)
         if limit is not None:
             query += ' ORDER BY i . id LIMIT %s'
             parameters += (limit,)
