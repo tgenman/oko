@@ -1553,12 +1553,7 @@ def test_failed_delete_problem_follows_job_without_status_read(tmp_path, postgre
         store.jobs.retry(job,1,'Ошибка удаления',code='delete')
         problem=current()
         assert problem is not None
-        candidates=store.problems.candidates(5)
-        assert candidates, candidates
-        legacy=next(c for c in candidates if c['id']=='job:delete:demo:delete:item')
-        legacy.setdefault('operation','producer:delete')
-        legacy.pop('_legacy_ids',None)
-        assert store.problems.deletion_candidates(job.id,5)[0] == legacy
+        assert not any(c['id']=='job:delete:demo:delete:item' for c in store.problems.candidates(5))
         with store.db:
             store.db.execute("UPDATE jobs SET next=0 WHERE id=%s", (job.id,))
         claimed=store.jobs.next_job(1,deleting_only=True)
@@ -1592,10 +1587,7 @@ def test_failed_feed_delete_problem_finishes_with_feed_removal(tmp_path, postgre
         store.jobs.retry(job,1,'Ошибка удаления',code='delete')
         problem=store.db.execute("SELECT id,body FROM reader_problems WHERE identity='job:delete:feed:feed-delete:feed' AND finished IS NULL").fetchone()
         assert problem is not None and json.loads(problem['body'])['objects']==[{'kind':'feed','id':'feed'}]
-        legacy=next(c for c in store.problems.candidates(5) if c['id']=='job:delete:feed:feed-delete:feed')
-        legacy.setdefault('operation','producer:feed-delete')
-        legacy.pop('_legacy_ids',None)
-        assert store.problems.deletion_candidates(job.id,5)[0] == legacy
+        assert not any(c['id']=='job:delete:feed:feed-delete:feed' for c in store.problems.candidates(5))
         with store.db:
             store.db.execute('UPDATE jobs SET next=0 WHERE id=%s',(job.id,))
         claimed=store.jobs.next_job(1,deleting_only=True)
@@ -1651,11 +1643,10 @@ def test_delete_problem_matches_status_projection(tmp_path, postgres_url, kind, 
             job_id=store.db.execute('INSERT INTO jobs(kind,item,status,error,problem_code) VALUES (%s,%s,%s,%s,%s) RETURNING id',
                                     (kind,'item',status,error,code)).fetchone()[0]
         current=store.problems.deletion_candidates(job_id,7)[0]
-        candidates=store.problems.candidates(7)
-        expected=next(c for c in candidates if c['id']==current['id'])
-        expected.setdefault('operation','producer:'+kind)
-        expected.pop('_legacy_ids',None)
-        assert current == expected
+        with store.db:store.problems.sync_deletion(job_id,[],7)
+        assert not any(c['id']==current['id'] for c in store.problems.candidates(7))
+        occurrence=store.db.execute('SELECT body FROM reader_problems WHERE identity=%s AND finished IS NULL',(current['id'],)).fetchone()
+        assert occurrence and json.loads(occurrence['body'])['operation']=='producer:'+kind
     finally:
         store.db.close()
 

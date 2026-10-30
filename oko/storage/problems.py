@@ -313,7 +313,7 @@ class Problems:
 
     @staticmethod
     def deletion_identity(row: Any) -> str | None:
-        if row['problem_code'] is None and row['error'] is None:
+        if row['item'] is None or (row['problem_code'] is None and row['error'] is None):
             return None
         code = row['problem_code'] or 'work-' + row['kind']
         if code not in ('delete','feed-delete','work-delete','work-feed-delete'):
@@ -368,14 +368,88 @@ class Problems:
             candidate['reason']=row['error']
         return candidate
 
+    @staticmethod
+    def deletion_record_matches(record: Any, candidate: dict[str, Any]) -> bool:
+        try:
+            body=json.loads(record['body'])
+        except (TypeError,ValueError):
+            return False
+        if not isinstance(body,dict) or body.get('code')!=candidate['code']:
+            return False
+        operation=body.get('operation')
+        owner=body.get('deletion_job_id')
+        if owner is not None:
+            return bool(operation==candidate['operation'] and owner==candidate.get('deletion_job_id') and body.get('deletion_job_identity',candidate['id'])==candidate['id'])
+        if operation not in (None,'producer:status',candidate['operation']):
+            return False
+        prefix='job:'+candidate['code']+':'
+        identity=body.get('deletion_job_identity',record['identity'])
+        if not isinstance(identity,str):
+            return False
+        if not identity.startswith(prefix):
+            return False
+        tail=identity[len(prefix):]
+        kinds=('fetch','discover','download_media','filter','theses','read','delete','feed-delete')
+        matches=[kind for kind in kinds if ':'+kind+':' in tail]
+        return matches==[candidate['operation'].removeprefix('producer:')] and tail.count(':'+matches[0]+':')==1
+
+    def deletion_record(self, candidate: dict[str, Any]) -> Any:
+        canonical=candidate['id']
+        rows=self.db.execute("SELECT id,identity,body FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation' IN ('producer:delete','producer:feed-delete') AND body::jsonb->>'deletion_job_identity'=%s",(canonical,)).fetchall()
+        for row in rows:
+            if self.deletion_record_matches(row,candidate):
+                return row
+        canonical_row=self.db.execute('SELECT id,identity,body FROM reader_problems WHERE identity=%s AND finished IS NULL',(canonical,)).fetchone()
+        return canonical_row if canonical_row and self.deletion_record_matches(canonical_row,candidate) else None
+
     def sync_deletion(self, job_id: int, previous: list[dict[str, Any]], now: float) -> None:
-        current = {candidate['id']:candidate for candidate in self.deletion_candidates(job_id,now)}
+        for candidate in previous:
+            candidate['deletion_job_id']=str(job_id)
+            if 'code' not in candidate or 'operation' not in candidate:
+                identity=candidate['id']
+                codes=[code for code in ('delete','feed-delete','work-delete','work-feed-delete') if identity.startswith('job:'+code+':')]
+                kinds=[kind for kind in ('fetch','discover','download_media','filter','theses','read','delete','feed-delete') if ':'+kind+':' in identity]
+                if len(codes)!=1 or len(kinds)!=1 or kinds[0] not in ('delete','feed-delete'):
+                    candidate['id']=''
+                    continue
+                candidate.update(code=codes[0],operation='producer:'+kinds[0])
+            matched=self.deletion_record(candidate)
+            if matched:
+                candidate['id']=matched['identity']
+            else:
+                candidate['id']=''  # Never close an unrelated occurrence sharing the legacy key.
+        current_candidates=self.deletion_candidates(job_id,now)
+        for candidate in current_candidates:
+            candidate['deletion_job_id']=str(job_id)
+            canonical=candidate['id']
+            matched=self.deletion_record(candidate)
+            if matched and matched['identity']!=canonical:
+                candidate['id']=matched['identity']
+                candidate['deletion_job_identity']=canonical
+                continue
+            occupied=self.db.execute('SELECT id FROM reader_problems WHERE identity=%s AND finished IS NULL',(canonical,)).fetchone()
+            tail=canonical[len('job:'+candidate['code']+':'):]
+            kind_names=('fetch','discover','download_media','filter','theses','read','delete','feed-delete')
+            tokens=[kind for kind in kind_names if ':'+kind+':' in tail]
+            ambiguous=len(tokens)!=1 or tail.count(':'+tokens[0]+':')!=1
+            if not matched and (occupied or ambiguous):
+                digest=hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+                for _ in range(3):
+                    alternate='job:delete-isolated:'+digest+':'+new_read_problem_token()
+                    if not self.db.execute('SELECT 1 FROM reader_problems WHERE identity=%s AND finished IS NULL',(alternate,)).fetchone():
+                        candidate['id']=alternate
+                        candidate['deletion_job_identity']=canonical
+                        break
+                else:
+                    raise RuntimeError('Unable to allocate deletion problem identity')
+        current = {candidate['id']:candidate for candidate in current_candidates}
         if current:
             row = self.db.execute("SELECT kind,item,error,problem_code,feed_id FROM jobs WHERE id=%s",(job_id,)).fetchone()
             legacy = self.deletion_identity(row) if row else None
             if legacy and legacy not in current:
-                old = self.db.execute('SELECT id FROM reader_problems WHERE identity=%s AND finished IS NULL',(legacy,)).fetchone()
-                if old:
+                old = self.db.execute('SELECT id,identity,body FROM reader_problems WHERE identity=%s AND finished IS NULL',(legacy,)).fetchone()
+                exemplar=next(iter(current.values()))
+                if old and self.deletion_record_matches(old,dict(exemplar,id=legacy)):
                     vacant = next((identity for identity in sorted(current) if not self.db.execute(
                         'SELECT 1 FROM reader_problems WHERE identity=%s AND finished IS NULL',(identity,)).fetchone()),None)
                     if vacant:
@@ -401,7 +475,7 @@ class Problems:
                 if moved or merged:
                     status_changed(self.db)
         for candidate in previous:
-            if candidate['id'] not in current:
+            if candidate['id'] and candidate['id'] not in current:
                 self.sync_candidate(candidate['id'],None,now)
         for candidate in current.values():
             self.sync_candidate(candidate['id'],candidate,now)
@@ -582,6 +656,74 @@ class Problems:
         with self.db:
             self.db.execute("INSERT INTO state(key,value) VALUES ('read-problems-recovered-v1','true') ON CONFLICT DO NOTHING")
 
+    def recover_deletion_problems(self) -> None:
+        if self.db.execute("SELECT 1 FROM state WHERE key='delete-problems-recovered-v1'").fetchone():
+            return
+        cursor: int | None = None
+        while True:
+            boundary = '' if cursor is None else ' AND id>%s'
+            params = () if cursor is None else (cursor,)
+            rows=self.db.execute("""SELECT id FROM jobs WHERE kind IN ('delete','feed-delete')
+                AND (error IS NOT NULL OR problem_code IS NOT NULL)
+                AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')"""+boundary+' ORDER BY id LIMIT 100',params).fetchall()
+            if not rows:
+                break
+            with self.db:
+                for row in rows:
+                    self.sync_deletion(row['id'],[],self.store.wall_clock())
+            cursor=rows[-1]['id']
+            self.store.fault('delete_problem_recovery_batch')
+        problem_cursor: str | None = None
+        while True:
+            boundary = '' if problem_cursor is None else ' AND id>%s'
+            problem_params = () if problem_cursor is None else (problem_cursor,)
+            query="""SELECT id,identity,body FROM reader_problems WHERE finished IS NULL AND identity LIKE 'job:%%'
+                AND body::jsonb->>'code' IN ('delete','feed-delete','work-delete','work-feed-delete')
+                AND (body::jsonb->>'operation' IN ('producer:delete','producer:feed-delete') OR body::jsonb->>'operation' IS NULL OR body::jsonb->>'operation'='producer:status')"""+boundary+' ORDER BY id LIMIT 100'
+            if problem_cursor is None:
+                query=query.replace('%%','%')
+            records=self.db.execute(query,problem_params).fetchall()
+            if not records:
+                break
+            with self.db:
+                for record in records:
+                    try:
+                        body=json.loads(record['body'])
+                    except (TypeError,ValueError):
+                        continue
+                    if not isinstance(body,dict) or not isinstance(body.get('objects'),list):
+                        continue
+                    if any(not isinstance(obj,dict) for obj in body['objects']):
+                        continue
+                    code=body.get('code')
+                    canonical=body.get('deletion_job_identity',record['identity'])
+                    if not isinstance(code,str) or not isinstance(canonical,str) or not canonical.startswith('job:'+code+':'):
+                        continue
+                    tail=canonical[len('job:'+code+':'):]
+                    kinds=[kind for kind in ('fetch','discover','download_media','filter','theses','read','delete','feed-delete') if ':'+kind+':' in tail]
+                    if len(kinds)!=1 or kinds[0] not in ('delete','feed-delete'):
+                        continue
+                    kind=kinds[0]
+                    delimiter=':'+kind+':'
+                    if tail.count(delimiter)!=1:
+                        continue
+                    item=tail.split(delimiter,1)[1]
+                    candidate=dict(id=record['identity'],code=code,operation='producer:'+kind,deletion_job_id=str(body.get('deletion_job_id','')))
+                    if body.get('deletion_job_identity'):
+                        candidate['id']=canonical
+                    if not self.deletion_record_matches(record,candidate):
+                        continue
+                    job=self.db.execute('SELECT id,status,error,problem_code FROM jobs WHERE kind=%s AND item=%s',(kind,item)).fetchone()
+                    job_code=(job['problem_code'] or 'work-'+kind) if job else None
+                    if job and job_code==code and (job['error'] is not None or job['problem_code'] is not None) and job['status'] in ('pending','running','failed','unavailable','blocked'):
+                        self.sync_deletion(job['id'],[candidate],self.store.wall_clock())
+                    else:
+                        self.sync_candidate(record['identity'],None,self.store.wall_clock())
+            problem_cursor=records[-1]['id']
+            self.store.fault('delete_problem_record_recovery_batch')
+        with self.db:
+            self.db.execute("INSERT INTO state(key,value) VALUES ('delete-problems-recovered-v1','true') ON CONFLICT DO NOTHING")
+
     def profile_candidates(self, now: float, feeds: dict[str, dict[str, Any]], bindings: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
         groups: dict[str, dict[str, Any]] = {}
         for saved_feed in feeds.values():
@@ -652,9 +794,9 @@ class Problems:
         feeds = {feed['id']: feed for feed in self.store.subscriptions.feeds()}
         profile_feeds = {obj['id'] for row in self.db.execute("SELECT body FROM reader_problems WHERE identity LIKE 'profile:%%' AND finished IS NULL")
                          for obj in json.loads(row['body'])['objects'] if obj['kind'] == 'feed'}
-        groups: dict[str, dict[str, Any]] = {}
+        groups: dict[str | tuple[str,str] | tuple[str,str,str], dict[str, Any]] = {}
         youtube = self.store.youtube.status(now)
-        jobs = self.db.execute(f"SELECT jobs . * , coalesce ( {owner_expr('items')} , {owner_expr('media_owner')} , {owner_expr('linked_root')} ) AS resolved_feed_id , coalesce ( items . viewed , media_owner . viewed ) AS viewed , m . resource_key AS resource_key , coalesce ( linked_root . id , m . publication_id , jobs . item ) AS affected_item FROM jobs LEFT JOIN publications items ON items . id = jobs . item LEFT JOIN media_files m ON jobs . kind = 'download_media' AND m . id = jobs . item LEFT JOIN publications media_owner ON media_owner . id = m . publication_id LEFT JOIN publication_links link ON link . target_publication_id = coalesce ( items . id , media_owner . id ) LEFT JOIN publications linked_root ON linked_root . id = link . source_publication_id AND linked_root . viewed = 0 WHERE ( jobs . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' , 'blocked' ) OR ( jobs . status = 'done' AND jobs . kind = 'fetch' AND jobs . problem_code IS NOT NULL AND jobs . error IS NOT NULL ) ) AND ( jobs . problem_code IS NOT NULL OR jobs . error IS NOT NULL ) AND (jobs.kind IS DISTINCT FROM 'read' OR jobs.problem_code='processor-config')").fetchall()
+        jobs = self.db.execute(f"SELECT jobs . * , coalesce ( {owner_expr('items')} , {owner_expr('media_owner')} , {owner_expr('linked_root')} ) AS resolved_feed_id , coalesce ( items . viewed , media_owner . viewed ) AS viewed , m . resource_key AS resource_key , coalesce ( linked_root . id , m . publication_id , jobs . item ) AS affected_item FROM (SELECT * FROM jobs WHERE (kind IS DISTINCT FROM 'read' OR problem_code='processor-config') AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')) AND (problem_code IS NOT NULL OR error IS NOT NULL) ORDER BY kind,item OFFSET 0) jobs LEFT JOIN publications items ON items . id = jobs . item LEFT JOIN media_files m ON jobs . kind = 'download_media' AND m . id = jobs . item LEFT JOIN publications media_owner ON media_owner . id = m . publication_id LEFT JOIN publication_links link ON link . target_publication_id = coalesce ( items . id , media_owner . id ) LEFT JOIN publications linked_root ON linked_root . id = link . source_publication_id AND linked_root . viewed = 0 WHERE ( jobs . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' , 'blocked' ) OR ( jobs . status = 'done' AND jobs . kind = 'fetch' AND jobs . problem_code IS NOT NULL AND jobs . error IS NOT NULL ) ) AND ( jobs . problem_code IS NOT NULL OR jobs . error IS NOT NULL ) AND (jobs.kind IS DISTINCT FROM 'read' OR jobs.problem_code='processor-config') AND NOT (jobs.kind IN ('delete','feed-delete') AND coalesce(nullif(jobs.problem_code,''),'work-'||jobs.kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))").fetchall()
         for job in jobs:
             resolved_feed = job['item'] if job['kind']=='read' else job['resolved_feed_id'] or job['feed_id']
             code = job['problem_code']
@@ -681,27 +823,30 @@ class Problems:
                 identity = 'processor:configuration'
             settings_action = code in ('processor-config', 'ai-permission')
             obj = dict(kind='feed' if job['kind'] in ('discover', 'read', 'feed-delete') else 'material', id=feed if job['kind'] in ('discover', 'read', 'feed-delete') else job['affected_item'])
-            if identity not in groups:
+            group_key: str | tuple[str,str] | tuple[str,str,str] = identity if code=='processor-config' else (identity,job['kind']) if shared else (identity,job['kind'],job['item'])
+            if group_key not in groups:
                 kind = job['kind']
                 title = {'feed-delete':'Удаление фида не завершено', 'fetch':'Не удалось загрузить материал', 'download_media':'Не удалось загрузить вложение', 'discover':'Не удалось обновить источник',
                          'read':'Не удалось подтвердить чтение в Telegram', 'delete':'Удаление не завершено'}.get(kind, 'Не удалось обработать материал')
                 if settings_action:
                     title = 'Требуется настройка обработчика'
                 action = None
-                groups[identity] = dict(id=identity,code=code,section='action' if settings_action else 'object',title=title,
+                groups[group_key] = dict(id=identity,code=code,section='action' if settings_action else 'object',title=title,
                     consequence='Сохранённое содержимое остаётся доступным.' if kind not in ('delete','feed-delete') else 'Око продолжает попытки удаления.',
                     next_step='Включите обработку, чтобы повторить попытку.' if job['status']=='blocked' else 'Повторите загрузку вручную.' if job['status'] in ('done','failed') else 'Проверьте доступность источника.' if job['status']=='unavailable' else 'Око повторит попытку автоматически.' if not settings_action else 'Откройте настройки обработчика.',
                     objects=[],action=action,operation='producer:'+kind,created_at=now,state='retrying' if job['status'] == 'running' or not job['error'] else 'current',finished_at=None,outcome=None,next_at=None)
+                if not shared:
+                    groups[group_key]['_status_job_target'] = job['item']
                 if kind != 'delete' and job['error']:
-                    groups[identity]['reason'] = job['error']
+                    groups[group_key]['reason'] = job['error']
                 if code == 'source-reconnect':
-                    groups[identity].update(section='action', next_step='Проверьте привязку источника; доступ не изменяется автоматически.', action=None)
+                    groups[group_key].update(section='action', next_step='Проверьте привязку источника; доступ не изменяется автоматически.', action=None)
             legacy_feed = job['feed_id'] or job['item'] or 'demo'
             legacy_identity = 'job:' + code + ':' + legacy_feed + ':' + job['kind'] + ('' if shared else ':' + job['item'])
             if identity.startswith('job:') and legacy_identity != identity:
-                groups[identity].setdefault('_legacy_ids',set()).add(legacy_identity)
-            if job['kind'] != 'delete' and obj not in groups[identity]['objects']:
-                groups[identity]['objects'].append(obj)
+                groups[group_key].setdefault('_legacy_ids',set()).add(legacy_identity)
+            if job['kind'] != 'delete' and obj not in groups[group_key]['objects']:
+                groups[group_key]['objects'].append(obj)
         if youtube['paused']:
             owners={job['affected_item'] for job in jobs if job['status'] in ('pending','running')
                 and feeds.get(job['resolved_feed_id'] or job['feed_id'],{}).get('kind')=='youtube'
@@ -888,12 +1033,147 @@ class Problems:
                 merged.add(row['id'])
         return remapped,merged
 
+    def _finished_foreign_legacy_jobs(self, records: dict[str,dict[str,Any]]) -> set[str]:
+        """Release only records with one proven finished owner, in bounded batches."""
+        possible: list[tuple[str,str,str,str]] = []
+        for identity,body in records.items():
+            code = body.get('code')
+            if not isinstance(code,str) or not identity.startswith('job:'+code+':'):
+                continue
+            tail = identity[len('job:'+code+':'):]
+            per_record: list[tuple[str,str,str,str]] = []
+            for kind in ('fetch','discover','download_media','filter','theses','read','delete','feed-delete'):
+                delimiter = ':'+kind+':'
+                start = 0
+                while (position := tail.find(delimiter,start)) >= 0:
+                    per_record.append((identity,kind,tail[position+len(delimiter):],tail[:position]))
+                    if len(per_record)>16:
+                        break
+                    start = position+1
+                if len(per_record)>16:
+                    break
+            if len(per_record)<=16:
+                possible.extend(per_record)
+        matches: dict[str,list[Any]] = {}
+        for start in range(0,len(possible),400):
+            batch=possible[start:start+400]
+            rows=self.db.execute('''SELECT j.kind,j.item,j.feed_id,j.status,j.error,j.problem_code,p.identity,p.feed
+                FROM unnest(%s::text[],%s::text[],%s::text[],%s::text[]) AS p(identity,kind,item,feed)
+                JOIN jobs j ON j.kind=p.kind AND j.item=p.item''',tuple([row[i] for row in batch] for i in range(4))).fetchall()
+            for row in rows:
+                matches.setdefault(row['identity'],[]).append(row)
+        result: set[str] = set()
+        for identity,rows in matches.items():
+            if len(rows)!=1:
+                continue
+            job=rows[0]
+            objects=records[identity].get('objects')
+            if (job['kind'] not in ('delete','feed-delete','read')
+                and job['feed'] == (job['feed_id'] or job['item'] or 'demo')
+                and isinstance(objects,list) and any(isinstance(obj,dict) and obj.get('kind')=='material' and obj.get('id')==job['item'] for obj in objects)
+                and job['status']=='done' and job['error'] is None and job['problem_code'] is None):
+                result.add(identity)
+        return result
+
     def reconcile(self, candidates: list[dict[str, Any]], now: float, feeds: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
         """Preserve occurrence identity; completed records never become current on restart."""
+        existing = {row['identity']: row for row in self.db.execute("SELECT * FROM reader_problems WHERE finished IS NULL")}
+        isolated: dict[tuple[str,str,str | None],str] = {}
+        for saved_identity,saved_row in sorted(existing.items()):
+            if 'status_job_identity' not in saved_row['body']:
+                continue
+            saved_body = json.loads(saved_row['body'])
+            if isinstance(saved_body,dict) and isinstance(saved_body.get('status_job_identity'),str) and isinstance(saved_body.get('operation'),str):
+                target=saved_body.get('status_job_target')
+                if isinstance(target,str) or target is None:
+                    isolated.setdefault((saved_body['status_job_identity'],saved_body['operation'],target),saved_identity)
+        separated = []
+        candidate_ids = {candidate['id'] for candidate in candidates}
+        reserved = set(existing) | candidate_ids
+        claimed: dict[str,tuple[str,str | None]] = {}
+        claimed_alternates: set[str] = set()
+        for original in candidates:
+            candidate = dict(original)
+            isolated_aliases: list[str] = []
+            target=candidate.get('_status_job_target')
+            target=target if isinstance(target,str) else None
+            if candidate.get('_legacy_ids'):
+                safe_aliases = set()
+                for alias in candidate['_legacy_ids']:
+                    alias_operation = candidate.get('operation')
+                    isolated_alias = (isolated.get((alias,alias_operation,target)) or isolated.get((alias,alias_operation,None))) if isinstance(alias_operation,str) else None
+                    if isolated_alias and isolated_alias not in claimed_alternates:
+                        safe_aliases.add(isolated_alias)
+                        isolated_aliases.append(isolated_alias)
+                        claimed_alternates.add(isolated_alias)
+                    previous = existing.get(alias)
+                    old_body = json.loads(previous['body']) if previous else None
+                    if (isinstance(old_body,dict) and old_body.get('operation')==alias_operation
+                        and old_body.get('code')==candidate.get('code') and alias not in candidate_ids and alias not in claimed_alternates):
+                        isolated_aliases.append(alias)
+                        claimed_alternates.add(alias)
+                    protected = (isinstance(old_body,dict) and old_body.get('code') in ('delete','feed-delete','work-delete','work-feed-delete')
+                                 and (old_body.get('operation') in ('producer:delete','producer:feed-delete')
+                                      or (old_body.get('operation') in (None,'producer:status') and (':delete:' in alias or ':feed-delete:' in alias))))
+                    if not protected:
+                        safe_aliases.add(alias)
+                candidate['_legacy_ids'] = safe_aliases
+            identity = candidate['id']
+            saved = existing.get(identity)
+            body = json.loads(saved['body']) if saved else None
+            operation = candidate.get('operation')
+            prior_alternate = isolated.get((identity,operation,target)) if isinstance(operation,str) else None
+            if prior_alternate is None and isinstance(operation,str) and not (isinstance(body,dict) and body.get('operation')==operation and target is not None and (body.get('status_job_target')==target or body.get('status_job_target') is None and body.get('objects')==candidate.get('objects'))):
+                prior_alternate = isolated.get((identity,operation,None))
+            if prior_alternate in claimed_alternates:
+                prior_alternate = None
+            if prior_alternate:
+                claimed_alternates.add(prior_alternate)
+                candidate['id'] = prior_alternate
+                candidate['status_job_identity'] = identity
+                if target is not None:
+                    candidate['status_job_target'] = target
+                candidate.pop('_legacy_ids',None)
+            elif (isinstance(operation,str) and operation.startswith('producer:') and (
+                (isinstance(body,dict) and isinstance(body.get('operation'),str) and body['operation'].startswith('producer:') and body['operation'] not in ('producer:status',operation))
+                or (identity in claimed and claimed[identity]!=(operation,target))
+                or (isinstance(body,dict) and body.get('operation')==operation and isinstance(body.get('status_job_target'),str) and body['status_job_target']!=target)
+                or (isinstance(body,dict) and body.get('code') in ('delete','feed-delete','work-delete','work-feed-delete')
+                    and body.get('operation') in (None,'producer:status')
+                    and operation not in ('producer:status','producer:delete','producer:feed-delete')
+                    and (':delete:' in identity or ':feed-delete:' in identity)))):
+                if isolated_aliases:
+                    alternate=min(isolated_aliases)
+                    claimed_alternates.add(alternate)
+                else:
+                    digest = hashlib.sha256((identity+'\0'+operation).encode()).hexdigest()
+                    for _ in range(3):
+                        alternate = 'job:status-isolated:'+digest+':'+new_read_problem_token()
+                        if alternate not in reserved:
+                            reserved.add(alternate)
+                            break
+                    else:
+                        raise RuntimeError('Unable to allocate status problem identity')
+                candidate['id'] = alternate
+                candidate['status_job_identity'] = identity
+                if target is not None:
+                    candidate['status_job_target'] = target
+                candidate.pop('_legacy_ids',None)
+            if isinstance(operation,str):
+                claimed.setdefault(identity,(operation,target))
+            separated.append(candidate)
+        candidates = separated
         by_identity = {candidate['id']: candidate for candidate in candidates}
         identities = set(by_identity)
         feeds = feeds if feeds is not None else {f['id']: f for f in self.store.subscriptions.feeds()}
-        existing = {row['identity']: row for row in self.db.execute("SELECT * FROM reader_problems WHERE finished IS NULL")}
+        foreign_records: dict[str,dict[str,Any]] = {}
+        for identity,row in existing.items():
+            if identity in identities or not identity.startswith('job:') or (':delete:' not in identity and ':feed-delete:' not in identity):
+                continue
+            body=json.loads(row['body'])
+            if isinstance(body,dict) and body.get('code') in ('delete','feed-delete','work-delete','work-feed-delete') and body.get('operation') in (None,'producer:status'):
+                foreign_records[identity]=body
+        finished_foreign=self._finished_foreign_legacy_jobs(foreign_records)
         with self.db:
             added: list[tuple[str,str,str,str,float]] = []
             remapped,merged = self._rekey_regrouped_jobs(existing,candidates,now)
@@ -903,6 +1183,10 @@ class Problems:
                     continue
                 if row['identity'] not in identities and row['identity'] != 'processor:codex-choice' and not row['identity'].startswith(('action:', 'profile:')):
                     body = json.loads(row['body'])
+                    if row['identity'].startswith('job:') and body.get('code') in ('delete','feed-delete','work-delete','work-feed-delete'):
+                        operation=body.get('operation')
+                        if operation in ('producer:delete','producer:feed-delete') or (operation in (None,'producer:status') and (':delete:' in row['identity'] or ':feed-delete:' in row['identity']) and row['identity'] not in finished_foreign):
+                            continue
                     if row['identity'].startswith('job:') and body.get('code')!='processor-config':
                         from oko.storage.read_job_problems import classify_legacy
                         if classify_legacy(row['identity'],body) in ('read','ambiguous'):
@@ -916,7 +1200,7 @@ class Problems:
                 if not candidate['id'].startswith('action:'):
                     candidate.setdefault('operation','producer:status')
                 identity = candidate['id']
-                body = {key: value for key, value in candidate.items() if key not in ('id', 'created_at', 'finished_at', 'outcome', '_legacy_ids')}
+                body = {key: value for key, value in candidate.items() if key not in ('id', 'created_at', 'finished_at', 'outcome', '_legacy_ids', '_status_job_target')}
                 # v3 carries resource identities; it never archives object titles.
                 body['objects'] = [{key: value for key, value in obj.items() if key != 'label'} for obj in candidate['objects']]
                 encoded = json.dumps(body)

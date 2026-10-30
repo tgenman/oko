@@ -1137,3 +1137,14 @@ receipt selection; a combined action/settings/status/cost suite passed 118 tests
 Mypy passed for 157 files and a Playwright surrogate-card scenario passed using
 a substituted status response; a separate HTTP test exercised the server path.
 No working database was changed. Other status problem categories remain.
+
+
+Deletion Job problems for the four supported deletion codes now recover at
+startup and are maintained by their event owners instead of the status GET.
+Other codes remain on the previous path. Synthetic tests cover restart, rollback,
+shared and colliding legacy identities, separate occurrences, and bounded
+recovery. Ambiguous legacy records are retained when their owner cannot be
+proved. The integrated checkout passed 275 PostgreSQL tests and 10 Playwright
+status scenarios, with a screenshot inspected; mypy passed on 157 files. No
+working database was migrated. Remaining status categories still reconcile on
+GET; this is not full acceptance of the target schema.

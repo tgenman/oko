@@ -130,12 +130,17 @@ class Store:
             with self.db:
                 collection_jobs.interrupt(self)
                 running_read = [row['item'] for row in self.db.execute("SELECT item FROM jobs WHERE kind='read' AND status='running' AND (error IS NOT NULL OR problem_code IS NOT NULL)")]
+                running_delete = [row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE kind IN ('delete','feed-delete') AND status='running' AND (error IS NOT NULL OR problem_code IS NOT NULL) AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')")]
                 job_write(self.db, "UPDATE jobs SET status='pending', generation=generation+1 WHERE status='running'")
                 job_write(self.db, "UPDATE jobs SET next = 0 WHERE status = 'pending' AND next IS DISTINCT FROM 0")
                 if self.db.execute("SELECT 1 FROM state WHERE key='read-problems-recovered-v1'").fetchone():
                     for feed in running_read:
                         self.problems.sync_read_feed(feed,self.wall_clock())
+                if self.db.execute("SELECT 1 FROM state WHERE key='delete-problems-recovered-v1'").fetchone():
+                    for job_id in running_delete:
+                        self.problems.sync_deletion(job_id,[],self.wall_clock())
             self.problems.recover_read_problems()
+            self.problems.recover_deletion_problems()
             collection_jobs.recover(self)
             self.recover_files()
             if self.db.execute(f"SELECT 1 FROM ({owned_ids('= %s')}) owner LIMIT 1", ('demo','demo')).fetchone():
