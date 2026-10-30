@@ -1,5 +1,6 @@
 """Durable, content-free eligibility and cumulative Telegram confirmation."""
 import json
+from oko.storage.database import Row
 from oko.storage.reading import reading_value
 from oko.storage.source_configuration import changed as source_changed
 from oko.storage.reader_status import changed as status_changed
@@ -43,6 +44,7 @@ class ReadSync:
     def schedule_saved_backfill(self, feed: str) -> None:
         self.mark_feed(feed)
         self.store.db.execute("UPDATE telegram_read_state SET saved_backfill_after='' WHERE feed=%s", (feed,))
+        self.store.problems.sync_read_feed(feed,self.store.wall_clock())
 
     def mark_item(self, item: str) -> None:
         self.store.db.execute("""INSERT INTO telegram_read_state(feed, needs_sync)
@@ -74,6 +76,7 @@ class ReadSync:
                 WHERE telegram_read_members.missing IS DISTINCT FROM 0 RETURNING member''', (feed,sorted(set(members)))).fetchone() is not None
         if previous is None or previous['since'] is None or boundary_changed or member_changed:
             status_changed(db)
+        self.store.problems.sync_read_feed(feed,self.store.wall_clock())
 
     def eligible(self, feed: str, members: list[int], reason: str) -> None:
         if reason not in ('saved', 'viewed'):
@@ -117,15 +120,22 @@ class ReadSync:
         profile = self.store.subscriptions.telegram.profile(binding['role']) if binding and binding['kind'] == 'client' else None
         return self._request(configs[0], binding, profile)
 
-    def _request(self, config: dict[str, Any], binding: dict[str, Any] | None, profile: dict[str, Any] | None) -> dict[str, Any] | None:
-        feed = config['id']
+    def request_state(self, config: dict[str, Any], binding: dict[str, Any] | None) -> Row | None:
+        """Check read eligibility without loading the channel's member history."""
         history = config.get('initial_history')
         if history and history['mode'] == 'count' and (not history['frozen'] or not history.get('scan_complete', True)):
             return None
-        state = self.store.db.execute('SELECT * FROM telegram_read_state WHERE feed = %s', (feed,)).fetchone()
+        state = self.store.db.execute('SELECT * FROM telegram_read_state WHERE feed = %s', (config['id'],)).fetchone()
         if not state or state['since'] is None or state['saved_backfill_after'] is not None or config['transport'] != 'telegram' or config['auto_read'] is None:
             return None
         if not binding or binding['kind'] != 'client' or config['connection'] == 'deleting':
+            return None
+        return state
+
+    def _request(self, config: dict[str, Any], binding: dict[str, Any] | None, profile: dict[str, Any] | None) -> dict[str, Any] | None:
+        feed = config['id']
+        state = self.request_state(config,binding)
+        if state is None:
             return None
         return dict(account=profile['account'] if profile else config['telegram_account'], peer=config['telegram_peer'],
                     username=config.get('telegram_username'), since=state['since'],
@@ -183,11 +193,13 @@ class ReadSync:
             status_changed(self.store.db)
         if plan.missing:
             self.mark_feed(feed)
+        self.store.problems.sync_read_feed(feed,self.store.wall_clock())
 
     def failed(self, feed: str, label: str) -> None:
         with self.store.db:
             if self.store.db.execute('UPDATE telegram_read_state SET error = %s WHERE feed = %s AND error IS DISTINCT FROM %s', (label,feed,label)).rowcount:
                 status_changed(self.store.db)
+            self.store.problems.sync_read_feed(feed,self.store.wall_clock())
 
     @reading_value
     def statuses(self) -> list[dict[str, Any]]:

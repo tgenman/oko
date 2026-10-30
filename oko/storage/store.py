@@ -129,8 +129,13 @@ class Store:
                 (root / name).mkdir(exist_ok=True)
             with self.db:
                 collection_jobs.interrupt(self)
+                running_read = [row['item'] for row in self.db.execute("SELECT item FROM jobs WHERE kind='read' AND status='running' AND (error IS NOT NULL OR problem_code IS NOT NULL)")]
                 job_write(self.db, "UPDATE jobs SET status='pending', generation=generation+1 WHERE status='running'")
                 job_write(self.db, "UPDATE jobs SET next = 0 WHERE status = 'pending' AND next IS DISTINCT FROM 0")
+                if self.db.execute("SELECT 1 FROM state WHERE key='read-problems-recovered-v1'").fetchone():
+                    for feed in running_read:
+                        self.problems.sync_read_feed(feed,self.wall_clock())
+            self.problems.recover_read_problems()
             collection_jobs.recover(self)
             self.recover_files()
             if self.db.execute(f"SELECT 1 FROM ({owned_ids('= %s')}) owner LIMIT 1", ('demo','demo')).fetchone():
@@ -207,7 +212,9 @@ class Store:
     def pause_history(self, feed: str, paused: bool) -> dict[str, Any]:
         self.subscriptions.check_owner('feed', feed)
         with self.db:
-            return self.subscriptions.history.pause(feed, paused)
+            result=self.subscriptions.history.pause(feed, paused)
+            self.problems.sync_read_feed(feed,self.wall_clock())
+            return result
 
     def change_history(self, feed: str, selection: InitialHistory | None) -> dict[str, Any]:
         self.subscriptions.check_owner('feed', feed)
@@ -217,7 +224,9 @@ class Store:
         if self.publications.feed(feed) and selection and selection.mode != 'count':
             raise ValueError('Догрузка YouTube поддерживает последние N видео')
         with self.db:
-            return self.subscriptions.history.start(feed, selection) if selection else self.subscriptions.history.cancel(feed)
+            result=self.subscriptions.history.start(feed, selection) if selection else self.subscriptions.history.cancel(feed)
+            self.problems.sync_read_feed(feed,self.wall_clock())
+            return result
 
 
     def cursor(self, feed: str = 'demo') -> str | None:
@@ -306,6 +315,7 @@ class Store:
             self.read_versions.memberships_changed(added_memberships)
             if envelope or 'history_enroll' in selection:
                 self.subscriptions.history.enroll(feed,history_items,envelope.selection.scan_complete if envelope else selection['scan_complete'])
+                self.problems.sync_read_feed(feed,self.wall_clock())
                 if envelope:
                     self.subscriptions.history.telegram_state(feed,envelope.selection)
                 for item in history_items:
@@ -562,6 +572,7 @@ class Store:
                 self.db.execute("UPDATE publications SET processing_metadata=(processing_metadata::jsonb-'_pass')::text WHERE id=ANY(%s)", (selected,))
             if self.db.execute("UPDATE feeds SET connection = 'deleting' WHERE id = %s AND connection IS DISTINCT FROM 'deleting'", (feed,)).rowcount:
                 source_changed(self.db)
+            self.problems.sync_read_feed(feed,self.wall_clock())
             shared=[r[0] for r in self.db.execute(f'SELECT p.id FROM ({owned_ids("= %s")}) owner JOIN publications p ON p.id=owner.id WHERE p.platform IS NOT NULL',(feed,feed))]
             effects = CollectionEffects()
             publication_links.capture_root_deletion_problems(self,effects,set(shared))

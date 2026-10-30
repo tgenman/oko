@@ -88,9 +88,9 @@ class TelegramAccess:
         return json.loads(row[0]) if row else None
 
     def put_binding(self, feed: str, binding: dict[str, Any]) -> None:
-        changed = self.db.execute('''INSERT INTO telegram_bindings VALUES (%s,%s)
-            ON CONFLICT(feed) DO UPDATE SET binding=excluded.binding
-            WHERE telegram_bindings.binding IS DISTINCT FROM excluded.binding''', (feed,json.dumps(binding))).rowcount
+        changed = self.db.execute('''INSERT INTO telegram_bindings (feed,binding,indexed_role) VALUES (%s,%s,%s)
+            ON CONFLICT(feed) DO UPDATE SET binding=excluded.binding, indexed_role=excluded.indexed_role
+            WHERE telegram_bindings.binding IS DISTINCT FROM excluded.binding OR telegram_bindings.indexed_role IS DISTINCT FROM excluded.indexed_role''', (feed,json.dumps(binding),binding.get('role'))).rowcount
         if changed:
             source_changed(self.db)
 
@@ -100,7 +100,7 @@ class TelegramAccess:
         return dict(row) if row else None
 
     def dependents(self, role: str) -> list[str]:
-        return [r['feed'] for r in self.db.execute("SELECT feed FROM telegram_bindings WHERE binding::jsonb->>'role' = %s", (role,))]
+        return [r['feed'] for r in self.db.execute("SELECT feed FROM telegram_bindings WHERE indexed_role = %s", (role,))]
 
     def save_profile(self, role: str, account: str, user_id: int, generation: int, checked: float) -> dict[str, Any]:
         with self.db:

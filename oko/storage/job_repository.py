@@ -51,6 +51,8 @@ class JobRepository:
             raise JobRejected('Attempt no longer owns this job')
         if job.kind=='delete' and previous:
             self.store.problems.sync_deletion(job.id,previous,self.store.wall_clock())
+        if job.kind=='read':
+            self.store.problems.sync_read_feed(job.item,self.store.wall_clock())
         if job.kind=='filter':
             self.store.processing.filter_changed(job.item)
 
@@ -387,6 +389,7 @@ class JobRepository:
             self.store.db.execute("INSERT INTO state VALUES ( 'job-dispatch-generation' , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value", (str(generation),))
             job_write(self.store.db, "UPDATE jobs SET status='running', attempt=attempt+1, generation=%s WHERE id=%s", (generation, row['id']))
             if row['kind']=='filter':self.store.processing.filter_changed(row['item'])
+            if row['kind']=='read':self.store.problems.sync_read_feed(row['item'],self.store.wall_clock())
             if row['kind'] in ('delete','feed-delete') and previous:
                 self.store.problems.sync_deletion(row['id'],previous,self.store.wall_clock())
         current = expect_row(self.store.db.execute('SELECT * FROM jobs WHERE id = %s', (row['id'],)).fetchone())
@@ -407,6 +410,8 @@ class JobRepository:
                 ('failed' if terminal else 'pending',0 if code=='ai-permission' else now+delay,error,code or job.kind,job.id,job.generation)).rowcount
             if changed and job.kind in ('delete','feed-delete'):
                 self.store.problems.sync_deletion(job.id,previous,self.store.wall_clock())
+            if changed and job.kind=='read':
+                self.store.problems.sync_read_feed(job.item,self.store.wall_clock())
 
 
     def restore_telegram_wait(self, feed: str, deadline: float) -> None:
@@ -429,6 +434,7 @@ class JobRepository:
             changed=job_write(self.store.db, f"UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status='pending', generation=generation+1 WHERE {selection} RETURNING id,kind,item,error,problem_code", params).fetchall()
             for row in changed:
                 if row['kind']=='filter':self.store.processing.filter_changed(row['item'])
+                if row['kind']=='read':self.store.problems.sync_read_feed(row['item'],self.store.wall_clock())
                 if row['kind'] in ('delete','feed-delete') and (row['error'] is not None or row['problem_code'] is not None):
                     self.store.problems.sync_deletion(row['id'],[],self.store.wall_clock())
 
@@ -530,6 +536,7 @@ class JobRepository:
                         else:
                             db.execute('UPDATE telegram_read_state SET saved_backfill_after=NULL,needs_sync=true WHERE feed=%s', (feed,))
                             status_changed(db)
+                        self.store.problems.sync_read_feed(feed,self.store.wall_clock())
                     yield
                     if not batch:
                         break
@@ -545,6 +552,7 @@ class JobRepository:
                             if state['signature'] != signature:
                                 db.execute('UPDATE telegram_read_state SET signature = %s WHERE feed = %s', (signature, feed))
                                 job_write(db, "INSERT INTO jobs ( kind , item ) VALUES ( 'read' , %s ) ON CONFLICT ( kind , item ) DO UPDATE SET status = 'pending' , next = 0 , error = NULL , generation = jobs . generation + 1", (feed,))
+                                self.store.problems.sync_read_feed(feed,self.store.wall_clock())
                 yield
                 if self.store.subscriptions.source_revision() != revision:
                     return
@@ -560,12 +568,15 @@ class JobRepository:
 
     def finish_read(self, job: Job, waiting: str, now: float) -> None:
         if waiting:
-            job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , next = %s , error = %s , problem_code = NULL WHERE id = %s AND generation = %s AND status = 'running'",(now+(.1 if waiting=='Продолжение проверки истории Telegram' else 30),waiting,job.id,job.generation))
+            changed=job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , next = %s , error = %s , problem_code = NULL WHERE id = %s AND generation = %s AND status = 'running'",(now+(.1 if waiting=='Продолжение проверки истории Telegram' else 30),waiting,job.id,job.generation)).rowcount
+            if changed:self.store.problems.sync_read_feed(job.item,self.store.wall_clock())
         else:self.finish(job)
 
     def account_wait(self, user: int, until: float, job: Job | None = None) -> None:
         self.store.db.execute('INSERT INTO state VALUES ( %s , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value',('telegram-retry:'+str(user),str(until)))
-        if job:job_write(self.store.db, "UPDATE jobs SET problem_code = %s WHERE id = %s AND generation = %s AND status = 'pending'",(job.kind+':FloodWaitError',job.id,job.generation))
+        if job:
+            changed=job_write(self.store.db, "UPDATE jobs SET problem_code = %s WHERE id = %s AND generation = %s AND status = 'pending'",(job.kind+':FloodWaitError',job.id,job.generation)).rowcount
+            if changed and job.kind=='read':self.store.problems.sync_read_feed(job.item,self.store.wall_clock())
 
     def fail_media(self, job: Job, issue: AdapterIssue) -> None:
         collection_jobs.fail(self.store,job,issue,cancelled=issue.kind==AdapterErrorKind.media_changed)
@@ -657,6 +668,7 @@ class JobRepository:
         job_write(db, f"UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL , retry_at = NULL , retry_delay = 0 , wait_scope = NULL , next = 0 WHERE kind = 'download_media' AND item IN ( SELECT m.id FROM media_files m JOIN ({owned_ids('= %s')}) owner ON owner.id=m.publication_id )",(feed,feed))
         job_write(db, "INSERT INTO jobs ( kind , item , queued_wall ) SELECT 'fetch' , items.id , extract(epoch FROM clock_timestamp()) FROM publications items JOIN feed_publications owner ON owner.publication_id=items.id AND owner.is_primary AND owner.is_unviewed WHERE owner.feed_id = %s AND items.viewed = 0 ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , generation = jobs . generation + 1 , next = 0 , retry_at = NULL , retry_delay = 0 , wait_scope = NULL , error = NULL , problem_code = NULL",(feed,))
         job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL WHERE kind = 'read' AND item = %s",(feed,))
+        self.store.problems.sync_read_feed(feed,self.store.wall_clock())
         self.enqueue_discovery(feed)
 
     def remove_feed(self, feed: str, members: set[str]) -> None:
@@ -667,6 +679,7 @@ class JobRepository:
                 WHERE item = %s AND kind IN ('filter','theses') AND NOT EXISTS (SELECT 1 FROM feed_publications WHERE publication_id=%s)""",(item,item))
             job_write(db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , generation = generation + 1 WHERE kind = 'download_media' AND status = 'running' AND item IN ( SELECT id FROM media_files WHERE publication_id = %s )",(item,))
         job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 WHERE item = %s AND kind NOT IN ( 'delete' , 'feed-delete' )",(feed,))
+        self.store.problems.sync_read_feed(feed,self.store.wall_clock())
         self.reconcile_cleanup()
         # Retain cleanup ownership independently of reading membership. A
         # publication can lose its last membership before its files are removed.
@@ -753,6 +766,7 @@ class JobRepository:
                 source_changed(self.store.db)
                 if affects_codex:
                     self.store.problems.sync_codex_choice(self.store.wall_clock())
+            self.store.problems.sync_read_feed(feed,self.store.wall_clock())
 
 
     def delete(self, job: Job) -> None:

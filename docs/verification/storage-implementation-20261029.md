@@ -1113,3 +1113,15 @@ latencies.
 The task checkout passed 59 migration, status, reading-version and release
 tests, plus six Playwright status scenarios; the status screenshot was
 inspected. Mypy passed on 158 files. No working database was migrated.
+
+
+Read-Job problems are now updated by their owning transactions and recovered on
+startup. Recovery retains unknown legacy records and handles conflicting old
+identities without overwriting unrelated problems. Migration 065 adds bounded
+recovery indexes and a derived Telegram binding role; it preserves binding text,
+including invalid JSONB, and restores valid orphan roles. Synthetic tests cover
+rollback, restart, collisions and bounded lookup. The integrated checkout passed
+283 PostgreSQL tests and 10 Playwright status-panel scenarios; its screenshot was
+inspected. Mypy passed on 157 files using a temporary cache after its default cache
+location produced an internal error. No working database was migrated. Other
+status categories still reconcile on GET and the full target remains incomplete.

@@ -1722,7 +1722,7 @@ def test_profile_problem_suppresses_publication_job_without_saved_job_feed(tmp_p
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','telegram','telegram','connected','[]')")
             store.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'ready',1)")
-            store.db.execute('INSERT INTO telegram_bindings(feed,binding) VALUES (%s,%s)',('feed',json.dumps(dict(kind='client',role='personal',account_user_id='101',peer_id='123'))))
+            store.subscriptions.telegram.put_binding('feed',dict(kind='client',role='personal',account_user_id='101',peer_id='123'))
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('item','telegram','item',0)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','item',true,true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','item','failed','failure','identity-unconfirmed')")

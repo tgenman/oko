@@ -69,4 +69,5 @@ MIGRATIONS = (
     Migration(62, 'remove-feed-owner-view', (Path(__file__).parent / 'postgres' / '062-remove-feed-owner-view.sql').read_text()),
     Migration(63, 'remove-item-read-view', (Path(__file__).parent / 'postgres' / '063-remove-item-read-view.sql').read_text()),
     Migration(64, 'problem-cleanup-identity', (Path(__file__).parent / 'postgres' / '064-problem-cleanup-identity.sql').read_text()),
+    Migration(65, 'read-problem-recovery-index', (Path(__file__).parent / 'postgres' / '065-read-problem-recovery-index.sql').read_text()),
 )

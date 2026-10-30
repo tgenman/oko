@@ -64,15 +64,19 @@ class SubscriptionService:
     @repository_access
     def patch_feed(self, identity: str, value: FeedPatch) -> tuple[dict[str, Any], bool]:
         repository = self._storage()
-        known = repository.subscriptions.feeds(identity)
-        if not known:
-            raise LookupError('Фид не найден')
-        previous = known[0]
-        result = repository.subscriptions.update_feed(identity, value)
-        if result != previous and value.model_fields_set & {'folder_id', 'new_folder', 'importance', 'public_ai', 'transport'}:
-            repository.settings_changed('feed', identity)
-        source_fields = value.model_fields_set - {'title', 'folder_id', 'new_folder', 'importance', 'public_ai'}
-        return result, any(result.get(field) != previous.get(field) for field in source_fields)
+        boundary = nullcontext() if repository.db.transaction_depth else transaction(repository.db)
+        with boundary:
+            known = repository.subscriptions.feeds(identity)
+            if not known:
+                raise LookupError('Фид не найден')
+            previous = known[0]
+            result = repository.subscriptions.update_feed(identity, value)
+            if result != previous and value.model_fields_set & {'folder_id', 'new_folder', 'importance', 'public_ai', 'transport'}:
+                repository.settings_changed('feed', identity)
+            if result != previous and value.model_fields_set & {'auto_read','read_history','transport'}:
+                repository.problems.sync_read_feed(identity,repository.wall_clock())
+            source_fields = value.model_fields_set - {'title', 'folder_id', 'new_folder', 'importance', 'public_ai'}
+            return result, any(result.get(field) != previous.get(field) for field in source_fields)
 
     @repository_access
     def remove_feed(self, identity: str) -> None:
