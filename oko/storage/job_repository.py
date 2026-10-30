@@ -211,7 +211,8 @@ class JobRepository:
                 self.enqueue_discovery(feed)
                 changed_discover=job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , next = CASE WHEN problem_code LIKE '%%FloodWaitError' OR problem_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'discover' AND item = %s AND status != 'running' RETURNING id,error,problem_code", (self.store.wall_clock(),self.store.wall_clock(),discovery)).fetchone()
                 if changed_discover and (changed_discover['error'] is not None or changed_discover['problem_code'] is not None):self.store.problems.sync_discover(changed_discover['id'],self.store.wall_clock())
-            for row in self.store.db.execute("SELECT i . id , i . members , i . source_deleted , j . error , j . status FROM publications i JOIN feed_publications owner ON owner.publication_id=i.id AND owner.is_primary AND owner.is_unviewed JOIN jobs j ON j . item = i . id AND j . kind = 'fetch' WHERE owner.feed_id = %s AND i . viewed = 0 AND j . status != 'running'", (feed,)).fetchall():
+            from oko.storage.fetch_job_problems import managed_candidates
+            for row in self.store.db.execute("SELECT i . id , i . members , i . source_deleted , j . id AS job_id, j . error , j . problem_code, j . status FROM publications i JOIN feed_publications owner ON owner.publication_id=i.id AND owner.is_primary AND owner.is_unviewed JOIN jobs j ON j . item = i . id AND j . kind = 'fetch' WHERE owner.feed_id = %s AND i . viewed = 0 AND j . status != 'running'", (feed,)).fetchall():
                 material = self.store.material(row['id'])
                 unavailable = row['source_deleted']
                 manifest=SourceManifest.model_validate_json(json.dumps(self.store.original(row['id'])[0]['source_manifest'])) if material and material.get('complete') and self.store.original(row['id'])[0].get('source_manifest') else None
@@ -220,7 +221,9 @@ class JobRepository:
                 if row['members'] != '[]' and material and material.get('full',False):
                     continue
                 if row['error'] or unavailable or not material or not material.get('full',False):
+                    prior=managed_candidates(self.store,row['job_id'],self.store.wall_clock()) if row['error'] is not None or row['problem_code'] is not None else []
                     job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , manual_once = CASE WHEN ( status = 'done' AND error IS NOT NULL ) OR EXISTS ( SELECT 1 FROM publications i WHERE i.id=jobs.item AND i.source_deleted ) THEN 1 ELSE manual_once END , status = 'pending' , next = CASE WHEN problem_code LIKE '%%FloodWaitError' OR problem_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'fetch' AND item = %s", (self.store.wall_clock(),self.store.wall_clock(),row['id']))
+                    if prior:self.store.problems.sync_fetch(row['job_id'],prior,self.store.wall_clock())
             for kind in ('filter','theses'):
                 for row in self.store.db.execute(f'SELECT j.item FROM jobs j JOIN ({owned_ids("= %s")}) owner ON owner.id=j.item WHERE j.kind = %s AND j.error IS NOT NULL',(feed,feed,kind)).fetchall():
                     self.retry_processing(row[0],kind)

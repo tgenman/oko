@@ -1180,3 +1180,11 @@ integrated fetch/status/delete/discover suite passed 115 tests, mypy passed for
 eight changed modules, and six Playwright status scenarios passed with desktop
 and mobile screenshots inspected. The browser scenarios covered the general
 status panel, not a dedicated fetch error. No working database was migrated.
+
+
+Manual feed refresh now updates the explicit fetch problem in the same
+transaction as its Job, including done-with-error becoming pending. Synthetic
+checks cover rollback and an indexed lookup with 10,000 unrelated Jobs. The
+integrated fetch/status suite passed 219 PostgreSQL/HTTP tests, six Playwright
+status scenarios and mypy for the changed module; a screenshot was inspected.
+No working database was changed.
