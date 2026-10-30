@@ -889,3 +889,24 @@ tests; the two new focused cases passed separately, as did seven Playwright
 cases with the Telegram profile screenshot inspected. Mypy passed. Binding
 lookup itself still scans its existing relation; no role index was added or
 performance claim made for an arbitrarily large number of bindings.
+
+The subtitle admission slot is now owned through result acceptance, rather
+than released as soon as bytes return. A cancelled request retains the slot
+while its physical call is still running; after it returns, its stale owner
+cannot release a newer attempt. The first broad attempt exposed an overlap with
+an intentionally cancellation-resistant request and was terminated because its
+test could not exit until that request was released. After correcting the slot
+protocol, 63 YouTube/media tests, mypy and eight Playwright cases passed; the
+YouTube settings screenshot was inspected.
+
+A separate draft to persist the shared YouTube wait was not integrated. On a
+synthetic comparison with 100 versus 10,000 unrelated failed Jobs, an initial
+query scanned 10,513 versus 30,011 relation rows and touched 114 versus 34,225
+shared buffers. A source-scoped variant avoided that foreign traversal, but
+when 10,000 other publications belonged to the same YouTube feed it still
+scanned 30,009 relation rows and 52,010 shared buffers. These are instrumented
+EXPLAIN measurements, not latency benchmarks. The draft and its tests are kept
+in `.scratch/storage-redesign/youtube-pause-producer-draft.patch`; further work
+must update affected owners without a feed-wide traversal and preserve linked
+ownership, expiry, retry, rollback and restart. Status GET can still persist the
+shared YouTube problem in the committed code.
