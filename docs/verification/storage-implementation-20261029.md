@@ -378,3 +378,11 @@
   migration it documents; 163 affected tests then passed. Types and five
   Playwright scenarios passed, and a shared-publication screenshot was inspected.
   Version 25 has 23 tables and 91 non-internal triggers; dirty queues remain.
+- Migration 026 removes 15 triggers/functions that only updated obsolete feed,
+  material, filter, summary or media resource versions. The current reader does
+  not consume those versions; the unused batch-version accessor was removed.
+  Card and status version mechanisms remain in place for now.
+- The affected migration, processing, status and reading suites passed 224
+  Python tests; types and 12 Playwright scenarios passed, and a feed-details
+  screenshot was inspected. Version 26 has 23 tables and 76 non-internal
+  triggers. Remaining dirty queues, status GET writes and final review are open.

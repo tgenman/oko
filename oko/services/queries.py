@@ -26,15 +26,6 @@ class VersionQueries:
     def identity(self) -> str:
         return self._storage().read_versions.identity
 
-    @property
-    @repository_access
-    def offset(self) -> float:
-        return self._storage().read_versions.offset
-
-    @repository_access
-    def batch(self, keys: set[tuple[str, str]]) -> dict[tuple[str, str], dict[str, Any]]:
-        return {key: dict(value) for key, value in self._storage().read_versions.batch(keys).items()}
-
     @repository_access
     def version(self, kind: str, identity: str) -> dict[str, Any] | None:
         row = self._storage().read_versions.version(kind, identity)

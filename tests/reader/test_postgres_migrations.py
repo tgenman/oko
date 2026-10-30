@@ -645,3 +645,16 @@ def test_membership_effect_triggers_are_removed(connections):
         assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname IN ('membership_owner_changed','reader_v_shared_insert','reader_v_shared_delete')").fetchone() == (0,)
         assert db.execute("SELECT feed_id,publication_id FROM feed_publications").fetchall() == [('feed','item')]
         verify(db, MIGRATIONS)
+
+
+def test_unused_job_resource_version_triggers_are_removed(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:25])
+        migrate(db, MIGRATIONS)
+        assert db.execute("""SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
+            JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND c.relname='jobs'
+            AND (t.tgname LIKE 'reader_v_job_filter_%' OR t.tgname LIKE 'reader_v_job_theses_%'
+                 OR t.tgname LIKE 'reader_v_job_history_%' OR t.tgname LIKE 'reader_v_filter_eligibility_%')""").fetchone() == (0,)
+        assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname IN ('reader_v_feed_material','reader_v_item_inputs','reader_v_item_media_available')").fetchone() == (0,)
+        verify(db, MIGRATIONS)

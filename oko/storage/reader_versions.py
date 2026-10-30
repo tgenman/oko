@@ -15,7 +15,6 @@ if TYPE_CHECKING:
 class ReaderVersions:
     def __init__(self, store: 'Store') -> None:
         self.store, self.db = store, store.db
-        self.offset = store.wall_clock() - store.clock()
         self._next_action_cleanup = float('-inf')
         with self.db:
             self.db.execute("INSERT INTO state(key,value) VALUES ('storage-id',%s) ON CONFLICT DO NOTHING", (json.dumps(str(uuid.uuid4())),))
@@ -61,16 +60,6 @@ class ReaderVersions:
 
     def version(self, kind: str, identity: str) -> Row | None:
         return self.db.execute('SELECT version , changed FROM reader_entities WHERE kind = %s AND identity = %s', (kind,identity)).fetchone()
-
-    def batch(self, keys: set[tuple[str, str]]) -> dict[tuple[str, str], Row]:
-        result = {}
-        ordered=sorted(keys)
-        for start in range(0,len(ordered),499):
-            batch=ordered[start:start+499]
-            marks=','.join('(%s,%s)' for _ in batch)
-            rows=self.db.execute(f"WITH wanted ( kind , identity ) AS ( VALUES {marks} ) SELECT e . * , i . id AS item_exists , i . viewed , f . id AS feed_exists FROM wanted w JOIN reader_entities e ON e . kind = w . kind AND e . identity = w . identity LEFT JOIN items_read i ON e . kind IN ( 'card' , 'material' , 'filter' , 'theses' , 'media' ) AND i . id = e . identity LEFT JOIN feeds f ON e . kind = 'feed' AND f . id = e . identity", [v for pair in batch for v in pair])
-            result.update({(r['kind'],r['identity']):r for r in rows})
-        return result
 
     def advance(self, now: float | None = None, wall: float | None = None) -> None:
         now=self.store.clock() if now is None else now
