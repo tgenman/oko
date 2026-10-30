@@ -10,7 +10,7 @@ class SettingsStore:
         self.db = db
 
     @staticmethod
-    def _owner(scope: Literal['oko', 'folder', 'feed'], owner: str) -> tuple[str | None, str | None]:
+    def _owner(scope: str, owner: str) -> tuple[str | None, str | None]:
         if scope == 'oko' and owner == 'global':
             return None, None
         if scope == 'folder' and owner:

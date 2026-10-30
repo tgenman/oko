@@ -543,11 +543,11 @@ def test_http_settings_reads_committed_changes_from_another_connection(tmp_path,
     with TestClient(app, headers=HEADERS) as client, psycopg.connect(settings_database) as writer:
         assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
         assert client.get(path).json()['effective']['theses']['value'] is False
-        writer.execute("INSERT INTO settings(scope,owner,field,value) VALUES ('oko','global','theses','true')")
+        writer.execute("INSERT INTO settings(field,value) VALUES ('theses','true')")
         assert client.get(path).json()['effective']['theses']['value'] is False
         writer.commit()
         assert client.get(path).json()['effective']['theses']['value'] is True
-        writer.execute("UPDATE settings SET value='false' WHERE scope='oko' AND owner='global' AND field='theses'")
+        writer.execute("UPDATE settings SET value='false' WHERE folder_id IS NULL AND feed_id IS NULL AND field='theses'")
         writer.rollback()
         assert client.get(path).json()['effective']['theses']['value'] is True
 
@@ -575,8 +575,8 @@ def test_http_inherited_settings_use_one_consistent_database_snapshot(tmp_path, 
             with ThreadPoolExecutor() as pool:
                 pending = pool.submit(client.get, path)
                 assert entered.wait(5)
-                writer.execute("UPDATE settings SET value='true' WHERE scope='oko' AND owner='global' AND field='theses'")
-                writer.execute("UPDATE settings SET value=%s WHERE scope='folder' AND owner=%s AND field='prompt_filters'", ('\"after\"', folder))
+                writer.execute("UPDATE settings SET value='true' WHERE folder_id IS NULL AND feed_id IS NULL AND field='theses'")
+                writer.execute("UPDATE settings SET value=%s WHERE folder_id=%s AND feed_id IS NULL AND field='prompt_filters'", ('\"after\"', folder))
                 writer.commit()
                 release.set()
                 result = pending.result(5)

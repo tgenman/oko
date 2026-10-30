@@ -574,7 +574,7 @@ def test_unused_reader_lists_and_originals_are_removed(connections):
         db.execute("INSERT INTO settings(scope,owner,field,value) VALUES ('feed','feed','originals','false')")
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT to_regclass('reader_lists'),to_regclass('reader_originals')").fetchone() == (None,None)
-        assert db.execute("SELECT value FROM settings WHERE scope='feed' AND owner='feed' AND field='originals'").fetchone() == ('false',)
+        assert db.execute("SELECT value FROM settings WHERE feed_id='feed' AND field='originals'").fetchone() == (False,)
         verify(db, MIGRATIONS)
 
 
@@ -922,3 +922,43 @@ def test_json_compatibility_helpers_are_removed(connections):
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=current_schema() AND p.proname LIKE 'oko_json_%'").fetchone() == (0,)
         verify(db, MIGRATIONS)
+
+
+def test_settings_migration_preserves_overrides_and_adds_foreign_keys(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:51])
+        db.execute("INSERT INTO folders(id,title) VALUES ('folder','Folder')")
+        db.execute("INSERT INTO feeds(id,folder_id) VALUES ('feed','folder')")
+        db.execute("INSERT INTO settings(scope,owner,field,value) VALUES ('oko','global','theses','true'),('folder','folder','theses','false'),('feed','feed','prompt_filters','\"\"')")
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT folder_id,feed_id,value FROM settings WHERE field='theses' ORDER BY folder_id NULLS FIRST").fetchall() == [(None,None,True),('folder',None,False)]
+        assert db.execute("SELECT value FROM settings WHERE feed_id='feed'").fetchone() == ('',)
+        with pytest.raises(psycopg.errors.ForeignKeyViolation):
+            db.execute("INSERT INTO settings(feed_id,field,value) VALUES ('missing','theses','false'::jsonb)")
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            db.execute("INSERT INTO settings(field,value) VALUES ('theses','false'::jsonb)")
+        verify(db, MIGRATIONS)
+
+
+def test_settings_migration_rejects_orphan_owner(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:51])
+        db.execute("INSERT INTO settings(scope,owner,field,value) VALUES ('feed','missing','theses','false')")
+        with pytest.raises(psycopg.errors.RaiseException, match='invalid settings owner'):
+            migrate(db, MIGRATIONS)
+        assert db.execute("SELECT value FROM settings WHERE owner='missing'").fetchone() == ('false',)
+        verify(db, MIGRATIONS[:51])
+
+
+@pytest.mark.parametrize('value,error', [('null', psycopg.errors.RaiseException), ('not-json', psycopg.errors.InvalidTextRepresentation)])
+def test_settings_migration_rejects_invalid_legacy_value(connections, value, error):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:51])
+        db.execute("INSERT INTO settings(scope,owner,field,value) VALUES ('oko','global','theses',%s)", (value,))
+        with pytest.raises(error):
+            migrate(db, MIGRATIONS)
+        assert db.execute("SELECT value FROM settings WHERE field='theses'").fetchone() == (value,)
+        verify(db, MIGRATIONS[:51])

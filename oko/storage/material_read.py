@@ -43,10 +43,11 @@ _ITEM = "SELECT i . * , CASE WHEN i.status='filter_out' THEN 1 ELSE 0 END AS rea
 _FEED_COLUMNS = ','.join('f.' + name for name in READER_FEED_COLUMNS)
 _FEED = 'SELECT ' + _FEED_COLUMNS + ', b.binding AS reader_binding FROM feeds f LEFT JOIN telegram_bindings b ON b.feed = f.id'
 _BATCH_FEED = 'SELECT ' + _FEED_COLUMNS + ''', b.binding AS reader_binding,
-    COALESCE((SELECT jsonb_agg(jsonb_build_array(s.scope, s.owner, s.field, s.value))
-              FROM settings s WHERE (s.scope = 'oko' AND s.owner = 'global')
-                 OR (s.scope = 'folder' AND s.owner = f.folder_id)
-                 OR (s.scope = 'feed' AND s.owner = f.id)), '[]'::jsonb) AS reader_settings
+    COALESCE((SELECT jsonb_agg(jsonb_build_array(
+        CASE WHEN s.feed_id IS NOT NULL THEN 'feed' WHEN s.folder_id IS NOT NULL THEN 'folder' ELSE 'oko' END,
+        COALESCE(s.feed_id,s.folder_id,'global'), s.field, s.value))
+              FROM settings s WHERE (s.folder_id IS NULL AND s.feed_id IS NULL)
+                 OR s.folder_id = f.folder_id OR s.feed_id = f.id), '[]'::jsonb) AS reader_settings
     FROM feeds f LEFT JOIN telegram_bindings b ON b.feed = f.id'''
 
 @reading_value
@@ -119,8 +120,8 @@ def material_inputs(db: Database, identities: set[str], *, include_subtitles: bo
             value.settings.setdefault(('oko', 'global'), {})
             value.settings.setdefault(('feed', row['id']), {})
             value.settings.setdefault(('folder', row['folder_id']), {})
-            for scope, owner, field, serialized in row['reader_settings']:
-                value.settings.setdefault((scope, owner), {})[field] = json.loads(serialized)
+            for scope, owner, field, setting in row['reader_settings']:
+                value.settings.setdefault((scope, owner), {})[field] = setting
     keys = ['settings-version', 'processor:codex', 'processor:llamacpp'] + ['settings-version:'+f for f in feeds]
     value.state_keys=set(keys)
     for start in range(0,len(keys),400):

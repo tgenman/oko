@@ -5,6 +5,7 @@ from typing import Any
 from oko.storage.database import Connection
 from oko.storage import material_read
 from oko.storage.source_configuration import changed as source_changed
+from oko.storage.settings_store import SettingsStore
 
 
 class SettingsRepository:
@@ -39,21 +40,24 @@ class SettingsRepository:
             inputs = material_read.current(self.db)
             if inputs is not None and (scope, owner) in inputs.settings:
                 return dict(inputs.settings[(scope, owner)])
-            return {row['field']: json.loads(row['value']) for row in self.db.execute(
-                'SELECT field, value FROM settings WHERE scope = %s AND owner = %s', (scope, owner))}
+            folder, feed = SettingsStore._owner(scope, owner)
+            return {row['field']: row['value'] for row in self.db.execute(
+                'SELECT field, value FROM settings WHERE folder_id IS NOT DISTINCT FROM %s AND feed_id IS NOT DISTINCT FROM %s', (folder, feed))}
 
     def patch(self, scope: str, owner: str, patch: dict[str, Any]) -> None:
+        folder, feed = SettingsStore._owner(scope, owner)
         changed = False
         for field, value in patch.items():
             if value is None:
-                changed = bool(self.db.execute('DELETE FROM settings WHERE scope = %s AND owner = %s AND field = %s', (scope, owner, field)).rowcount) or changed
+                changed = bool(self.db.execute('DELETE FROM settings WHERE folder_id IS NOT DISTINCT FROM %s AND feed_id IS NOT DISTINCT FROM %s AND field=%s', (folder,feed,field)).rowcount) or changed
             else:
-                changed = bool(self.db.execute('''INSERT INTO settings VALUES (%s,%s,%s,%s)
-                    ON CONFLICT(scope,owner,field) DO UPDATE SET value=excluded.value
-                    WHERE settings.value IS DISTINCT FROM excluded.value''', (scope,owner,field,json.dumps(value))).rowcount) or changed
+                changed = bool(self.db.execute('''INSERT INTO settings(folder_id,feed_id,field,value) VALUES (%s,%s,%s,%s::jsonb)
+                    ON CONFLICT ON CONSTRAINT settings_one_value DO UPDATE SET value=excluded.value
+                    WHERE settings.value IS DISTINCT FROM excluded.value''', (folder,feed,field,json.dumps(value))).rowcount) or changed
         if changed:
             source_changed(self.db)
 
     def clear(self, scope: str, owner: str) -> None:
-        if self.db.execute('DELETE FROM settings WHERE scope = %s AND owner = %s', (scope, owner)).rowcount:
+        folder, feed = SettingsStore._owner(scope, owner)
+        if self.db.execute('DELETE FROM settings WHERE folder_id IS NOT DISTINCT FROM %s AND feed_id IS NOT DISTINCT FROM %s', (folder,feed)).rowcount:
             source_changed(self.db)

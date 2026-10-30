@@ -574,3 +574,11 @@
   Telegram publication screenshot was inspected. A fresh schema has 22 tables,
   zero non-internal triggers and zero schema-local functions. The two dirty
   tables and remaining physical/model changes are still unfinished.
+- Migration 052 converts `settings` to nullable folder/feed foreign keys and
+  JSONB, with a single NULLS NOT DISTINCT uniqueness constraint. It preserves
+  false and empty strings, rejects orphan owners, JSON null and invalid JSON,
+  and rolls back without modifying legacy values. Inheritance, settings, feed
+  cleanup, recovery and migration suites passed 265 tests and types; two invalid
+  value migration cases and 14 SQL-cost checks also passed. Nine Playwright
+  settings/feed scenarios passed and the filter switch screenshot was inspected.
+  The dirty processing queues and duplicate feed configuration remain open.

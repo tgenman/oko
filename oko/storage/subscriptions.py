@@ -219,11 +219,11 @@ class SubscriptionRepository:
     def effective_feeds(self) -> dict[str,dict[str,Any]]:
         feeds = self.feeds()
         settings: dict[tuple[str,str],dict[str,Any]] = {}
-        for row in self.db.execute("""SELECT scope,owner,field,value FROM settings
-            WHERE (scope='oko' AND owner='global') OR (scope='feed' AND owner=ANY(%s))
-               OR (scope='folder' AND owner=ANY(%s))""",
+        for row in self.db.execute("""SELECT CASE WHEN feed_id IS NOT NULL THEN 'feed' WHEN folder_id IS NOT NULL THEN 'folder' ELSE 'oko' END AS scope,
+                COALESCE(feed_id,folder_id,'global') AS owner,field,value FROM settings
+            WHERE (folder_id IS NULL AND feed_id IS NULL) OR feed_id=ANY(%s) OR folder_id=ANY(%s)""",
             ([feed['id'] for feed in feeds], list({feed['folder_id'] for feed in feeds}))):
-            settings.setdefault((row['scope'],row['owner']), {})[row['field']] = json.loads(row['value'])
+            settings.setdefault((row['scope'],row['owner']), {})[row['field']] = row['value']
         return {feed['id']:self._effective_value('feed',feed['id'],feed,settings) for feed in feeds}
 
     def _effective_value(self, scope: str, owner: str, feed: dict[str,Any] | Row | None,
