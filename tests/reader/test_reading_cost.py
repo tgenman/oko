@@ -97,7 +97,7 @@ def test_unviewed_index_bounds_archive_work_and_survives_reopen(tmp_path):
         assert rows[0]['id'] == 'archive-00099'
         assert work.rows < 2000, work
         with measure_reads(store.db) as feed_work:
-            feed_rows = store.db.execute("SELECT id FROM unviewed_items_by_feed WHERE feed_id='demo' AND viewed=0 ORDER BY published DESC").fetchall()
+            feed_rows = store.db.execute("SELECT p.id FROM feed_publications m JOIN publications p ON p.id=m.publication_id WHERE m.feed_id='demo' AND m.is_primary AND m.is_unviewed AND p.viewed=0 ORDER BY p.published DESC").fetchall()
         assert len(feed_rows) == 100
         assert feed_work.rows < 2000, feed_work
         # Include transactional entity versions and navigation counts, as well as
@@ -122,7 +122,7 @@ def test_unviewed_index_bounds_archive_work_and_survives_reopen(tmp_path):
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'small',id,true FROM publications WHERE id LIKE 'small-%'")
             store.db._db.execute('ANALYZE publications')
         with measure_reads(store.db) as small_work:
-            small_rows = store.db.execute("SELECT id FROM unviewed_items_by_feed WHERE feed_id='small'").fetchall()
+            small_rows = store.db.execute("SELECT p.id FROM feed_publications m JOIN publications p ON p.id=m.publication_id WHERE m.feed_id='small' AND m.is_primary AND m.is_unviewed AND p.viewed=0").fetchall()
         assert len(small_rows) == 10
         assert small_work.rows < 200, small_work
     finally:

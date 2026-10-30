@@ -43,7 +43,7 @@ def test_manifest_pins_every_component_without_credentials(tmp_path):
     assert manifest['platform'] == 'linux/amd64'
     assert manifest['helper']['protocol'] == 1
     assert manifest['codex']['version'] == '0.164.0'
-    assert manifest['schema'] == {'minimum':60,'maximum':60}
+    assert manifest['schema'] == {'minimum':61,'maximum':61}
     assert not {'token','password','api_key','auth'} & manifest.keys()
 
 

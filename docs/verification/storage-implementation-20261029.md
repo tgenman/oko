@@ -985,3 +985,14 @@ passed 254 tests; the task checkout passed 204 migration and transaction tests.
 Mypy passed on 157 files. Thirty-two Playwright reading and status scenarios
 passed, and the opened-publication screenshot was inspected. Other compatibility
 views and status reconciliation are still present.
+
+
+Migration 061 removes `unviewed_items_by_feed` after its consumers were moved to
+explicit joins of publications and memberships, retaining both primary and
+unviewed membership predicates as well as the publication viewed predicate. A
+synthetic upgrade preserved selection for shared, viewed and flagged records;
+a forced failure restored the view and left the ledger at 60. The temporary-copy
+regression passed 259 tests, including bounded reading-cost checks; the task
+checkout passed 217 migration and transaction tests. Mypy passed on 157 files.
+Eight Playwright collection/status scenarios passed in the task checkout; the
+collection screenshot was inspected. No working database was migrated.

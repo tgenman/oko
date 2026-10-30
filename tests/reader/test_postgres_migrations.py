@@ -1175,3 +1175,31 @@ def test_reading_memberships_removal_rolls_back_on_migration_failure(connections
         assert db.execute("SELECT count(*) FROM reading_memberships WHERE publication_id='article'").fetchone()[0] == 1
         assert db.execute('SELECT max(version) FROM oko_schema_migrations').fetchone()[0] == 59
         verify(db, MIGRATIONS[:59])
+
+
+def test_unviewed_view_removal_preserves_primary_membership_selection(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:60])
+        db.execute("INSERT INTO feeds(id,platform,external_id) VALUES ('first','rss','https://first.test'),('second','rss','https://second.test')")
+        db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('shared','rss','shared',0),('viewed','rss','viewed',1),('flagged','rss','flagged',0)")
+        db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('first','shared',true,true),('second','shared',false,true),('first','viewed',true,false),('first','flagged',true,false)")
+        before=db.execute('SELECT id,feed_id FROM unviewed_items_by_feed ORDER BY id,feed_id').fetchall()
+        assert before == [('shared','first')]
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT to_regclass('unviewed_items_by_feed')").fetchone()[0] is None
+        after=db.execute('SELECT p.id,m.feed_id FROM publications p JOIN feed_publications m ON m.publication_id=p.id WHERE m.is_primary AND m.is_unviewed AND p.viewed=0 ORDER BY p.id,m.feed_id').fetchall()
+        assert after == before
+        verify(db,MIGRATIONS)
+
+
+def test_unviewed_view_removal_rolls_back_on_failure(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:60])
+        failing=Migration(61, MIGRATIONS[60].name, MIGRATIONS[60].sql+'; SELECT missing_column FROM feed_publications')
+        with pytest.raises(psycopg.errors.UndefinedColumn):
+            migrate(db, (*MIGRATIONS[:60], failing))
+        assert db.execute("SELECT to_regclass('unviewed_items_by_feed')").fetchone()[0] is not None
+        assert db.execute('SELECT max(version) FROM oko_schema_migrations').fetchone()[0] == 60
+        verify(db, MIGRATIONS[:60])
