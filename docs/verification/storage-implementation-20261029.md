@@ -767,3 +767,8 @@
   states survive. The affected migration, processing, history and recovery
   suites passed 281 tests and types; three Playwright scenarios passed and the
   collection status screenshot was inspected.
+- Migration 058 constrains Job operation names and nonnegative attempt,
+  generation and retry-delay counters. Unknown, null or negative legacy values
+  stop migration without rewriting them. The relevant migration, worker, history,
+  deletion and recovery suites passed 298 tests and types; three Playwright cases
+  passed and the collection screenshot was inspected.

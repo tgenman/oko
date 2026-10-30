@@ -1087,3 +1087,30 @@ def test_status_constraint_migration_rejects_invalid_legacy_data(connections, ta
             migrate(db,MIGRATIONS)
         assert db.execute(f'SELECT status FROM {table}').fetchone() == (value,)
         verify(db,MIGRATIONS[:56])
+
+
+def test_job_operation_and_counters_are_constrained(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db,MIGRATIONS[:57])
+        db.execute("INSERT INTO jobs(kind,item,generation,attempt,retry_delay) VALUES ('filter','item',3,2,5)")
+        migrate(db,MIGRATIONS)
+        assert db.execute("SELECT kind,generation,attempt,retry_delay FROM jobs WHERE item='item'").fetchone() == ('filter',3,2,5.0)
+        with pytest.raises(psycopg.errors.CheckViolation):
+            db.execute("INSERT INTO jobs(kind,item) VALUES ('invented','other')")
+        with pytest.raises(psycopg.errors.CheckViolation):
+            db.execute("UPDATE jobs SET generation=-1 WHERE item='item'")
+        verify(db,MIGRATIONS)
+
+
+@pytest.mark.parametrize('field,value', [('kind','invented'),('kind',None),('generation',-1),('generation',None),('attempt',-1),('attempt',None),('retry_delay',-1)])
+def test_job_constraint_migration_rejects_ambiguous_legacy_data(connections, field, value):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db,MIGRATIONS[:57])
+        db.execute("INSERT INTO jobs(kind,item) VALUES ('filter','item')")
+        db.execute(f'UPDATE jobs SET {field}=%s WHERE item=%s', (value,'item'))
+        with pytest.raises(psycopg.errors.RaiseException,match='invalid saved job'):
+            migrate(db,MIGRATIONS)
+        assert db.execute(f'SELECT {field} FROM jobs WHERE item=%s', ('item',)).fetchone() == (value,)
+        verify(db,MIGRATIONS[:57])
