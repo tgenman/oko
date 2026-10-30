@@ -37,6 +37,8 @@ class DiscoveryProjection:
     delete_problem_children: tuple[str,...] = ()
     fetch_problem_job: int | None = None
     fetch_problem_children: tuple[str,...] = ()
+    media_problem_exists: bool = False
+    media_problem_children: tuple[str,...] = ()
     fingerprint: str | None = None
     content: tuple[dict[str, Any], list[dict[str, Any]]] | None = None
 
@@ -153,6 +155,8 @@ class Publications:
             plan=DiscoveryProjection(item,existing[0]['source_id'] if existing else source_id)
             current=self.store.db.execute("""SELECT viewed,members,complete,
                 (SELECT j.id FROM jobs j WHERE j.kind='delete' AND j.item=publications.id AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)) AS delete_problem_job,
+                EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=publications.id AND m.resource_key IS DISTINCT FROM 'youtube:subtitles' AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%') AS media_problem_exists,
+                ARRAY(SELECT DISTINCT m.publication_id FROM publication_links l JOIN media_files m ON m.publication_id=l.target_publication_id JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE l.source_publication_id=publications.id AND m.resource_key IS DISTINCT FROM 'youtube:subtitles' AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%') AS media_problem_children,
                 (SELECT j.id FROM jobs j WHERE j.kind='fetch' AND j.item=publications.id AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','work-fetch')) AS fetch_problem_job,
                 ARRAY(SELECT j.item FROM LATERAL
                       (SELECT target_publication_id FROM publication_links WHERE source_publication_id=publications.id ORDER BY target_publication_id OFFSET 0) l
@@ -172,6 +176,8 @@ class Publications:
                 plan.delete_problem_children = tuple(current['delete_problem_children'])
                 plan.fetch_problem_job = current['fetch_problem_job']
                 plan.fetch_problem_children = tuple(current['fetch_problem_children'])
+                plan.media_problem_exists = bool(current['media_problem_exists'])
+                plan.media_problem_children = tuple(current['media_problem_children'])
             described=publication.teaser.adapter_content if publication.teaser else None
             album_changed=bool(current and described and ref.key.platform.value=='telegram'
                 and described.content.get('extra',{}).get('telegram',{}).get('album_id') is not None
@@ -279,11 +285,23 @@ class Publications:
         """Called in the accepting transaction, after durable media preparation."""
         content, media = prepared
         store = self.store
+        old = expect_row(store.db.execute("""SELECT p.content,p.platform,EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id
+            WHERE m.publication_id=p.id AND m.resource_key IS DISTINCT FROM 'youtube:subtitles' AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%') AS media_problem_exists,
+            ARRAY(SELECT j.id FROM jobs j WHERE j.kind='download_media' AND j.item=ANY(%s) AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%' AND NOT EXISTS (SELECT 1 FROM media_files m WHERE m.id=j.item)) AS orphan_media_jobs
+            FROM publications p WHERE p.id=%s""",([row['id'] for row in media],item)).fetchone())
+        if old['media_problem_exists']:
+            publication_links.capture_media_problems(store,effects,{item})
+        if old['orphan_media_jobs']:
+            from oko.storage.media_job_problems import managed_candidates
+            for job_id in old['orphan_media_jobs']:
+                if job_id in effects.media_problems_checked:continue
+                effects.media_problems_checked.add(job_id)
+                previous=managed_candidates(store,job_id,store.wall_clock())
+                if previous:effects.media_problems_before[job_id]=previous
         self.set_source_deleted([item], False)
         from oko.collection.adapters import ExternalKey,Platform
         links=content['extra'].pop('_links',[])
         links_changed=publication_links.sync(store,item,tuple(ExternalReference(ExternalKey(Platform(ref['platform']),ref['external_id']),ref['url']) for ref in links),effects)
-        old = expect_row(store.db.execute('SELECT content , platform FROM publications WHERE id = %s', (item,)).fetchone())
         previous = json.loads(old['content'])
         same = not links_changed and publication_input.blocks(previous)==publication_input.blocks(content) and previous.get('extra',{}).get('_reader',{}).get('title')==content['extra']['_reader']['title']
         if 'youtube' in content.get('extra',{}):
@@ -469,14 +487,16 @@ class Publications:
     def forget(self, item: str, *, prune: bool = True, effects: CollectionEffects | None = None) -> None:
         db = self.store.db
         linked={row[0] for row in db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id = %s',(item,))}
-        self.forget_many([item])
+        self.forget_many([item],effects=effects)
         if prune:
             publication_links.prune(self.store,linked,effects=effects)
 
-    def forget_many(self, items: list[str]) -> None:
+    def forget_many(self, items: list[str], *, effects: CollectionEffects | None = None) -> None:
         """Clear saved copies without re-evaluating graph reachability."""
         db = self.store.db
         memberships.lock_graph(db)
+        local_effects=effects if effects is not None else CollectionEffects()
+        publication_links.capture_media_problems(self.store,local_effects,set(items))
         for start in range(0, len(items), 400):
             batch = items[start:start+400]
             marks = ','.join('%s' for _ in batch)
@@ -486,3 +506,6 @@ class Publications:
             db.execute(f'DELETE FROM media_files WHERE publication_id IN ( {marks} )', batch)
             db.execute(f"UPDATE publications SET content = '{{}}' , media_ids = '[]' , filtered_content = '{{}}' , summarized_content = '{{}}' , processing_metadata = '{{}}' WHERE id IN ( {marks} )", batch)
             self.store.processing.memberships_removed(removed)
+        if effects is None:
+            for job_id,previous in local_effects.media_problems_before.items():
+                self.store.problems.sync_media_problem(job_id,previous,self.store.wall_clock())

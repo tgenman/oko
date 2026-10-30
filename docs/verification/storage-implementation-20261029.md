@@ -1188,3 +1188,14 @@ checks cover rollback and an indexed lookup with 10,000 unrelated Jobs. The
 integrated fetch/status suite passed 219 PostgreSQL/HTTP tests, six Playwright
 status scenarios and mypy for the changed module; a screenshot was inspected.
 No working database was changed.
+
+
+Explicit non-source download_media errors, including orphan Jobs, now use
+event-owned updates and startup recovery. YouTube subtitles and common codes
+remain on their previous path. Synthetic coverage checks file replacement and
+rollback, orphan HTTP parity, multiple roots, retry, legacy preservation and
+bounded selection. The integrated media/fetch/Telegram/status/delete suite
+passed 107 PostgreSQL tests, mypy passed for eight modules and six Playwright
+status scenarios passed; desktop/mobile screenshots were inspected. Browser
+coverage was for the general status panel, not a dedicated media error. No
+working database was migrated.

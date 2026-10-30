@@ -27,12 +27,16 @@ def interrupt(store: 'Store', feeds: set[str] | None = None, *, backoff: bool = 
             else row['retry_at'] if row['wait_scope'] else None)
         from oko.storage.fetch_job_problems import managed_candidates
         previous_fetch=managed_candidates(store,row['id'],store.wall_clock()) if row['kind']=='fetch' and (row['error'] is not None or row['problem_code'] is not None) else []
+        from oko.storage.media_job_problems import managed_candidates as media_candidates
+        previous_media=media_candidates(store,row['id'],store.wall_clock()) if row['kind']=='download_media' and (row['error'] is not None or row['problem_code'] is not None) else []
         job_write(store.db, "UPDATE jobs SET queued_wall=CASE WHEN kind IN ('discover','fetch','download_media') AND status!='pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END, status='pending', generation=generation+1, retry_at=%s, next=%s WHERE id=%s",
             (until,store.clock()+max(0,until-store.wall_clock()) if until else 0,row['id']))
         if row['kind']=='discover' and (row['error'] is not None or row['problem_code'] is not None):
             store.problems.sync_discover(row['id'],store.wall_clock())
         if previous_fetch:
             store.problems.sync_fetch(row['id'],previous_fetch,store.wall_clock())
+        if previous_media:
+            store.problems.sync_media_problem(row['id'],previous_media,store.wall_clock())
 
 
 def recover(store: 'Store') -> None:
@@ -54,6 +58,8 @@ def fail(store: 'Store', job: 'Job', issue: AdapterIssue, *, cancelled: bool = F
         return
     from oko.storage.fetch_job_problems import managed_candidates
     previous=managed_candidates(store,job.id,store.wall_clock()) if job.kind=='fetch' else []
+    from oko.storage.media_job_problems import managed_candidates as media_candidates
+    previous_media=media_candidates(store,job.id,store.wall_clock()) if job.kind=='download_media' else []
     row = expect_row(store.db.execute('SELECT retry_delay FROM jobs WHERE id = %s',(job.id,)).fetchone())
     settings = store.subscriptions.retry_settings()
     delay = min(settings['max_seconds'],max(settings['initial_seconds'],row['retry_delay']*2))
@@ -65,3 +71,5 @@ def fail(store: 'Store', job: 'Job', issue: AdapterIssue, *, cancelled: bool = F
         store.problems.sync_discover(job.id,store.wall_clock())
     if job.kind=='fetch':
         store.problems.sync_fetch(job.id,previous,store.wall_clock())
+    if job.kind=='download_media':
+        store.problems.sync_media_problem(job.id,previous_media,store.wall_clock())
