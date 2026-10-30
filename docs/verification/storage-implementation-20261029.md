@@ -948,3 +948,17 @@ status and Codex settings scenarios passed, and the status screenshot was
 inspected. Other problem categories are still reconciled by status GET; this is
 not a claim that GET is fully read-only. Deleting a feed that required Codex
 currently reevaluates effective feed settings, so this path can scan feeds.
+
+
+Command problems are now synchronized by command events, not recomputed by the
+status read. Startup performs an idempotent one-time recovery of older command
+receipts, committing in batches and setting a version marker only after success.
+An interruption after one batch resumes correctly. Tests cover newer successful
+receipts, deleted material, interrupted pending commands, atomic error updates,
+and retries sharing a timestamp. The one-time recovery can scan unresolved
+receipts; pending-at-start recovery remains a separate existing startup scan.
+
+On synthetic PostgreSQL, 115 settings, status and transaction tests passed in
+the task checkout. Mypy passed on 157 files. Eight Playwright status and model
+settings scenarios passed, and the status screenshot was inspected. Other
+problem categories still depend on status reconciliation.

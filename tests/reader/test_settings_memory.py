@@ -890,3 +890,165 @@ def test_deleting_feed_keeps_problem_needed_by_global_settings(tmp_path, setting
         assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s', (problem,)).fetchone()['finished'] is None
     finally:
         store.db.close()
+
+
+def test_legacy_command_problems_recover_at_startup_not_status_read(tmp_path, settings_database):
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    context = lambda identity: dict(identity=identity, title='Command', objects=[], action=None, discardable=True)
+    try:
+        for result in ('failed', 'unknown'):
+            store.problems.report_action(result, context(result), result, 1)
+        with store.db:
+            store.db.execute("DELETE FROM reader_problems WHERE identity LIKE 'action:%%'")
+            store.db.execute("DELETE FROM state WHERE key='action-problems-recovered-v1'")
+        store.db.close()
+        store = Store(tmp_path, lambda _: None, database_url=settings_database)
+        problems = store.db.execute("SELECT identity FROM reader_problems WHERE identity LIKE 'action:%%' AND finished IS NULL ORDER BY identity").fetchall()
+        assert [row['identity'] for row in problems] == ['action:failed', 'action:unknown']
+        with store.db:
+            store.db.execute("DELETE FROM reader_problems WHERE identity='action:failed'")
+        state = store.problems.snapshot(2)
+        assert len([problem for problem in state['current'] if problem['code'].startswith('action-')]) == 1
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='action:failed'").fetchone() is None
+    finally:
+        store.db.close()
+
+
+def test_action_recovery_respects_latest_receipt_and_closes_stale_problem(tmp_path, settings_database):
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    context = dict(identity='same', title='Command', objects=[], action=None, discardable=True)
+    try:
+        store.problems.report_action('old', context, 'failed', 1)
+        store.problems.action_started('new', context, 2)
+        store.problems.action_finished('new', True, 3)
+        with store.db:
+            store.db.execute("UPDATE reader_problems SET finished=NULL,outcome=NULL WHERE identity='action:same'")
+            store.db.execute("DELETE FROM state WHERE key='action-problems-recovered-v1'")
+        store.db.close()
+        store = Store(tmp_path, lambda _: None, database_url=settings_database)
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='action:same' AND finished IS NULL").fetchone() is None
+        assert not [p for p in store.problems.snapshot(4)['current'] if p['code'].startswith('action-')]
+    finally:
+        store.db.close()
+
+
+def test_command_error_updates_problem_in_same_transaction(tmp_path, settings_database):
+    import json
+    from oko.storage.transaction import transaction
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    context = dict(identity='same', title='Command', objects=[], action=None, discardable=True,
+                   command_context={'operation':'codex_save'})
+    try:
+        store.problems.report_action('one', context, 'failed', 1)
+        def error():
+            row=store.db.execute("SELECT body FROM reader_problems WHERE identity='action:same' AND finished IS NULL").fetchone()
+            return json.loads(json.loads(row['body'])['operation'])['error']
+        assert error() is None
+        with pytest.raises(ValueError, match='rollback'):
+            with transaction(store.db):
+                store.problems.command_error('one', json.dumps({'code':'failed'}))
+                assert error() == {'code':'failed'}
+                raise ValueError('rollback')
+        assert error() is None
+        store.problems.command_error('one', json.dumps({'code':'failed'}))
+        assert error() == {'code':'failed'}
+    finally:
+        store.db.close()
+
+
+def test_command_problem_recovery_resumes_after_interrupted_batch(tmp_path, settings_database):
+    import json
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    try:
+        with store.db:
+            store.db.execute("DELETE FROM state WHERE key='action-problems-recovered-v1'")
+            body=json.dumps(dict(title='Command', objects=[], action=None, discardable=True))
+            store.db.executemany("INSERT INTO reader_action_results(id,identity,body,started,result) VALUES (%s,%s,%s,1,'failed')",
+                                 [(str(i),str(i),body) for i in range(101)])
+        store.db.close()
+        def fault(point):
+            if point == 'action_problem_recovery_batch':
+                raise RuntimeError('interrupted')
+        with pytest.raises(RuntimeError, match='interrupted'):
+            Store(tmp_path, fault, database_url=settings_database)
+        store=Store(tmp_path,lambda _:None,database_url=settings_database)
+        assert store.db.execute("SELECT count(*) FROM reader_problems WHERE identity LIKE 'action:%%' AND finished IS NULL").fetchone()[0] == 101
+        assert store.db.execute("SELECT 1 FROM state WHERE key='action-problems-recovered-v1'").fetchone()
+    finally:
+        store.db.close()
+
+
+def test_legacy_recovery_does_not_reopen_irrelevant_deleted_material_problem(tmp_path, settings_database):
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    context = dict(identity='material-action', title='Command', objects=[dict(kind='material', id='gone')],
+                   action=None, discardable=True, command_context={'operation':'retry_material'})
+    try:
+        store.problems.report_action('command-id', context, 'failed', 1)
+        with store.db:
+            store.problems.forget_materials({'gone'}, 2)
+            store.db.execute("DELETE FROM state WHERE key='action-problems-recovered-v1'")
+        assert store.db.execute("SELECT result FROM reader_action_results WHERE id='command-id'").fetchone()[0] == 'failed'
+        store.db.close()
+        store = Store(tmp_path, lambda _: None, database_url=settings_database)
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='action:material-action' AND finished IS NULL").fetchone() is None
+    finally:
+        store.db.close()
+
+
+def test_pending_command_for_deleted_material_stays_irrelevant_after_restart(tmp_path, settings_database):
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    context = dict(identity='material-action', title='Command', objects=[dict(kind='material', id='gone')],
+                   action=None, discardable=True, command_context={'operation':'retry_material'})
+    try:
+        store.problems.report_action('old', context, 'failed', 1)
+        store.problems.action_started('new', context, 2)
+        with store.db:
+            store.problems.forget_materials({'gone'}, 3)
+            store.db.execute("DELETE FROM state WHERE key='action-problems-recovered-v1'")
+        store.db.close()
+        store = Store(tmp_path, lambda _: None, database_url=settings_database)
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='action:material-action' AND finished IS NULL").fetchone() is None
+    finally:
+        store.db.close()
+
+
+def test_retry_at_same_timestamp_is_not_hidden_after_restart(tmp_path, settings_database):
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    context = dict(identity='same', title='Command', objects=[], action=None, discardable=True,
+                   command_context={'operation':'codex_save'})
+    try:
+        store.problems.report_action('id', context, 'failed', 1)
+        problem = store.db.execute("SELECT id FROM reader_problems WHERE identity='action:same' AND finished IS NULL").fetchone()['id']
+        assert store.problems.abandon(problem, 2)
+        store.problems.action_started('id', context, 2, restart=True)
+        store.db.close()
+        store = Store(tmp_path, lambda _: None, database_url=settings_database)
+        row=store.db.execute("SELECT body FROM reader_problems WHERE identity='action:same' AND finished IS NULL").fetchone()
+        assert row is not None
+    finally:
+        store.db.close()
+
+
+def test_recovered_finished_action_for_removed_feed_is_irrelevant(tmp_path, settings_database):
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    context = dict(identity='feed-action', title='Command', objects=[dict(kind='feed', id='missing')], action=None, discardable=True)
+    try:
+        store.problems.report_action('id', context, 'failed', 1)
+        store.problems.action_started('new', context, 2)
+        store.problems.action_finished('new', True, 3)
+        with store.db:
+            store.db.execute("UPDATE reader_problems SET finished=NULL,outcome=NULL WHERE identity='action:feed-action'")
+            store.db.execute("DELETE FROM state WHERE key='action-problems-recovered-v1'")
+        store.db.close()
+        store = Store(tmp_path, lambda _: None, database_url=settings_database)
+        assert store.db.execute("SELECT outcome FROM reader_problems WHERE identity='action:feed-action'").fetchone()['outcome'] == 'irrelevant'
+    finally:
+        store.db.close()
