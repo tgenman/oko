@@ -1048,3 +1048,23 @@ def test_startup_reconciles_publications_without_seeding_dirty_queue(tmp_path):
     finally:
         store.db.set_trace_callback(None)
         store.db.close()
+
+
+def test_read_repair_reconciles_without_queue_and_survives_rollback(tmp_path):
+    store, item, _, _ = worker_library(tmp_path)
+    try:
+        with store.db:
+            store.db.execute('DELETE FROM processing_dirty')
+        store.processing.repair(item)
+        with pytest.raises(ValueError, match='rollback'):
+            with transaction(store.db):
+                store.processing.sync()
+                assert item not in store.processing._repairs
+                assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
+                raise ValueError('rollback')
+        assert item in store.processing._repairs
+        store.processing.sync()
+        assert item not in store.processing._repairs
+        assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
+    finally:
+        store.db.close()

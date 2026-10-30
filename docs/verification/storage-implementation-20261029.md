@@ -642,3 +642,11 @@
   then 207 recovery, background-cost, processing and migration tests plus types.
   Seven Playwright scenarios passed and the mobile status screenshot was inspected.
   Settings invalidation and the transitional repair path still use the queue.
+- The deferred in-memory repair mechanism now reconciles one publication
+  directly instead of adding a database marker. A new rollback test exposed that
+  the old implementation lost its in-memory request on rollback; the corrected
+  path retains it. Startup/rollback checks passed eight tests, and the affected
+  processing, recovery and YouTube suites passed 93 tests; types and three
+  Playwright scenarios passed, with the unavailable-captions screenshot inspected.
+  This tests the repair mechanism directly; the current code has no caller that
+  schedules it from a read, so end-to-end read-detected repair remains open.

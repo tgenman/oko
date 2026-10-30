@@ -62,7 +62,10 @@ class ProcessingState:
                 self.reconcile_item(after)
                 yield
         while True:
-            self._queue_repairs()
+            if self._repairs:
+                self._repair_one()
+                yield
+                continue
             row = self.store.db.execute('SELECT item FROM processing_dirty ORDER BY item LIMIT 1').fetchone()
             if row is None:
                 break
@@ -123,18 +126,24 @@ class ProcessingState:
 
     def sync(self) -> None:
         """Reconcile persisted affected publications in dependency order."""
-        self._queue_repairs()
         if self.recovering or self.background:
             return
+        while self._repairs:
+            self._repair_one()
         items = [row[0] for row in self.store.db.execute('SELECT item FROM processing_dirty')]
         for item in items:
             self.reconcile_item(item)
 
-    def _queue_repairs(self) -> None:
-        if self._repairs:
-            with self.store.db:
-                self.store.db.executemany('INSERT INTO processing_dirty VALUES ( %s ) ON CONFLICT ( item ) DO NOTHING', [(item,) for item in self._repairs])
-            self._repairs.clear()
+    def _repair_one(self) -> None:
+        item = min(self._repairs)
+        self._repairs.remove(item)
+        if self.store.db.in_transaction:
+            self.store.db.after_rollback(lambda: self._repairs.add(item))
+        try:
+            self.reconcile_item(item)
+        except BaseException:
+            self._repairs.add(item)
+            raise
 
     def reconcile_item(self, item: str) -> None:
         # Accepted state and both stage Jobs commit with removal of the marker.
