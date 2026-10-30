@@ -48,6 +48,8 @@ def _stage(store: 'Store', batch: list[str], kind: Kind) -> None:
             snapshot = job['input_snapshot'] if job else None
             previous = snapshot.get('signature') if isinstance(snapshot,dict) else None
             enabled = processing_input.stage_enabled(store,item,kind) if signature is not None else False
+            if job and job['status']=='done' and previous is not None and previous==signature:
+                continue
             if previous is not None and previous==signature and job and (job['status']=='running' or json.loads(job['payload']).get('input_revision')==revision):
                 if job['status']=='blocked' and enabled:
                     if json.loads(job['payload']).get('preclaim_blocked') and not processing_input.can_start(

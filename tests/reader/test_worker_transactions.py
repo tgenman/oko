@@ -1479,3 +1479,25 @@ def test_discovery_page_saves_success_with_its_continuation_atomically(tmp_path,
         assert store.db.execute("SELECT status FROM jobs WHERE id=%s", (job.id,)).fetchone()[0]=='pending'
     finally:
         store.db.close()
+
+
+def test_summary_prompt_change_keeps_completed_filter_attempt(tmp_path):
+    from oko.subscriptions.subscriptions import Overrides
+    store, item, execution, tasks = worker_library(tmp_path)
+    try:
+        asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
+        asyncio.run(pass_worker(workers(execution,tasks)[1],tasks))
+        before = store.db.execute("SELECT status,generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()[:]
+        assert before[0] == 'done'
+        with transaction(store.db):
+            store.subscriptions.update_settings('feed','demo',Overrides(prompt_theses='Different summary prompt'))
+            store.settings_changed('feed','demo')
+        after = store.db.execute("SELECT status,generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()[:]
+        assert after == before
+        with transaction(store.db):
+            store.processing.reconcile_accepted_item(item)
+            store.jobs.invalidate_processing()
+        assert store.db.execute("SELECT status,generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()[:] == before
+        assert store.processing.theses.read(item) is None
+    finally:
+        store.db.close()

@@ -52,6 +52,10 @@ class JobRepository:
             job=db.execute("SELECT status,payload,problem_code,input_snapshot->>'signature' AS signature FROM jobs WHERE kind=%s AND item=%s",(kind,item)).fetchone()
             previous=job['signature'] if job else None
             enabled = processing_input.stage_enabled(self.store, item, kind) if signature is not None else False
+            if job and job['status']=='done' and previous is not None and previous==signature:
+                if json.loads(job['payload']).get('input_revision') != revision:
+                    job_write(db, "UPDATE jobs SET payload=jsonb_set(payload::jsonb,'{input_revision}',to_jsonb(%s::text))::text WHERE kind=%s AND item=%s", (revision,kind,item))
+                continue
             if previous is not None and previous==signature and job and (job['status']=='running' or json.loads(job['payload']).get('input_revision')==revision):
                 # Reconsider blocked work only on an input/settings event. Running
                 # attempts are allowed to finish when the switch is turned off.
