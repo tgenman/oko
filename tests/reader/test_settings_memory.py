@@ -824,15 +824,15 @@ def test_deleting_last_codex_feed_finishes_problem_atomically(tmp_path, settings
         feeds = [service.add_feed(AddFeed(url='https://www.youtube.com/feeds/videos.xml?channel_id=UC'+ch*22,
                     title=ch, folder='Folder', verification='synthetic')) for ch in ('a', 'b')]
         problem = store.db.execute("SELECT id FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone()['id']
-        store.jobs.finish_feed_deletion(SimpleNamespace(item=feeds[0]['id']))
+        store.jobs.finish_feed_deletion(SimpleNamespace(item=feeds[0]['id'],id=-1))
         assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s', (problem,)).fetchone()['finished'] is None
         with pytest.raises(ValueError, match='rollback'):
             with transaction(store.db):
-                store.jobs.finish_feed_deletion(SimpleNamespace(item=feeds[1]['id']))
+                store.jobs.finish_feed_deletion(SimpleNamespace(item=feeds[1]['id'],id=-1))
                 assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s', (problem,)).fetchone()['outcome'] == 'irrelevant'
                 raise ValueError('rollback')
         assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s', (problem,)).fetchone()['finished'] is None
-        store.jobs.finish_feed_deletion(SimpleNamespace(item=feeds[1]['id']))
+        store.jobs.finish_feed_deletion(SimpleNamespace(item=feeds[1]['id'],id=-1))
         assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s', (problem,)).fetchone()['outcome'] == 'irrelevant'
     finally:
         store.db.close()
@@ -882,9 +882,9 @@ def test_deleting_feed_keeps_problem_needed_by_global_settings(tmp_path, setting
         feed = service.add_feed(AddFeed(url='https://www.youtube.com/feeds/videos.xml?channel_id=UC'+'c'*22,
                                        title='Video', folder='Folder', verification='synthetic'))
         problem = store.db.execute("SELECT id FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone()['id']
-        store.jobs.finish_feed_deletion(SimpleNamespace(item=feed['id']))
+        store.jobs.finish_feed_deletion(SimpleNamespace(item=feed['id'],id=-1))
         assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s', (problem,)).fetchone()['finished'] is None
-        store.jobs.finish_feed_deletion(SimpleNamespace(item=feed['id']))
+        store.jobs.finish_feed_deletion(SimpleNamespace(item=feed['id'],id=-1))
         assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s', (problem,)).fetchone()['finished'] is None
     finally:
         store.db.close()

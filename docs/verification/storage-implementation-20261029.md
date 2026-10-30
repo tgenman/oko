@@ -1068,3 +1068,12 @@ The temporary-copy transaction/status/linked suite passed 187 tests; the task
 checkout passed 133 worker/status tests. Mypy passed on 158 files. Six Playwright
 status scenarios passed and the status screenshot was inspected. No working
 database was changed.
+
+
+A synthetic historical history fixture exposed a startup regression: Codex and
+Telegram profile synchronization decoded unrelated feed history and failed on
+a cancelled count selection lacking `count`. Settings and profile projections
+now read only the feed columns they use. The old-history dispatch, settings and
+Telegram suite passed 73 tests in the task checkout; one Playwright Telegram
+scenario passed and its profile screenshot was inspected. Existing fake deletion
+Jobs in two tests were updated to include the ID required by the current API.

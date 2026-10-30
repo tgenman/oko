@@ -218,7 +218,9 @@ class SubscriptionRepository:
         return self._effective_value(scope,owner,feed)
 
     def effective_feeds(self) -> dict[str,dict[str,Any]]:
-        feeds = self.feeds()
+        # This settings projection needs only inheritance owners and source kind.
+        # Loading reader details would also decode unrelated history and profiles.
+        feeds = [dict(row) for row in self.db.execute('SELECT id,kind,folder_id FROM feeds ORDER BY rowid')]
         settings: dict[tuple[str,str],dict[str,Any]] = {}
         for row in self.db.execute("""SELECT CASE WHEN feed_id IS NOT NULL THEN 'feed' WHEN folder_id IS NOT NULL THEN 'folder' ELSE 'oko' END AS scope,
                 COALESCE(feed_id,folder_id,'global') AS owner,field,value FROM settings
