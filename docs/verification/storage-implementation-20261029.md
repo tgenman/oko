@@ -411,3 +411,11 @@
   suites passed 246 tests; types and eight Playwright scenarios passed, and a
   Telegram access screenshot was inspected. Version 29 has 23 tables and 61
   triggers. Other revision owners and the complete redesign remain unfinished.
+- Migration 030 moves Telegram binding/profile source-revision changes to their
+  Python owner. No-op binding and repeated identity checks do not advance the
+  revision; actual identity changes, deletion, rollback and restart are tested.
+  Six triggers/functions were removed.
+- The affected migration, Telegram, worker and recovery suites passed 233
+  Python tests; types and eight Playwright scenarios passed, and a mobile
+  settings screenshot was inspected. Version 30 has 23 tables and 55 triggers.
+  History revision, remaining projections and the full redesign are still open.

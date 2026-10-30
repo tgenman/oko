@@ -171,6 +171,66 @@ def test_feed_source_revision_changes_only_for_source_configuration(tmp_path, se
         store.db.close()
 
 
+def test_telegram_source_revision_tracks_binding_and_identity_changes(tmp_path, settings_database):
+    from tests.support.storage import Store
+    from oko.storage.transaction import transaction
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        telegram = store.subscriptions.telegram
+        before = store.subscriptions.source_revision()
+        with transaction(store.db):
+            telegram.put_binding('synthetic-feed', {'kind':'web','username':'fixture'})
+        bound = store.subscriptions.source_revision()
+        assert bound > before
+        with transaction(store.db):
+            telegram.put_binding('synthetic-feed', {'kind':'web','username':'fixture'})
+        assert store.subscriptions.source_revision() == bound
+        with pytest.raises(ValueError,match='synthetic rollback'):
+            with transaction(store.db):
+                telegram.put_binding('synthetic-feed', {'kind':'web','username':'different'})
+                assert store.subscriptions.source_revision() > bound
+                raise ValueError('synthetic rollback')
+        assert store.subscriptions.source_revision() == bound
+        with transaction(store.db):
+            telegram.save_profile('personal','synthetic',123,0,1.0)
+        saved = store.subscriptions.source_revision()
+        assert saved > bound
+        with transaction(store.db):
+            assert telegram.checked('personal',1,123,2.0)
+        assert store.subscriptions.source_revision() == saved
+        with transaction(store.db):
+            assert not telegram.checked('personal',1,456,3.0)
+        assert store.subscriptions.source_revision() > saved
+        with transaction(store.db):
+            before_release = store.subscriptions.source_revision()
+            telegram.release('synthetic-feed')
+            assert store.subscriptions.source_revision() > before_release
+    finally:
+        store.db.close()
+
+
+def test_telegram_profile_restart_marks_source_revision_once(tmp_path, settings_database):
+    from tests.support.storage import Store
+    from oko.storage.transaction import transaction
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    with transaction(store.db):
+        store.subscriptions.telegram.save_profile('personal','synthetic',123,0,1.0)
+    ready = store.subscriptions.source_revision()
+    store.db.close()
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        unavailable = store.subscriptions.source_revision()
+        assert unavailable > ready
+        assert store.subscriptions.telegram.profile('personal')['state'] == 'unavailable'
+    finally:
+        store.db.close()
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        assert store.subscriptions.source_revision() == unavailable
+    finally:
+        store.db.close()
+
+
 def test_folder_settings_follow_rollback_and_new_folder_identity(tmp_path, settings_database):
     from tests.support.storage import Store
     from oko.storage.transaction import transaction

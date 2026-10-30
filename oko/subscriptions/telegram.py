@@ -58,8 +58,10 @@ class TelegramAccess:
         # No executescript here: migrations and their ownership rows are atomic.
         with db:
             begin_write(db)
-            pass
+            changed = db.execute("SELECT 1 FROM telegram_profiles WHERE state IS DISTINCT FROM 'unavailable' LIMIT 1").fetchone() is not None
             db.execute("UPDATE telegram_profiles SET state = 'unavailable' , message = 'Требуется проверка сессии после запуска'")
+            if changed:
+                source_changed(db)
 
     def bindings(self, feeds: list[str] | None = None) -> dict[str, dict[str, Any]]:
         return self._bindings(tuple(sorted(set(feeds))) if feeds is not None else None)
@@ -82,7 +84,11 @@ class TelegramAccess:
         return json.loads(row[0]) if row else None
 
     def put_binding(self, feed: str, binding: dict[str, Any]) -> None:
-        self.db.execute('INSERT INTO telegram_bindings VALUES ( %s , %s ) ON CONFLICT ( feed ) DO UPDATE SET binding = excluded . binding', (feed, json.dumps(binding)))
+        changed = self.db.execute('''INSERT INTO telegram_bindings VALUES (%s,%s)
+            ON CONFLICT(feed) DO UPDATE SET binding=excluded.binding
+            WHERE telegram_bindings.binding IS DISTINCT FROM excluded.binding''', (feed,json.dumps(binding))).rowcount
+        if changed:
+            source_changed(self.db)
 
     @reading_value
     def profile(self, role: str) -> dict[str, Any] | None:
@@ -104,6 +110,7 @@ class TelegramAccess:
                 raise TelegramConflict('profile_account_conflict', dict(role=role), 'Для двух ролей нужны разные аккаунты')
             self.db.execute('INSERT INTO telegram_profiles VALUES ( %s , %s , %s , %s , %s , %s , %s ) ON CONFLICT ( role ) DO UPDATE SET account = excluded . account , user_id = excluded . user_id , generation = excluded . generation , state = excluded . state , checked = excluded . checked , message = NULL',
                 (role, account, user_id, generation + 1, 'ready', checked, None))
+            source_changed(self.db)
         return self.profile(role) or {}
 
     def checked(self, role: str, generation: int, user_id: int | None, checked: float) -> bool:
@@ -114,6 +121,8 @@ class TelegramAccess:
         with self.db:
             self.db.execute('UPDATE telegram_profiles SET state = %s , checked = %s , message = %s WHERE role = %s',
                 (state, checked, None if state == 'ready' else 'Личность Telegram-аккаунта не подтверждена', role))
+            if row['state'] != state:
+                source_changed(self.db)
         return state == 'ready'
 
     def claims(self, info: dict[str, Any]) -> list[tuple[str, str]]:
@@ -252,4 +261,5 @@ class TelegramAccess:
     def release(self, feed: str) -> None:
         self._set_avatar(feed, None, None, None)
         self.db.execute('DELETE FROM telegram_claim_owners WHERE feed = %s', (feed,))
-        self.db.execute('DELETE FROM telegram_bindings WHERE feed = %s', (feed,))
+        if self.db.execute('DELETE FROM telegram_bindings WHERE feed = %s', (feed,)).rowcount:
+            source_changed(self.db)
