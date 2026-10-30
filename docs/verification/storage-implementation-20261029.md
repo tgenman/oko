@@ -1077,3 +1077,24 @@ now read only the feed columns they use. The old-history dispatch, settings and
 Telegram suite passed 73 tests in the task checkout; one Playwright Telegram
 scenario passed and its profile screenshot was inspected. Existing fake deletion
 Jobs in two tests were updated to include the ID required by the current API.
+
+
+The Job status projection previously selected both `jobs.feed_id` and another
+column with the same name. The row adapter returned the first, hiding the
+computed publication, media or linked-root owner. The projection now uses a
+distinct alias, and deletion producers use the same owner rules. Existing
+occurrences are rekeyed using exact former Job keys; merges preserve one ID and
+retain the others in history. A synthetic review found that owners could change
+before deletion problems were synchronized; the implementation captures prior
+identities before graph mutations under the graph lock. Regression tests cover
+rediscovery, multiple roots, removed links, viewed items, feed deletion and
+rollback.
+
+On synthetic data, a 50-item existing discovery page used 711 SQL statements
+both before and after the graph fix. With 10,000 unrelated links and failed
+Jobs, one selected root with 10,000 genuinely linked children required 10,001
+relation rows and 22,011 shared buffers using indexed probes; this is one
+EXPLAIN measurement, not a production latency claim. The integrated task
+checkout passed 213 transaction, status and linked-publication tests; mypy
+passed on 158 files. Twelve Playwright feed/status scenarios passed and the
+feed screenshot was inspected. Status GET still reconciles remaining Job problems.

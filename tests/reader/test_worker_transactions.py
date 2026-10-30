@@ -1543,7 +1543,7 @@ def test_failed_delete_problem_follows_job_without_status_read(tmp_path, postgre
             row=store.db.execute("INSERT INTO jobs(kind,item,status,generation,payload) VALUES ('delete','item','running',1,%s) RETURNING id", (json.dumps({'cleanup_feed':'demo'}),)).fetchone()
         job=Job(row['id'],'delete','item',1)
         def current():
-            return store.db.execute("SELECT id,body FROM reader_problems WHERE identity='job:delete:item:delete:item' AND finished IS NULL").fetchone()
+            return store.db.execute("SELECT id,body FROM reader_problems WHERE identity='job:delete:demo:delete:item' AND finished IS NULL").fetchone()
         with pytest.raises(ValueError,match='rollback'):
             with transaction(store.db):
                 store.jobs.retry(job,1,'Ошибка удаления',code='delete')
@@ -1555,9 +1555,10 @@ def test_failed_delete_problem_follows_job_without_status_read(tmp_path, postgre
         assert problem is not None
         candidates=store.problems.candidates(5)
         assert candidates, candidates
-        legacy=next(c for c in candidates if c['id']=='job:delete:item:delete:item')
+        legacy=next(c for c in candidates if c['id']=='job:delete:demo:delete:item')
         legacy.setdefault('operation','producer:delete')
-        assert store.problems.deletion_candidate(job.id,5) == legacy
+        legacy.pop('_legacy_ids',None)
+        assert store.problems.deletion_candidates(job.id,5)[0] == legacy
         with store.db:
             store.db.execute("UPDATE jobs SET next=0 WHERE id=%s", (job.id,))
         claimed=store.jobs.next_job(1,deleting_only=True)
@@ -1593,7 +1594,8 @@ def test_failed_feed_delete_problem_finishes_with_feed_removal(tmp_path, postgre
         assert problem is not None and json.loads(problem['body'])['objects']==[{'kind':'feed','id':'feed'}]
         legacy=next(c for c in store.problems.candidates(5) if c['id']=='job:delete:feed:feed-delete:feed')
         legacy.setdefault('operation','producer:feed-delete')
-        assert store.problems.deletion_candidate(job.id,5) == legacy
+        legacy.pop('_legacy_ids',None)
+        assert store.problems.deletion_candidates(job.id,5)[0] == legacy
         with store.db:
             store.db.execute('UPDATE jobs SET next=0 WHERE id=%s',(job.id,))
         claimed=store.jobs.next_job(1,deleting_only=True)
@@ -1648,10 +1650,592 @@ def test_delete_problem_matches_status_projection(tmp_path, postgres_url, kind, 
         with store.db:
             job_id=store.db.execute('INSERT INTO jobs(kind,item,status,error,problem_code) VALUES (%s,%s,%s,%s,%s) RETURNING id',
                                     (kind,'item',status,error,code)).fetchone()[0]
-        current=store.problems.deletion_candidate(job_id,7)
+        current=store.problems.deletion_candidates(job_id,7)[0]
         candidates=store.problems.candidates(7)
         expected=next(c for c in candidates if c['id']==current['id'])
         expected.setdefault('operation','producer:'+kind)
+        expected.pop('_legacy_ids',None)
         assert current == expected
+    finally:
+        store.db.close()
+
+
+def test_status_groups_source_failures_by_publication_owner_without_job_feed(tmp_path, postgres_url):
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('one','rss','one',0),('two','rss','two',0)")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','one',true,true),('feed','two',true,true)")
+            store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','one','failed','failure','source-connection'),('fetch','two','failed','failure','source-connection')")
+        problems=store.problems.snapshot(store.wall_clock())['current']
+        related=[p for p in problems if p['code']=='source-connection']
+        assert len(related)==1
+        assert store.db.execute('SELECT identity FROM reader_problems WHERE id=%s',(related[0]['id'],)).fetchone()[0]=='job:source-connection:feed:fetch'
+        assert {obj['id'] for obj in related[0]['objects']}=={'one','two'}
+    finally:
+        store.db.close()
+
+
+def test_status_groups_media_failures_by_publication_owner_without_job_feed(tmp_path, postgres_url):
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('one','rss','one',0),('two','rss','two',0)")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','one',true,true),('feed','two',true,true)")
+            store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m1','one','m1','https://a.test','one','pending_download'),('m2','two','m2','https://b.test','two','pending_download')")
+            store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('download_media','m1','failed','failure','source-connection'),('download_media','m2','failed','failure','source-connection')")
+        related=[p for p in store.problems.snapshot(store.wall_clock())['current'] if p['code']=='source-connection']
+        assert len(related)==1
+        assert {obj['id'] for obj in related[0]['objects']}=={'one','two'}
+    finally:
+        store.db.close()
+
+
+def test_status_uses_root_owner_for_linked_publication_failure(tmp_path, postgres_url):
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('root','rss','root',0),('linked','other_web','linked',0)")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','root',true,true)")
+            store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root','linked')")
+            store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','linked','failed','failure','source-connection')")
+        related=[p for p in store.problems.snapshot(store.wall_clock())['current'] if p['code']=='source-connection']
+        assert len(related)==1
+        assert store.db.execute('SELECT identity FROM reader_problems WHERE id=%s',(related[0]['id'],)).fetchone()[0]=='job:source-connection:feed:fetch'
+        assert related[0]['objects']==[{'kind':'material','id':'root'}]
+    finally:
+        store.db.close()
+
+
+def test_profile_problem_suppresses_publication_job_without_saved_job_feed(tmp_path, postgres_url):
+    import json
+    from oko.services.connections import ConnectionService
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','telegram','telegram','connected','[]')")
+            store.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'ready',1)")
+            store.db.execute('INSERT INTO telegram_bindings(feed,binding) VALUES (%s,%s)',('feed',json.dumps(dict(kind='client',role='personal',account_user_id='101',peer_id='123'))))
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('item','telegram','item',0)")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','item',true,true)")
+            store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','item','failed','failure','identity-unconfirmed')")
+        assert not ConnectionService(lambda:store).checked('personal',1,202,2)
+        problems=store.problems.snapshot(2)['current']
+        assert [p['code'] for p in problems]==['account_identity_mismatch']
+    finally:
+        store.db.close()
+
+
+def test_youtube_pause_counts_publication_when_job_feed_is_missing(tmp_path, postgres_url):
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','youtube','youtube','connected','[]')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('item','youtube','item',0)")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','item',true,true)")
+            store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','item','pending','paused','youtube-admission')")
+            store.youtube.blocked(1,900)
+        problems=store.problems.snapshot(2)['current']
+        paused=next(p for p in problems if p['code']=='youtube-admission')
+        assert paused['objects']==[{'kind':'material','id':'item'}]
+    finally:
+        store.db.close()
+
+
+def test_delete_problem_uses_cleanup_owner_without_saved_job_feed(tmp_path, postgres_url):
+    import json
+    from oko.storage.job_types import Job
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('item','rss','item',1)")
+            job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation,payload) VALUES ('delete','item','running',1,%s) RETURNING id",(json.dumps({'cleanup_feed':'feed'}),)).fetchone()[0]
+        store.jobs.retry(Job(job_id,'delete','item',1),1,'failed',code='delete')
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='job:delete:feed:delete:item' AND finished IS NULL").fetchone()
+    finally:
+        store.db.close()
+
+
+def test_delete_problem_tracks_all_linked_root_owners_and_cancellation(tmp_path, postgres_url):
+    from oko.domain.collection import CollectionEffects
+    from oko.storage.job_types import Job
+    from oko.storage.transaction import transaction
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),('b','b','B','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('r1','rss','r1',0),('r2','rss','r2',0),('item','other_web','item',1)")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('a','r1',true,true),('b','r2',true,true)")
+            store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('r1','item'),('r2','item')")
+            job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('delete','item','running',1) RETURNING id").fetchone()[0]
+        store.jobs.retry(Job(job_id,'delete','item',1),1,'failed',code='delete')
+        rows=store.db.execute("SELECT identity FROM reader_problems WHERE identity LIKE 'job:delete:%%' AND finished IS NULL ORDER BY identity").fetchall()
+        assert [r[0] for r in rows]==['job:delete:a:delete:item','job:delete:b:delete:item']
+        with transaction(store.db):
+            store.jobs.apply_collection(CollectionEffects(fetch={'item':False}))
+        assert store.db.execute("SELECT count(*) FROM reader_problems WHERE identity LIKE 'job:delete:%%' AND finished IS NULL").fetchone()[0]==0
+    finally:
+        store.db.close()
+
+
+def test_delete_problem_prefetch_ignores_unrelated_jobs(tmp_path, postgres_url):
+    from tests.support.postgres_work import scan_rows
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) SELECT 'delete','foreign-'||n,'pending','failure','delete' FROM generate_series(1,10000) n")
+            store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('delete','selected','pending','failure','delete')")
+            store.db._db.execute('ANALYZE jobs')
+        query="SELECT id,item FROM jobs WHERE kind='delete' AND item=ANY(%s) AND (error IS NOT NULL OR problem_code IS NOT NULL)"
+        plan=store.db._db.execute('EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) '+query, (['selected','missing'],)).fetchone()[0][0]['Plan']
+        assert scan_rows(plan)<100,plan
+    finally:
+        store.db.close()
+
+
+def test_grouping_correction_preserves_an_existing_problem_occurrence(tmp_path, postgres_url):
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('item','rss','item',0)")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','item',true,true)")
+            store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','item','failed','failure','source-connection')")
+            old=dict(id='job:source-connection:item:fetch',code='source-connection',section='object',title='Не удалось загрузить материал',consequence='Сохранённое содержимое остаётся доступным.',next_step='Повторите загрузку вручную.',objects=[dict(kind='material',id='item')],action=None,operation='producer:fetch',created_at=1,state='current',finished_at=None,outcome=None,next_at=None,reason='failure')
+            store.problems.sync_candidate(old['id'],old,1)
+        original=store.db.execute("SELECT id FROM reader_problems WHERE identity='job:source-connection:item:fetch' AND finished IS NULL").fetchone()[0]
+        result=store.problems.snapshot(2)
+        current=next(p for p in result['current'] if p['code']=='source-connection')
+        assert current['id']==original
+        assert not [p for p in result['recent'] if p['id']==original]
+    finally:
+        store.db.close()
+
+
+def test_grouping_correction_merges_old_problems_without_losing_history(tmp_path, postgres_url):
+    from oko.storage.transaction import transaction
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('one','rss','one',0),('two','rss','two',0)")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','one',true,true),('feed','two',true,true)")
+            store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','one','failed','failure','source-connection'),('fetch','two','failed','failure','source-connection')")
+            for index,item in enumerate(('one','two'),1):
+                old=dict(id='job:source-connection:'+item+':fetch',code='source-connection',section='object',title='Не удалось загрузить материал',consequence='Сохранённое содержимое остаётся доступным.',next_step='Повторите загрузку вручную.',objects=[dict(kind='material',id=item)],action=None,operation='producer:fetch',created_at=index,state='current',finished_at=None,outcome=None,next_at=None,reason='failure')
+                store.problems.sync_candidate(old['id'],old,index)
+        originals=store.db.execute("SELECT id FROM reader_problems WHERE identity LIKE 'job:source-connection:%%' ORDER BY created").fetchall()
+        with pytest.raises(ValueError,match='rollback'):
+            with transaction(store.db):
+                result=store.problems.snapshot(3)
+                assert len(result['current'])==1 and result['current'][0]['id']==originals[0][0]
+                raise ValueError('rollback')
+        assert store.db.execute("SELECT count(*) FROM reader_problems WHERE identity LIKE 'job:source-connection:%%' AND finished IS NULL").fetchone()[0]==2
+        result=store.problems.snapshot(3)
+        assert len(result['current'])==1 and result['current'][0]['id']==originals[0][0]
+        merged=next(p for p in result['recent'] if p['id']==originals[1][0])
+        assert merged['outcome']=='irrelevant'
+        assert {obj['id'] for obj in result['current'][0]['objects']}=={'one','two'}
+    finally:
+        store.db.close()
+
+
+def test_grouping_correction_splits_one_occurrence_without_false_resolution(tmp_path, postgres_url):
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        def candidate(identity):
+            return dict(id=identity,code='source-connection',section='object',title='Ошибка',consequence='Сохранено',next_step='Повторите',objects=[dict(kind='material',id='item')],action=None,operation='producer:fetch',created_at=1,state='current',finished_at=None,outcome=None,next_at=None)
+        old=candidate('job:source-connection:item:fetch')
+        with store.db:store.problems.sync_candidate(old['id'],old,1)
+        original=store.db.execute('SELECT id FROM reader_problems WHERE identity=%s',(old['id'],)).fetchone()[0]
+        first=candidate('job:source-connection:a:fetch');first['_legacy_ids']={old['id']}
+        second=candidate('job:source-connection:b:fetch');second['_legacy_ids']={old['id']}
+        result=store.problems.reconcile([first,second],2,{})
+        assert len(result['current'])==2
+        assert original in {problem['id'] for problem in result['current']}
+        assert not [problem for problem in result['recent'] if problem['id']==original]
+    finally:
+        store.db.close()
+
+
+def test_grouping_correction_does_not_merge_distinct_jobs_sharing_root(tmp_path, postgres_url):
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        def candidate(identity):
+            return dict(id=identity,code='specific-failure',section='object',title='Ошибка',consequence='Сохранено',next_step='Повторите',objects=[dict(kind='material',id='root')],action=None,operation='producer:fetch',created_at=1,state='current',finished_at=None,outcome=None,next_at=None)
+        old1=candidate('job:specific-failure:child1:fetch:child1')
+        old2=candidate('job:specific-failure:child2:fetch:child2')
+        with store.db:
+            store.problems.sync_candidate(old1['id'],old1,1)
+            store.problems.sync_candidate(old2['id'],old2,2)
+        original={r['identity']:r['id'] for r in store.db.execute("SELECT identity,id FROM reader_problems WHERE finished IS NULL")}
+        first=candidate('job:specific-failure:feed:fetch:child1');first['_legacy_ids']={old1['id']}
+        second=candidate('job:specific-failure:feed:fetch:child2');second['_legacy_ids']={old2['id']}
+        result=store.problems.reconcile([first,second],3,{})
+        assert {p['id'] for p in result['current']}==set(original.values())
+        assert result['recent']==[]
+    finally:
+        store.db.close()
+
+
+def test_delete_retry_rekeys_existing_problem_without_waiting_for_status(tmp_path, postgres_url):
+    import json
+    from oko.storage.job_types import Job
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('item','rss','item',1)")
+            job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation,error,problem_code,payload) VALUES ('delete','item','running',1,'failure','delete',%s) RETURNING id",(json.dumps({'cleanup_feed':'feed'}),)).fetchone()[0]
+            old=dict(id='job:delete:item:delete:item',code='delete',section='object',title='Удаление не завершено',consequence='Око продолжает попытки удаления.',next_step='Око повторит попытку автоматически.',objects=[],action=None,operation='producer:delete',created_at=1,state='retrying',finished_at=None,outcome=None,next_at=None)
+            store.problems.sync_candidate(old['id'],old,1)
+        original=store.db.execute('SELECT id FROM reader_problems WHERE identity=%s',(old['id'],)).fetchone()[0]
+        store.jobs.retry(Job(job_id,'delete','item',1),2,'failure',code='delete')
+        current=store.db.execute("SELECT id FROM reader_problems WHERE identity='job:delete:feed:delete:item' AND finished IS NULL").fetchone()
+        assert current and current[0]==original
+        assert store.db.execute("SELECT count(*) FROM reader_problems WHERE finished IS NULL").fetchone()[0]==1
+    finally:
+        store.db.close()
+
+
+def test_delete_problem_owner_lookup_ignores_unrelated_links(tmp_path, postgres_url):
+    from tests.support.postgres_work import scan_rows
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('root','rss','root',0),('item','other_web','item',1)")
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) SELECT 'foreign-'||n,'other_web','foreign-'||n,0 FROM generate_series(1,10000) n")
+            store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) SELECT 'root','foreign-'||n FROM generate_series(1,10000) n")
+            store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root','item')")
+            job_id=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('delete','item','pending','failure','delete') RETURNING id").fetchone()[0]
+            store.db._db.execute('ANALYZE publication_links')
+        statements=[]
+        store.db.set_trace_callback(statements.append)
+        try:
+            assert store.problems.deletion_candidates(job_id,1)
+        finally:
+            store.db.set_trace_callback(None)
+        query=next(q for q in statements if 'FROM jobs j LEFT JOIN publications p' in q)
+        plan=store.db._db.execute('EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) '+query,(job_id,)).fetchone()[0][0]['Plan']
+        assert scan_rows(plan)<100,plan
+    finally:
+        store.db.close()
+
+
+def test_grouping_correction_preserves_legacy_problem_without_operation(tmp_path, postgres_url):
+    import json
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('item','rss','item',0)")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','item',true,true)")
+            store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','item','failed','failure','source-connection')")
+            old=dict(id='job:source-connection:item:fetch',code='source-connection',section='object',title='Ошибка',consequence='Сохранено',next_step='Повторите',objects=[dict(kind='material',id='item')],action=None,created_at=1,state='current',finished_at=None,outcome=None,next_at=None)
+            store.problems.sync_candidate(old['id'],old,1)
+            row=store.db.execute('SELECT id,body FROM reader_problems WHERE identity=%s',(old['id'],)).fetchone()
+            body=json.loads(row['body']);body.pop('operation')
+            store.db.execute('UPDATE reader_problems SET body=%s WHERE id=%s',(json.dumps(body),row['id']))
+        result=store.problems.snapshot(2)
+        assert len(result['current'])==1 and result['current'][0]['id']==row['id']
+        assert not [p for p in result['recent'] if p['id']==row['id']]
+    finally:
+        store.db.close()
+
+
+def test_regroup_does_not_rekey_unrelated_problem_with_same_material(tmp_path, postgres_url):
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        def candidate(identity):
+            return dict(id=identity,code='source-connection',section='object',title='Ошибка',consequence='Сохранено',next_step='Повторите',objects=[dict(kind='material',id='item')],action=None,operation='producer:fetch',created_at=1,state='current',finished_at=None,outcome=None,next_at=None)
+        old=candidate('job:source-connection:other-feed:fetch')
+        with store.db:store.problems.sync_candidate(old['id'],old,1)
+        original=store.db.execute('SELECT id FROM reader_problems WHERE identity=%s',(old['id'],)).fetchone()[0]
+        current=candidate('job:source-connection:feed:fetch')
+        current['_legacy_ids']={'job:source-connection:item:fetch'}
+        result=store.problems.reconcile([current],2,{})
+        assert len(result['current'])==1 and result['current'][0]['id']!=original
+        assert next(p for p in result['recent'] if p['id']==original)['outcome']=='resolved'
+    finally:
+        store.db.close()
+
+
+def test_review_real_discovery_captures_cleanup_problem_before_new_owner(tmp_path, postgres_url):
+    import json
+    from oko.collection.contracts import Publication
+    from oko.storage.job_types import Job
+    from oko.storage.transaction import transaction
+    from tests.support.source import publication_packet
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('old','old','Old','default','rss','rss','connected','[]'),('new','new','New','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO publications(id,source_id,url,platform,external_id,viewed) VALUES ('item','old:one','https://example.test/item','other_web','https://example.test/item',1)")
+            job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation,payload) VALUES ('delete','item','running',1,%s) RETURNING id",(json.dumps({'cleanup_feed':'old'}),)).fetchone()[0]
+        store.jobs.retry(Job(job_id,'delete','item',1),1,'failed',code='delete')
+        problem=store.db.execute("SELECT id FROM reader_problems WHERE identity='job:delete:old:delete:item' AND finished IS NULL").fetchone()['id']
+        packet=publication_packet(Publication('one','https://example.test/item',123))
+        with pytest.raises(ValueError,match='rollback'):
+            with transaction(store.db):
+                effects=store.collect_discovery([packet],'{}','new')
+                store.jobs.apply_collection(effects)
+                assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s',(problem,)).fetchone()['outcome']=='resolved'
+                raise ValueError('rollback')
+        assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s',(problem,)).fetchone()['finished'] is None
+        with transaction(store.db):
+            effects=store.collect_discovery([packet],'{}','new')
+            store.jobs.apply_collection(effects)
+        assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s',(problem,)).fetchone()['outcome']=='resolved'
+    finally:
+        store.db.close()
+
+def test_review_discovery_captures_multiple_prior_root_problems(tmp_path, postgres_url):
+    from oko.collection.contracts import Publication
+    from oko.storage.job_types import Job
+    from oko.storage.transaction import transaction
+    from tests.support.source import publication_packet
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),('b','b','B','default','rss','rss','connected','[]'),('new','new','New','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO publications(id,source_id,url,platform,external_id,viewed) VALUES ('r1','a:r1','https://example.test/r1','other_web','https://example.test/r1',0),('r2','b:r2','https://example.test/r2','other_web','https://example.test/r2',0),('item','old:one','https://example.test/item','other_web','https://example.test/item',1)")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('a','r1',true,true),('b','r2',true,true)")
+            store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('r1','item'),('r2','item')")
+            job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('delete','item','running',1) RETURNING id").fetchone()[0]
+        store.jobs.retry(Job(job_id,'delete','item',1),1,'failed',code='delete')
+        assert store.db.execute("SELECT count(*) FROM reader_problems WHERE identity LIKE 'job:delete:%%' AND finished IS NULL").fetchone()[0]==2
+        packet=publication_packet(Publication('one','https://example.test/item',123))
+        with transaction(store.db):
+            effects=store.collect_discovery([packet],'{}','new')
+            store.jobs.apply_collection(effects)
+            assert store.db.execute("SELECT count(*) FROM reader_problems WHERE identity LIKE 'job:delete:%%' AND finished IS NULL").fetchone()[0]==0
+    finally:
+        store.db.close()
+
+def test_review_link_removal_keeps_delete_problem_occurrence(tmp_path, postgres_url):
+    from oko.domain.collection import CollectionEffects
+    from oko.storage.job_types import Job
+    from oko.storage.transaction import transaction
+    from oko.storage import publication_links
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id,url,viewed) VALUES ('root','rss','root','https://example.test/root',0),('item','other_web','item','https://example.test/item',1)")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','root',true,true)")
+            store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root','item')")
+            job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('delete','item','running',1) RETURNING id").fetchone()[0]
+        store.jobs.retry(Job(job_id,'delete','item',1),1,'failed',code='delete')
+        problem=store.db.execute("SELECT id FROM reader_problems WHERE identity='job:delete:feed:delete:item' AND finished IS NULL").fetchone()['id']
+        with pytest.raises(ValueError,match='rollback'):
+            with transaction(store.db):
+                effects=CollectionEffects()
+                publication_links.sync(store,'root',(),effects)
+                store.jobs.apply_collection(effects)
+                assert store.db.execute("SELECT id FROM reader_problems WHERE identity='job:delete:item:delete:item' AND finished IS NULL").fetchone()['id']==problem
+                raise ValueError('rollback')
+        assert store.db.execute("SELECT id FROM reader_problems WHERE identity='job:delete:feed:delete:item' AND finished IS NULL").fetchone()['id']==problem
+        with transaction(store.db):
+            effects=CollectionEffects()
+            publication_links.sync(store,'root',(),effects)
+            store.jobs.apply_collection(effects)
+        assert store.db.execute("SELECT id FROM reader_problems WHERE identity='job:delete:item:delete:item' AND finished IS NULL").fetchone()['id']==problem
+    finally:
+        store.db.close()
+
+def test_review_discovery_closes_legacy_problem_before_status(tmp_path, postgres_url):
+    import json
+    from oko.collection.contracts import Publication
+    from oko.storage.transaction import transaction
+    from tests.support.source import publication_packet
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('old','old','Old','default','rss','rss','connected','[]'),('new','new','New','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO publications(id,source_id,url,platform,external_id,viewed) VALUES ('item','old:one','https://example.test/item','other_web','https://example.test/item',1)")
+            store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code,payload) VALUES ('delete','item','pending','failure','delete',%s)",(json.dumps({'cleanup_feed':'old'}),))
+            old=dict(id='job:delete:item:delete:item',code='delete',section='object',title='Ошибка',consequence='Сохранено',next_step='Повторите',objects=[],action=None,operation='producer:delete',created_at=1,state='current',finished_at=None,outcome=None,next_at=None)
+            store.problems.sync_candidate(old['id'],old,1)
+        problem=store.db.execute('SELECT id FROM reader_problems WHERE identity=%s',(old['id'],)).fetchone()[0]
+        packet=publication_packet(Publication('one','https://example.test/item',123))
+        with transaction(store.db):
+            effects=store.collect_discovery([packet],'{}','new')
+            store.jobs.apply_collection(effects)
+            assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s',(problem,)).fetchone()[0]=='resolved'
+    finally:
+        store.db.close()
+
+def test_review_removing_one_root_keeps_other_root_problem(tmp_path, postgres_url):
+    from oko.domain.collection import CollectionEffects
+    from oko.storage.job_types import Job
+    from oko.storage.transaction import transaction
+    from oko.storage import publication_links
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),('b','b','B','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id,url,viewed) VALUES ('r1','rss','r1','https://example.test/r1',0),('r2','rss','r2','https://example.test/r2',0),('item','other_web','item','https://example.test/item',1)")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('a','r1',true,true),('b','r2',true,true)")
+            store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('r1','item'),('r2','item')")
+            job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('delete','item','running',1) RETURNING id").fetchone()[0]
+        store.jobs.retry(Job(job_id,'delete','item',1),1,'failed',code='delete')
+        before={r['identity']:r['id'] for r in store.db.execute("SELECT id,identity FROM reader_problems WHERE identity LIKE 'job:delete:%%' AND finished IS NULL")}
+        assert set(before)=={'job:delete:a:delete:item','job:delete:b:delete:item'}
+        with pytest.raises(ValueError,match='rollback'):
+            with transaction(store.db):
+                effects=CollectionEffects();publication_links.sync(store,'r1',(),effects);store.jobs.apply_collection(effects)
+                assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s',(before['job:delete:a:delete:item'],)).fetchone()[0]=='irrelevant'
+                assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s',(before['job:delete:b:delete:item'],)).fetchone()[0] is None
+                raise ValueError('rollback')
+        assert store.db.execute("SELECT count(*) FROM reader_problems WHERE identity LIKE 'job:delete:%%' AND finished IS NULL").fetchone()[0]==2
+        with transaction(store.db):
+            effects=CollectionEffects();publication_links.sync(store,'r1',(),effects);store.jobs.apply_collection(effects)
+        assert store.db.execute('SELECT id FROM reader_problems WHERE identity=%s AND finished IS NULL',('job:delete:b:delete:item',)).fetchone()[0]==before['job:delete:b:delete:item']
+        assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s',(before['job:delete:a:delete:item'],)).fetchone()[0]=='irrelevant'
+    finally:
+        store.db.close()
+
+def test_review_new_owner_rekeys_delete_problem_of_linked_child(tmp_path, postgres_url):
+    from oko.collection.contracts import Publication
+    from oko.storage.job_types import Job
+    from oko.storage.transaction import transaction
+    from tests.support.source import publication_packet
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('new','new','New','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO publications(id,source_id,url,platform,external_id,viewed) VALUES ('root','linked:root','https://example.test/root','other_web','https://example.test/root',0),('child','linked:child','https://example.test/child','other_web','https://example.test/child',1)")
+            store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root','child')")
+            job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('delete','child','running',1) RETURNING id").fetchone()[0]
+        store.jobs.retry(Job(job_id,'delete','child',1),1,'failed',code='delete')
+        problem=store.db.execute("SELECT id FROM reader_problems WHERE identity='job:delete:child:delete:child' AND finished IS NULL").fetchone()['id']
+        packet=publication_packet(Publication('one','https://example.test/root',123))
+        with transaction(store.db):
+            effects=store.collect_discovery([packet],'{}','new')
+            store.jobs.apply_collection(effects)
+        assert store.db.execute("SELECT id FROM reader_problems WHERE identity='job:delete:new:delete:child' AND finished IS NULL").fetchone()[0]==problem
+    finally:
+        store.db.close()
+
+def test_review_removing_primary_feed_rekeys_child_delete_problem(tmp_path, postgres_url):
+    from oko.storage.job_types import Job
+    from oko.storage.transaction import transaction
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),('b','b','B','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('root','rss','root',0),('child','other_web','child',1)")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('a','root',true,true),('b','root',false,true)")
+            store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root','child')")
+            job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('delete','child','running',1) RETURNING id").fetchone()[0]
+        store.jobs.retry(Job(job_id,'delete','child',1),1,'failed',code='delete')
+        problem=store.db.execute("SELECT id FROM reader_problems WHERE identity='job:delete:a:delete:child' AND finished IS NULL").fetchone()['id']
+        with pytest.raises(ValueError,match='rollback'):
+            with transaction(store.db):
+                store.remove_feed('a')
+                assert store.db.execute("SELECT id FROM reader_problems WHERE identity='job:delete:b:delete:child' AND finished IS NULL").fetchone()[0]==problem
+                raise ValueError('rollback')
+        assert store.db.execute("SELECT id FROM reader_problems WHERE identity='job:delete:a:delete:child' AND finished IS NULL").fetchone()[0]==problem
+        store.remove_feed('a')
+        row=store.db.execute("SELECT id FROM reader_problems WHERE identity='job:delete:b:delete:child' AND finished IS NULL").fetchone()
+        assert row is not None and row['id']==problem
+    finally:
+        store.db.close()
+
+def test_review_viewed_root_rekeys_child_delete_problem_atomically(tmp_path, postgres_url):
+    from oko.storage.job_types import Job
+    from oko.storage.transaction import transaction
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('root','rss','root',0),('child','other_web','child',1)")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','root',true,true)")
+            store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root','child')")
+            job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('delete','child','running',1) RETURNING id").fetchone()[0]
+        store.jobs.retry(Job(job_id,'delete','child',1),1,'failed',code='delete')
+        problem=store.db.execute("SELECT id FROM reader_problems WHERE identity='job:delete:feed:delete:child' AND finished IS NULL").fetchone()['id']
+        with pytest.raises(ValueError,match='rollback'):
+            with transaction(store.db):
+                assert store.viewed_set(['root'])
+                assert store.db.execute("SELECT id FROM reader_problems WHERE identity='job:delete:child:delete:child' AND finished IS NULL").fetchone()[0]==problem
+                raise ValueError('rollback')
+        assert store.db.execute("SELECT id FROM reader_problems WHERE identity='job:delete:feed:delete:child' AND finished IS NULL").fetchone()[0]==problem
+        with transaction(store.db): assert store.viewed_set(['root'])
+        assert store.db.execute("SELECT id FROM reader_problems WHERE identity='job:delete:child:delete:child' AND finished IS NULL").fetchone()[0]==problem
+    finally:
+        store.db.close()
+
+def test_review_primary_change_preserves_both_delete_occurrences(tmp_path, postgres_url):
+    from oko.storage.job_types import Job
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),('b','b','B','default','rss','rss','connected','[]'),('c','c','C','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('r1','rss','r1',0),('r2','rss','r2',0),('item','other_web','item',1)")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('a','r1',true,true),('c','r1',false,true),('b','r2',true,true)")
+            store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('r1','item'),('r2','item')")
+            job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('delete','item','running',1) RETURNING id").fetchone()[0]
+        store.jobs.retry(Job(job_id,'delete','item',1),1,'failed',code='delete')
+        before={r['identity']:r['id'] for r in store.db.execute("SELECT id,identity FROM reader_problems WHERE identity LIKE 'job:delete:%%' AND finished IS NULL")}
+        store.remove_feed('a')
+        after={r['identity']:r['id'] for r in store.db.execute("SELECT id,identity FROM reader_problems WHERE identity LIKE 'job:delete:%%' AND finished IS NULL")}
+        assert after=={'job:delete:b:delete:item':before['job:delete:b:delete:item'], 'job:delete:c:delete:item':before['job:delete:a:delete:item']}
+    finally:
+        store.db.close()
+
+def test_review_two_owner_changes_preserve_both_occurrence_ids(tmp_path, postgres_url):
+    from oko.domain.collection import CollectionEffects
+    from oko.storage.job_types import Job
+    from oko.storage.transaction import transaction
+    from oko.storage import memberships, publication_links
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            for feed in ('a','b','c','d'):
+                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES (%s,%s,%s,'default','rss','rss','connected','[]')",(feed,feed,feed))
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('r1','rss','r1',0),('r2','rss','r2',0),('item','other_web','item',1)")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('a','r1',true,true),('b','r2',true,true)")
+            store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('r1','item'),('r2','item')")
+            job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('delete','item','running',1) RETURNING id").fetchone()[0]
+        store.jobs.retry(Job(job_id,'delete','item',1),1,'failed',code='delete')
+        before={r['id'] for r in store.db.execute("SELECT id FROM reader_problems WHERE identity LIKE 'job:delete:%%' AND finished IS NULL")}
+        with transaction(store.db):
+            memberships.lock_graph(store.db)
+            effects=CollectionEffects();publication_links.capture_root_deletion_problems(store,effects,{'r1','r2'})
+            memberships.remove(store.db,items=['r1','r2'])
+            memberships.add(store.db,'c','r1');memberships.add(store.db,'d','r2')
+            store.jobs.sync_captured_deletions(effects)
+        rows=store.db.execute("SELECT id,identity FROM reader_problems WHERE identity LIKE 'job:delete:%%' AND finished IS NULL").fetchall()
+        assert {r['id'] for r in rows}==before
+        assert {r['identity'] for r in rows}=={'job:delete:c:delete:item','job:delete:d:delete:item'}
     finally:
         store.db.close()

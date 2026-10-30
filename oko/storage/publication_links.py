@@ -28,11 +28,13 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
     owner=expect_row(store.db.execute(f"SELECT i.*, {owner_expr('i')} AS feed_id FROM publications i WHERE i.id = %s",(item,)).fetchone())
     if owner['feed_id'] is None:
         return False
+    previous={row[0] for row in store.db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id = %s',(item,))}
+    capture_deletion_problems(store,effects,previous)
     targets=[]
     for ref in references:
         if (ref.key.platform.value,ref.key.external_id)==(owner['platform'],owner['external_id']):
             continue
-        row=store.db.execute(f"SELECT i.*, {owner_expr('i')} AS feed_id FROM publications i WHERE i.platform = %s AND i.external_id = %s",
+        row=store.db.execute(f"SELECT i.*, {owner_expr('i')} AS feed_id, (SELECT j.id FROM jobs j WHERE j.kind='delete' AND j.item=i.id AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)) AS delete_problem_job FROM publications i WHERE i.platform = %s AND i.external_id = %s",
                              (ref.key.platform.value,ref.key.external_id)).fetchone()
         if row is None:
             identity=str(uuid4())
@@ -42,6 +44,10 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
             effects.fetch[identity]=False
         else:
             identity=row['id']
+            if identity not in effects.delete_problems_checked:
+                if row['delete_problem_job'] is not None:
+                    effects.delete_problem_ids_before[identity] = store.problems.deletion_problem_ids(row['delete_problem_job'],store.wall_clock())
+                effects.delete_problems_checked.add(identity)
             if row['url']!=ref.url:
                 raise ValueError('Conflicting linked publication identity')
             if row['viewed'] and row['feed_id'] is None:
@@ -50,10 +56,9 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
             elif owner['platform']=='rss':
                 effects.refresh_links.add(identity)
         targets.append(identity)
-    previous={row[0] for row in store.db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id = %s',(item,))}
     store.db.execute('DELETE FROM publication_links WHERE source_publication_id = %s',(item,))
     store.db.executemany('INSERT INTO publication_links VALUES ( %s , %s ) ON CONFLICT DO NOTHING',[(item,target) for target in targets])
-    prune(store,previous-set(targets))
+    prune(store,previous-set(targets),effects=effects)
     changed=previous!=set(targets)
     return changed
 
@@ -89,7 +94,33 @@ def notify_parents_many(store: 'Store', items: set[str]) -> None:
         store.processing.reconcile_accepted_item(row[0])
 
 
-def prune(store: 'Store', candidates: set[str]) -> None:
+def capture_deletion_problems(store: 'Store', effects: CollectionEffects, items: set[str]) -> None:
+    missing = sorted(items - effects.delete_problems_checked)
+    effects.delete_problems_checked.update(missing)
+    for start in range(0,len(missing),400):
+        for row in store.db.execute("SELECT id,item FROM jobs WHERE kind='delete' AND item=ANY(%s) AND (error IS NOT NULL OR problem_code IS NOT NULL)", (missing[start:start+400],)):
+            effects.delete_problem_ids_before[row['item']] = store.problems.deletion_problem_ids(row['id'],store.wall_clock())
+
+
+def capture_root_deletion_problems(store: 'Store', effects: CollectionEffects, roots: set[str]) -> None:
+    ordered = sorted(roots)
+    for start in range(0,len(ordered),400):
+        batch = ordered[start:start+400]
+        capture_deletion_problems(store,effects,set(batch))
+        # Keep the selected roots as the outer relation: unrelated links and
+        # unrelated failed Jobs must not turn this into a library-wide join.
+        rows = store.db.execute("""SELECT DISTINCT j.id,j.item FROM unnest(%s::text[]) root(id)
+            CROSS JOIN LATERAL (SELECT target_publication_id FROM publication_links
+                WHERE source_publication_id=root.id ORDER BY target_publication_id OFFSET 0) link
+            CROSS JOIN LATERAL (SELECT id,item FROM jobs WHERE kind='delete' AND item=link.target_publication_id
+                AND (error IS NOT NULL OR problem_code IS NOT NULL) OFFSET 0) j""",(batch,))
+        for row in rows:
+            if row['item'] not in effects.delete_problems_checked:
+                effects.delete_problems_checked.add(row['item'])
+                effects.delete_problem_ids_before[row['item']] = store.problems.deletion_problem_ids(row['id'],store.wall_clock())
+
+
+def prune(store: 'Store', candidates: set[str], *, effects: CollectionEffects | None = None) -> None:
     if not candidates:
         return
     memberships.lock_graph(store.db)
@@ -115,6 +146,8 @@ def prune(store: 'Store', candidates: set[str]) -> None:
         SELECT i.id FROM publications i WHERE i.id=c.id AND i.platform IS NOT NULL AND i.viewed=0 OFFSET 0
     ) candidate WHERE NOT EXISTS (SELECT 1 FROM needed n WHERE n.id=candidate.id)''', (sorted(candidates),)).fetchall()
     items = [row['id'] for row in rows]
+    if effects is not None:
+        capture_root_deletion_problems(store,effects,set(items))
     store.publications.forget_many(items)
     for start in range(0, len(items), 400):
         batch = items[start:start+400]

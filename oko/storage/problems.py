@@ -192,10 +192,32 @@ class Problems:
         feed = row['feed_id'] or row['item'] or 'demo'
         return str('job:' + code + ':' + feed + ':' + row['kind'] + ':' + row['item'])
 
-    def deletion_candidate(self, job_id: int, now: float) -> dict[str, Any] | None:
-        """Project one deletion Job, without inspecting unrelated work."""
-        row = self.db.execute("SELECT kind,item,status,error,problem_code,feed_id FROM jobs WHERE id=%s AND kind IN ('delete','feed-delete')", (job_id,)).fetchone()
-        if not row or row['status'] not in ('pending','running','failed','unavailable','blocked') or (row['problem_code'] is None and row['error'] is None):
+    def deletion_candidates(self, job_id: int, now: float) -> list[dict[str, Any]]:
+        """Project one deletion Job for every affected root owner."""
+        rows = self.db.execute(f"""SELECT j.kind,j.item,j.status,j.error,j.problem_code,
+            coalesce({owner_expr('p')},{owner_expr('root')},j.feed_id) AS feed_id
+            FROM jobs j LEFT JOIN publications p ON p.id=j.item
+            LEFT JOIN publication_links l ON l.target_publication_id=p.id
+            LEFT JOIN publications root ON root.id=l.source_publication_id AND root.viewed=0
+            WHERE j.id=%s AND j.kind IN ('delete','feed-delete') AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL) ORDER BY root.id""", (job_id,)).fetchall()
+        candidates: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            candidate = self._deletion_candidate(row,now)
+            if candidate is not None:
+                candidates[candidate['id']] = candidate
+        return list(candidates.values())
+
+    def deletion_problem_ids(self, job_id: int, now: float) -> list[str]:
+        """Capture current and pre-owner-fix identities before a graph mutation."""
+        identities = {candidate['id'] for candidate in self.deletion_candidates(job_id,now)}
+        row = self.db.execute("SELECT kind,item,error,problem_code,feed_id FROM jobs WHERE id=%s AND kind IN ('delete','feed-delete')",(job_id,)).fetchone()
+        legacy = self.deletion_identity(row) if row else None
+        if legacy:
+            identities.add(legacy)
+        return sorted(identities)
+
+    def _deletion_candidate(self, row: Any, now: float) -> dict[str, Any] | None:
+        if row['status'] not in ('pending','running','failed','unavailable','blocked') or (row['problem_code'] is None and row['error'] is None):
             return None
         identity = self.deletion_identity(row)
         if identity is None:
@@ -217,12 +239,43 @@ class Problems:
             candidate['reason']=row['error']
         return candidate
 
-    def sync_deletion(self, job_id: int, previous: dict[str, Any] | None, now: float) -> None:
-        current = self.deletion_candidate(job_id,now)
-        if previous is not None and (current is None or previous['id']!=current['id']):
-            self.sync_candidate(previous['id'],None,now)
-        if current is not None:
-            self.sync_candidate(current['id'],current,now)
+    def sync_deletion(self, job_id: int, previous: list[dict[str, Any]], now: float) -> None:
+        current = {candidate['id']:candidate for candidate in self.deletion_candidates(job_id,now)}
+        if current:
+            row = self.db.execute("SELECT kind,item,error,problem_code,feed_id FROM jobs WHERE id=%s",(job_id,)).fetchone()
+            legacy = self.deletion_identity(row) if row else None
+            if legacy and legacy not in current:
+                old = self.db.execute('SELECT id FROM reader_problems WHERE identity=%s AND finished IS NULL',(legacy,)).fetchone()
+                if old:
+                    vacant = next((identity for identity in sorted(current) if not self.db.execute(
+                        'SELECT 1 FROM reader_problems WHERE identity=%s AND finished IS NULL',(identity,)).fetchone()),None)
+                    if vacant:
+                        self.db.execute('UPDATE reader_problems SET identity=%s WHERE id=%s',(vacant,old['id']))
+                        status_changed(self.db)
+                    else:
+                        self.sync_candidate(legacy,None,now,removed_outcome='irrelevant')
+        if current and previous:
+            old_ids = {candidate['id'] for candidate in previous if candidate['id'] not in current}
+            if old_ids:
+                existing = {row['identity']:row for row in self.db.execute(
+                    'SELECT * FROM reader_problems WHERE finished IS NULL AND identity=ANY(%s)', (sorted(old_ids | set(current)),))}
+                vacant = sorted(identity for identity in current if identity not in existing)
+                destinations = vacant or sorted(current)
+                prior = sorted((existing[identity] for identity in old_ids if identity in existing),
+                               key=lambda row:(row['created'],row['id']))
+                assigned: dict[str,set[str]] = {}
+                for index,row in enumerate(prior):
+                    target = destinations[min(index,len(destinations)-1)]
+                    assigned.setdefault(target,set()).add(row['identity'])
+                targets = [dict(current[identity],_legacy_ids=legacy) for identity,legacy in assigned.items()]
+                moved,merged = self._rekey_regrouped_jobs(existing,targets,now)
+                if moved or merged:
+                    status_changed(self.db)
+        for candidate in previous:
+            if candidate['id'] not in current:
+                self.sync_candidate(candidate['id'],None,now)
+        for candidate in current.values():
+            self.sync_candidate(candidate['id'],candidate,now)
 
     def profile_candidates(self, now: float, feeds: dict[str, dict[str, Any]], bindings: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
         groups: dict[str, dict[str, Any]] = {}
@@ -284,22 +337,23 @@ class Problems:
         groups: dict[str, dict[str, Any]] = {}
         youtube = self.store.youtube.status(now)
         read_states = {state['feed_id']: state for state in self.store.read_sync.statuses()}
-        jobs = self.db.execute(f"SELECT jobs . * , coalesce ( {owner_expr('items')} , {owner_expr('media_owner')} , {owner_expr('linked_root')} ) AS feed_id , coalesce ( items . viewed , media_owner . viewed ) AS viewed , m . resource_key AS resource_key , coalesce ( linked_root . id , m . publication_id , jobs . item ) AS affected_item FROM jobs LEFT JOIN publications items ON items . id = jobs . item LEFT JOIN media_files m ON jobs . kind = 'download_media' AND m . id = jobs . item LEFT JOIN publications media_owner ON media_owner . id = m . publication_id LEFT JOIN publication_links link ON link . target_publication_id = coalesce ( items . id , media_owner . id ) LEFT JOIN publications linked_root ON linked_root . id = link . source_publication_id AND linked_root . viewed = 0 WHERE ( jobs . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' , 'blocked' ) OR ( jobs . status = 'done' AND jobs . kind = 'fetch' AND jobs . problem_code IS NOT NULL AND jobs . error IS NOT NULL ) ) AND ( jobs . problem_code IS NOT NULL OR jobs . error IS NOT NULL )").fetchall()
+        jobs = self.db.execute(f"SELECT jobs . * , coalesce ( {owner_expr('items')} , {owner_expr('media_owner')} , {owner_expr('linked_root')} ) AS resolved_feed_id , coalesce ( items . viewed , media_owner . viewed ) AS viewed , m . resource_key AS resource_key , coalesce ( linked_root . id , m . publication_id , jobs . item ) AS affected_item FROM jobs LEFT JOIN publications items ON items . id = jobs . item LEFT JOIN media_files m ON jobs . kind = 'download_media' AND m . id = jobs . item LEFT JOIN publications media_owner ON media_owner . id = m . publication_id LEFT JOIN publication_links link ON link . target_publication_id = coalesce ( items . id , media_owner . id ) LEFT JOIN publications linked_root ON linked_root . id = link . source_publication_id AND linked_root . viewed = 0 WHERE ( jobs . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' , 'blocked' ) OR ( jobs . status = 'done' AND jobs . kind = 'fetch' AND jobs . problem_code IS NOT NULL AND jobs . error IS NOT NULL ) ) AND ( jobs . problem_code IS NOT NULL OR jobs . error IS NOT NULL )").fetchall()
         for job in jobs:
+            resolved_feed = job['resolved_feed_id'] or job['feed_id']
             code = job['problem_code']
             if code in ('codex-choice', 'ai-permission'):
                 continue
             if job['kind']=='download_media' and job['resource_key']=='youtube:subtitles':
                 if youtube['paused'] or code is None and self.store.youtube.ready_at()>now:
                     continue
-            if code is None and job['kind'] == 'fetch' and feeds.get(job['feed_id'], {}).get('kind') == 'youtube' and self.store.youtube.ready_at() > now:
+            if code is None and job['kind'] == 'fetch' and feeds.get(resolved_feed, {}).get('kind') == 'youtube' and self.store.youtube.ready_at() > now:
                 continue
             if code is None and job['kind'] == 'read' and not read_states.get(job['item'], {}).get('error', ''):
                 continue
             if code == 'youtube-admission':
                 continue
             code = code or 'work-' + job['kind']
-            feed = job['feed_id'] or job['item'] or 'demo'
+            feed = resolved_feed or job['item'] or 'demo'
             if code in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') and feed in profile_feeds:
                 continue
             if job['viewed'] and job['kind'] not in ('delete','feed-delete'):
@@ -325,11 +379,15 @@ class Problems:
                     groups[identity]['reason'] = job['error']
                 if code == 'source-reconnect':
                     groups[identity].update(section='action', next_step='Проверьте привязку источника; доступ не изменяется автоматически.', action=None)
+            legacy_feed = job['feed_id'] or job['item'] or 'demo'
+            legacy_identity = 'job:' + code + ':' + legacy_feed + ':' + job['kind'] + ('' if shared else ':' + job['item'])
+            if identity.startswith('job:') and legacy_identity != identity:
+                groups[identity].setdefault('_legacy_ids',set()).add(legacy_identity)
             if job['kind'] != 'delete' and obj not in groups[identity]['objects']:
                 groups[identity]['objects'].append(obj)
         if youtube['paused']:
             owners={job['affected_item'] for job in jobs if job['status'] in ('pending','running')
-                and feeds.get(job['feed_id'],{}).get('kind')=='youtube'
+                and feeds.get(job['resolved_feed_id'] or job['feed_id'],{}).get('kind')=='youtube'
                 and (job['kind']=='fetch' or job['resource_key']=='youtube:subtitles')}
             objects=[dict(kind='material',id=owner) for owner in sorted(owners)]
             groups['youtube:admission'] = dict(id='youtube:admission',code='youtube-admission',section='wait',title='YouTube ограничил запросы',
@@ -473,6 +531,33 @@ class Problems:
                 if result != row['result']:
                     status_changed(self.db)
 
+    def _rekey_regrouped_jobs(self, existing: dict[str,Any], candidates: list[dict[str,Any]], now: float) -> tuple[set[str],set[str]]:
+        """Move exact legacy Job keys to corrected owner groups, preserving history."""
+        target_ids = {candidate['id'] for candidate in candidates}
+        old_targets: dict[str,set[str]] = {}
+        for candidate in candidates:
+            for legacy in candidate.get('_legacy_ids',set()):
+                if legacy not in target_ids and legacy in existing:
+                    old_targets.setdefault(legacy,set()).add(candidate['id'])
+        old_for_target: dict[str,list[Any]] = {}
+        for legacy,targets in old_targets.items():
+            if targets:
+                old_for_target.setdefault(min(targets),[]).append(existing[legacy])
+        remapped: set[str] = set()
+        merged: set[str] = set()
+        for identity in sorted(old_for_target):
+            matches = old_for_target[identity]
+            matches.sort(key=lambda row:(row['created'],row['id']))
+            if identity not in existing:
+                chosen=matches.pop(0)
+                self.db.execute('UPDATE reader_problems SET identity=%s WHERE id=%s AND finished IS NULL',(identity,chosen['id']))
+                existing[identity]=chosen
+                remapped.add(chosen['id'])
+            for row in matches:
+                self.db.execute("UPDATE reader_problems SET finished=%s,outcome='irrelevant' WHERE id=%s AND finished IS NULL",(now,row['id']))
+                merged.add(row['id'])
+        return remapped,merged
+
     def reconcile(self, candidates: list[dict[str, Any]], now: float, feeds: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
         """Preserve occurrence identity; completed records never become current on restart."""
         by_identity = {candidate['id']: candidate for candidate in candidates}
@@ -481,8 +566,11 @@ class Problems:
         existing = {row['identity']: row for row in self.db.execute("SELECT * FROM reader_problems WHERE finished IS NULL")}
         with self.db:
             added: list[tuple[str,str,str,str,float]] = []
-            changed = False
+            remapped,merged = self._rekey_regrouped_jobs(existing,candidates,now)
+            changed = bool(remapped or merged)
             for row in existing.values():
+                if row['id'] in remapped or row['id'] in merged:
+                    continue
                 if row['identity'] not in identities and row['identity'] != 'processor:codex-choice' and not row['identity'].startswith(('action:', 'profile:')):
                     body = json.loads(row['body'])
                     irrelevant = body['code'] == 'codex-choice' and self.store.codex_config() is None
@@ -494,7 +582,7 @@ class Problems:
                 if not candidate['id'].startswith('action:'):
                     candidate.setdefault('operation','producer:status')
                 identity = candidate['id']
-                body = {key: value for key, value in candidate.items() if key not in ('id', 'created_at', 'finished_at', 'outcome')}
+                body = {key: value for key, value in candidate.items() if key not in ('id', 'created_at', 'finished_at', 'outcome', '_legacy_ids')}
                 # v3 carries resource identities; it never archives object titles.
                 body['objects'] = [{key: value for key, value in obj.items() if key != 'label'} for obj in candidate['objects']]
                 encoded = json.dumps(body)

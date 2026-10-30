@@ -33,6 +33,8 @@ if TYPE_CHECKING:
 class DiscoveryProjection:
     item: str
     source_id: str
+    delete_problem_job: int | None = None
+    delete_problem_children: tuple[str,...] = ()
     fingerprint: str | None = None
     content: tuple[dict[str, Any], list[dict[str, Any]]] | None = None
 
@@ -147,7 +149,20 @@ class Publications:
                 continue
             item=existing[0]['id'] if existing else str(uuid4())
             plan=DiscoveryProjection(item,existing[0]['source_id'] if existing else source_id)
-            current=self.store.db.execute('SELECT viewed , members , complete FROM publications WHERE id = %s',(item,)).fetchone() if existing else None
+            current=self.store.db.execute("""SELECT viewed,members,complete,
+                (SELECT j.id FROM jobs j WHERE j.kind='delete' AND j.item=publications.id AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)) AS delete_problem_job,
+                CASE WHEN viewed=0 AND NOT EXISTS (SELECT 1 FROM feed_publications m WHERE m.publication_id=publications.id AND m.is_primary)
+                     THEN ARRAY(SELECT j.item FROM LATERAL
+                                (SELECT target_publication_id FROM publication_links WHERE source_publication_id=publications.id
+                                 ORDER BY target_publication_id OFFSET 0) l
+                                CROSS JOIN LATERAL (SELECT j.item FROM jobs j WHERE j.item=l.target_publication_id AND j.kind='delete'
+                                 AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL) OFFSET 0) j)
+                     ELSE ARRAY[]::text[] END AS delete_problem_children
+                FROM publications WHERE id = %s""",(item,)).fetchone() if existing else None
+            if current and current['delete_problem_job'] is not None:
+                plan.delete_problem_job = current['delete_problem_job']
+            if current:
+                plan.delete_problem_children = tuple(current['delete_problem_children'])
             described=publication.teaser.adapter_content if publication.teaser else None
             album_changed=bool(current and described and ref.key.platform.value=='telegram'
                 and described.content.get('extra',{}).get('telegram',{}).get('album_id') is not None
@@ -442,12 +457,12 @@ class Publications:
                 if str(path.relative_to(self.store.root)) not in referenced and path not in self.store.media.active_paths:
                     path.unlink()
 
-    def forget(self, item: str, *, prune: bool = True) -> None:
+    def forget(self, item: str, *, prune: bool = True, effects: CollectionEffects | None = None) -> None:
         db = self.store.db
         linked={row[0] for row in db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id = %s',(item,))}
         self.forget_many([item])
         if prune:
-            publication_links.prune(self.store,linked)
+            publication_links.prune(self.store,linked,effects=effects)
 
     def forget_many(self, items: list[str]) -> None:
         """Clear saved copies without re-evaluating graph reachability."""

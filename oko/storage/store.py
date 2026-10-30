@@ -250,6 +250,12 @@ class Store:
                 if plan is None:
                     continue
                 item=plan.item
+                if item not in effects.delete_problems_checked:
+                    if plan.delete_problem_job is not None:
+                        effects.delete_problem_ids_before[item] = self.problems.deletion_problem_ids(plan.delete_problem_job,self.wall_clock())
+                    effects.delete_problems_checked.add(item)
+                if plan.delete_problem_children:
+                    publication_links.capture_deletion_problems(self,effects,set(plan.delete_problem_children))
                 item_status_changed |= bool(self.db.execute('INSERT INTO publications ( id , source_id , url , published , members , published_known ) VALUES ( %s , %s , %s , %s , %s , %s ) ON CONFLICT DO NOTHING',
                     (item,plan.source_id,publication.url,publication.published,json.dumps(publication.members),publication.published_known)).rowcount)
                 membership=membership_graph.add(self.db,feed,item)
@@ -512,6 +518,8 @@ class Store:
                     memberships.setdefault(row['publication_id'], []).append(row['feed_id'])
             if len(rows) != len(members):
                 return False
+            effects = CollectionEffects()
+            publication_links.capture_root_deletion_problems(self,effects,set(members))
             eligibility: dict[str, set[int]] = {}
             for member, feeds in memberships.items():
                 for feed in feeds:
@@ -529,12 +537,13 @@ class Store:
                     status_changed(self.db)
                 removed = membership_graph.remove(self.db,items=batch)
                 self.read_versions.memberships_changed(removed)
-            publication_links.prune(self, set(members))
+            publication_links.prune(self, set(members),effects=effects)
             self.processing.memberships_removed(members)
             publication_links.notify_parents_many(self, set(members))
             for item, row in rows.items():
                 if row['feed_id'] is not None:
                     self._remember_cleanup_owner(item, row['feed_id'])
+            self.jobs.sync_captured_deletions(effects)
         self.processing.sync()
         self.db.after_commit(lambda: self.fault('after_viewed_commit'))
         return True
@@ -554,20 +563,23 @@ class Store:
             if self.db.execute("UPDATE feeds SET connection = 'deleting' WHERE id = %s AND connection IS DISTINCT FROM 'deleting'", (feed,)).rowcount:
                 source_changed(self.db)
             shared=[r[0] for r in self.db.execute(f'SELECT p.id FROM ({owned_ids("= %s")}) owner JOIN publications p ON p.id=owner.id WHERE p.platform IS NOT NULL',(feed,feed))]
+            effects = CollectionEffects()
+            publication_links.capture_root_deletion_problems(self,effects,set(shared))
             removed = membership_graph.remove(self.db,feed=feed)
             self.read_versions.memberships_changed(removed)
             for item in shared:
                 self.read_sync.mark_item(item)
-            publication_links.prune(self,set(shared))
+            publication_links.prune(self,set(shared),effects=effects)
             for item in shared:
                 self._remember_cleanup_owner(item, feed)
             items = [r[0] for r in self.db.execute(owned_ids('= %s'), (feed,feed))]
             self.problems.forget_materials(set(items), self.wall_clock())
+            publication_links.capture_root_deletion_problems(self,effects,set(items))
             for item in items:
                 self.filters.forget(item)
                 self.publications.set_source_deleted([item], False)
                 if self.publications.owns(item):
-                    self.publications.forget(item)
+                    self.publications.forget(item,effects=effects)
                 self.jobs.forget_input('theses', [item])
                 # This is local cleanup, not viewed(): never create read eligibility.
                 membership_graph.set_viewed(self.db,[item],True)
@@ -575,6 +587,7 @@ class Store:
             publication_links.notify_parents_many(self, set(removed))
             if binding and binding['kind']=='client':
                 self.problems.sync_profiles(self.wall_clock(), {str(binding.get('role') or feed)})
+            self.jobs.sync_captured_deletions(effects)
         self.db.after_commit(lambda: self.fault('after_feed_delete_commit'))
 
     def _remember_cleanup_owner(self, item: str, feed: str) -> None:
