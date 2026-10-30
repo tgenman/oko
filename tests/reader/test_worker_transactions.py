@@ -1157,3 +1157,20 @@ def test_content_round_trip_rejects_old_filter_attempt(tmp_path):
             release.set()
             store.db.close()
     asyncio.run(scenario())
+
+
+def test_display_only_setting_does_not_enqueue_processing(tmp_path):
+    from oko.services.subscriptions import SubscriptionService
+    from oko.subscriptions.subscriptions import Overrides
+    store, item, execution, _ = worker_library(tmp_path)
+    try:
+        with store.db:
+            store.db.execute('DELETE FROM processing_dirty')
+        store.processing.background = True
+        before = tuple(store.db.execute("SELECT status,generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone())
+        with transaction(store.db):
+            SubscriptionService(execution.require_store).update_settings('feed','demo',Overrides(originals=False))
+        assert store.db.execute('SELECT 1 FROM processing_dirty LIMIT 1').fetchone() is None
+        assert tuple(store.db.execute("SELECT status,generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()) == before
+    finally:
+        store.db.close()

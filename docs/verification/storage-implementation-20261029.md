@@ -664,3 +664,7 @@
   passed after removing the unused affected-feed result. Three Playwright scenarios
   passed and the filter-switch screenshot was inspected. The settings dirty queue
   remains and this does not finish the target schema.
+- Display-only `originals` changes no longer enqueue processing or alter a filter
+  Job. The targeted regression first failed on the old queue insertion; after the
+  change, 48 settings and transaction tests passed, plus 28 Playwright scenarios.
+  The switched open-material screenshot was inspected.

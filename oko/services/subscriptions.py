@@ -34,7 +34,8 @@ class SubscriptionService:
                 raise ValueError('Для включённой фильтрации нужен непустой промпт')
         repository.fault('settings_after_values')
         changed = bool(patch.model_fields_set - GLOBAL_SERVICE_SETTINGS and value != previous)
-        if changed:
+        processing_fields = {'filter_enabled','prompt_filters','theses','prompt_theses','processor'}
+        if changed and patch.model_fields_set & processing_fields:
             repository.settings_changed(scope, owner)
         repository.fault('settings_after_invalidation')
         return SettingsChange(value, changed, repository.subscriptions.feed_refresh_minutes() * 60)
