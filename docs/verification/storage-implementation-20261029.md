@@ -582,3 +582,9 @@
   value migration cases and 14 SQL-cost checks also passed. Nine Playwright
   settings/feed scenarios passed and the filter switch screenshot was inspected.
   The dirty processing queues and duplicate feed configuration remain open.
+- Migration 053 removes the unused feed-level filter/summary JSON copies only
+  when both are empty. Nonempty values and malformed JSON stop migration without
+  changing the old data, requiring reconciliation instead of guessing which
+  settings win. Migration and inheritance suites passed 164 tests and types;
+  eight Playwright scenarios passed and feed details were inspected. The two
+  processing dirty queues and the rest of the physical schema remain open.

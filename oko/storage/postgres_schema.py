@@ -57,4 +57,5 @@ MIGRATIONS = (
     Migration(50, 'native-time-max', (Path(__file__).parent / 'postgres' / '050-native-time-max.sql').read_text()),
     Migration(51, 'native-json', (Path(__file__).parent / 'postgres' / '051-native-json.sql').read_text()),
     Migration(52, 'owned-settings', (Path(__file__).parent / 'postgres' / '052-owned-settings.sql').read_text()),
+    Migration(53, 'feed-processing-copies', (Path(__file__).parent / 'postgres' / '053-feed-processing-copies.sql').read_text()),
 )

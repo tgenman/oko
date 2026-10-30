@@ -962,3 +962,25 @@ def test_settings_migration_rejects_invalid_legacy_value(connections, value, err
             migrate(db, MIGRATIONS)
         assert db.execute("SELECT value FROM settings WHERE field='theses'").fetchone() == (value,)
         verify(db, MIGRATIONS[:51])
+
+
+def test_empty_feed_processing_copies_are_removed(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:52])
+        db.execute("INSERT INTO feeds(id) VALUES ('feed')")
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='feeds' AND column_name IN ('filter_config','summary_config')").fetchone() == (0,)
+        verify(db, MIGRATIONS)
+
+
+@pytest.mark.parametrize('column', ['filter_config','summary_config'])
+def test_feed_processing_copy_migration_rejects_nonempty_legacy_data(connections, column):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:52])
+        db.execute(f"INSERT INTO feeds(id,{column}) VALUES ('feed',%s)", ('{"prompt":"saved"}',))
+        with pytest.raises(psycopg.errors.RaiseException, match='nonempty feed processing config'):
+            migrate(db, MIGRATIONS)
+        assert db.execute(f"SELECT {column} FROM feeds WHERE id='feed'").fetchone() == ('{"prompt":"saved"}',)
+        verify(db, MIGRATIONS[:52])
