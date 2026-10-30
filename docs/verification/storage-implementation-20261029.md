@@ -1288,3 +1288,12 @@ Starlette/httpx warning was emitted. This is a query optimization only:
 material-incomplete can still be created or closed by GET, and direct external
 SQL content updates bypass the application-maintained classification. No
 working database was migrated.
+
+
+Removing one feed from a shared publication now captures stage problems
+before cancelling Jobs owned by that feed and updates them with the graph
+change in the same transaction. Synthetic checks cover filter and theses,
+explicit and empty codes, both stages at once, rollback and 10,000 unrelated
+Jobs. The integrated suite passed 174 PostgreSQL/HTTP tests, mypy for the
+changed module and six Playwright status scenarios; a screenshot was inspected.
+One Starlette/httpx warning was emitted. No working database was changed.

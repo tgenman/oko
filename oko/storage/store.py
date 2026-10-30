@@ -605,9 +605,11 @@ class Store:
         with boundary:
             membership_graph.lock_graph(self.db)
             binding = self.subscriptions.telegram.binding(feed)
+            effects = CollectionEffects()
             selected = [r[0] for r in self.db.execute("""SELECT i.id FROM feed_publications m JOIN publications i ON i.id=m.publication_id
                 WHERE m.feed_id=%s AND i.processing_metadata::jsonb->'_pass'->>'feed_id'=%s""", (feed,feed))]
             if selected:
+                publication_links.capture_processing_problems(self,effects,set(selected))
                 affected=[row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE item=ANY(%s) AND kind IN ('filter','theses') AND status!='done' AND (processor_visible OR problem_code='processor-config')",(selected,))]
                 previous=self.problems.prepare_processor_change(affected,self.wall_clock())
                 job_write(self.db, """UPDATE jobs SET status='cancelled',generation=generation+1,input_snapshot=NULL
@@ -620,7 +622,6 @@ class Store:
             for row in self.db.execute("SELECT id FROM jobs WHERE kind='discover' AND (item=%s OR feed_id=%s) AND (error IS NOT NULL OR problem_code IS NOT NULL)",(feed,feed)):
                 self.problems.sync_discover(row['id'],self.wall_clock())
             shared=[r[0] for r in self.db.execute(f'SELECT p.id FROM ({owned_ids("= %s")}) owner JOIN publications p ON p.id=owner.id WHERE p.platform IS NOT NULL',(feed,feed))]
-            effects = CollectionEffects()
             publication_links.capture_root_deletion_problems(self,effects,set(shared))
             removed = membership_graph.remove(self.db,feed=feed)
             self.read_versions.memberships_changed(removed)
