@@ -1259,3 +1259,21 @@ def test_feed_owner_view_removal_rolls_back_on_failure(connections):
         assert db.execute("SELECT to_regclass('items_by_feed')").fetchone()[0] is not None
         assert db.execute('SELECT max(version) FROM oko_schema_migrations').fetchone()[0] == 61
         verify(db, MIGRATIONS[:61])
+
+
+def test_explicit_owner_preserves_view_owner_and_cleanup(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    from oko.storage.publication_owners import owner_expr
+    with connections() as db:
+        migrate(db,MIGRATIONS[:62])
+        db.execute("INSERT INTO feeds(id,platform,external_id) VALUES ('first','rss','https://first.test'),('second','rss','https://second.test')")
+        db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('primary','rss','primary',0),('cleanup','rss','cleanup',1),('orphan','rss','orphan',0)")
+        db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('first','primary',true,true),('second','primary',false,true)")
+        db.execute("INSERT INTO jobs(kind,item,payload,status) VALUES ('delete','cleanup','{\"cleanup_feed\":\"first\"}','pending')")
+        before=db.execute('SELECT id,feed_id,viewed FROM items_read ORDER BY id').fetchall()
+        assert before == [('cleanup','first',1),('orphan',None,0),('primary','first',0)]
+        after=db.execute('SELECT i.id,'+owner_expr('i')+' AS feed_id,i.viewed FROM publications i ORDER BY i.id').fetchall()
+        assert after == before
+        different=db.execute("SELECT count(*) FROM items_read old JOIN publications i ON i.id=old.id WHERE to_jsonb(old) IS DISTINCT FROM to_jsonb(i) || jsonb_build_object('feed_id',"+owner_expr('i')+")").fetchone()[0]
+        assert different == 0
+        verify(db,MIGRATIONS)

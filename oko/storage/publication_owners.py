@@ -14,3 +14,14 @@ def owned_ids(feed_condition: str) -> str:
         WHERE j.kind='delete' AND (j.payload::jsonb->>'cleanup_feed') {feed_condition}
           AND NOT EXISTS (SELECT 1 FROM feed_publications primary_owner
                           WHERE primary_owner.publication_id=p.id AND primary_owner.is_primary)"""
+
+
+def owner_expr(publication_alias: str) -> str:
+    """SQL expression for one publication's primary or cleanup feed.
+
+    The alias is supplied by the caller's own SQL, never by external input.
+    """
+    return f"""COALESCE(
+        (SELECT m.feed_id FROM feed_publications m WHERE m.publication_id={publication_alias}.id AND m.is_primary),
+        (SELECT j.payload::jsonb->>'cleanup_feed' FROM jobs j
+         WHERE j.kind='delete' AND j.item={publication_alias}.id AND {publication_alias}.viewed=1))"""

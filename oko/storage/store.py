@@ -276,7 +276,7 @@ class Store:
                     if completed:
                         completed_links.add(item)
                     saved_items.add(item)
-                row=expect_row(self.db.execute('SELECT * FROM items_read WHERE id = %s',(item,)).fetchone())
+                row=expect_row(self.db.execute('SELECT * FROM publications WHERE id = %s',(item,)).fetchone())
                 if publication.published_known and not row['published_known']:
                     self.db.execute('UPDATE publications SET published = %s , published_known = 1 , published_at = %s WHERE id = %s',(publication.published,publication.published,item))
                     item_status_changed = True
@@ -401,14 +401,14 @@ class Store:
 
 
     def publication(self, item: str) -> Publication | None:
-        row = self.db.execute('SELECT * FROM items_read WHERE id = %s AND viewed = 0', (item,)).fetchone()
+        row = self.db.execute('SELECT * FROM publications WHERE id = %s AND viewed = 0', (item,)).fetchone()
         if row:
             header, text = self.publications.original(item) if row['complete'] else ({},'')
             refs = tuple(MediaReference(m['resource_key'],m['source_locator'],m['name'],m['mime_type'],m['size_bytes'],m['resource_identity'])
                 for m in self.db.execute('SELECT * FROM media_files WHERE publication_id = %s',(item,)) if m['source_locator'])
             last_description = PublicationContent(PublicationMetadata(ExternalReference(ExternalKey(Platform(row['platform']),row['external_id']),row['url']),
                 header.get('title',''),datetime.fromtimestamp(row['published'],timezone.utc) if row['published_known'] else None),media=refs,
-                linked_publications=tuple(ExternalReference(ExternalKey(Platform(target['platform']),target['external_id']),target['url']) for target in self.db.execute('SELECT i . * FROM publication_links l JOIN items_read i ON i . id = l . target_publication_id WHERE l . source_publication_id = %s',(item,))))
+                linked_publications=tuple(ExternalReference(ExternalKey(Platform(target['platform']),target['external_id']),target['url']) for target in self.db.execute('SELECT i . platform , i . external_id , i . url FROM publication_links l JOIN publications i ON i . id = l . target_publication_id WHERE l . source_publication_id = %s',(item,))))
             teaser = Material(header.get('title',''),text,header.get('full',False),header.get('reason',''),
                 members=tuple(json.loads(row['members'])),description=header.get('description',''),
                 source_manifest=SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if header.get('source_manifest') else None,
@@ -508,7 +508,7 @@ class Store:
                 marks = ','.join('%s' for _ in batch)
                 rows.update({row['id']: row for row in self.db.execute(
                     f'SELECT id , members , feed_id FROM items_read WHERE id IN ( {marks} )', batch)})
-                for row in self.db.execute(f'SELECT m . publication_id , m . feed_id FROM feed_publications m JOIN items_read i ON i . id = m . publication_id WHERE i . viewed = 0 AND m . publication_id IN ( {marks} )', batch):
+                for row in self.db.execute(f'SELECT m . publication_id , m . feed_id FROM feed_publications m JOIN publications i ON i . id = m . publication_id WHERE i . viewed = 0 AND m . publication_id IN ( {marks} )', batch):
                     memberships.setdefault(row['publication_id'], []).append(row['feed_id'])
             if len(rows) != len(members):
                 return False

@@ -237,7 +237,7 @@ class JobRepository:
         if processing_kind is not None:
             query += " AND kind=" + ("'filter'" if processing_kind=='filter' else "'theses'")
         if ai_only:
-            query += """ AND kind IN ('filter','theses') AND NOT EXISTS (SELECT 1 FROM items_read i WHERE i.id=jobs.item AND i.platform IS NOT NULL
+            query += """ AND kind IN ('filter','theses') AND NOT EXISTS (SELECT 1 FROM publications i WHERE i.id=jobs.item AND i.platform IS NOT NULL
                 AND NOT ((jobs.kind='filter' AND i.status IN ('pending_filtering','filter_out'))
                       OR (jobs.kind='theses' AND (i.status IN ('pending_summary','ready')
                           OR (i.status='pending_filtering' AND i.processing_metadata::jsonb->'_pass'->>'feed_id' IS NULL)))))"""

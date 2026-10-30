@@ -1,4 +1,5 @@
 """Direct article dependencies; external identities come only from adapters."""
+from oko.storage.publication_owners import owner_expr
 from oko.storage.database import expect_row, Row
 from typing import Any, TYPE_CHECKING
 from uuid import uuid4
@@ -19,19 +20,19 @@ def children(store: 'Store',item: str) -> list[Row]:
     inputs = current(store.db)
     if inputs is not None and item in inputs.children:
         return inputs.children[item]
-    return list(store.db.execute("SELECT i . * , j . error AS fetch_error FROM publication_links l JOIN items_read i ON i . id = l . target_publication_id LEFT JOIN jobs j ON j . kind = 'fetch' AND j . item = i . id WHERE l . source_publication_id = %s AND i . viewed = 0 ORDER BY l . rowid",(item,)).fetchall())
+    return list(store.db.execute(f"SELECT i . * , {owner_expr('i')} AS feed_id , j . error AS fetch_error FROM publication_links l JOIN publications i ON i . id = l . target_publication_id LEFT JOIN jobs j ON j . kind = 'fetch' AND j . item = i . id WHERE l . source_publication_id = %s AND i . viewed = 0 ORDER BY l . rowid",(item,)).fetchall())
 
 
 def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], effects: CollectionEffects) -> bool:
     memberships.lock_graph(store.db)
-    owner=expect_row(store.db.execute('SELECT * FROM items_read WHERE id = %s',(item,)).fetchone())
+    owner=expect_row(store.db.execute(f"SELECT i.*, {owner_expr('i')} AS feed_id FROM publications i WHERE i.id = %s",(item,)).fetchone())
     if owner['feed_id'] is None:
         return False
     targets=[]
     for ref in references:
         if (ref.key.platform.value,ref.key.external_id)==(owner['platform'],owner['external_id']):
             continue
-        row=store.db.execute('SELECT * FROM items_read WHERE platform = %s AND external_id = %s',
+        row=store.db.execute(f"SELECT i.*, {owner_expr('i')} AS feed_id FROM publications i WHERE i.platform = %s AND i.external_id = %s",
                              (ref.key.platform.value,ref.key.external_id)).fetchone()
         if row is None:
             identity=str(uuid4())
@@ -58,7 +59,7 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
 
 
 def feedless(store: 'Store', item: str) -> bool:
-    return store.db.execute('SELECT 1 FROM items_read WHERE id = %s AND platform IS NOT NULL AND feed_id IS NULL',(item,)).fetchone() is not None
+    return store.db.execute(f"SELECT 1 FROM publications i WHERE i.id = %s AND i.platform IS NOT NULL AND {owner_expr('i')} IS NULL",(item,)).fetchone() is not None
 
 
 def text(store: 'Store', item: str) -> str:

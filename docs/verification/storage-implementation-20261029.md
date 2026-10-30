@@ -1024,3 +1024,13 @@ task checkout passed 245 migration and transaction tests. Mypy passed on 158
 files. Twelve Playwright feed/status scenarios passed and the feed screenshot
 was inspected. No working database was migrated. `items_read` and status GET
 reconciliation remain.
+
+
+Material reads, linked-publication reads and processing admission now obtain
+the primary or cleanup feed explicitly from memberships and Jobs. A synthetic
+comparison checked all returned publication fields against `items_read` for
+primary, cleanup and ownerless cases. The temporary-copy regression passed
+152 tests and two reading-cost scenarios; the task checkout passed 228 tests
+and the complete-field comparison. Mypy passed on 158 files. Thirty-two
+Playwright reading/status scenarios passed and an opened-material screenshot
+was inspected. Other consumers of `items_read` remain; no migration was added.

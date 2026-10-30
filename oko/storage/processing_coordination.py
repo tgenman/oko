@@ -69,13 +69,13 @@ class ProcessingState:
             yield
 
     def invalidate(self, scope: str = 'oko', owner: str = 'global') -> None:
-        query = 'SELECT DISTINCT i . id FROM items_read i JOIN feed_publications m ON m . publication_id = i . id JOIN feeds f ON f . id = m . feed_id WHERE i . viewed = 0'
+        query = 'SELECT DISTINCT i . id FROM publications i JOIN feed_publications m ON m . publication_id = i . id JOIN feeds f ON f . id = m . feed_id WHERE i . viewed = 0'
         params: tuple[str, ...] = ()
         if scope in ('feed', 'folder'):
             condition = 'f.id=%s' if scope=='feed' else 'f.folder_id=%s'
             query += ' AND ' + condition
             # A linked source's privacy participates in its parent's AI input.
-            query += """ UNION SELECT DISTINCT parent.id FROM items_read parent
+            query += """ UNION SELECT DISTINCT parent.id FROM publications parent
                 JOIN publication_links l ON l.source_publication_id=parent.id
                 JOIN feed_publications m ON m.publication_id=l.target_publication_id
                 JOIN feeds f ON f.id=m.feed_id WHERE parent.viewed=0 AND """ + condition

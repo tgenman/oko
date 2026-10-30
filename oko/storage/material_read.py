@@ -3,6 +3,7 @@
 Synchronous reading calculations open this scope. Nothing survives it;
 write paths use the same accessors against current storage without a snapshot.
 """
+from oko.storage.publication_owners import owner_expr
 from oko.storage.database import Database, Row
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -41,7 +42,7 @@ def current(db: Database) -> Inputs | None:
     return value if value is not None and value.db is db else None
 
 
-_ITEM = "SELECT i . * , CASE WHEN i.status='filter_out' THEN 1 ELSE 0 END AS reader_hidden FROM items_read i"
+_ITEM = f"SELECT i.*, {owner_expr('i')} AS feed_id, CASE WHEN i.status='filter_out' THEN 1 ELSE 0 END AS reader_hidden FROM publications i"
 _FEED_COLUMNS = ','.join('f.' + name for name in READER_FEED_COLUMNS)
 _FEED = 'SELECT ' + _FEED_COLUMNS + ', b.binding AS reader_binding FROM feeds f LEFT JOIN telegram_bindings b ON b.feed = f.id'
 _BATCH_FEED = 'SELECT ' + _FEED_COLUMNS + ''', b.binding AS reader_binding,
@@ -60,7 +61,7 @@ def item(db: Database, identity: str) -> Row | None:
             return value.items[identity]
         if identity in value.related_items:
             return value.related_items[identity]
-    return db.execute('SELECT * FROM items_read WHERE id = %s', (identity,)).fetchone()
+    return db.execute(f"SELECT i.*, {owner_expr('i')} AS feed_id FROM publications i WHERE i.id = %s", (identity,)).fetchone()
 
 
 
@@ -107,7 +108,7 @@ def material_inputs(db: Database, identities: set[str], *, include_subtitles: bo
             else:
                 value.jobs.setdefault(r['reader_item'],{})[r['kind']]=r
         value.children.update({identity: [] for identity in batch})
-        for row in db.execute("SELECT l . source_publication_id AS reader_source , i . * , j . error AS fetch_error FROM publication_links l JOIN items_read i ON i . id = l . target_publication_id LEFT JOIN jobs j ON j . kind = 'fetch' AND j . item = i . id WHERE l . source_publication_id = ANY ( %s ) AND i . viewed = 0 ORDER BY l . rowid", (batch,)):
+        for row in db.execute(f"SELECT l . source_publication_id AS reader_source , i . * , {owner_expr('i')} AS feed_id , j . error AS fetch_error FROM publication_links l JOIN publications i ON i . id = l . target_publication_id LEFT JOIN jobs j ON j . kind = 'fetch' AND j . item = i . id WHERE l . source_publication_id = ANY ( %s ) AND i . viewed = 0 ORDER BY l . rowid", (batch,)):
             value.children[row['reader_source']].append(row)
             value.related_items[row['id']] = row
         value.memberships.update({identity: [] for identity in batch})
