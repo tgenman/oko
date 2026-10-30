@@ -194,6 +194,7 @@ class Store:
             item_status_changed = False
             saved_items: set[str] = set()
             added_memberships: list[str] = []
+            completed_links: set[str] = set()
             envelope=HistoryEnvelope.decode(cursor,adapter='client' if namespace=='telegram' else 'web') if namespace in ('telegram','telegram-web') else None
             selection=json.loads(cursor) if not envelope and self.subscriptions.history.status(feed) else {}
             enrolled=set(envelope.selection.enrolled_ids) if envelope else set(selection.get('history_enroll',[]))
@@ -232,7 +233,10 @@ class Store:
                 if plan.content is not None:
                     assert plan.fingerprint is not None
                     self.publications.publish(item,plan.content,plan.fingerprint,effects)
-                    item_status_changed |= bool(self.db.execute('UPDATE publications SET complete = 1 WHERE id = %s AND complete IS DISTINCT FROM 1',(item,)).rowcount)
+                    completed = bool(self.db.execute('UPDATE publications SET complete = 1 WHERE id = %s AND complete IS DISTINCT FROM 1',(item,)).rowcount)
+                    item_status_changed |= completed
+                    if completed:
+                        completed_links.add(item)
                     saved_items.add(item)
                 row=expect_row(self.db.execute('SELECT * FROM items_read WHERE id = %s',(item,)).fetchone())
                 if publication.published_known and not row['published_known']:
@@ -274,6 +278,7 @@ class Store:
                     self.read_sync.saved_publication(item)
             for item in saved_items:
                 self.processing.reconcile_accepted_item(item)
+            publication_links.notify_parents_many(self, set(added_memberships) | completed_links)
             if successful:
                 self.subscriptions.details.record(feed,'updated')
             self.subscriptions.details.description(feed,description)
@@ -488,6 +493,7 @@ class Store:
                 self.read_versions.memberships_changed(removed)
             publication_links.prune(self, set(members))
             self.processing.memberships_removed(members)
+            publication_links.notify_parents_many(self, set(members))
             for item, row in rows.items():
                 if row['feed_id'] is not None:
                     self._remember_cleanup_owner(item, row['feed_id'])
@@ -526,6 +532,7 @@ class Store:
                 # This is local cleanup, not viewed(): never create read eligibility.
                 membership_graph.set_viewed(self.db,[item],True)
             self.processing.memberships_removed(removed)
+            publication_links.notify_parents_many(self, set(removed))
         self.db.after_commit(lambda: self.fault('after_feed_delete_commit'))
 
     def _remember_cleanup_owner(self, item: str, feed: str) -> None:

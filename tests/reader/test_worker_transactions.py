@@ -1335,7 +1335,10 @@ def test_discovery_page_shares_linked_article_with_its_own_membership(tmp_path,p
         rows=store.db.execute("SELECT id,complete,content FROM publications WHERE url='https://fixture.test/child'").fetchall()
         assert len(rows)==1 and rows[0]['complete']==1 and 'Child text' in rows[0]['content']
         assert store.db.execute("SELECT 1 FROM feed_publications WHERE feed_id='demo' AND publication_id=%s", (rows[0]['id'],)).fetchone()
-        assert store.db.execute("SELECT 1 FROM publication_links WHERE target_publication_id=%s", (rows[0]['id'],)).fetchone()
+        parent_id = store.db.execute("SELECT source_publication_id FROM publication_links WHERE target_publication_id=%s", (rows[0]['id'],)).fetchone()[0]
+        from oko.storage.processing_input import signature
+        job = store.db.execute("SELECT input_snapshot->>'signature' FROM jobs WHERE kind='filter' AND item=%s", (parent_id,)).fetchone()
+        assert job and job[0] == signature(store, parent_id, 'filter')
         child_id = rows[0]['id']
         assert store.publication(child_id).id == 'child'
         # A pre-existing link placeholder with a membership is repaired too.
@@ -1371,5 +1374,46 @@ def test_changed_title_discards_old_results_and_rolls_back_atomically(tmp_path):
         assert saved(store, item)['summarized_content'] == before['summarized_content']
         with transaction(store.db):
             change()
+    finally:
+        store.db.close()
+
+
+def test_linked_membership_privacy_change_revokes_parent_attempt(tmp_path):
+    from dataclasses import replace
+    from oko.collection.contracts import Publication
+    from oko.storage import memberships
+    from oko.subscriptions.subscriptions import AddFeed, FeedPatch
+    from tests.support.source import publication_packet
+
+    store, item, _, _ = worker_library(tmp_path)
+    try:
+        other = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other', title='Other', folder='Other', verification='synthetic'))['id']
+        packet = publication_packet(Publication('child', 'https://fixture.test/child', 2), Material('Child', 'Child text'), needs_fetch=False)
+        with transaction(store.db):
+            store.subscriptions.update_feed('demo', FeedPatch(public_ai=True))
+            store.db.execute("""INSERT INTO publications(id,source_id,url,platform,external_id,complete,content,title)
+                SELECT 'linked','linked:linked',%s,%s,%s,1,content,title FROM publications WHERE id=%s""",
+                (packet.url,packet.adapter_reference.key.platform.value,packet.adapter_reference.key.external_id,item))
+            store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES (%s,'linked')", (item,))
+            store.processing.reconcile_accepted_item(item)
+            job = store.jobs.claim_processing('filter', store.clock())
+            assert job and job.item == item
+        observed = replace(packet, teaser=None, observed_only=True)
+        def change():
+            store.collect_discovery([observed], '{}', feed=other)
+            assert not store.jobs.valid(job)
+        with pytest.raises(ValueError, match='rollback'):
+            with transaction(store.db):
+                change()
+                raise ValueError('rollback')
+        assert store.jobs.valid(job)
+        with transaction(store.db):
+            change()
+            second = store.jobs.claim_processing('filter', store.clock())
+            assert second and second.item == item
+        with transaction(store.db):
+            store.remove_feed(other)
+            assert not store.jobs.valid(second)
+        assert not store.jobs.valid(job)
     finally:
         store.db.close()
