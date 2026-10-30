@@ -3,6 +3,7 @@ from typing import Any,TYPE_CHECKING
 from pathlib import Path
 
 from oko.storage.reading import saved_bytes,reading_value
+from oko.storage.media_paths import existing_file
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
@@ -24,8 +25,8 @@ def subtitle_path(store: 'Store', identity: str | None) -> Path | None:
         row=store.db.execute("SELECT storage_key,publication_id FROM media_files WHERE id=%s AND status='ready'",(identity,)).fetchone()
         key = row[0] if row else None
         owner = row[1] if row else None
-    path=store.root/key if key else None
-    if path and path.is_file():
+    path=existing_file(store.root,key)
+    if path:
         return path
     if owner:
         store.processing.repair(owner)

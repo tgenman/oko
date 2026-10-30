@@ -2,6 +2,7 @@
 from oko.storage import material_read
 from oko.storage.reading import retry_time
 from oko.storage.transaction import begin_write
+from oko.storage.media_paths import existing_file
 from oko.storage.job_writes import execute as job_write
 from dataclasses import dataclass
 import json
@@ -159,7 +160,7 @@ class ProcessingState:
                 content = json.loads(row[0]) if row else {}
                 identity = youtube_media.subtitle_id(content)
                 media = self.store.db.execute("SELECT storage_key FROM media_files WHERE id=%s AND publication_id=%s AND status='ready'", (identity,item)).fetchone() if identity else None
-                if media and (not media[0] or not (self.store.root / media[0]).is_file()):
+                if media and (not media[0] or existing_file(self.store.root,media[0]) is None):
                     self.store.db.execute("UPDATE media_files SET status='pending_download',storage_key=NULL,reason='' WHERE id=%s", (identity,))
                     content['extra']['youtube']['captions'] = 'pending'
                     content['extra']['_reader']['captions'] = 'error'

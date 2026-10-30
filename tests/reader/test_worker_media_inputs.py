@@ -202,3 +202,56 @@ def test_two_workers_ready_to_write_commit_sequentially_on_one_connection(tmp_pa
         assert store.db.execute("SELECT count(*) FROM jobs WHERE kind IN ('filter','download_media') AND status='done'").fetchone()[0]==2
         store.db.close()
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('kind', ['absolute', 'parent', 'symlink', 'internal'])
+def test_media_key_cannot_read_outside_library(tmp_path, kind):
+    store,item,execution,tasks=worker_library(tmp_path/'library')
+    try:
+        service=CollectionService(execution.require_store)
+        source=StructuredSource(None)
+        accept_material(store,service,item,image_material(source,store,item))
+        job=store.jobs.next_job(store.clock(),feeds=['demo'],media_only=True)
+        external=tmp_path/'outside.txt'
+        external.write_text('private')
+        if kind == 'absolute':
+            key = str(external)
+        elif kind == 'parent':
+            key = '../outside.txt'
+        elif kind == 'symlink':
+            (store.root/'media'/'escape').symlink_to(tmp_path, target_is_directory=True)
+            key = 'media/escape/outside.txt'
+        else:
+            external = store.root/'private.txt'
+            external.write_text('private')
+            key = 'private.txt'
+        with store.jobs.transaction(lambda:True):
+            store.db.execute("UPDATE media_files SET status='ready',storage_key=%s WHERE id=%s", (key,job.item))
+        assert store.media.file(item,job.item) is None
+        assert external.read_text() == 'private'
+    finally:
+        store.db.close()
+
+
+def test_reader_http_does_not_serve_a_media_key_outside_the_library(tmp_path):
+    from tests.support.app import create_app
+    from tests.support.reader import HEADERS
+    from tests.support.v3 import TestClient
+    root = tmp_path/'library'
+    store,item,execution,tasks=worker_library(root)
+    try:
+        service=CollectionService(execution.require_store)
+        source=StructuredSource(None)
+        accept_material(store,service,item,image_material(source,store,item))
+        job=store.jobs.next_job(store.clock(),feeds=['demo'],media_only=True)
+        secret=tmp_path/'outside.txt'
+        secret.write_text('private')
+        with store.jobs.transaction(lambda:True):
+            store.db.execute("UPDATE media_files SET status='ready',storage_key=%s WHERE id=%s", (str(secret),job.item))
+    finally:
+        store.db.close()
+    with TestClient(create_app(root,token='test',api_only=True),headers=HEADERS) as client:
+        response=client.get('/api/v3/materials/'+item+'/media/'+job.item)
+        assert response.status_code == 404
+        assert 'private' not in response.text
+        assert client.get('/api/v3/publication/'+item).status_code == 200

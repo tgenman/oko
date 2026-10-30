@@ -2,6 +2,7 @@
 
 All supported sources use the same current storage.
 """
+from oko.storage.media_paths import existing_file
 from oko.storage.database import expect_row
 from oko.storage.reading import reading_snapshot, saved_content
 from copy import deepcopy
@@ -193,7 +194,7 @@ class Publications:
             previous=known.get(ref.key)
             subtitles=youtube is not None and any(block.get('ref')=={'$media':ref.key} and block.get('role')=='subtitles' for block in content['blocks'])
             keep_caption=bool(subtitles and previous and previous['source_locator']==ref.locator and
-                (previous['status']=='ready' and previous['storage_key'] and (self.store.root/previous['storage_key']).is_file() or youtube.get('captions')!='not_requested' and old_youtube.get('captions') in ('unavailable','error')))
+                (previous['status']=='ready' and previous['storage_key'] and existing_file(self.store.root,previous['storage_key']) is not None or youtube.get('captions')!='not_requested' and old_youtube.get('captions') in ('unavailable','error')))
             if keep_caption and previous:
                 identities[ref.key]=previous['id']
                 media.append(previous)
@@ -211,7 +212,7 @@ class Publications:
             if ref.key in identities:
                 raise ValueError('Duplicate adapter media key')
             identities[ref.key]=identity
-            ready=bool(unchanged and previous and previous['status']=='ready' and previous['storage_key'] and (self.store.root/previous['storage_key']).is_file())
+            ready=bool(unchanged and previous and previous['status']=='ready' and previous['storage_key'] and existing_file(self.store.root,previous['storage_key']) is not None)
             media.append(dict(id=identity,publication_id=item,resource_key=ref.key,source_locator=ref.locator,
                 name=ref.name or (previous['name'] if ready and previous else ''),mime_type=previous['mime_type'] if ready and previous else ref.mime_type,
                 size_bytes=previous['size_bytes'] if ready and previous else ref.size_bytes,
@@ -222,7 +223,7 @@ class Publications:
             external=resource.get('external')
             if not external or resource['key'] in identities or not previous or not (previous['status']=='ready' or previous['storage_key'] or previous['reason']=='Локальный файл вложения недоступен'):
                 continue
-            if not previous['storage_key'] or not (self.store.root/previous['storage_key']).is_file():
+            if not previous['storage_key'] or existing_file(self.store.root,previous['storage_key']) is None:
                 previous=dict(previous,status='unavailable',reason='Локальный файл вложения недоступен',storage_key=None)
             identities[resource['key']]=previous['id']
             media.append(previous)
@@ -298,8 +299,8 @@ class Publications:
             (json.dumps(content, ensure_ascii=False), json.dumps([r['id'] for r in media]),
              content['extra']['_reader']['title'], 'pending_filtering', item))
         if previous and old['platform'] != 'youtube' and old_header.get('title') != content['extra']['_reader']['title']:
-            row = expect_row(store.db.execute('SELECT processing_metadata FROM items_read WHERE id = %s', (item,)).fetchone())
-            metadata = json.loads(row[0])
+            metadata_row = expect_row(store.db.execute('SELECT processing_metadata FROM items_read WHERE id = %s', (item,)).fetchone())
+            metadata = json.loads(metadata_row[0])
             for operation in ('filter', 'summary'):
                 if operation in metadata:
                     metadata[operation].setdefault('source_title', old_header.get('title'))

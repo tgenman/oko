@@ -13,6 +13,7 @@ from typing import Any, TYPE_CHECKING
 
 from oko.collection.adapters import AdapterIssue, AdapterErrorKind, ExternalKey, ExternalReference, MediaReference, Platform
 from oko.storage.reading import reading_value, reader_now
+from oko.storage.media_paths import existing_file, resolve_key
 from oko.storage import collection_jobs, publication_links, youtube_media, files, material_read, memberships
 
 if TYPE_CHECKING:
@@ -55,6 +56,7 @@ class MediaFiles:
         previous_attachments = {value['name']:value for value in header.get('attachments', [])}
         roles = {b['media_id']: b['role'] for b in content['blocks'] if b['type']=='media'}
         order = {identity:index for index,identity in enumerate(roles)}
+        media = [dict(row, status='pending_download') if row['status']=='ready' and not existing_file(self.store.root, row['storage_key']) else row for row in media]
         media = sorted(media,key=lambda row:order.get(row['id'],len(order)))
         header['attachments'] = []
         for resource in resources:
@@ -68,7 +70,9 @@ class MediaFiles:
             if ready:
                 resource['external']=None
                 resource['reason']=''
-                resource['sha256'] = files.file_digest(self.store.root/row['storage_key'])
+                path = existing_file(self.store.root,row['storage_key'])
+                if path is not None:
+                    resource['sha256'] = files.file_digest(path)
         header['_media_urls'] = {}
         for row in media:
             if row['status']=='ready':
@@ -93,8 +97,8 @@ class MediaFiles:
     def file(self, item: str, media: str) -> tuple[Path, str] | None:
         row = self.store.db.execute("SELECT m . * FROM media_files m JOIN items_read i ON i . id = m . publication_id WHERE m . id = %s AND m . publication_id = %s AND i . viewed = 0 AND m . status = 'ready' ", (media,item)).fetchone()
         if row and row['storage_key']:
-            path = self.store.root/row['storage_key']
-            if path.is_file():
+            path = existing_file(self.store.root,row['storage_key'])
+            if path is not None:
                 return path, row['mime_type'] or 'application/octet-stream'
         return None
 
@@ -142,11 +146,11 @@ class MediaFiles:
         if actual.size_bytes is not None and actual.size_bytes != size:
             raise ValueError('Media adapter returned a different size')
         previous=store.db.execute('SELECT * FROM media_files WHERE id = %s',(identity,)).fetchone()
-        same=bool(download.final.name!=identity and previous and previous['storage_key']
-            and (store.root/previous['storage_key']).is_file()
-            and files.file_digest(download.temporary)==files.file_digest(store.root/previous['storage_key']))
+        previous_file = existing_file(store.root,previous['storage_key']) if previous else None
+        same=bool(download.final.name!=identity and previous_file
+            and files.file_digest(download.temporary)==files.file_digest(previous_file))
         accepted_identity=identity if same or previous and previous['status']=='pending_download' else download.final.name
-        saved=store.root/previous['storage_key'] if same and previous else download.final
+        saved=previous_file if same and previous_file else download.final
         with download.temporary.open('rb') as stream:
             os.fsync(stream.fileno())
         if same:
@@ -210,7 +214,7 @@ class MediaFiles:
     def cleanup(self) -> None:
         """Runs under Runtime's file admission, outside a database transaction."""
         root = self.store.root
-        referenced = {root/row[0] for row in self.store.db.execute("SELECT storage_key FROM media_files WHERE storage_key IS NOT NULL")}
+        referenced = {path for row in self.store.db.execute("SELECT storage_key FROM media_files WHERE storage_key IS NOT NULL") if (path := resolve_key(root,row[0])) is not None}
         for directory in (root/'media').iterdir():
             if not directory.is_dir() or directory.is_symlink():
                 if directory not in self.active_paths and directory not in referenced:
@@ -278,7 +282,7 @@ class MediaFiles:
                 subtitles=youtube_media.subtitle_id(content)==media_id
                 media = [dict(r) for r in store.db.execute('SELECT * FROM media_files WHERE publication_id = %s', (owner,))]
                 old=next((value for value in media if value['id']==media_id),None)
-                keep_file=bool(old and old['status']=='ready' and old['storage_key'] and (store.root/old['storage_key']).is_file())
+                keep_file=bool(old and old['status']=='ready' and old['storage_key'] and existing_file(store.root,old['storage_key']) is not None)
                 if subtitles and not keep_file:
                     content['extra']['youtube']['captions']='error'
                     content['extra']['_reader']['captions']='error'

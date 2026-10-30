@@ -35,6 +35,7 @@ from oko.collection.contracts import ReplyPreview, SourceError, Material, Public
 from oko.storage.subscriptions import SubscriptionRepository
 from oko.storage.job_writes import execute as job_write
 from oko.storage.transaction import begin_write, transaction
+from oko.storage.media_paths import existing_file
 from oko.storage.job_repository import JobRepository
 from oko.domain.collection import CollectionEffects
 from oko.subscriptions.history import InitialHistory
@@ -385,7 +386,7 @@ class Store:
         previous = self.publication(item)
         if material.source_manifest and material.source_manifest.post_web_unavailable:
             media=[dict(row) for row in self.db.execute('SELECT * FROM media_files WHERE publication_id = %s',(item,))]
-            missing=[row for row in media if row['storage_key'] and not (self.root/row['storage_key']).is_file() or row['status']=='unavailable' and row['reason']=='Локальный файл вложения недоступен']
+            missing=[row for row in media if row['storage_key'] and existing_file(self.root,row['storage_key']) is None or row['status']=='unavailable' and row['reason']=='Локальный файл вложения недоступен']
             if missing:
                 error=SourceError('Локальный файл вложения недоступен',code='media-unavailable',retryable=False)
                 content=json.loads(expect_row(self.db.execute('SELECT content FROM items_read WHERE id = %s',(item,)).fetchone())[0])
