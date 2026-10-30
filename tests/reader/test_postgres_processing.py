@@ -635,3 +635,38 @@ def test_http_rule_change_rejects_old_model_response_and_starts_replacement(post
             assert requests[0]['prompt'] != requests[1]['prompt']
         finally:
             release.set()
+
+
+def test_http_processor_model_change_keeps_started_filter(postgres_url, tmp_path):
+    import threading
+    import httpx
+    from fastapi.testclient import TestClient
+    from tests.support.app import create_app
+    from tests.support.filters import transport
+    from tests.support.reader import HEADERS, wait_for
+
+    store, item, _, _ = worker_library(tmp_path,database_url=postgres_url)
+    store.set_work_enabled(False)
+    store.db.close()
+    started, release = threading.Event(), threading.Event()
+    attempts = []
+    upstream = transport([],theses=True)
+    async def respond(request):
+        if request.url.path == '/v1/chat/completions' and json.loads(json.loads(request.content)['messages'][1]['content'])['operation']=='filter':
+            attempts.append(request)
+            started.set()
+            await asyncio.to_thread(release.wait,10)
+        return upstream.handler(request)
+    app = create_app(tmp_path,token='test',api_only=True,database_url=postgres_url,ai_transport=httpx.MockTransport(respond))
+    with TestClient(app,headers=HEADERS) as client:
+        try:
+            assert client.put('/api/v3/power',json={'enabled':True}).status_code==200
+            assert started.wait(5)
+            response=client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:new','local_execution':True})
+            assert response.status_code==200, response.text
+            release.set()
+            result=wait_for(client,lambda:(value if (value:=client.get('/api/v3/publication/'+item).json())['filter']['state']=='ready' else None))
+            assert result['filter']['result'] is not None
+            assert len(attempts)==1
+        finally:
+            release.set()

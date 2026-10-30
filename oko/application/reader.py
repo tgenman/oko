@@ -469,10 +469,8 @@ class ReaderApplication:
         async with self._actions:
             with transaction(self.require_store().db):
                 changed = self.connections.configure_processor(config)
-                if changed:
-                    self.jobs.invalidate()
             if changed:
-                await self.jobs.cancel(invalidate=False)
+                await self.jobs.cancel_stale_ai()
 
 
     async def check_processor(self) -> dict[str, Any]:

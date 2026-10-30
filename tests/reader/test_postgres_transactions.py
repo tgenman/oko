@@ -712,3 +712,94 @@ def test_read_confirmation_preserves_legacy_null_frontier(postgres_url, tmp_path
             assert store.db.execute("SELECT confirmed FROM telegram_read_state WHERE feed='feed'").fetchone()[0] is None
     finally:
         store.db.close()
+
+
+@pytest.mark.parametrize('change', ['settings','feed','processor'])
+def test_configuration_takes_graph_lock_before_writes(postgres_url, tmp_path, change):
+    import psycopg
+    from oko.processing.llamacpp import ProcessorConfig
+    from oko.services.subscriptions import SubscriptionService
+    from oko.subscriptions.subscriptions import FeedPatch, Overrides
+    from tests.support.worker_library import worker_library
+
+    store, _, execution, _ = worker_library(tmp_path,database_url=postgres_url)
+    statements = []
+    try:
+        store.db.set_trace_callback(statements.append)
+        with psycopg.connect(postgres_url) as other, transaction(store.db):
+            if change=='settings':
+                SubscriptionService(execution.require_store).update_settings('feed','demo',Overrides(prompt_filters='Changed rules'))
+            elif change=='feed':
+                SubscriptionService(execution.require_store).patch_feed('demo',FeedPatch(public_ai=True))
+            else:
+                store.configure_processor(ProcessorConfig(endpoint='http://localhost:9932',model='other',local_execution=True))
+            assert not other.execute('SELECT pg_try_advisory_xact_lock(hashtextextended(current_schema(),%s))', (0x4F4B4F4752415048,)).fetchone()[0]
+        lock = next(i for i,query in enumerate(statements) if 'pg_advisory_xact_lock' in query)
+        mutation = next(i for i,query in enumerate(statements) if query.lstrip().upper().startswith(('INSERT INTO SETTINGS','UPDATE FEEDS','INSERT INTO STATE')))
+        assert lock < mutation, statements
+    finally:
+        store.db.set_trace_callback(None)
+        store.db.close()
+
+
+def test_settings_wait_for_membership_commit_and_include_new_owner(postgres_url, tmp_path):
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    import psycopg
+    from oko.services.subscriptions import SubscriptionService
+    from oko.subscriptions.subscriptions import AddFeed, Overrides
+    from tests.support.worker_library import worker_library
+
+    store, item, execution, _ = worker_library(tmp_path,database_url=postgres_url)
+    try:
+        other_feed = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/new-owner',title='New owner',folder='Other',verification='synthetic'))['id']
+        with transaction(store.db):
+            store.subscriptions.update_settings('feed','demo',Overrides(filter_enabled=False))
+            store.settings_changed('feed','demo')
+        entered = threading.Event()
+        def update_settings():
+            entered.set()
+            with transaction(store.db):
+                SubscriptionService(execution.require_store).update_settings('feed',other_feed,Overrides(prompt_filters='New owner rules'))
+        with ThreadPoolExecutor(max_workers=1) as pool, psycopg.connect(postgres_url) as other:
+            other.execute('SELECT pg_advisory_xact_lock(hashtextextended(current_schema(),%s))', (0x4F4B4F4752415048,))
+            other.execute('INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES (%s,%s,false)', (other_feed,item))
+            backend = store.db._db.info.backend_pid
+            future = pool.submit(update_settings)
+            assert entered.wait(2)
+            deadline = time.monotonic()+2
+            while time.monotonic()<deadline:
+                waiting = other.execute('SELECT wait_event_type FROM pg_stat_activity WHERE pid=%s', (backend,)).fetchone()
+                if waiting and waiting[0]=='Lock':
+                    break
+                time.sleep(.01)
+            assert waiting and waiting[0]=='Lock'
+            assert not future.done()
+            other.commit()
+            future.result(timeout=5)
+        actual = store.db.execute("SELECT input_snapshot->>'signature' FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()
+        assert actual and actual[0] == store.filters.signature(item)
+    finally:
+        store.db.close()
+
+
+def test_processor_configuration_does_not_interrupt_unrelated_fetch(postgres_url, tmp_path):
+    import psycopg
+    from fastapi.testclient import TestClient
+    from tests.support.app import create_app
+    from tests.support.reader import HEADERS
+    from tests.support.worker_library import worker_library
+
+    store, item, _, _ = worker_library(tmp_path,database_url=postgres_url)
+    store.set_work_enabled(False)
+    store.db.close()
+    app = create_app(tmp_path,token='test',api_only=True,database_url=postgres_url)
+    with TestClient(app,headers=HEADERS) as client:
+        with psycopg.connect(postgres_url,autocommit=True) as db:
+            db.execute("""INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch',%s,'running',42)
+                ON CONFLICT(kind,item) DO UPDATE SET status='running',generation=42""", (item,))
+        response = client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9932','model':'other','local_execution':True})
+        assert response.status_code==200, response.text
+        with psycopg.connect(postgres_url) as db:
+            assert db.execute("SELECT status,generation FROM jobs WHERE kind='fetch' AND item=%s", (item,)).fetchone() == ('running',42)

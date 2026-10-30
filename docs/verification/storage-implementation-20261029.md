@@ -724,3 +724,13 @@
   passed. Fourteen Playwright scenarios passed and a linked Telegram screenshot
   was inspected. Larger connected components and concurrent graph changes remain
   part of the final acceptance/review.
+- Processing settings, relevant feed changes and processor configuration now take
+  the transaction-scoped graph lock before their writes and affected-graph reads.
+  Two-connection tests prove a settings write waits for an in-flight membership
+  commit and then includes the new owner. Processor changes no longer interrupt
+  unrelated collection, and changing only the model for future work does not
+  cancel a running filter. The initial focused tests exposed missing locks and an
+  unrelated fetch cancellation; after correction the affected suites passed 200
+  tests and types. Five Playwright scenarios passed and the model-settings
+  screenshot was inspected. Queue and source-ID cutovers remain blocked by the
+  separate auto-review rejections recorded above.

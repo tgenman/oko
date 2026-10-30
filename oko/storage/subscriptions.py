@@ -10,6 +10,7 @@ import re
 import secrets
 from uuid import uuid4
 from oko.storage.transaction import begin_write
+from oko.storage import memberships
 import time
 from collections.abc import Callable
 from typing import Any
@@ -263,6 +264,8 @@ class SubscriptionRepository:
         self.check_owner(scope, owner)
         self.validate_retry_settings(patch.model_dump(exclude_unset=True))
         with self.db:
+            if patch.model_fields_set & {'filter_enabled','prompt_filters','theses','prompt_theses','processor'}:
+                memberships.lock_graph(self.db)
             before = self.settings.values(scope, owner)
             self.settings.patch(scope, owner, patch.model_dump(exclude_unset=True))
             after = self.settings.values(scope, owner)
@@ -307,6 +310,8 @@ class SubscriptionRepository:
         if transport == 'rss' and feed['kind'] in ('youtube', 'demo'):
             raise ValueError('Для этого источника нет RSS-подключения')
         with self.db:
+            if patch.model_fields_set & {'folder_id','new_folder','importance','public_ai','transport'}:
+                memberships.lock_graph(self.db)
             if folder_title is not None:
                 begin_write(self.db)
                 if self.db.execute('SELECT 1 FROM folders WHERE title = %s', (folder_title,)).fetchone():

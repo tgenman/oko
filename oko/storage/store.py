@@ -669,8 +669,9 @@ class Store:
         if self.processor_config() == config:
             return False
         with self.db:
+            membership_graph.lock_graph(self.db)
             self.subscriptions.settings.set_state('processor:llamacpp', config.model_dump_json())
-        self.settings_changed()
+            self.settings_changed()
         return True
 
     @reading_value
@@ -680,6 +681,7 @@ class Store:
 
     def settings_changed(self, scope: str = 'oko', owner: str = 'global') -> None:
         with self.db:
+            membership_graph.lock_graph(self.db)
             row = self.db.execute("SELECT value FROM state WHERE key = 'settings-sequence'").fetchone()
             sequence = max(int(row[0]) if row else 0, self.settings_version()) + 1
             self.db.execute("INSERT INTO state VALUES ( 'settings-sequence' , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value", (str(sequence),))
