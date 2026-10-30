@@ -1,0 +1,6 @@
+DROP TRIGGER reader_v_reader_problems_status_delete ON reader_problems;
+DROP TRIGGER reader_v_reader_problems_status_insert ON reader_problems;
+DROP TRIGGER reader_v_reader_problems_status_update ON reader_problems;
+DROP FUNCTION oko_trigger_reader_v_reader_problems_status_delete();
+DROP FUNCTION oko_trigger_reader_v_reader_problems_status_insert();
+DROP FUNCTION oko_trigger_reader_v_reader_problems_status_update();

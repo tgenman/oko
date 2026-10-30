@@ -596,3 +596,32 @@ def test_action_status_freshness_is_atomic_and_ignores_duplicate_start(postgres_
         assert revision() == finished
     finally:
         store.db.close()
+
+
+def test_problem_status_freshness_is_atomic_and_unchanged_on_repeat(postgres_url, tmp_path):
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=postgres_url)
+    candidate = dict(id='test', code='test', objects=[], state='current', message='first')
+    def revision():
+        row = store.db.execute("SELECT version FROM reader_entities WHERE kind='status' AND identity='runtime'").fetchone()
+        return row[0] if row else 0
+    try:
+        before = revision()
+        with pytest.raises(RuntimeError, match='rollback'):
+            with transaction(store.db):
+                store.problems.reconcile([candidate.copy()], 1, {})
+                assert revision() > before
+                raise RuntimeError('rollback')
+        assert revision() == before
+        store.problems.reconcile([candidate.copy()], 1, {})
+        created = revision()
+        assert created > before
+        store.problems.reconcile([candidate.copy()], 1, {})
+        assert revision() == created
+        store.problems.reconcile([dict(candidate, message='changed')], 2, {})
+        updated = revision()
+        assert updated > created
+        store.problems.reconcile([], 3, {})
+        assert revision() > updated
+    finally:
+        store.db.close()

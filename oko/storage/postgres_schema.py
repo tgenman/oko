@@ -50,4 +50,5 @@ MIGRATIONS = (
     Migration(43, 'viewed-membership', (Path(__file__).parent / 'postgres' / '043-viewed-membership.sql').read_text()),
     Migration(44, 'collection-queue', (Path(__file__).parent / 'postgres' / '044-collection-queue.sql').read_text()),
     Migration(45, 'action-status', (Path(__file__).parent / 'postgres' / '045-action-status.sql').read_text()),
+    Migration(46, 'problem-status', (Path(__file__).parent / 'postgres' / '046-problem-status.sql').read_text()),
 )

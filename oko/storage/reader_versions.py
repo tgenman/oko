@@ -63,7 +63,10 @@ class ReaderVersions:
         now=self.store.clock() if now is None else now
         wall=self.store.wall_clock() if wall is None else wall
         with self.db:
-            self.db.execute('DELETE FROM reader_problems WHERE rowid IN ( SELECT rowid FROM reader_problems WHERE finished <= %s ORDER BY finished LIMIT 200 )',(wall-86400,))
+            removed = self.db.execute('DELETE FROM reader_problems WHERE rowid IN ( SELECT rowid FROM reader_problems WHERE finished <= %s ORDER BY finished LIMIT 200 )',(wall-86400,)).rowcount
+            if removed:
+                from oko.storage.reader_status import changed as status_changed
+                status_changed(self.db)
             if now >= self._next_action_cleanup:
                 self.store.problems.cleanup_receipts(wall - 86400)
                 self._next_action_cleanup=now+60

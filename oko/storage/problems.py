@@ -271,6 +271,7 @@ class Problems:
                                 (json.dumps(body), now, row['id']))
             else:
                 self.db.execute('UPDATE reader_problems SET body = %s WHERE id = %s', (json.dumps(body), row['id']))
+            status_changed(self.db)
         for row in problem_links.material_records(self.db, 'action', members):
             body = json.loads(row['body'])
             before = body['objects']
@@ -292,6 +293,7 @@ class Problems:
         existing = {row['identity']: row for row in self.db.execute("SELECT * FROM reader_problems WHERE finished IS NULL")}
         with self.db:
             added: list[tuple[str,str,str,str,float]] = []
+            changed = False
             for row in existing.values():
                 if row['identity'] not in identities:
                     body = json.loads(row['body'])
@@ -299,6 +301,7 @@ class Problems:
                     irrelevant = irrelevant or any(obj['kind'] == 'material' and self.store.publications.source_deleted(obj['id']) for obj in body['objects'])
                     irrelevant = irrelevant or any(obj['kind'] == 'feed' and feeds.get(obj['id'], {}).get('connection', 'deleting') == 'deleting' for obj in body['objects'])
                     self.db.execute('UPDATE reader_problems SET finished = %s , outcome = %s WHERE id = %s', (now, 'irrelevant' if irrelevant else 'resolved', row['id']))
+                    changed = True
             for candidate in candidates:
                 if not candidate['id'].startswith('action:'):
                     candidate.setdefault('operation','producer:status')
@@ -311,13 +314,18 @@ class Problems:
                 if prior_problem:
                     if prior_problem['body'] != encoded:
                         self.db.execute('UPDATE reader_problems SET body = %s WHERE id = %s', (encoded, prior_problem['id']))
+                        changed = True
                 else:
                     added.append((uuid.uuid4().hex, identity, 'action' if identity.startswith('action:') else 'background', encoded, now))
+            if added:
+                changed = True
             for start in range(0, len(added), 400):
                 batch = added[start:start+400]
                 self.db.execute('''INSERT INTO reader_problems(id,identity,origin,body,created,finished,outcome)
                     SELECT id,identity,origin,body,created,NULL,NULL FROM unnest(%s::text[],%s::text[],%s::text[],%s::text[],%s::double precision[])
                     AS p(id,identity,origin,body,created)''', tuple([row[i] for row in batch] for i in range(5)))
+            if changed:
+                status_changed(self.db)
         current: list[dict[str, Any]] = []
         recent: list[dict[str, Any]] = []
         for row in self.db.execute('SELECT * FROM reader_problems WHERE finished IS NULL OR finished > %s ORDER BY created DESC', (now - 86400,)).fetchall():

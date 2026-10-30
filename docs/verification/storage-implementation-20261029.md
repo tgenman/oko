@@ -526,3 +526,9 @@
   16 Playwright scenarios passed; the status panel screenshot was inspected.
   Problem, publication and Job status triggers remain, as do the transitional
   queues and final schema work.
+- Migration 046 moves problem-record status freshness to its Python owner and
+  batches the status bump for reconciliation. Creation, changes, resolution,
+  cleanup, duplicate snapshots and rollback retain their previous semantics.
+  The affected journal, status, transaction and load suites passed 154 tests;
+  types and 16 Playwright scenarios passed, with a current-status screenshot
+  inspected. Publication and Job status triggers and the transitional queues remain.
