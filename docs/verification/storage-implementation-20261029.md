@@ -1237,3 +1237,15 @@ for ten modules, and 10 Playwright status scenarios passed with screenshot
 inspection. The browser scenarios cover the general panel, not a dedicated
 stage-error flow. One Starlette/httpx deprecation warning was emitted; no
 working database was migrated.
+
+
+Processor history capture now covers a combined publication change that
+removes one media item while cancelling another. The contributing material IDs
+and reason are preserved in the same transaction, including rollback. This
+also handles an internal prepared payload that retains a media ID while changing
+its resource key; the normal synthetic adapter generates a new ID for that
+change. The integrated processor/media/stage/status suite passed 261 tests,
+mypy passed on 160 files and 10 Playwright status scenarios passed with a
+screenshot inspected. The existing global cleanup probe still reads all active
+processor-config Jobs in a 10,000-Job synthetic case; this change did not
+introduce that cost. No working database was changed.

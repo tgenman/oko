@@ -302,11 +302,11 @@ class JobRepository:
         return True
 
 
-    def enqueue_fetch(self, item: str, *, sync_problem: bool = True) -> None:
+    def enqueue_fetch(self, item: str, *, sync_problem: bool = True, sync_processor: bool = True) -> None:
         from oko.storage.fetch_job_problems import managed_candidates
         before = self.store.db.execute("SELECT id,status,error,next,problem_code,processor_visible FROM jobs WHERE kind='fetch' AND item=%s", (item,)).fetchone()
         previous=managed_candidates(self.store,before['id'],self.store.wall_clock()) if sync_problem and before and (before['error'] is not None or before['problem_code'] is not None) else []
-        affected=[before['id']] if before and (before['processor_visible'] or before['problem_code']=='processor-config') else []
+        affected=[before['id']] if sync_processor and before and (before['processor_visible'] or before['problem_code']=='processor-config') else []
         processor_previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
         self.store.db.execute("INSERT INTO jobs ( kind , item , queued_wall ) VALUES ( 'fetch' , %s , extract(epoch FROM clock_timestamp()) ) ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , manual_once = 0 , next = CASE WHEN jobs . problem_code LIKE '%%FloodWaitError' OR ( jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s ) THEN jobs . next ELSE 0 END , error = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . error ELSE NULL END , retry_at = CASE WHEN jobs . problem_code LIKE '%%FloodWaitError' OR ( jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s ) THEN jobs . retry_at ELSE NULL END , generation = jobs . generation + 1", (item,self.store.wall_clock(),self.store.wall_clock(),self.store.wall_clock()))
 
@@ -760,8 +760,8 @@ class JobRepository:
         captured_fetch_items={row['item'] for row in db.execute("SELECT item FROM jobs WHERE kind='fetch' AND id=ANY(%s)",(list(effects.fetch_problems_before),))} if effects.fetch_problems_before else set()
         affected = sorted(set(effects.fetch) | set(effects.delete_problem_ids_before))
         processor_items=sorted(set(affected) | set(effects.refresh_links) | set(effects.media) | set(effects.revalidate))
-        processor_jobs=self.store.problems.processor_jobs_for_materials(processor_items)
-        processor_previous=self.store.problems.prepare_processor_change(processor_jobs,self.store.wall_clock())
+        processor_jobs=sorted(set(self.store.problems.processor_jobs_for_materials(processor_items)) | set(self.processor_cleanup_jobs()))
+        processor_previous=self.store.problems.processor_history_before_batch(processor_jobs,self.store.wall_clock())
         for start in range(0,len(affected),400):
             for row in db.execute("SELECT id,item FROM jobs WHERE kind='delete' AND item=ANY(%s) AND (error IS NOT NULL OR problem_code IS NOT NULL)",(affected[start:start+400],)):
                 identities = effects.delete_problem_ids_before.get(row['item'])
@@ -775,7 +775,7 @@ class JobRepository:
                 deletion_job_id,previous = previous_deletions[item]
                 self.store.problems.sync_deletion(deletion_job_id,previous,self.store.wall_clock())
             if changed:
-                self.enqueue_fetch(item,sync_problem=item not in captured_fetch_items)
+                self.enqueue_fetch(item,sync_problem=item not in captured_fetch_items,sync_processor=False)
             else:
                 job_write(db, "INSERT INTO jobs ( kind , item , queued_wall ) VALUES ( 'fetch' , %s , extract(epoch FROM clock_timestamp()) ) ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , next = 0 , error = NULL , generation = jobs . generation + 1 WHERE jobs . status = 'done' AND ( jobs . error IS NULL OR jobs . problem_code IS NULL )",(item,))
         for item in sorted(set(previous_deletions) - set(effects.fetch)):
@@ -783,9 +783,9 @@ class JobRepository:
             self.store.problems.sync_deletion(deletion_job_id,previous,self.store.wall_clock())
         for item in effects.refresh_links:
             job_write(db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , next = 0 , generation = generation + 1 WHERE kind = 'fetch' AND item = %s AND status = 'done' AND error IS NULL",(item,))
-        for item in effects.media:self.schedule_media(item,skip_problem_jobs=set(effects.media_problems_before))
-        for identity,manual in effects.revalidate.items():self.revalidate_media(identity,manual=manual)
-        self.reconcile_cleanup()
+        for item in effects.media:self.schedule_media(item,skip_problem_jobs=set(effects.media_problems_before),sync_processor=False)
+        for identity,manual in effects.revalidate.items():self.revalidate_media(identity,manual=manual,sync_processor=False)
+        self.reconcile_cleanup(sync_processor=False)
         for job_id,previous in effects.fetch_problems_before.items():
             self.store.problems.sync_fetch(job_id,previous,self.store.wall_clock())
         if processor_jobs:self.store.problems.finish_processor_change(processor_jobs,processor_previous,self.store.wall_clock())
@@ -794,9 +794,12 @@ class JobRepository:
         if effects.processing_problems_before:
             self.store.problems.sync_processing_problems(effects.processing_problems_before,self.store.wall_clock())
 
-    def reconcile_cleanup(self) -> None:
+    def processor_cleanup_jobs(self) -> list[int]:
         db=self.store.db
-        affected=[row['id'] for row in db.execute("SELECT j.id FROM jobs j WHERE (j.processor_visible OR j.problem_code='processor-config') AND ((j.kind='download_media' AND j.status IN ('pending','running','failed','unavailable') AND NOT EXISTS (SELECT 1 FROM media_files m WHERE m.id=j.item)) OR (j.status!='cancelled' AND ((j.kind NOT IN ('delete','discover','read','feed-delete','download_media') AND EXISTS (SELECT 1 FROM publications p WHERE p.id=j.item AND p.viewed=1)) OR (j.kind='download_media' AND EXISTS (SELECT 1 FROM media_files m JOIN publications p ON p.id=m.publication_id WHERE m.id=j.item AND p.viewed=1)))) OR (j.kind='delete' AND j.status='cancelled' AND EXISTS (SELECT 1 FROM publications p WHERE p.id=j.item AND p.viewed=1)))")]
+        return [row['id'] for row in db.execute("SELECT j.id FROM jobs j WHERE (j.processor_visible OR j.problem_code='processor-config') AND ((j.kind='download_media' AND j.status IN ('pending','running','failed','unavailable') AND NOT EXISTS (SELECT 1 FROM media_files m WHERE m.id=j.item)) OR (j.status!='cancelled' AND ((j.kind NOT IN ('delete','discover','read','feed-delete','download_media') AND EXISTS (SELECT 1 FROM publications p WHERE p.id=j.item AND p.viewed=1)) OR (j.kind='download_media' AND EXISTS (SELECT 1 FROM media_files m JOIN publications p ON p.id=m.publication_id WHERE m.id=j.item AND p.viewed=1)))) OR (j.kind='delete' AND j.status='cancelled' AND EXISTS (SELECT 1 FROM publications p WHERE p.id=j.item AND p.viewed=1)))")]
+    def reconcile_cleanup(self, *, sync_processor: bool = True) -> None:
+        db=self.store.db
+        affected=self.processor_cleanup_jobs() if sync_processor else []
         processor_previous=self.store.problems.processor_history_before_batch(affected,self.store.wall_clock())
         orphaned=job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL WHERE kind = 'download_media' AND status IN ( 'pending' , 'running' , 'failed' , 'unavailable' ) AND item NOT IN ( SELECT id FROM media_files ) RETURNING id").fetchall()
         ids=[row['id'] for row in orphaned]
@@ -883,7 +886,7 @@ class JobRepository:
     def schedule_media(self, item: str, *, skip_problem_jobs: set[int] | None = None, sync_processor: bool = True) -> None:
         db = self.store.db
         processor_affected=self.store.problems.processor_jobs_for_materials([item]) if sync_processor else []
-        processor_previous=self.store.problems.prepare_processor_change(processor_affected,self.store.wall_clock())
+        processor_previous=self.store.problems.prepare_processor_change(processor_affected,self.store.wall_clock()) if sync_processor else None
         cancelled=job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 WHERE kind = 'download_media' AND status IN ( 'pending' , 'running' ) AND item IN ( SELECT id FROM media_files WHERE publication_id = %s AND status = 'unavailable' ) RETURNING id,error,problem_code",(item,)).fetchall()
         excluded=skip_problem_jobs or set()
         changed_ids=[row['id'] for row in cancelled if row['id'] not in excluded and (row['error'] is not None or row['problem_code'] is not None)]
@@ -937,13 +940,13 @@ class JobRepository:
         if affected:store.problems.finish_processor_change(affected,previous,store.wall_clock())
 
 
-    def revalidate_media(self, identity: str, *, manual: bool = True) -> None:
+    def revalidate_media(self, identity: str, *, manual: bool = True, sync_processor: bool = True) -> None:
         store=self.store
         row=store.db.execute(f"SELECT m.resource_key, i.platform, {owner_expr('i')} AS feed_id FROM media_files m JOIN publications i ON i.id=m.publication_id WHERE m.id = %s AND m.status = 'ready' AND i.viewed = 0",(identity,)).fetchone()
         if row is None or row['resource_key']=='youtube:subtitles' and not store.subscriptions.youtube_theses(row['feed_id']):
             return
-        affected=store.problems.processor_jobs_for_materials([identity])
-        previous=store.problems.prepare_processor_change(affected,store.wall_clock())
+        affected=store.problems.processor_jobs_for_materials([identity]) if sync_processor else []
+        previous=store.problems.prepare_processor_change(affected,store.wall_clock()) if sync_processor else None
         job_write(store.db, "INSERT INTO jobs ( kind , item , manual_once , queued_wall ) VALUES ( 'download_media' , %s , 1 , extract(epoch FROM clock_timestamp()) ) ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , manual_once = 1 , generation = jobs . generation + 1 , next = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . next ELSE 0 END , retry_at = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . retry_at ELSE NULL END WHERE jobs . status IN ( 'done' , 'cancelled' ) OR ( %s = 1 AND jobs . status IN ( 'failed' , 'unavailable' ) )",
             (identity,store.wall_clock(),store.wall_clock(),manual))
         if affected:store.problems.finish_processor_change(affected,previous,store.wall_clock())

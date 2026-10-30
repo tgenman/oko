@@ -2179,8 +2179,10 @@ class Problems:
             if old is not None:
                 captures[job_id]=old
         previous=self.prepare_processor_change(job_ids,now)
-        if previous is None or not captures:
+        if not captures:
             return previous
+        if previous is None and self.any_visible_processor(now,job_ids):
+            return None
         return self.processor_configuration_candidate(now,overrides=captures)
 
     def prepare_processor_change(self, job_ids: list[int], now: float) -> dict[str,Any] | None:
