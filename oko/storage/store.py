@@ -407,7 +407,6 @@ class Store:
                         self.db.execute("UPDATE media_files SET status = 'unavailable' , reason = %s , storage_key = NULL WHERE id = %s",(error.label,row['id']))
                     self.db.execute('UPDATE items SET content = %s WHERE id = %s',(json.dumps(content,ensure_ascii=False),item))
                     self.collection_history(item,replace(material,collection_error=error))
-                    self.read_versions.media_changed(item)
                 return error,effects
         if (material.source_manifest and material.source_manifest.post_web_unavailable
                 and previous and previous.teaser and previous.teaser.source_manifest):

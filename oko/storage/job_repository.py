@@ -81,28 +81,15 @@ class JobRepository:
                         continue
                 job_write(db, "UPDATE jobs SET status='cancelled', generation=generation+1, error=NULL, problem_code=NULL, input_snapshot=NULL WHERE kind=%s AND item=%s",(kind,item))
                 if kind=='filter' and job:self.store.processing.filter_changed(item)
-                if kind == 'filter' and previous is not None:
-                    self._processing_input_changed([item])
             else:
                 job_write(db, "INSERT INTO jobs (kind,item,status,payload,input_snapshot) VALUES (%s,%s,%s,%s,%s::jsonb) ON CONFLICT (kind,item) DO UPDATE SET status=excluded.status,payload=excluded.payload,input_snapshot=excluded.input_snapshot,generation=jobs.generation+1,next=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.next ELSE 0 END,error=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.error ELSE NULL END,problem_code=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.problem_code ELSE NULL END",
                     (kind,item,'done' if satisfied else 'pending' if enabled else 'blocked',json.dumps(dict(input_revision=revision)),json.dumps(dict(signature=signature)),self.store.wall_clock(),self.store.wall_clock(),self.store.wall_clock()))
                 if kind=='filter' and job:self.store.processing.filter_changed(item)
-                if kind == 'filter' and previous != signature:
-                    self._processing_input_changed([item])
-
-    def _processing_input_changed(self, identities: list[str]) -> None:
-        if not identities:
-            return
-        now = self.store.wall_clock()
-        for kind in ('filter', 'theses', 'card'):
-            self.store.db.execute("INSERT INTO reader_entities SELECT %s,unnest(%s::text[]),1,%s ON CONFLICT(kind,identity) DO UPDATE SET version=reader_entities.version+1,changed=excluded.changed", (kind, identities, now))
 
     def forget_input(self, kind: Kind, identities: list[str]) -> None:
         ordered = sorted(set(identities))
         for start in range(0, len(ordered), 400):
-            rows = self.store.db.execute("UPDATE jobs SET input_snapshot=NULL WHERE kind=%s AND item=ANY(%s) AND input_snapshot IS NOT NULL RETURNING item", (kind, ordered[start:start+400])).fetchall()
-            if kind == 'filter':
-                self._processing_input_changed([row[0] for row in rows])
+            self.store.db.execute("UPDATE jobs SET input_snapshot=NULL WHERE kind=%s AND item=ANY(%s) AND input_snapshot IS NOT NULL", (kind, ordered[start:start+400]))
 
     def save_input(self, job: Job, work: ProcessingInput) -> None:
         selected = processing_input.settings(self.store, job.item)
@@ -506,7 +493,7 @@ class JobRepository:
                             db.execute('UPDATE telegram_read_state SET saved_backfill_after=%s WHERE feed=%s', (batch[-1],feed))
                         else:
                             db.execute('UPDATE telegram_read_state SET saved_backfill_after=NULL,needs_sync=true WHERE feed=%s', (feed,))
-                            db.execute(self.store.read_versions._bump('status', "'runtime'"))
+                            status_changed(db)
                     yield
                     if not batch:
                         break

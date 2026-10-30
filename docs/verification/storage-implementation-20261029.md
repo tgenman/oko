@@ -548,3 +548,10 @@
   inspected. The fresh version 48 schema has 23 tables and zero non-internal
   triggers. This is not completion: dirty queues, the target physical schema,
   problem reconciliation, full validation and independent review remain open.
+- Migration 049 removes `reader_entities`, discards unread per-resource versions
+  and carries the existing status revision and timestamp into one transitional
+  `state` value. It fails rather than overwriting an existing key. This value
+  still needs the target direct status ETag; moving it is not the final status
+  design. Migration, status, settings, recovery and SQL-cost suites passed 248
+  tests; types and nine Playwright scenarios passed, with the status screenshot
+  inspected. The fresh schema has 22 tables and zero non-internal triggers.

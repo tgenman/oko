@@ -893,3 +893,14 @@ def test_job_status_triggers_are_removed(connections):
         names = ['reader_v_job_delete','reader_v_job_insert','reader_v_job_update']
         assert db.execute('SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname=ANY(%s)', (names,)).fetchone() == (0,)
         verify(db, MIGRATIONS)
+
+
+def test_status_revision_migrates_without_entity_catalog(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:48])
+        db.execute("INSERT INTO reader_entities(kind,identity,version,changed) VALUES ('status','runtime',42,123.5) ON CONFLICT(kind,identity) DO UPDATE SET version=42,changed=123.5")
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT to_regclass('reader_entities')").fetchone() == (None,)
+        assert db.execute("SELECT (value::jsonb->>'version')::bigint,(value::jsonb->>'changed')::float8 FROM state WHERE key='reader-status-revision'").fetchone() == (42,123.5)
+        verify(db, MIGRATIONS)

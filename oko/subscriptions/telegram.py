@@ -262,10 +262,7 @@ class TelegramAccess:
         changed = self.db.execute('UPDATE feeds SET avatar_image=%s, avatar_mime=%s, avatar_digest=%s WHERE id=%s AND avatar_digest IS DISTINCT FROM %s',
                                   (image, mime, digest, feed, digest)).rowcount
         if changed:
-            now = self.wall_clock()
-            for kind, identity in (('feed', feed), ('status', 'runtime')):
-                self.db.execute('INSERT INTO reader_entities VALUES (%s,%s,1,%s) ON CONFLICT (kind,identity) DO UPDATE SET version=reader_entities.version+1, changed=excluded.changed',
-                                (kind, identity, now))
+            status_changed(self.db)
 
     def release(self, feed: str) -> None:
         self._set_avatar(feed, None, None, None)

@@ -64,9 +64,7 @@ class Publications:
                 f'UPDATE items SET source_deleted={literal} WHERE id=ANY(%s) AND source_deleted IS DISTINCT FROM {literal} RETURNING id', (batch,))]
             if not changed:
                 continue
-            now = self.store.wall_clock()
-            self.store.db.execute("INSERT INTO reader_entities SELECT 'material',unnest(%s::text[]),1,%s ON CONFLICT(kind,identity) DO UPDATE SET version=reader_entities.version+1,changed=excluded.changed", (changed, now))
-            self.store.db.execute("INSERT INTO reader_entities VALUES ('status','runtime',1,%s) ON CONFLICT(kind,identity) DO UPDATE SET version=reader_entities.version+1,changed=excluded.changed", (now,))
+            status_changed(self.store.db)
 
     def feed(self, feed: str) -> bool:
         return self.store.db.execute("SELECT 1 FROM feeds WHERE id = %s AND adapter IN ( 'telegram_web_adapter' , 'telegram_client_adapter' , 'rss_adapter' , 'youtube_adapter' )", (feed,)).fetchone() is not None

@@ -574,7 +574,7 @@ def test_action_status_freshness_is_atomic_and_ignores_duplicate_start(postgres_
     store = Store(tmp_path, lambda _: None, database_url=postgres_url)
     context = dict(identity='action', title='Action', objects=[], action=None)
     def revision():
-        row = store.db.execute("SELECT version FROM reader_entities WHERE kind='status' AND identity='runtime'").fetchone()
+        row = store.read_versions.version('status','runtime')
         return row[0] if row else 0
     try:
         first = revision()
@@ -603,7 +603,7 @@ def test_problem_status_freshness_is_atomic_and_unchanged_on_repeat(postgres_url
     store = Store(tmp_path, lambda _: None, database_url=postgres_url)
     candidate = dict(id='test', code='test', objects=[], state='current', message='first')
     def revision():
-        row = store.db.execute("SELECT version FROM reader_entities WHERE kind='status' AND identity='runtime'").fetchone()
+        row = store.read_versions.version('status','runtime')
         return row[0] if row else 0
     try:
         before = revision()
@@ -632,7 +632,7 @@ def test_viewed_status_version_changes_atomically(postgres_url, tmp_path):
     from tests.support.storage import Store
     store = Store(tmp_path, lambda _: None, database_url=postgres_url)
     def revision():
-        return store.db.execute("SELECT version FROM reader_entities WHERE kind='status' AND identity='runtime'").fetchone()[0]
+        return store.read_versions.version('status','runtime')[0]
     try:
         with store.db:
             store.db.execute("INSERT INTO items(id) VALUES ('item')")
@@ -661,7 +661,7 @@ def test_job_status_version_tracks_queue_and_rollback(postgres_url, tmp_path):
     from tests.support.storage import Store
     store = Store(tmp_path, lambda _: None, database_url=postgres_url)
     def revision():
-        return store.db.execute("SELECT version FROM reader_entities WHERE kind='status' AND identity='runtime'").fetchone()[0]
+        return store.read_versions.version('status','runtime')[0]
     try:
         store.subscriptions.ensure_demo()
         before = revision()
@@ -693,9 +693,9 @@ def test_repeated_fetch_enqueue_keeps_status_revision(postgres_url, tmp_path):
     try:
         with store.db:
             store.jobs.enqueue_fetch('item')
-        before = store.db.execute("SELECT version FROM reader_entities WHERE kind='status' AND identity='runtime'").fetchone()[0]
+        before = store.read_versions.version('status','runtime')[0]
         with store.db:
             store.jobs.enqueue_fetch('item')
-        assert store.db.execute("SELECT version FROM reader_entities WHERE kind='status' AND identity='runtime'").fetchone()[0] == before
+        assert store.read_versions.version('status','runtime')[0] == before
     finally:
         store.db.close()

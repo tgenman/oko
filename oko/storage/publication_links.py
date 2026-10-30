@@ -56,7 +56,6 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
     changed=previous!=set(targets)
     if changed:
         store.db.execute('INSERT INTO processing_dirty VALUES ( %s ) ON CONFLICT DO NOTHING',(item,))
-        store.read_versions.linked_changed(item)
     return changed
 
 
@@ -83,7 +82,6 @@ def notify_parents(store: 'Store', item: str) -> None:
         store.read_sync.mark_item(row[0])
         store.read_sync.saved_publication(row[0])
         store.processing.reconcile_accepted_item(row[0])
-        store.read_versions.linked_changed(row[0])
 
 
 def prune(store: 'Store', candidates: set[str]) -> None:
