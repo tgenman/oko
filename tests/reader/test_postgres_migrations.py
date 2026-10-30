@@ -669,3 +669,12 @@ def test_card_job_version_triggers_are_removed(connections):
             JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND c.relname='jobs'
             AND (t.tgname LIKE 'reader_v_job_card_%' OR t.tgname LIKE 'reader_v_job_fetch_%')""").fetchone() == (0,)
         verify(db, MIGRATIONS)
+
+
+def test_settings_source_revision_triggers_are_removed(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:27])
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname LIKE 'source_configuration_settings_%'").fetchone() == (0,)
+        verify(db, MIGRATIONS)

@@ -101,6 +101,44 @@ def test_settings_memory_obeys_nested_rollback_and_failed_commit(tmp_path, setti
         store.db.close()
 
 
+def test_settings_source_revision_tracks_real_changes_and_rolls_back(tmp_path, settings_database):
+    from tests.support.storage import Store
+    from oko.storage.transaction import transaction
+    from oko.subscriptions.subscriptions import Overrides
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        initial = store.subscriptions.source_revision()
+        with transaction(store.db):
+            store.subscriptions.update_settings('oko','global',Overrides(prompt_filters='A'))
+        first = store.subscriptions.source_revision()
+        assert first > initial
+        with transaction(store.db):
+            store.subscriptions.update_settings('oko','global',Overrides(prompt_filters='A'))
+        assert store.subscriptions.source_revision() == first
+        with pytest.raises(ValueError,match='synthetic rollback'):
+            with transaction(store.db):
+                store.subscriptions.update_settings('oko','global',Overrides(prompt_filters='B'))
+                assert store.subscriptions.source_revision() > first
+                raise ValueError('synthetic rollback')
+        assert store.subscriptions.source_revision() == first
+        with transaction(store.db):
+            store.subscriptions.update_settings('oko','global',Overrides(prompt_filters='B'))
+        second = store.subscriptions.source_revision()
+        with transaction(store.db):
+            store.subscriptions.update_settings('oko','global',Overrides(prompt_filters='A'))
+        assert store.subscriptions.source_revision() > second > first
+        restored = store.subscriptions.source_revision()
+        with transaction(store.db):
+            store.subscriptions.update_settings('oko','global',Overrides(prompt_filters=None))
+        cleared = store.subscriptions.source_revision()
+        assert cleared > restored
+        with transaction(store.db):
+            store.subscriptions.update_settings('oko','global',Overrides(prompt_filters=None))
+        assert store.subscriptions.source_revision() == cleared
+    finally:
+        store.db.close()
+
+
 def test_folder_settings_follow_rollback_and_new_folder_identity(tmp_path, settings_database):
     from tests.support.storage import Store
     from oko.storage.transaction import transaction

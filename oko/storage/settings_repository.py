@@ -4,6 +4,7 @@ from typing import Any
 
 from oko.storage.database import Connection
 from oko.storage import material_read
+from oko.storage.source_configuration import changed as source_changed
 
 
 class SettingsRepository:
@@ -42,12 +43,17 @@ class SettingsRepository:
                 'SELECT field, value FROM settings WHERE scope = %s AND owner = %s', (scope, owner))}
 
     def patch(self, scope: str, owner: str, patch: dict[str, Any]) -> None:
+        changed = False
         for field, value in patch.items():
             if value is None:
-                self.db.execute('DELETE FROM settings WHERE scope = %s AND owner = %s AND field = %s', (scope, owner, field))
+                changed = bool(self.db.execute('DELETE FROM settings WHERE scope = %s AND owner = %s AND field = %s', (scope, owner, field)).rowcount) or changed
             else:
-                self.db.execute('INSERT INTO settings VALUES ( %s , %s , %s , %s ) ON CONFLICT ( scope , owner , field ) DO UPDATE SET value = excluded . value',
-                                (scope, owner, field, json.dumps(value)))
+                changed = bool(self.db.execute('''INSERT INTO settings VALUES (%s,%s,%s,%s)
+                    ON CONFLICT(scope,owner,field) DO UPDATE SET value=excluded.value
+                    WHERE settings.value IS DISTINCT FROM excluded.value''', (scope,owner,field,json.dumps(value))).rowcount) or changed
+        if changed:
+            source_changed(self.db)
 
     def clear(self, scope: str, owner: str) -> None:
-        self.db.execute('DELETE FROM settings WHERE scope = %s AND owner = %s', (scope, owner))
+        if self.db.execute('DELETE FROM settings WHERE scope = %s AND owner = %s', (scope, owner)).rowcount:
+            source_changed(self.db)

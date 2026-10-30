@@ -396,3 +396,10 @@
   clock/link tests and six Playwright scenarios passed, and a screenshot was
   inspected. Version 27 has 23 tables and 67 non-internal triggers. Status
   versions, dirty queues and GET problem reconciliation remain unfinished.
+- Migration 028 removes three settings-to-source-revision triggers. The Python
+  settings repository advances the monotonic revision in the same transaction
+  only for actual changes. Tests cover no-op, reset, A → B → A and rollback.
+- The affected migration, settings, processing, Telegram and recovery suites
+  passed 229 tests; types and five Playwright scenarios passed, and a settings
+  screenshot was inspected. Version 28 has 23 tables and 64 triggers. Other
+  source-configuration triggers and the remaining project work are still open.
