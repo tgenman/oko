@@ -669,3 +669,59 @@ def test_codex_configuration_problem_rolls_back_with_settings(tmp_path, settings
         assert store.db.execute("SELECT outcome FROM reader_problems WHERE id=%s",(identity,)).fetchone()[0]=='irrelevant'
     finally:
         store.db.close()
+
+
+def test_telegram_profile_problem_rolls_back_with_identity_check(tmp_path, settings_database, monkeypatch):
+    import json
+    from oko.services.connections import ConnectionService
+    from oko.storage.transaction import transaction
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('telegram','telegram','Telegram','default','telegram','telegram','connected','[]')")
+            store.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'ready',1)")
+            store.db.execute("INSERT INTO telegram_bindings(feed,binding) VALUES ('telegram',%s)", (json.dumps(dict(kind='client',role='personal',account_user_id='101',peer_id='123')),))
+        service=ConnectionService(lambda:store)
+        with monkeypatch.context() as patch:
+            def fail(*args,**kwargs):
+                raise RuntimeError('problem persistence failed')
+            patch.setattr(store.problems,'sync_profiles',fail)
+            with pytest.raises(RuntimeError,match='problem persistence failed'):
+                service.checked('personal',1,202,2)
+        assert store.subscriptions.telegram.profile('personal')['state']=='ready'
+        with pytest.raises(ValueError,match='rollback'):
+            with transaction(store.db):
+                assert not service.checked('personal',1,202,2)
+                assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='profile:personal' AND finished IS NULL").fetchone()
+                raise ValueError('rollback')
+        assert store.subscriptions.telegram.profile('personal')['state']=='ready'
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='profile:personal'").fetchone() is None
+        with transaction(store.db):
+            assert not service.checked('personal',1,202,2)
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='profile:personal' AND finished IS NULL").fetchone()
+    finally:
+        store.db.close()
+
+
+def test_shared_telegram_profile_problem_keeps_remaining_feed(tmp_path, settings_database):
+    import json
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'unavailable',1)")
+            for feed in ('first','second'):
+                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES (%s,%s,%s,'default','telegram','telegram','connected','[]')", (feed,feed,feed))
+                store.db.execute('INSERT INTO telegram_bindings(feed,binding) VALUES (%s,%s)',(feed,json.dumps(dict(kind='client',role='personal',account_user_id='101',peer_id=feed))))
+            store.problems.sync_profiles(store.wall_clock(),{'personal'})
+        before=store.db.execute("SELECT id,body FROM reader_problems WHERE identity='profile:personal' AND finished IS NULL").fetchone()
+        assert {v['id'] for v in json.loads(before['body'])['objects']}=={'first','second'}
+        store.remove_feed('first')
+        after=store.db.execute("SELECT id,body FROM reader_problems WHERE identity='profile:personal' AND finished IS NULL").fetchone()
+        assert after['id']==before['id']
+        assert [v['id'] for v in json.loads(after['body'])['objects']]==['second']
+        store.remove_feed('second')
+        assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s',(before['id'],)).fetchone()[0]=='irrelevant'
+    finally:
+        store.db.close()

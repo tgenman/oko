@@ -59,9 +59,31 @@ class Store:
     def is_integrity_failure(error: BaseException) -> bool:
         return isinstance(error, INTEGRITY_ERRORS)
 
+    def save_telegram_profile(self, role: str, account: str, user_id: int, generation: int, checked: float) -> None:
+        boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
+        with boundary:
+            self.subscriptions.telegram.save_profile(role, account, user_id, generation, checked)
+            self.problems.sync_profiles(checked, {role})
+
+    def check_telegram_profile(self, role: str, generation: int, user_id: int | None, checked: float) -> bool:
+        boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
+        with boundary:
+            valid = self.subscriptions.telegram.checked(role, generation, user_id, checked)
+            self.problems.sync_profiles(checked, {role})
+            return valid
+
+    def connect_telegram(self, binding: dict[str,Any], info: dict[str,Any], source: str, folder: str, history: InitialHistory | None, auto_read: bool) -> dict[str,Any]:
+        boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
+        with boundary:
+            result = self.subscriptions.telegram.connect(binding,info,source,folder,history,auto_read,self.subscriptions)
+            if binding['kind']=='client':
+                self.problems.sync_profiles(self.wall_clock(), {str(binding.get('role') or result['id'])})
+            return result
+
     def change_telegram_access(self, feed: str, binding: dict[str,Any], info: dict[str,Any],
                                auto_read: bool | None) -> dict[str,Any]:
-        with self.db:
+        boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
+        with boundary:
             begin_write(self.db)
             membership_graph.lock_graph(self.db)
             previous=self.subscriptions.telegram.binding(feed)
@@ -70,6 +92,9 @@ class Store:
             self.publications.changed_adapter(feed)
             if previous and previous['kind']=='web' and binding['kind']=='client':
                 self.read_sync.schedule_saved_backfill(feed)
+            roles = {str(value.get('role') or feed) for value in (previous,binding) if value and value['kind']=='client'}
+            if roles:
+                self.problems.sync_profiles(self.wall_clock(),roles)
         return result
 
     def __init__(self, root: Path, fault: Callable[[str], None], *, wall_clock: Callable[[], float] = time.time, clock: Callable[[], float] = time.monotonic, database_url: str | None = None, defer_recovery: bool = False) -> None:
@@ -94,6 +119,8 @@ class Store:
             self.read_sync = ReadSync(self)
             self.youtube = YouTubeAccess(self)
             self.problems = Problems(self)
+            with self.db:
+                self.problems.sync_profiles(self.wall_clock())
             for name in ('content', 'staging'):
                 (root / name).mkdir(exist_ok=True)
             with self.db:
@@ -504,8 +531,10 @@ class Store:
 
     def remove_feed(self, feed: str) -> None:
         self.subscriptions.check_owner('feed', feed)
-        with self.db:
+        boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
+        with boundary:
             membership_graph.lock_graph(self.db)
+            binding = self.subscriptions.telegram.binding(feed)
             selected = [r[0] for r in self.db.execute("""SELECT i.id FROM feed_publications m JOIN publications i ON i.id=m.publication_id
                 WHERE m.feed_id=%s AND i.processing_metadata::jsonb->'_pass'->>'feed_id'=%s""", (feed,feed))]
             if selected:
@@ -534,6 +563,8 @@ class Store:
                 membership_graph.set_viewed(self.db,[item],True)
             self.processing.memberships_removed(removed)
             publication_links.notify_parents_many(self, set(removed))
+            if binding and binding['kind']=='client':
+                self.problems.sync_profiles(self.wall_clock(), {str(binding.get('role') or feed)})
         self.db.after_commit(lambda: self.fault('after_feed_delete_commit'))
 
     def _remember_cleanup_owner(self, item: str, feed: str) -> None:

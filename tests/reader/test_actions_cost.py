@@ -236,3 +236,71 @@ def test_command_problem_and_outcome_roll_back_together(tmp_path):
         assert store.problems.command_record('synthetic-pending').result=='unknown'
     finally:
         store.db.close()
+
+
+def test_telegram_profile_problem_is_saved_before_status_read(tmp_path):
+    from tests.support.telegram import Telegram
+    class Account(Telegram):
+        user=101
+        async def accounts(self):
+            return ['one']
+        async def identity(self,account):
+            return self.user
+        async def history_page(self,account,peer,upper,before,since):
+            return dict(messages=(await self.page(account,peer,0,since))['messages'],upper=11,next_before=11,more=False)
+    network=Account()
+    app=traced_app(tmp_path,telegram_client=network)
+    with TestClient(app,headers=HEADERS) as client:
+        tracing(client,app)
+        assert client.put('/api/v3/telegram/profiles/personal',json={'configuration_ref':'one'}).status_code==200
+        body=dict(source_locator='@fixture',folder='Inbox',access={'kind':'client','profile':'personal'})
+        assert client.post('/api/v3/telegram/connect',json=body).status_code==200
+        network.user=202
+        assert client.post('/api/v3/telegram/connect',json=dict(body,source_locator='@different')).status_code==409
+        def profile_row():
+            row=app.state.host.require_store().db.execute("SELECT id,finished,outcome,xmin::text FROM reader_problems WHERE identity='profile:personal' ORDER BY created DESC LIMIT 1").fetchone()
+            return row[:] if row else None
+        before=client.portal.call(profile_row)
+        assert before and before[1] is None
+        status=client.get('/api/v3/status/details')
+        assert status.status_code==200
+        assert any(p['id']==before[0] and p['code']=='account_identity_mismatch' for p in status.json()['problems']['current'])
+        assert client.portal.call(profile_row)==before
+        network.user=101
+        assert client.put('/api/v3/telegram/profiles/personal',json={'configuration_ref':'one'}).status_code==200
+        resolved=client.portal.call(profile_row)
+        assert resolved and resolved[0]==before[0] and resolved[2]=='resolved'
+        status=client.get('/api/v3/status/details')
+        assert not any(p['id']==before[0] for p in status.json()['problems']['current'])
+        assert client.portal.call(profile_row)==resolved
+
+
+def test_telegram_profile_restart_problem_is_saved_before_status_read(tmp_path):
+    from tests.support.telegram import Telegram
+    class Account(Telegram):
+        async def accounts(self):
+            return ['one']
+        async def identity(self,account):
+            return 101
+        async def history_page(self,account,peer,upper,before,since):
+            return dict(messages=(await self.page(account,peer,0,since))['messages'],upper=11,next_before=11,more=False)
+    options=dict(telegram_client=Account())
+    app=traced_app(tmp_path,**options)
+    with TestClient(app,headers=HEADERS) as client:
+        assert client.put('/api/v3/telegram/profiles/personal',json={'configuration_ref':'one'}).status_code==200
+        connected=client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox','access':{'kind':'client','profile':'personal'}})
+        assert connected.status_code==200
+        feed_id=connected.json()['feed_id']
+        assert client.put('/api/v3/power',json={'enabled':False}).status_code==200
+    restarted=traced_app(tmp_path,**options)
+    with TestClient(restarted,headers=HEADERS) as client:
+        tracing(client,restarted)
+        status=client.get('/api/v3/status/details')
+        assert status.status_code==200
+        problem=next(p for p in status.json()['problems']['current'] if p['code']=='profile_unavailable')
+        assert not any(q.lstrip().upper().startswith(('INSERT','UPDATE','DELETE')) for q in restarted.state.last_sql)
+        assert client.delete('/api/v3/feeds/'+feed_id).status_code==200
+        status=client.get('/api/v3/status/details')
+        assert not any(p['id']==problem['id'] for p in status.json()['problems']['current'])
+        assert any(p['id']==problem['id'] and p['outcome']=='irrelevant' for p in status.json()['problems']['recent'])
+        assert not any(q.lstrip().upper().startswith(('INSERT','UPDATE','DELETE')) for q in restarted.state.last_sql)
