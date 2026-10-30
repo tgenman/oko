@@ -182,6 +182,48 @@ class Problems:
                             outcome = 'irrelevant'
         self.sync_candidate('action:'+identity, candidate, now, removed_outcome=outcome)
 
+    @staticmethod
+    def deletion_identity(row: Any) -> str | None:
+        if row['problem_code'] is None and row['error'] is None:
+            return None
+        code = row['problem_code'] or 'work-' + row['kind']
+        if code not in ('delete','feed-delete','work-delete','work-feed-delete'):
+            return None
+        feed = row['feed_id'] or row['item'] or 'demo'
+        return str('job:' + code + ':' + feed + ':' + row['kind'] + ':' + row['item'])
+
+    def deletion_candidate(self, job_id: int, now: float) -> dict[str, Any] | None:
+        """Project one deletion Job, without inspecting unrelated work."""
+        row = self.db.execute("SELECT kind,item,status,error,problem_code,feed_id FROM jobs WHERE id=%s AND kind IN ('delete','feed-delete')", (job_id,)).fetchone()
+        if not row or row['status'] not in ('pending','running','failed','unavailable','blocked') or (row['problem_code'] is None and row['error'] is None):
+            return None
+        identity = self.deletion_identity(row)
+        if identity is None:
+            return None
+        code = row['problem_code'] or 'work-' + row['kind']
+        feed = row['feed_id'] or row['item'] or 'demo'
+        kind = row['kind']
+        title = 'Удаление фида не завершено' if kind=='feed-delete' else 'Удаление не завершено'
+        next_step = ('Включите обработку, чтобы повторить попытку.' if row['status']=='blocked' else
+                     'Повторите загрузку вручную.' if row['status']=='failed' else
+                     'Проверьте доступность источника.' if row['status']=='unavailable' else
+                     'Око повторит попытку автоматически.')
+        candidate = dict(id=identity,code=code,section='object',title=title,
+            consequence='Око продолжает попытки удаления.',next_step=next_step,
+            objects=[dict(kind='feed',id=feed)] if kind=='feed-delete' else [],action=None,
+            operation='producer:'+kind,created_at=now,state='retrying' if row['status']=='running' or not row['error'] else 'current',
+            finished_at=None,outcome=None,next_at=None)
+        if kind!='delete' and row['error']:
+            candidate['reason']=row['error']
+        return candidate
+
+    def sync_deletion(self, job_id: int, previous: dict[str, Any] | None, now: float) -> None:
+        current = self.deletion_candidate(job_id,now)
+        if previous is not None and (current is None or previous['id']!=current['id']):
+            self.sync_candidate(previous['id'],None,now)
+        if current is not None:
+            self.sync_candidate(current['id'],current,now)
+
     def profile_candidates(self, now: float, feeds: dict[str, dict[str, Any]], bindings: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
         groups: dict[str, dict[str, Any]] = {}
         for saved_feed in feeds.values():

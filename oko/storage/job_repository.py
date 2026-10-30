@@ -44,10 +44,13 @@ class JobRepository:
         return bool(row and row['status']=='running' and row['generation']==job.generation and row['kind']==job.kind and row['item']==job.item)
 
     def finish(self, job: Job) -> None:
+        previous = self.store.problems.deletion_candidate(job.id,self.store.wall_clock()) if job.kind=='delete' else None
         changed=job_write(self.store.db, "UPDATE jobs SET status = 'done' , error = NULL , problem_code = NULL , manual_once = 0 , retry_at = NULL , retry_delay = 0 , wait_scope = NULL WHERE id = %s AND generation = %s AND status = 'running' AND kind = %s AND item = %s",
             (job.id,job.generation,job.kind,job.item)).rowcount
         if changed!=1:
             raise JobRejected('Attempt no longer owns this job')
+        if job.kind=='delete' and previous is not None:
+            self.store.problems.sync_deletion(job.id,previous,self.store.wall_clock())
         if job.kind=='filter':
             self.store.processing.filter_changed(job.item)
 
@@ -378,11 +381,14 @@ class JobRepository:
             return None
         with self.store.db:
             # Keep dispatch generations monotonic even when every old job was removed.
+            previous = self.store.problems.deletion_candidate(row['id'],self.store.wall_clock()) if row['kind'] in ('delete','feed-delete') and (row['error'] is not None or row['problem_code'] is not None) else None
             sequence = self.store.db.execute("SELECT value FROM state WHERE key = 'job-dispatch-generation'").fetchone()
             generation = max(row['generation'], int(sequence[0]) if sequence else 0) + 1
             self.store.db.execute("INSERT INTO state VALUES ( 'job-dispatch-generation' , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value", (str(generation),))
             job_write(self.store.db, "UPDATE jobs SET status='running', attempt=attempt+1, generation=%s WHERE id=%s", (generation, row['id']))
             if row['kind']=='filter':self.store.processing.filter_changed(row['item'])
+            if row['kind'] in ('delete','feed-delete') and previous is not None:
+                self.store.problems.sync_deletion(row['id'],previous,self.store.wall_clock())
         current = expect_row(self.store.db.execute('SELECT * FROM jobs WHERE id = %s', (row['id'],)).fetchone())
         return Job(current['id'], current['kind'], current['item'], current['generation'])
 
@@ -396,8 +402,11 @@ class JobRepository:
                 if valid and job.kind=='filter':self.store.processing.filter_changed(job.item)
             return
         with self.store.db:
-            job_write(self.store.db, "UPDATE jobs SET status = %s , next = %s , error = %s , problem_code = %s WHERE id = %s AND generation = %s AND status = 'running'",
-                ('failed' if terminal else 'pending',0 if code=='ai-permission' else now+delay,error,code or job.kind,job.id,job.generation))
+            previous = self.store.problems.deletion_candidate(job.id,self.store.wall_clock()) if job.kind in ('delete','feed-delete') else None
+            changed = job_write(self.store.db, "UPDATE jobs SET status = %s , next = %s , error = %s , problem_code = %s WHERE id = %s AND generation = %s AND status = 'running'",
+                ('failed' if terminal else 'pending',0 if code=='ai-permission' else now+delay,error,code or job.kind,job.id,job.generation)).rowcount
+            if changed and job.kind in ('delete','feed-delete'):
+                self.store.problems.sync_deletion(job.id,previous,self.store.wall_clock())
 
 
     def restore_telegram_wait(self, feed: str, deadline: float) -> None:
@@ -417,9 +426,11 @@ class JobRepository:
             # A configuration cancellation is not a failed discovery request.
             job_write(self.store.db, f"UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , generation = generation + 1 , next = CASE WHEN wait_scope IS NULL THEN 0 ELSE next END , retry_at = CASE WHEN wait_scope IS NULL THEN NULL ELSE retry_at END WHERE kind = 'discover' AND {selection}",params)
             collection_jobs.interrupt(self.store,feeds,backoff=False)
-            changed=job_write(self.store.db, f"UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status='pending', generation=generation+1 WHERE {selection} RETURNING kind,item", params).fetchall()
+            changed=job_write(self.store.db, f"UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status='pending', generation=generation+1 WHERE {selection} RETURNING id,kind,item,error,problem_code", params).fetchall()
             for row in changed:
                 if row['kind']=='filter':self.store.processing.filter_changed(row['item'])
+                if row['kind'] in ('delete','feed-delete') and (row['error'] is not None or row['problem_code'] is not None):
+                    self.store.problems.sync_deletion(row['id'],None,self.store.wall_clock())
 
 
     def saved_execution(self, job: Job, signature: str) -> dict[str, Any] | None:
@@ -600,7 +611,9 @@ class JobRepository:
     def apply_collection(self, effects: CollectionEffects) -> None:
         db=self.store.db
         for item,changed in effects.fetch.items():
-            job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , payload = (payload::jsonb - 'cleanup_feed')::text WHERE kind = 'delete' AND item = %s",(item,))
+            cancelled = job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , payload = (payload::jsonb - 'cleanup_feed')::text WHERE kind = 'delete' AND item = %s RETURNING kind,item,error,problem_code,feed_id",(item,)).fetchone()
+            if cancelled and (identity := self.store.problems.deletion_identity(cancelled)) is not None:
+                self.store.problems.sync_candidate(identity,None,self.store.wall_clock())
             if changed:
                 self.enqueue_fetch(item)
             else:
@@ -698,11 +711,13 @@ class JobRepository:
             memberships.lock_graph(self.store.db)
             feed_exists = self.store.db.execute('SELECT 1 FROM feeds WHERE id=%s', (feed,)).fetchone() is not None
             affects_codex = feed_exists and self.store.problems.codex_choice(self.store.wall_clock(), feed=feed) is not None
+            previous_problem = self.store.problems.deletion_candidate(job.id,self.store.wall_clock())
             owned = "SELECT item FROM jobs WHERE kind='delete' AND payload::jsonb->>'cleanup_feed' = %s"
             job_write(self.store.db, f"DELETE FROM jobs WHERE kind != 'delete' AND item IN ({owned})", (feed,))
             if self.store.db.execute(f'DELETE FROM publications WHERE id IN ({owned})', (feed,)).rowcount:
                 status_changed(self.store.db)
             job_write(self.store.db, "DELETE FROM jobs WHERE item = %s OR (kind='delete' AND payload::jsonb->>'cleanup_feed' = %s)", (feed, feed))
+            self.store.problems.sync_deletion(job.id,previous_problem,self.store.wall_clock())
             for table in ('history_members', 'initial_history', 'telegram_read_members', 'telegram_read_state'):
                 deleted = self.store.db.execute(f'DELETE FROM {table} WHERE feed = %s', (feed,)).rowcount
                 if table=='initial_history' and deleted:

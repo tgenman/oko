@@ -1050,3 +1050,21 @@ additional catalog/migration cases. Mypy passed on 158 files; 32 Playwright
 reading/status scenarios passed and an opened-material screenshot was inspected.
 No working database was migrated. Status GET still reconciles remaining problems;
 physical transitional fields and other final requirements also remain.
+
+
+Deletion and feed-deletion errors are now synchronized on Job retry, claim,
+completion, interruption and cancellation by rediscovery, in the Job transaction.
+The status read still reconciles these and other problem categories: startup and
+legacy recovery plus other transitions must be handled before removing that path.
+Forty synthetic state/code combinations matched the existing status projection;
+rollback tests cover failed retry, completion and rediscovery. The existing
+projection selects both `jobs.*` and a computed column named `feed_id`; `Record`
+uses the first duplicate name. In a synthetic delete Job with an empty Job feed
+and cleanup owner `demo`, the projection used item ID as its feed instead of
+the computed owner. The new producer preserves that behavior for now; correcting
+its effect on all Job groups requires separate coverage.
+
+The temporary-copy transaction/status/linked suite passed 187 tests; the task
+checkout passed 133 worker/status tests. Mypy passed on 158 files. Six Playwright
+status scenarios passed and the status screenshot was inspected. No working
+database was changed.

@@ -1529,3 +1529,129 @@ def test_failed_discovery_and_diagnostic_roll_back_together(tmp_path, monkeypatc
         assert row[:] == ('running',None)
     finally:
         store.db.close()
+
+
+def test_failed_delete_problem_follows_job_without_status_read(tmp_path, postgres_url):
+    import json
+    from oko.storage.job_types import Job
+    from oko.storage.transaction import transaction
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('item','rss','item',1)")
+            row=store.db.execute("INSERT INTO jobs(kind,item,status,generation,payload) VALUES ('delete','item','running',1,%s) RETURNING id", (json.dumps({'cleanup_feed':'demo'}),)).fetchone()
+        job=Job(row['id'],'delete','item',1)
+        def current():
+            return store.db.execute("SELECT id,body FROM reader_problems WHERE identity='job:delete:item:delete:item' AND finished IS NULL").fetchone()
+        with pytest.raises(ValueError,match='rollback'):
+            with transaction(store.db):
+                store.jobs.retry(job,1,'Ошибка удаления',code='delete')
+                assert current() is not None
+                raise ValueError('rollback')
+        assert current() is None
+        store.jobs.retry(job,1,'Ошибка удаления',code='delete')
+        problem=current()
+        assert problem is not None
+        candidates=store.problems.candidates(5)
+        assert candidates, candidates
+        legacy=next(c for c in candidates if c['id']=='job:delete:item:delete:item')
+        legacy.setdefault('operation','producer:delete')
+        assert store.problems.deletion_candidate(job.id,5) == legacy
+        with store.db:
+            store.db.execute("UPDATE jobs SET next=0 WHERE id=%s", (job.id,))
+        claimed=store.jobs.next_job(1,deleting_only=True)
+        assert claimed is not None and claimed.id==job.id
+        assert json.loads(current()['body'])['state']=='retrying'
+        with pytest.raises(ValueError,match='finish rollback'):
+            with transaction(store.db):
+                store.jobs.delete(claimed)
+                assert current() is None
+                raise ValueError('finish rollback')
+        assert current() is not None
+        assert store.jobs.valid(claimed)
+        store.jobs.delete(claimed)
+        assert current() is None
+        assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s',(problem['id'],)).fetchone()['outcome']=='resolved'
+    finally:
+        store.db.close()
+
+
+def test_failed_feed_delete_problem_finishes_with_feed_removal(tmp_path, postgres_url):
+    import json
+    from oko.storage.job_types import Job
+    from oko.storage.transaction import transaction
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','deleting','[]')")
+            row=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('feed-delete','feed','running',1) RETURNING id").fetchone()
+        job=Job(row['id'],'feed-delete','feed',1)
+        store.jobs.retry(job,1,'Ошибка удаления',code='delete')
+        problem=store.db.execute("SELECT id,body FROM reader_problems WHERE identity='job:delete:feed:feed-delete:feed' AND finished IS NULL").fetchone()
+        assert problem is not None and json.loads(problem['body'])['objects']==[{'kind':'feed','id':'feed'}]
+        legacy=next(c for c in store.problems.candidates(5) if c['id']=='job:delete:feed:feed-delete:feed')
+        legacy.setdefault('operation','producer:feed-delete')
+        assert store.problems.deletion_candidate(job.id,5) == legacy
+        with store.db:
+            store.db.execute('UPDATE jobs SET next=0 WHERE id=%s',(job.id,))
+        claimed=store.jobs.next_job(1,deleting_only=True)
+        assert claimed is not None and claimed.id==job.id
+        with pytest.raises(ValueError,match='rollback'):
+            with transaction(store.db):
+                store.jobs.finish_feed_deletion(claimed)
+                assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s',(problem['id'],)).fetchone()['outcome']=='resolved'
+                raise ValueError('rollback')
+        assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s',(problem['id'],)).fetchone()['finished'] is None
+        store.jobs.finish_feed_deletion(claimed)
+        assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s',(problem['id'],)).fetchone()['outcome']=='resolved'
+        assert store.db.execute("SELECT 1 FROM feeds WHERE id='feed'").fetchone() is None
+    finally:
+        store.db.close()
+
+
+def test_resurrected_publication_closes_failed_delete_problem_atomically(tmp_path, postgres_url):
+    from oko.domain.collection import CollectionEffects
+    from oko.storage.job_types import Job
+    from oko.storage.transaction import transaction
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('item','rss','item',1)")
+            job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('delete','item','running',1) RETURNING id").fetchone()[0]
+        job=Job(job_id,'delete','item',1)
+        store.jobs.retry(job,1,'Ошибка удаления',code='delete')
+        problem=store.db.execute("SELECT id FROM reader_problems WHERE identity='job:delete:item:delete:item' AND finished IS NULL").fetchone()['id']
+        with pytest.raises(ValueError,match='rollback'):
+            with transaction(store.db):
+                store.jobs.apply_collection(CollectionEffects(fetch={'item':False}))
+                assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s',(problem,)).fetchone()['outcome']=='resolved'
+                raise ValueError('rollback')
+        assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s',(problem,)).fetchone()['finished'] is None
+        with transaction(store.db):
+            store.jobs.apply_collection(CollectionEffects(fetch={'item':False}))
+        assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s',(problem,)).fetchone()['outcome']=='resolved'
+    finally:
+        store.db.close()
+
+
+
+@pytest.mark.parametrize('kind', ['delete','feed-delete'])
+@pytest.mark.parametrize('status', ['pending','running','failed','unavailable','blocked'])
+@pytest.mark.parametrize('code,error', [(None,'synthetic failure'),('delete','synthetic failure'),('',None),(None,'')])
+def test_delete_problem_matches_status_projection(tmp_path, postgres_url, kind, status, code, error):
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            job_id=store.db.execute('INSERT INTO jobs(kind,item,status,error,problem_code) VALUES (%s,%s,%s,%s,%s) RETURNING id',
+                                    (kind,'item',status,error,code)).fetchone()[0]
+        current=store.problems.deletion_candidate(job_id,7)
+        candidates=store.problems.candidates(7)
+        expected=next(c for c in candidates if c['id']==current['id'])
+        expected.setdefault('operation','producer:'+kind)
+        assert current == expected
+    finally:
+        store.db.close()
