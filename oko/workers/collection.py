@@ -339,7 +339,7 @@ class CollectionWorker:
                         with current.jobs.transaction(self._live):
                             self.service.viewed(job.item)
                             current.jobs.reconcile_cleanup()
-                        self._finish_collection(job,current)
+                            self._finish_collection(job,current)
                         return
                     if isinstance(error, SourceDeleted) and job.kind == 'fetch':
                         collection_error = None
@@ -348,7 +348,7 @@ class CollectionWorker:
                             current.jobs.retry(job,self._clock(),error.label,terminal=True,
                                 issue=error.adapter_issue or AdapterIssue('source-unavailable',error.label,AdapterErrorKind.unavailable))
                             self.service.notify_parents(job.item)
-                        self._finish_collection(job,current)
+                            self._finish_collection(job,current)
                         return
                     label = error.label if isinstance(error, SourceError) else str(error) if isinstance(error, TelegramConflict) else 'Ошибка синхронизации Telegram' if job.kind == 'read' else 'Ошибка сбора'
                     if isinstance(error, SourceError):
@@ -364,18 +364,19 @@ class CollectionWorker:
                     else:
                         code = job.kind + ':' + type(error).__name__
                     label = self.execution.diagnostics.clean(label) if self.execution.diagnostics else label
-                    current.jobs.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,code=code,
-                        terminal=isinstance(error, SourceError) and not error.retryable or job.kind in ('discover','fetch') and (isinstance(error,ValueError) or Store.is_integrity_failure(error)),
-                        issue=error.adapter_issue if isinstance(error,SourceError) else None)
-                    if job.kind=='fetch':
-                        self.service.notify_parents(job.item)
-                    if job.kind=='discover':
-                        self.service.discovery_wait(feed,label,current.jobs.retry_at(job))
-                    if job.kind == 'read':
-                        self.service.read_failed(feed, label)
-                    elif isinstance(error, SourceError):
-                        self.service.feed_status(feed, error=label, gap=None)
-                    self._finish_collection(job, current, error)
+                    with current.jobs.transaction(self._live):
+                        current.jobs.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,code=code,
+                            terminal=isinstance(error, SourceError) and not error.retryable or job.kind in ('discover','fetch') and (isinstance(error,ValueError) or Store.is_integrity_failure(error)),
+                            issue=error.adapter_issue if isinstance(error,SourceError) else None)
+                        if job.kind=='fetch':
+                            self.service.notify_parents(job.item)
+                        if job.kind=='discover':
+                            self.service.discovery_wait(feed,label,current.jobs.retry_at(job))
+                        if job.kind == 'read':
+                            self.service.read_failed(feed, label)
+                        elif isinstance(error, SourceError):
+                            self.service.feed_status(feed, error=label, gap=None)
+                        self._finish_collection(job, current, error)
 
         finally:
             attempt = self.jobs._collection_active.get(job.id)

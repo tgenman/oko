@@ -1501,3 +1501,28 @@ def test_summary_prompt_change_keeps_completed_filter_attempt(tmp_path):
         assert store.processing.theses.read(item) is None
     finally:
         store.db.close()
+
+
+def test_failed_discovery_and_diagnostic_roll_back_together(tmp_path, monkeypatch):
+    from oko.collection.contracts import SourceError
+    from tests.support.worker_library import collection_worker
+    class Failing:
+        changes = None
+        async def discover(self, cursor):
+            raise SourceError('Synthetic source failure')
+    store, _, _, _ = worker_library(tmp_path)
+    try:
+        with store.db:
+            store.jobs.enqueue_discovery()
+        job = store.jobs.next_job(store.clock(), feeds=['demo'])
+        assert job and job.kind == 'discover'
+        worker = collection_worker(tmp_path,store,StructuredSource(Failing()))
+        def fail_diagnostic(*args, **kwargs):
+            raise RuntimeError('diagnostic failure')
+        monkeypatch.setattr(worker,'_finish_collection',fail_diagnostic)
+        with pytest.raises(RuntimeError, match='diagnostic failure'):
+            asyncio.run(worker._execute(job))
+        row = store.db.execute('SELECT status,error FROM jobs WHERE id=%s',(job.id,)).fetchone()
+        assert row[:] == ('running',None)
+    finally:
+        store.db.close()
