@@ -855,3 +855,6 @@ settings/transaction/worker tests, 24 status/settings tests, and the 400-item
 settings cost case. After transfer to the branch three focused tests, layer
 boundaries and mypy passed. Status GET can still write other problem categories;
 this does not establish the target read-only status contract as complete.
+The targeted Playwright status, settings and Codex HTTP suites subsequently
+passed 10 tests with two workers. The status screenshot showing the missing
+Codex model was inspected. Other problem categories remain outside this slice.
