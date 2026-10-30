@@ -470,6 +470,10 @@ def test_process_death_at_media_acceptance_never_exposes_uncommitted_bytes(tmp_p
         assert process.wait(timeout=5)==79
     finally:
         cleanup(process)
+    if committed:
+        with database(root) as db:
+            attempt = db.execute("SELECT collection_attempt FROM jobs WHERE kind='download_media' AND item=%s", (media_id,)).fetchone()
+            assert attempt is not None and attempt[0] is None
     def available(request):
         if request.url.host=='cdn.example':
             return httpx.Response(200,content=b'process-media',headers={'content-type':'image/jpeg'})

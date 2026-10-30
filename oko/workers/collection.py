@@ -461,10 +461,10 @@ class CollectionWorker:
                             return
                         media.accept(job.item,download,actual,staged)
                         current.jobs.finish(job)
+                        self._finish_collection(job,current)
                     current.jobs.checkpoint('after_media_commit')
                     if caption_attempt and caption_attempt.attempted:
                         self.service.caption_completed()
-                    self._finish_collection(job,current)
         except CaptionsDeferred:
             pass
         except asyncio.CancelledError:
