@@ -152,3 +152,18 @@ def test_status_does_not_scan_completed_job_archive(tmp_path):
             response = client.get('/api/v3/status')
         assert response.status_code == 200
         assert work.rows < 10000, work
+
+
+def test_codex_configuration_problem_changes_without_status_writes(tmp_path):
+    app = traced_app(tmp_path)
+    with TestClient(app, headers=HEADERS) as client:
+        tracing(client, app)
+        assert client.patch('/api/v3/settings/oko/global', json={'processor':'codex','theses':True}).status_code == 200
+        response = client.get('/api/v3/status/details')
+        assert response.status_code == 200
+        assert any(p['code']=='processor_not_configured' for p in response.json()['problems']['current'])
+        assert not any(q.lstrip().upper().startswith(('INSERT','UPDATE','DELETE')) for q in app.state.last_sql)
+        assert client.patch('/api/v3/settings/oko/global', json={'theses':False}).status_code == 200
+        response = client.get('/api/v3/status/details')
+        assert not any(p['code']=='processor_not_configured' for p in response.json()['problems']['current'])
+        assert not any(q.lstrip().upper().startswith(('INSERT','UPDATE','DELETE')) for q in app.state.last_sql)

@@ -641,3 +641,31 @@ def test_feed_processing_settings_follow_committed_storage(tmp_path, settings_da
             assert store.subscriptions.effective('feed', identity, details=False)['feed']['public_ai'] is True
     finally:
         store.db.close()
+
+
+def test_codex_configuration_problem_rolls_back_with_settings(tmp_path, settings_database):
+    from oko.storage.transaction import transaction
+    from oko.subscriptions.subscriptions import Overrides
+    from oko.services.subscriptions import SubscriptionService
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        service=SubscriptionService(lambda:store)
+        with pytest.raises(ValueError,match='rollback'):
+            with transaction(store.db):
+                service.update_settings('oko','global',Overrides(processor='codex',theses=True))
+                assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone()
+                raise ValueError('rollback')
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='processor:codex-choice'").fetchone() is None
+        with transaction(store.db):
+            service.update_settings('oko','global',Overrides(processor='codex',theses=True))
+        identity=store.db.execute("SELECT id FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone()[0]
+        store.db.close()
+        store=Store(tmp_path,lambda _:None,database_url=settings_database)
+        assert store.db.execute("SELECT id FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone()[0]==identity
+        with transaction(store.db):
+            service=SubscriptionService(lambda:store)
+            service.update_settings('oko','global',Overrides(theses=False))
+        assert store.db.execute("SELECT outcome FROM reader_problems WHERE id=%s",(identity,)).fetchone()[0]=='irrelevant'
+    finally:
+        store.db.close()

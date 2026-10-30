@@ -668,11 +668,14 @@ class Store:
 
     def configure_codex(self, config: CodexSettings) -> None:
         # Future execution choice does not invalidate inputs or cancel work.
-        with self.db:
+        boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
+        with boundary:
+            membership_graph.lock_graph(self.db)
             self.subscriptions.settings.set_state('processor:codex', config.model_dump_json())
             job_write(self.db, """UPDATE jobs SET status='pending',next=0,error=NULL,problem_code=NULL,
                 payload=(payload::jsonb-'preclaim_blocked')::text
                 WHERE status='pending' AND problem_code='processor-config' AND payload::jsonb->>'preclaim_blocked'='true'""")
+            self.problems.sync_codex_choice(self.wall_clock())
 
     @reading_value
     def processor_config(self) -> ProcessorConfig | None:
@@ -708,6 +711,7 @@ class Store:
             self.db.executemany('INSERT INTO state VALUES ( %s , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value', [(key, str(sequence)) for key in keys])
             self.jobs.revoke_changed_running_inputs()
             self.processing.invalidate(scope, owner)
+            self.problems.sync_codex_choice(self.wall_clock())
         self.processing.sync()
 
     @reading_value

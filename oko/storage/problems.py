@@ -49,18 +49,47 @@ class Problems:
             feeds = {f['id']: f for f in self.store.subscriptions.feeds()}
         return self.reconcile(candidates, now, feeds)
 
-    def candidates(self, now: float) -> list[dict[str, Any]]:
-        current: list[dict[str, Any]] = []
+    def codex_choice(self, now: float) -> dict[str, Any] | None:
         configurations=[self.store.subscriptions.effective('oko','global'),*self.store.subscriptions.effective_feeds().values()]
         needs_codex = any((values := configuration['effective'])['processor']['value'] == 'codex' and
                          any(values[key]['value'] for key in ('theses', 'prompt_filters')) for configuration in configurations)
         if needs_codex and self.store.codex_config() is None:
-            current.append(dict(id='processor:codex-choice', code='codex-choice', section='action',
-                                title='Не выбрана модель Codex', consequence='Тезисы пока не создаются.',
-                                next_step='Выберите и сохраните модель для каждого действия.',
-                                objects=[dict(kind='settings', id='global', label='Настройки Око')],
-                                action=None, created_at=now,
-                                state='current', finished_at=None, outcome=None, next_at=None))
+            return dict(id='processor:codex-choice', code='codex-choice', section='action',
+                        title='Не выбрана модель Codex', consequence='Тезисы пока не создаются.',
+                        next_step='Выберите и сохраните модель для каждого действия.',
+                        objects=[dict(kind='settings', id='global', label='Настройки Око')],
+                        action=None, created_at=now,
+                        state='current', finished_at=None, outcome=None, next_at=None)
+        return None
+
+    def sync_codex_choice(self, now: float) -> None:
+        """Persist the configuration obstacle with the settings change."""
+        candidate = self.codex_choice(now)
+        existing = self.db.execute("SELECT id,body FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone()
+        if candidate is None:
+            if existing:
+                outcome = 'irrelevant' if self.store.codex_config() is None else 'resolved'
+                self.db.execute('UPDATE reader_problems SET finished=%s,outcome=%s WHERE id=%s', (now,outcome,existing['id']))
+                status_changed(self.db)
+            return
+        candidate['operation'] = 'producer:status'
+        body = {key: value for key,value in candidate.items() if key not in ('id','created_at','finished_at','outcome')}
+        body['objects'] = [{key:value for key,value in obj.items() if key!='label'} for obj in candidate['objects']]
+        encoded = json.dumps(body)
+        if existing:
+            if existing['body'] != encoded:
+                self.db.execute('UPDATE reader_problems SET body=%s WHERE id=%s',(encoded,existing['id']))
+                status_changed(self.db)
+        else:
+            self.db.execute('INSERT INTO reader_problems(id,identity,origin,body,created,finished,outcome) VALUES (%s,%s,%s,%s,%s,NULL,NULL)',
+                            (uuid.uuid4().hex,candidate['id'],'background',encoded,now))
+            status_changed(self.db)
+
+    def candidates(self, now: float) -> list[dict[str, Any]]:
+        current: list[dict[str, Any]] = []
+        codex_choice = self.codex_choice(now)
+        if codex_choice is not None:
+            current.append(codex_choice)
         groups: dict[str, dict[str, Any]] = {}
         feeds = {feed['id']: feed for feed in self.store.subscriptions.feeds()}
         bindings=self.store.subscriptions.telegram.bindings(list(feeds))
