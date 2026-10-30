@@ -34,6 +34,10 @@ class JobRepository:
     def __init__(self, store: 'Store') -> None:
         self.store=store
 
+    def after_commit(self, callback: Callable[[], None]) -> None:
+        """Publish an attempt's in-memory completion only after its transaction commits."""
+        self.store.db.after_commit(callback)
+
     def valid(self, job: Job) -> bool:
         row=self.store.db.execute('SELECT status , generation , kind , item FROM jobs WHERE id = %s',(job.id,)).fetchone()
         return bool(row and row['status']=='running' and row['generation']==job.generation and row['kind']==job.kind and row['item']==job.item)

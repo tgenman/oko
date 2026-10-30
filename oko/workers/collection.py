@@ -216,7 +216,7 @@ class CollectionWorker:
                 from oko.observability import event
                 self.jobs.metrics.attempt(job.kind, 'error' if error else 'returned', elapsed)
                 event('job_finished', job_id=job.id, kind=job.kind, level='error' if error else 'info', error=error, elapsed=elapsed)
-        current.db.after_commit(committed)
+        current.jobs.after_commit(committed)
 
     async def _execute(self, job: Job) -> None:
         capture = Capture()
