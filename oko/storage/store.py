@@ -1,4 +1,4 @@
-from oko.storage.publication_owners import owned_ids
+from oko.storage.publication_owners import owned_ids, owner_expr
 from oko.storage.database import expect_row, Connection, Row, INTEGRITY_ERRORS
 from oko.collection.external_media import saved_external, expected_incomplete
 from oko.collection.adapters import ExternalKey, ExternalReference, Platform, MediaReference, PublicationContent, PublicationMetadata
@@ -373,7 +373,7 @@ class Store:
         if row is None:
             raise LookupError('Publication not found')
         if row['feed_id'] is None:
-            root=self.db.execute('SELECT i . feed_id FROM publication_links l JOIN items_read i ON i . id = l . source_publication_id WHERE l . target_publication_id = %s AND i . viewed = 0 AND i . feed_id IS NOT NULL ORDER BY i . id LIMIT 1',(item,)).fetchone()
+            root=self.db.execute(f"SELECT {owner_expr('i')} AS feed_id FROM publication_links l JOIN publications i ON i.id=l.source_publication_id WHERE l.target_publication_id = %s AND i.viewed = 0 AND {owner_expr('i')} IS NOT NULL ORDER BY i.id LIMIT 1",(item,)).fetchone()
             if root:
                 return str(root[0])
             return ''
@@ -507,7 +507,7 @@ class Store:
                 batch = members[start:start+400]
                 marks = ','.join('%s' for _ in batch)
                 rows.update({row['id']: row for row in self.db.execute(
-                    f'SELECT id , members , feed_id FROM items_read WHERE id IN ( {marks} )', batch)})
+                    f'SELECT i.id , i.members , {owner_expr("i")} AS feed_id FROM publications i WHERE i.id IN ( {marks} )', batch)})
                 for row in self.db.execute(f'SELECT m . publication_id , m . feed_id FROM feed_publications m JOIN publications i ON i . id = m . publication_id WHERE i . viewed = 0 AND m . publication_id IN ( {marks} )', batch):
                     memberships.setdefault(row['publication_id'], []).append(row['feed_id'])
             if len(rows) != len(members):
@@ -679,7 +679,7 @@ class Store:
             # the completed archive even when it has no problems.
             condition = """jobs.id IN (SELECT id FROM jobs WHERE status IN ('pending','running') OR error IS NOT NULL
                 UNION SELECT id FROM jobs WHERE problem_code IS NOT NULL OR error IS NOT NULL)"""
-        rows = self.db.execute(f"SELECT jobs . kind , jobs . status , jobs . problem_code , count ( * ) AS count , CASE WHEN jobs . kind IN ( 'discover' , 'read' , 'feed-delete' ) THEN NULLIF ( jobs . item , '' ) WHEN jobs . kind = 'download_media' THEN ( SELECT i . feed_id FROM media_files m JOIN items_read i ON i . id = m . publication_id WHERE m . id = jobs . item ) ELSE items . feed_id END AS feed , min ( jobs . next ) AS next , sum ( CASE WHEN jobs . error IS NOT NULL THEN 1 ELSE 0 END ) AS errors FROM jobs LEFT JOIN items_read items ON items . id = jobs . item WHERE {condition} GROUP BY jobs . kind , jobs . status , jobs . problem_code , feed ORDER BY min ( jobs . id )").fetchall()
+        rows = self.db.execute(f"SELECT jobs . kind , jobs . status , jobs . problem_code , count ( * ) AS count , CASE WHEN jobs . kind IN ( 'discover' , 'read' , 'feed-delete' ) THEN NULLIF ( jobs . item , '' ) WHEN jobs . kind = 'download_media' THEN ( SELECT {owner_expr('i')} FROM media_files m JOIN publications i ON i . id = m . publication_id WHERE m . id = jobs . item ) ELSE {owner_expr('items')} END AS feed , min ( jobs . next ) AS next , sum ( CASE WHEN jobs . error IS NOT NULL THEN 1 ELSE 0 END ) AS errors FROM jobs LEFT JOIN publications items ON items . id = jobs . item WHERE {condition} GROUP BY jobs . kind , jobs . status , jobs . problem_code , feed ORDER BY min ( jobs . id )").fetchall()
         now, wall = self.clock(), self.wall_clock()
         return [WorkSummary(row['kind'],row['status'],row['feed'],row['count'],
                     row['problem_code'] or (row['kind']+'-failed' if row['errors'] else None),

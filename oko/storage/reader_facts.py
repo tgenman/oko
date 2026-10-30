@@ -2,7 +2,7 @@
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
-from oko.storage.publication_owners import owned_ids
+from oko.storage.publication_owners import owned_ids, owner_expr
 from oko.storage.store import Store
 from oko.storage import material_read, publication_links
 from oko.storage.reading import reader_now
@@ -61,7 +61,7 @@ class ReaderFacts:
         return (bytes(row['image']), row['mime']) if row else None
 
     def material_feeds(self, identities: set[str]) -> dict[str, str]:
-        return {row['id']: row['feed_id'] for row in self.storage().db.execute(f"SELECT id , feed_id FROM items_read WHERE viewed = 0 AND id IN ( {','.join(('%s' for _ in identities))} )", tuple(identities))} if identities else {}
+        return {row['id']: row['feed_id'] for row in self.storage().db.execute(f"SELECT i.id , {owner_expr('i')} AS feed_id FROM publications i WHERE i.viewed = 0 AND i.id IN ( {','.join(('%s' for _ in identities))} )", tuple(identities))} if identities else {}
 
     def linked_preview(self, identity: str) -> dict[str, Any] | None:
         store=self.storage()
@@ -79,4 +79,4 @@ class ReaderFacts:
             UNION SELECT id FROM ({owned_ids('= %s')}) owner''', (identity,identity,identity))}
 
     def deletion_feeds(self) -> set[str]:
-        return {row[0] for row in self.storage().db.execute("SELECT DISTINCT feed_id FROM items_read WHERE id IN ( SELECT item FROM jobs WHERE kind = 'delete' AND status != 'done' )")}
+        return {row[0] for row in self.storage().db.execute(f"SELECT DISTINCT {owner_expr('i')} AS feed_id FROM publications i WHERE i.id IN ( SELECT item FROM jobs WHERE kind = 'delete' AND status != 'done' )")}

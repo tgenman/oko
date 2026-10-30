@@ -2,6 +2,7 @@
 import json
 from uuid import uuid4
 
+from oko.storage.publication_owners import owner_expr, owned_ids
 from tests.support.storage import Store
 from tests.support.postgres_work import measure_reads
 from tests.support.reading_cost import build_library
@@ -55,7 +56,7 @@ def test_scheduling_one_publication_does_not_scan_foreign_media_jobs(tmp_path):
     for foreign in (26,400):
         store,feeds=_pending_files(tmp_path/str(foreign),foreign)
         try:
-            item=store.db.execute('SELECT id FROM items_read WHERE feed_id = %s LIMIT 1',(feeds[0],)).fetchone()[0]
+            item=store.db.execute(owned_ids('= %s')+' LIMIT 1',(feeds[0],feeds[0])).fetchone()[0]
             with measure_reads(store.db) as work:
                 with store.db:
                     store.jobs.schedule_media(item)
@@ -70,7 +71,7 @@ def test_scheduling_one_publication_does_not_scan_foreign_media_jobs(tmp_path):
 def test_non_youtube_subtitle_file_uses_the_common_media_worker(tmp_path):
     store,feeds=_pending_files(tmp_path,1)
     try:
-        row=store.db.execute("SELECT m . id , m . publication_id FROM jobs j JOIN media_files m ON m . id = j . item JOIN items_read i ON i . id = m . publication_id WHERE j . kind = 'download_media' AND i . feed_id = %s ORDER BY j . id LIMIT 1",(feeds[0],)).fetchone()
+        row=store.db.execute("SELECT m . id , m . publication_id FROM jobs j JOIN media_files m ON m . id = j . item JOIN feed_publications i ON i . publication_id = m . publication_id AND i.is_primary WHERE j . kind = 'download_media' AND i . feed_id = %s ORDER BY j . id LIMIT 1",(feeds[0],)).fetchone()
         with store.db:
             item=store.db.execute('SELECT content FROM publications WHERE id = %s',(row['publication_id'],)).fetchone()
             content=json.loads(item['content'])
@@ -127,7 +128,7 @@ def test_readiness_waits_for_viewed_publication_cleanup(tmp_path):
     try:
         with store.db:
             store.db.execute("UPDATE jobs SET status='done' WHERE kind='fetch'")
-        item=store.db.execute('SELECT id FROM items_read WHERE feed_id = %s LIMIT 1',(feeds[0],)).fetchone()[0]
+        item=store.db.execute(owned_ids('= %s')+' LIMIT 1',(feeds[0],feeds[0])).fetchone()[0]
         assert store.ready_sources([feeds[0]])==1
         store.viewed(item)
         with store.db:store.jobs.reconcile_cleanup()

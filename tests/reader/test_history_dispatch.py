@@ -6,6 +6,7 @@ import psycopg
 
 import pytest
 
+from oko.storage.publication_owners import owner_expr, owned_ids
 from tests.support.storage import Store
 from tests.support.postgres_work import measure_reads
 from tests.support.library_templates import templates
@@ -96,7 +97,7 @@ def test_foreign_cancelled_history_does_not_add_linear_dispatch_work(tmp_path, a
                 store.db.execute("INSERT INTO jobs(kind,item) VALUES ('fetch','live')")
                 if analyze:
                     analyze_schema(store.db)
-            assert store.db.execute("SELECT count(*) FROM items_read WHERE feed_id='archive' AND viewed=1").fetchone()[0] == 10000
+            assert store.db.execute(f"SELECT count(*) FROM ({owned_ids('= %s')}) owner JOIN publications i ON i.id=owner.id WHERE i.viewed=1", ('archive','archive')).fetchone()[0] == 10000
             assert store.db.execute("SELECT count(*) FROM jobs WHERE kind='fetch' AND status='done'").fetchone()[0] == 10000
             assert store.db.execute("SELECT count(*) FROM history_members WHERE feed='archive'").fetchone()[0] == count
             with measure_reads(store.db) as work:

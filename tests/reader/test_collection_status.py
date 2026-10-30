@@ -1,4 +1,5 @@
 """Collection progress and original request diagnostics through the reader HTTP interface."""
+from oko.storage.publication_owners import owner_expr, owned_ids
 from tests.support.cards import read_all_cards
 import threading
 import asyncio
@@ -162,7 +163,7 @@ def test_collection_summary_batches_attempts_and_details_ignore_other_feeds(tmp_
         with store.db:
             jobs = store.db.execute("SELECT id,item,generation FROM jobs WHERE kind='fetch'").fetchall()
             for job in jobs:
-                feed = store.db.execute('SELECT feed_id FROM items_read WHERE id = %s', (job['item'],)).fetchone()[0]
+                feed = store.db.execute(f"SELECT {owner_expr('i')} AS feed_id FROM publications i WHERE i.id = %s", (job['item'],)).fetchone()[0]
                 error = dict(attempt_id=f"{job['id']}:{job['generation']}", operation_id='fetch:'+job['item'],
                              occurred_at='2026-01-01T00:00:00Z', error_type='SourceError', message='Synthetic failure',
                              traceback='Synthetic traceback\n' * 1000, source='server', message_truncated=False,

@@ -3,6 +3,7 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
+from oko.storage.publication_owners import owner_expr
 from tests.support.storage import Store
 from tests.support.postgres_work import measure_reads, scan_rows
 from tests.support.reader import HEADERS
@@ -92,7 +93,7 @@ def test_unviewed_index_bounds_archive_work_and_survives_reopen(tmp_path):
     for _ in range(2):
         store = Store(tmp_path, lambda _: None)
         with measure_reads(store.db) as work:
-            rows = store.db.execute('SELECT id,feed_id FROM items_read WHERE viewed=0 ORDER BY published DESC').fetchall()
+            rows = store.db.execute(f"SELECT i.id,{owner_expr('i')} AS feed_id FROM publications i WHERE i.viewed=0 ORDER BY i.published DESC").fetchall()
         assert len(rows) == 100
         assert rows[0]['id'] == 'archive-00099'
         assert work.rows < 2000, work

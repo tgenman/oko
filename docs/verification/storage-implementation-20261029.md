@@ -1034,3 +1034,19 @@ primary, cleanup and ownerless cases. The temporary-copy regression passed
 and the complete-field comparison. Mypy passed on 158 files. Thirty-two
 Playwright reading/status scenarios passed and an opened-material screenshot
 was inspected. Other consumers of `items_read` remain; no migration was added.
+
+
+Migration 063 removes the last publication compatibility view, `items_read`,
+after the remaining callers were moved to publications, memberships and
+cleanup Jobs. Synthetic upgrade tests preserve primary, cleanup and ownerless
+identities and verify transactional rollback; catalog checks found no views or
+non-internal triggers in the synthetic schema. A first archive-cost test used a
+join that scanned 20,100 relation rows; using indexed owner lookups instead
+passed the existing bounded-work test on the 20,000-publication fixture.
+
+The temporary-copy suites passed 130 migration and 201 application tests, plus
+reading and readiness cost checks. The task checkout passed 191 tests and three
+additional catalog/migration cases. Mypy passed on 158 files; 32 Playwright
+reading/status scenarios passed and an opened-material screenshot was inspected.
+No working database was migrated. Status GET still reconciles remaining problems;
+physical transitional fields and other final requirements also remain.

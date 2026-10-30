@@ -3,6 +3,7 @@
 Mutations participate in the caller's transaction; no external work happens here.
 """
 from oko.storage.job_writes import execute as job_write
+from oko.storage.publication_owners import owner_expr
 from oko.storage.database import expect_row
 from typing import TYPE_CHECKING
 
@@ -19,7 +20,7 @@ def interrupt(store: 'Store', feeds: set[str] | None = None, *, backoff: bool = 
     initial = store.subscriptions.retry_settings()['initial_seconds']
     for row in store.db.execute(f"SELECT * FROM jobs WHERE status = 'running' AND {_TARGET}").fetchall():
         owner = store.media.owner(row['item']) if row['kind']=='download_media' else row['item']
-        feed = store.db.execute('SELECT feed_id FROM items_read WHERE id = %s', (owner,)).fetchone()
+        feed = store.db.execute(f"SELECT {owner_expr('i')} AS feed_id FROM publications i WHERE i.id = %s", (owner,)).fetchone()
         if feeds is not None and (row['item'] not in feeds if row['kind']=='discover' else feed is None or feed[0] not in feeds):
             continue
         until = (max(row['retry_at'] or 0, store.wall_clock()+max(initial,row['retry_delay'])) if backoff

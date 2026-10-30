@@ -1,4 +1,5 @@
 """Current reading composition; no persisted snapshot or lifecycle ownership."""
+from oko.storage.publication_owners import owner_expr
 from oko.storage.database import expect_row
 from oko.storage.reading import reading_snapshot
 from dataclasses import dataclass
@@ -46,7 +47,7 @@ class ReadingComposition:
             'feed': 'EXISTS (SELECT 1 FROM feed_publications m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE m.publication_id=i.id AND m.feed_id=%(owner)s)',
             'folder': 'EXISTS (SELECT 1 FROM feed_publications m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE m.publication_id=i.id AND owner_feed.folder_id=%(owner)s)',
         }[scope]
-        selected=f"SELECT i.id, i.published, i.published_known FROM items_read i JOIN feeds f ON f.id=i.feed_id WHERE i.viewed=0 AND (%(hidden)s=1 OR i.status IS DISTINCT FROM 'filter_out') AND {membership}"
+        selected=f"SELECT i.id, i.published, i.published_known FROM publications i JOIN feeds f ON f.id={owner_expr('i')} WHERE i.viewed=0 AND (%(hidden)s=1 OR i.status IS DISTINCT FROM 'filter_out') AND {membership}"
         cte=f"WITH selected AS ({selected}), ordered AS (SELECT id, CASE WHEN published_known=0 THEN 1 ELSE 0 END AS missing, CASE WHEN published_known=0 THEN 0 WHEN %(sort)s='oldest' THEN published ELSE -published END AS stamp FROM selected)"
         args=dict(owner=target.get('feed_id',target.get('folder_id','')),sort=options['sort'],hidden=int(options['show_hidden']),cursor=cursor,limit=limit+1)
         db=self._store.db
@@ -78,7 +79,7 @@ class ReadingComposition:
     def _contents(self, owner: str, scope: str) -> FolderContents:
         self._store.subscriptions.check_owner(scope, owner)
         condition = 'm . feed_id = %s' if scope == 'feed' else 'f . folder_id = %s'
-        rows = list(self._store.db.execute(f'SELECT DISTINCT i . id , i . members , i . feed_id FROM items_read i JOIN feed_publications m ON m . publication_id = i . id JOIN feeds f ON f . id = m . feed_id WHERE i . viewed = 0 AND {condition} ORDER BY i . id', (owner,)))
+        rows = list(self._store.db.execute(f'SELECT DISTINCT i . id , i . members , {owner_expr("i")} AS feed_id FROM publications i JOIN feed_publications m ON m . publication_id = i . id JOIN feeds f ON f . id = m . feed_id WHERE i . viewed = 0 AND {condition} ORDER BY i . id', (owner,)))
         # Pending and damaged publications both have a visible card. Completion
         # still captures every member, including those with no current feed.
         return FolderContents(tuple((row['id'], row['members']) for row in rows),

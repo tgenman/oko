@@ -1,6 +1,6 @@
 """Attempt identity, conditional transitions and saved execution parameters."""
 from oko.storage.job_writes import execute as job_write
-from oko.storage.publication_owners import owned_ids
+from oko.storage.publication_owners import owned_ids, owner_expr
 from oko.storage.database import expect_row, Database, Row
 import json
 import shutil
@@ -253,8 +253,8 @@ class JobRepository:
                 SELECT m.id FROM publications i JOIN feed_publications owner ON owner.publication_id=i.id AND owner.is_primary AND owner.is_unviewed JOIN media_files m ON m.publication_id=i.id
                     WHERE i.viewed=0 AND owner.feed_id IN ({placeholders})
                 UNION SELECT m.id FROM publications root JOIN feed_publications owner ON owner.publication_id=root.id AND owner.is_primary AND owner.is_unviewed JOIN publication_links l ON l.source_publication_id=root.id
-                    JOIN items_read i ON i.id=l.target_publication_id JOIN media_files m ON m.publication_id=i.id
-                    WHERE root.viewed=0 AND owner.feed_id IN ({dependency_keys}) AND i.viewed=0 AND i.feed_id IS NULL)"""
+                    JOIN publications i ON i.id=l.target_publication_id JOIN media_files m ON m.publication_id=i.id
+                    WHERE root.viewed=0 AND owner.feed_id IN ({dependency_keys}) AND i.viewed=0 AND NOT EXISTS (SELECT 1 FROM feed_publications own WHERE own.publication_id=i.id AND own.is_primary))"""
         else:
             available = feeds if feeds is not None else [source_feed]
             placeholders = ','.join('%s' for _ in available) or "''"
@@ -649,7 +649,7 @@ class JobRepository:
     def retry_media(self, item: str, *, revalidate_ready: bool = True) -> None:
         """Manual retry preserves source deadlines and the accumulated backoff."""
         store = self.store
-        owner=store.db.execute('SELECT platform , feed_id FROM items_read WHERE id = %s',(item,)).fetchone()
+        owner=store.db.execute(f"SELECT i.platform, {owner_expr('i')} AS feed_id FROM publications i WHERE i.id = %s",(item,)).fetchone()
         captions_allowed=not owner or owner['platform']!='youtube' or store.subscriptions.youtube_theses(owner['feed_id'])
         rows = store.db.execute("SELECT j . * , m . resource_key , m . status AS media_status FROM jobs j JOIN media_files m ON m . id = j . item WHERE m . publication_id = %s AND j . kind = 'download_media' AND ( j . status IN ( 'failed' , 'unavailable' , 'pending' ) OR j . status = 'done' AND m . status = 'unavailable' )", (item,)).fetchall()
         for row in rows:
@@ -681,7 +681,7 @@ class JobRepository:
 
     def revalidate_media(self, identity: str, *, manual: bool = True) -> None:
         store=self.store
-        row=store.db.execute("SELECT m . resource_key , i . platform , i . feed_id FROM media_files m JOIN items_read i ON i . id = m . publication_id WHERE m . id = %s AND m . status = 'ready' AND i . viewed = 0",(identity,)).fetchone()
+        row=store.db.execute(f"SELECT m.resource_key, i.platform, {owner_expr('i')} AS feed_id FROM media_files m JOIN publications i ON i.id=m.publication_id WHERE m.id = %s AND m.status = 'ready' AND i.viewed = 0",(identity,)).fetchone()
         if row is None or row['resource_key']=='youtube:subtitles' and not store.subscriptions.youtube_theses(row['feed_id']):
             return
         job_write(store.db, "INSERT INTO jobs ( kind , item , manual_once , queued_wall ) VALUES ( 'download_media' , %s , 1 , extract(epoch FROM clock_timestamp()) ) ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , manual_once = 1 , generation = jobs . generation + 1 , next = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . next ELSE 0 END , retry_at = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . retry_at ELSE NULL END WHERE jobs . status IN ( 'done' , 'cancelled' ) OR ( %s = 1 AND jobs . status IN ( 'failed' , 'unavailable' ) )",

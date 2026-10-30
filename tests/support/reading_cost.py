@@ -4,6 +4,7 @@ from contextvars import ContextVar
 import time
 
 from oko.collection.contracts import Material, Publication
+from oko.storage.publication_owners import owner_expr, owned_ids
 from tests.support.storage import Store
 from oko.subscriptions.subscriptions import AddFeed
 from tests.support.app import create_app
@@ -41,7 +42,7 @@ def build_library(root, counts):
             discovered(store,[publication_packet(Publication(str(n), f'https://example.org/{index}/{n}', n),
                               Material(f'Video {n}', '', captions='not_requested', description='Synthetic video'),needs_fetch=True)
                               for n in range(count)], '{}', job, feed)
-            items.append(store.db.execute('SELECT id FROM items_read WHERE feed_id=%s ORDER BY id', (feed,)).fetchone()[0])
+            items.append(store.db.execute(owned_ids('= %s')+' ORDER BY id', (feed,feed)).fetchone()[0])
         store.set_work_enabled(False)
     finally:
         store.db.close()

@@ -1,3 +1,4 @@
+from oko.storage.publication_owners import owner_expr
 from tests.support.storage import analyze
 from tests.support.collection_acceptance import discovered
 from tests.support.source import publication_packet
@@ -30,7 +31,7 @@ def archive_evidence():
       s.db.execute("INSERT INTO jobs(kind,item) VALUES ('filter','pending')")
       analyze(s.db)
      operations={
-      'unviewed':('SELECT id,feed_id FROM items_read WHERE viewed=0 ORDER BY published DESC',()),
+      'unviewed':(f"SELECT i.id,{owner_expr('i')} AS feed_id FROM publications i WHERE i.viewed=0 ORDER BY i.published DESC",()),
       'history_point':('SELECT * FROM history_members WHERE item=%s',('archive-100',)),
       'job_point':('SELECT * FROM jobs WHERE item=%s',('archive-100',)),
       'pending':("SELECT id FROM jobs WHERE status='pending' AND next<=%s ORDER BY next,id LIMIT 1",(0,))}

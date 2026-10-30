@@ -321,7 +321,7 @@ def test_source_deletion_migration_preserves_marker_in_publication(connections):
         db.execute("INSERT INTO items(id,platform,external_id) VALUES ('gone','rss','gone'),('present','rss','present')")
         db.execute("INSERT INTO source_deleted VALUES ('gone')")
         migrate(db, MIGRATIONS)
-        assert db.execute('SELECT id,source_deleted FROM items_read ORDER BY id').fetchall() == [('gone', True), ('present', False)]
+        assert db.execute('SELECT id,source_deleted FROM publications ORDER BY id').fetchall() == [('gone', True), ('present', False)]
         assert db.execute("SELECT to_regclass('source_deleted')").fetchone() == (None,)
         names = ['reader_v_deleted_delete','reader_v_deleted_insert','reader_v_deleted_update']
         assert db.execute('SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname = ANY(%s)', (names,)).fetchone() == (0,)
@@ -1053,7 +1053,7 @@ def test_publication_table_rename_preserves_data_and_views(connections):
         migrate(db,MIGRATIONS)
         assert db.execute("SELECT to_regclass('items'),to_regclass('publications')").fetchone() == (None,'publications')
         assert db.execute("SELECT url,content FROM publications WHERE id='item'").fetchone() == ('https://example.test','{"blocks":[]}')
-        assert db.execute("SELECT feed_id FROM items_read WHERE id='item'").fetchone() == ('feed',)
+        assert db.execute("SELECT feed_id FROM feed_publications WHERE publication_id='item' AND is_primary").fetchone() == ('feed',)
         verify(db,MIGRATIONS)
 
 
@@ -1276,4 +1276,44 @@ def test_explicit_owner_preserves_view_owner_and_cleanup(connections):
         assert after == before
         different=db.execute("SELECT count(*) FROM items_read old JOIN publications i ON i.id=old.id WHERE to_jsonb(old) IS DISTINCT FROM to_jsonb(i) || jsonb_build_object('feed_id',"+owner_expr('i')+")").fetchone()[0]
         assert different == 0
+        verify(db,MIGRATIONS[:62])
+
+
+def test_last_read_view_removal_preserves_all_publication_owners(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    from oko.storage.publication_owners import owner_expr
+    with connections() as db:
+        migrate(db, MIGRATIONS[:62])
+        db.execute("INSERT INTO feeds(id,platform,external_id) VALUES ('first','rss','https://first.test'),('second','rss','https://second.test')")
+        db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('primary','rss','primary',0),('cleanup','rss','cleanup',1),('orphan','rss','orphan',0)")
+        db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('first','primary',true,true),('second','primary',false,true)")
+        db.execute("INSERT INTO jobs(kind,item,payload,status) VALUES ('delete','cleanup','{\"cleanup_feed\":\"first\"}','pending')")
+        before=db.execute('SELECT id,feed_id,viewed FROM items_read ORDER BY id').fetchall()
+        migrate(db,MIGRATIONS)
+        assert db.execute("SELECT to_regclass('items_read')").fetchone()[0] is None
+        assert db.execute('SELECT i.id,'+owner_expr('i')+' AS feed_id,i.viewed FROM publications i ORDER BY i.id').fetchall() == before
+        assert db.execute('SELECT count(*) FROM feed_publications').fetchone()[0] == 2
+        assert db.execute("SELECT count(*) FROM jobs WHERE kind='delete'").fetchone()[0] == 1
         verify(db,MIGRATIONS)
+
+
+def test_last_read_view_removal_rolls_back_on_failure(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db,MIGRATIONS[:62])
+        failing=Migration(63,MIGRATIONS[62].name,MIGRATIONS[62].sql+'; SELECT missing_column FROM publications')
+        with pytest.raises(psycopg.errors.UndefinedColumn):
+            migrate(db,(*MIGRATIONS[:62],failing))
+        assert db.execute("SELECT to_regclass('items_read')").fetchone()[0] is not None
+        assert db.execute('SELECT max(version) FROM oko_schema_migrations').fetchone()[0] == 62
+        verify(db,MIGRATIONS[:62])
+
+
+def test_current_schema_has_no_legacy_publication_views(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db,MIGRATIONS)
+        names=('items_read','items_by_feed','unviewed_items_by_feed','reading_memberships')
+        assert db.execute('SELECT viewname FROM pg_views WHERE schemaname=current_schema() AND viewname=ANY(%s)', (list(names),)).fetchall() == []
+        assert db.execute('SELECT viewname FROM pg_views WHERE schemaname=current_schema()').fetchall() == []
+        assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND NOT t.tgisinternal").fetchone()[0] == 0
