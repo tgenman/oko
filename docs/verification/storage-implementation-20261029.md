@@ -772,3 +772,39 @@
   stop migration without rewriting them. The relevant migration, worker, history,
   deletion and recovery suites passed 298 tests and types; three Playwright cases
   passed and the collection screenshot was inspected.
+
+### Follow-up checks on 30 October
+
+The following are focused checks against synthetic PostgreSQL and temporary
+files, not evidence of deployment or a passing full suite:
+
+- Media attempts use distinct final keys. A retry no longer overwrites an
+  uncommitted file; 44 media and YouTube tests passed on the redesign branch.
+- Processor configuration and processing reconciliation now share a
+  transaction. The rollback scenario and 64 settings/transaction tests passed.
+- A confirmed title change invalidates old results, while a YouTube metadata
+  change keeps results based on unchanged captions. Processing and YouTube:
+  98 tests passed; rollback is covered.
+- Linked ownership and completion changes reconcile parent Jobs atomically.
+  The 99-test affected run passed, followed by 20 focused cases after batching
+  parent lookup. The privacy change and its rollback were exercised.
+- Missing subtitles are marked pending and re-enqueued with their owner; restart
+  before and after repair and rollback were checked. The affected run passed
+  119 tests; the focused restart cases and an HTTP re-download case also passed.
+- Changing feed processing rules or folder no longer cancels collection. The
+  affected run passed 119 tests; 38 cases passed after refining unchanged fields.
+- Persisted media keys are constrained to the managed media directory. A
+  synthetic HTTP request for an outside file returned 404, and 52 media/reading
+  tests passed. This is not a claim about adversarial filesystem races.
+- Discovery/fetch outcomes and successful media outcomes are committed with the
+  accepted result. Failures and their diagnostics share a transaction; fault
+  tests cover rollback and a stopped process. Affected collection runs passed
+  119 tests, and media runs passed 50, 29 and 38 tests for their respective
+  snapshots. The release-manifest fixture was updated to schema 58; 48 release
+  tests passed.
+- Changing only the summary prompt leaves the completed filter Job unchanged;
+  157 processing/settings tests and the focused post-reconciliation case passed.
+
+The full run started on commit `9594f1c9` separately; its final result is not
+included here until the run completes. Queue cutover, source identity cutover,
+review and publication remain unresolved as described above.
