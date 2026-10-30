@@ -752,7 +752,6 @@ def test_profile_check_does_not_load_unrelated_feed_details(tmp_path, settings_d
 def test_profile_problem_order_is_stable_across_feed_batches(tmp_path, settings_database):
     import json
     from oko.services.connections import ConnectionService
-    from oko.storage.reading import reading_snapshot
     from tests.support.storage import Store
     store=Store(tmp_path,lambda _:None,database_url=settings_database)
     try:
@@ -764,8 +763,7 @@ def test_profile_problem_order_is_stable_across_feed_batches(tmp_path, settings_
                 store.db.execute('INSERT INTO telegram_bindings(feed,binding) VALUES (%s,%s)',(feed,json.dumps(dict(kind='client',role='personal',account_user_id='101',peer_id=feed))))
         assert not ConnectionService(lambda:store).checked('personal',1,202,2)
         saved=json.loads(store.db.execute("SELECT body FROM reader_problems WHERE identity='profile:personal' AND finished IS NULL").fetchone()[0])
-        with reading_snapshot():
-            candidate=next(c for c in store.problems.candidates(2) if c['id']=='profile:personal')
+        candidate=next(c for c in store.problems.snapshot(2)['current'] if c['code']=='account_identity_mismatch')
         assert saved['objects']==candidate['objects']
         assert len(saved['objects'])==405
     finally:
@@ -1050,5 +1048,50 @@ def test_recovered_finished_action_for_removed_feed_is_irrelevant(tmp_path, sett
         store.db.close()
         store = Store(tmp_path, lambda _: None, database_url=settings_database)
         assert store.db.execute("SELECT outcome FROM reader_problems WHERE identity='action:feed-action'").fetchone()['outcome'] == 'irrelevant'
+    finally:
+        store.db.close()
+
+
+def test_status_does_not_recreate_missing_telegram_profile_problem(tmp_path, settings_database):
+    import json
+    from oko.services.connections import ConnectionService
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('telegram','telegram','Telegram','default','telegram','telegram','connected','[]')")
+            store.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'ready',1)")
+            store.db.execute("INSERT INTO telegram_bindings(feed,binding) VALUES ('telegram',%s)", (json.dumps(dict(kind='client',role='personal',account_user_id='101',peer_id='123')),))
+        assert not ConnectionService(lambda:store).checked('personal',1,202,2)
+        with store.db:
+            store.db.execute("DELETE FROM reader_problems WHERE identity='profile:personal'")
+        state=store.problems.snapshot(3)
+        assert not any(problem['code'] == 'account_identity_mismatch' for problem in state['current'])
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='profile:personal'").fetchone() is None
+        store.db.close()
+        store=Store(tmp_path,lambda _:None,database_url=settings_database)
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='profile:personal' AND finished IS NULL").fetchone()
+    finally:
+        store.db.close()
+
+
+def test_saved_profile_problem_suppresses_only_matching_job_problem(tmp_path, settings_database):
+    import json
+    from oko.services.connections import ConnectionService
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('telegram','telegram','Telegram','default','telegram','telegram','connected','[]')")
+            store.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'ready',1)")
+            store.db.execute("INSERT INTO telegram_bindings(feed,binding) VALUES ('telegram',%s)", (json.dumps(dict(kind='client',role='personal',account_user_id='101',peer_id='123')),))
+            store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('discover','telegram','failed','failure','identity-unconfirmed') ON CONFLICT(kind,item) DO UPDATE SET status='failed',error='failure',problem_code='identity-unconfirmed'")
+        service=ConnectionService(lambda:store)
+        assert not service.checked('personal',1,202,2)
+        problems=store.problems.snapshot(2)['current']
+        assert [p['code'] for p in problems] == ['account_identity_mismatch']
+        assert service.checked('personal',1,101,3)
+        problems=store.problems.snapshot(3)['current']
+        assert [p['code'] for p in problems] == ['identity-unconfirmed']
     finally:
         store.db.close()

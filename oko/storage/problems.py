@@ -237,8 +237,9 @@ class Problems:
     def candidates(self, now: float) -> list[dict[str, Any]]:
         current: list[dict[str, Any]] = []
         feeds = {feed['id']: feed for feed in self.store.subscriptions.feeds()}
-        bindings=self.store.subscriptions.telegram.bindings(list(feeds))
-        groups = self.profile_candidates(now,feeds,bindings)
+        profile_feeds = {obj['id'] for row in self.db.execute("SELECT body FROM reader_problems WHERE identity LIKE 'profile:%%' AND finished IS NULL")
+                         for obj in json.loads(row['body'])['objects'] if obj['kind'] == 'feed'}
+        groups: dict[str, dict[str, Any]] = {}
         youtube = self.store.youtube.status(now)
         read_states = {state['feed_id']: state for state in self.store.read_sync.statuses()}
         jobs = self.db.execute("SELECT jobs . * , coalesce ( items . feed_id , media_owner . feed_id , linked_root . feed_id ) AS feed_id , coalesce ( items . viewed , media_owner . viewed ) AS viewed , m . resource_key AS resource_key , coalesce ( linked_root . id , m . publication_id , jobs . item ) AS affected_item FROM jobs LEFT JOIN items_read items ON items . id = jobs . item LEFT JOIN media_files m ON jobs . kind = 'download_media' AND m . id = jobs . item LEFT JOIN items_read media_owner ON media_owner . id = m . publication_id LEFT JOIN publication_links link ON link . target_publication_id = coalesce ( items . id , media_owner . id ) LEFT JOIN items_read linked_root ON linked_root . id = link . source_publication_id AND linked_root . viewed = 0 WHERE ( jobs . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' , 'blocked' ) OR ( jobs . status = 'done' AND jobs . kind = 'fetch' AND jobs . problem_code IS NOT NULL AND jobs . error IS NOT NULL ) ) AND ( jobs . problem_code IS NOT NULL OR jobs . error IS NOT NULL )").fetchall()
@@ -257,7 +258,7 @@ class Problems:
                 continue
             code = code or 'work-' + job['kind']
             feed = job['feed_id'] or job['item'] or 'demo'
-            if code in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') and any(identity.startswith('profile:') and any(obj['id']==feed for obj in group['objects']) for identity,group in groups.items()):
+            if code in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') and feed in profile_feeds:
                 continue
             if job['viewed'] and job['kind'] not in ('delete','feed-delete'):
                 continue
@@ -440,7 +441,7 @@ class Problems:
             added: list[tuple[str,str,str,str,float]] = []
             changed = False
             for row in existing.values():
-                if row['identity'] not in identities and row['identity'] != 'processor:codex-choice' and not row['identity'].startswith('action:'):
+                if row['identity'] not in identities and row['identity'] != 'processor:codex-choice' and not row['identity'].startswith(('action:', 'profile:')):
                     body = json.loads(row['body'])
                     irrelevant = body['code'] == 'codex-choice' and self.store.codex_config() is None
                     irrelevant = irrelevant or any(obj['kind'] == 'material' and self.store.publications.source_deleted(obj['id']) for obj in body['objects'])

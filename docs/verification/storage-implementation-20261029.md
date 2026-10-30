@@ -962,3 +962,15 @@ On synthetic PostgreSQL, 115 settings, status and transaction tests passed in
 the task checkout. Mypy passed on 157 files. Eight Playwright status and model
 settings scenarios passed, and the status screenshot was inspected. Other
 problem categories still depend on status reconciliation.
+
+
+Profile problems are now read from producer-owned records instead of being
+recomputed by status GET. Job problems suppressed by a current profile problem
+use its saved feed references; once the profile is restored, an independently
+remaining job problem becomes visible. Startup still reconciles profiles, and
+profile checks, bindings and feed deletion retain their transactional updates.
+
+A synthetic checkout run passed 76 settings, status and Telegram tests; an
+expanded temporary-copy run passed 130 tests. Mypy passed on 157 files. Seven
+Playwright Telegram and status scenarios passed, and the Telegram profile
+screenshot was inspected. Status GET still reconciles other problem categories.
