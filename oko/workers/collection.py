@@ -1,6 +1,7 @@
 """Collection cron owns source/media attempts and their adapter calls."""
 from oko.collection.request_observation import Capture
 import asyncio
+from copy import deepcopy
 from datetime import datetime,timezone
 from collections.abc import Awaitable, Callable
 import secrets
@@ -201,18 +202,21 @@ class CollectionWorker:
         attempt = self.jobs._collection_active.get(job.id)
         if not attempt or attempt.job.generation != job.generation:
             return
-        del self.jobs._collection_active[job.id]
         capture = attempt.capture
         details = capture.error or (exception_details(error) if error else None)
         if isinstance(error, SourceError) and error.remote_type:
             details = dict(error_type=error.remote_type, message=error.remote_message, traceback=error.remote_traceback, origin='worker')
         observation = self.clean_collection(dict(error=details, requests=capture.requests, request_count=capture.request_count))
-        current.jobs.collection_finish(job, attempt.feed, attempt.saved, max(0., self._clock()-attempt.started), observation)
-        if self.jobs.metrics:
-            from oko.observability import event
-            elapsed = max(0., self._clock()-attempt.started)
-            self.jobs.metrics.attempt(job.kind, 'error' if error else 'returned', elapsed)
-            event('job_finished', job_id=job.id, kind=job.kind, level='error' if error else 'info', error=error, elapsed=elapsed)
+        elapsed = max(0., self._clock()-attempt.started)
+        current.jobs.collection_finish(job, attempt.feed, deepcopy(attempt.saved), elapsed, observation)
+        def committed() -> None:
+            if self.jobs._collection_active.get(job.id) is attempt:
+                del self.jobs._collection_active[job.id]
+            if self.jobs.metrics:
+                from oko.observability import event
+                self.jobs.metrics.attempt(job.kind, 'error' if error else 'returned', elapsed)
+                event('job_finished', job_id=job.id, kind=job.kind, level='error' if error else 'info', error=error, elapsed=elapsed)
+        current.db.after_commit(committed)
 
     async def _execute(self, job: Job) -> None:
         capture = Capture()
@@ -281,12 +285,12 @@ class CollectionWorker:
                             current.jobs.checkpoint('collection_after_result')
                             current.jobs.finish(job)
                             current.jobs.checkpoint('collection_after_finish')
+                            self._finish_collection(job, current, collection_error)
                             if outcome.continuation is not None:
                                 delay = outcome.continuation
                                 current.jobs.enqueue_discovery(feed, self._clock() + delay if delay else 0)
                                 current.jobs.checkpoint('collection_after_continuation')
                         self.service.feed_status(feed, error=None, gap=outcome.observation.gap, changes=outcome.observation.changes)
-                        self._finish_collection(job, current, collection_error)
             elif publication:
                 if linked:
                     fetched=await self._collection.article_source().fetch(publication)
@@ -312,10 +316,10 @@ class CollectionWorker:
                             else:
                                 current.jobs.finish(job)
                             current.jobs.checkpoint('collection_after_finish')
+                            self._finish_collection(job, current, collection_error)
                         self._account_wait(feed, material.collection_error, job)
                         current.jobs.sync_reads()
                         self.service.feed_status(feed, error=None, gap=fetched.observation.gap, changes=fetched.observation.changes)
-                        self._finish_collection(job, current, collection_error)
         except CaptionsDeferred:
             async with self.execution._actions:
                 if current and self.execution._store is current and not self.stopped:

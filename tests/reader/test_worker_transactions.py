@@ -1314,6 +1314,7 @@ def test_discovery_page_and_continuation_roll_back_together(tmp_path):
         asyncio.run(worker._execute(job))
         assert store.db.execute("SELECT cursor FROM feeds WHERE id='demo'").fetchone()[0] == ''
         assert store.db.execute("SELECT 1 FROM publications WHERE url='https://example.org/next'").fetchone() is None
+        assert not store.db.execute("SELECT last_collection_result FROM feeds WHERE id='demo'").fetchone()[0].get('success_at')
         assert store.db.execute("SELECT status FROM jobs WHERE id=%s", (job.id,)).fetchone()[0] != 'done'
     finally:
         store.db.close()
@@ -1445,5 +1446,36 @@ def test_missing_subtitle_repair_is_rediscovered_after_restart(tmp_path):
         store = Store(tmp_path, lambda _: None)
         assert store.db.execute("SELECT status FROM media_files WHERE id='missing-caption'").fetchone()[0] == 'pending_download'
         assert store.db.execute("SELECT status FROM jobs WHERE kind='download_media' AND item='missing-caption'").fetchone()[0] == 'pending'
+    finally:
+        store.db.close()
+
+
+def test_discovery_page_saves_success_with_its_continuation_atomically(tmp_path, monkeypatch):
+    from oko.collection.contracts import DiscoveryResult, Publication
+    from tests.support.worker_library import collection_worker
+    class Paginated:
+        changes = None
+        async def discover(self, cursor):
+            return DiscoveryResult((Publication('next','https://example.org/next',123,Material('Next','Synthetic page')),),
+                                   'page-two',continuation=30)
+    store, _, _, _ = worker_library(tmp_path)
+    try:
+        with store.db:
+            store.db.execute("UPDATE feeds SET cursor='',last_collection_result='{}'::jsonb WHERE id='demo'")
+            store.jobs.enqueue_discovery()
+        job=store.jobs.next_job(store.clock(),feeds=['demo'])
+        assert job and job.kind=='discover'
+        worker=collection_worker(tmp_path,store,StructuredSource(Paginated()))
+        class ProcessStopped(BaseException):
+            pass
+        def stop_after_commit(*args, **kwargs):
+            raise ProcessStopped()
+        monkeypatch.setattr(worker.service, 'feed_status', stop_after_commit)
+        with pytest.raises(ProcessStopped):
+            asyncio.run(worker._execute(job))
+        row=store.db.execute("SELECT cursor,last_collection_result FROM feeds WHERE id='demo'").fetchone()
+        assert json.loads(row['cursor'])['synthetic_cursor']=='page-two'
+        assert row['last_collection_result'].get('success_at')
+        assert store.db.execute("SELECT status FROM jobs WHERE id=%s", (job.id,)).fetchone()[0]=='pending'
     finally:
         store.db.close()
