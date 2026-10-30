@@ -681,7 +681,7 @@ def test_telegram_profile_problem_rolls_back_with_identity_check(tmp_path, setti
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('telegram','telegram','Telegram','default','telegram','telegram','connected','[]')")
             store.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'ready',1)")
-            store.db.execute("INSERT INTO telegram_bindings(feed,binding) VALUES ('telegram',%s)", (json.dumps(dict(kind='client',role='personal',account_user_id='101',peer_id='123')),))
+            store.subscriptions.telegram.put_binding('telegram',dict(kind='client',role='personal',account_user_id='101',peer_id='123'))
         service=ConnectionService(lambda:store)
         with monkeypatch.context() as patch:
             def fail(*args,**kwargs):
@@ -713,7 +713,7 @@ def test_shared_telegram_profile_problem_keeps_remaining_feed(tmp_path, settings
             store.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'unavailable',1)")
             for feed in ('first','second'):
                 store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES (%s,%s,%s,'default','telegram','telegram','connected','[]')", (feed,feed,feed))
-                store.db.execute('INSERT INTO telegram_bindings(feed,binding) VALUES (%s,%s)',(feed,json.dumps(dict(kind='client',role='personal',account_user_id='101',peer_id=feed))))
+                store.subscriptions.telegram.put_binding(feed,dict(kind='client',role='personal',account_user_id='101',peer_id=feed))
             store.problems.sync_profiles(store.wall_clock(),{'personal'})
         before=store.db.execute("SELECT id,body FROM reader_problems WHERE identity='profile:personal' AND finished IS NULL").fetchone()
         assert {v['id'] for v in json.loads(before['body'])['objects']}=={'first','second'}
@@ -737,7 +737,7 @@ def test_profile_check_does_not_load_unrelated_feed_details(tmp_path, settings_d
             store.db.executemany("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES (%s,%s,%s,'default','rss','rss','connected','[]')", [(f'other-{i}',f'other-{i}',f'Other {i}') for i in range(150)])
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('telegram','telegram','Telegram','default','telegram','telegram','connected','[]')")
             store.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'ready',1)")
-            store.db.execute("INSERT INTO telegram_bindings(feed,binding) VALUES ('telegram',%s)", (json.dumps(dict(kind='client',role='personal',account_user_id='101',peer_id='123')),))
+            store.subscriptions.telegram.put_binding('telegram',dict(kind='client',role='personal',account_user_id='101',peer_id='123'))
         statements=[]
         store.db.set_trace_callback(statements.append)
         try:
@@ -760,7 +760,7 @@ def test_profile_problem_order_is_stable_across_feed_batches(tmp_path, settings_
             for i in range(405):
                 feed=f'feed-{404-i:04}'
                 store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES (%s,%s,%s,'default','telegram','telegram','connected','[]')",(feed,feed,feed))
-                store.db.execute('INSERT INTO telegram_bindings(feed,binding) VALUES (%s,%s)',(feed,json.dumps(dict(kind='client',role='personal',account_user_id='101',peer_id=feed))))
+                store.subscriptions.telegram.put_binding(feed,dict(kind='client',role='personal',account_user_id='101',peer_id=feed))
         assert not ConnectionService(lambda:store).checked('personal',1,202,2)
         saved=json.loads(store.db.execute("SELECT body FROM reader_problems WHERE identity='profile:personal' AND finished IS NULL").fetchone()[0])
         candidate=next(c for c in store.problems.snapshot(2)['current'] if c['code']=='account_identity_mismatch')
@@ -1061,7 +1061,7 @@ def test_status_does_not_recreate_missing_telegram_profile_problem(tmp_path, set
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('telegram','telegram','Telegram','default','telegram','telegram','connected','[]')")
             store.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'ready',1)")
-            store.db.execute("INSERT INTO telegram_bindings(feed,binding) VALUES ('telegram',%s)", (json.dumps(dict(kind='client',role='personal',account_user_id='101',peer_id='123')),))
+            store.subscriptions.telegram.put_binding('telegram',dict(kind='client',role='personal',account_user_id='101',peer_id='123'))
         assert not ConnectionService(lambda:store).checked('personal',1,202,2)
         with store.db:
             store.db.execute("DELETE FROM reader_problems WHERE identity='profile:personal'")
@@ -1084,7 +1084,7 @@ def test_saved_profile_problem_suppresses_only_matching_job_problem(tmp_path, se
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('telegram','telegram','Telegram','default','telegram','telegram','connected','[]')")
             store.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'ready',1)")
-            store.db.execute("INSERT INTO telegram_bindings(feed,binding) VALUES ('telegram',%s)", (json.dumps(dict(kind='client',role='personal',account_user_id='101',peer_id='123')),))
+            store.subscriptions.telegram.put_binding('telegram',dict(kind='client',role='personal',account_user_id='101',peer_id='123'))
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('discover','telegram','failed','failure','identity-unconfirmed') ON CONFLICT(kind,item) DO UPDATE SET status='failed',error='failure',problem_code='identity-unconfirmed'")
         service=ConnectionService(lambda:store)
         assert not service.checked('personal',1,202,2)
