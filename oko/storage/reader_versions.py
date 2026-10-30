@@ -20,8 +20,6 @@ class ReaderVersions:
             self.db.execute("INSERT INTO state(key,value) VALUES ('storage-id',%s) ON CONFLICT DO NOTHING", (json.dumps(str(uuid.uuid4())),))
             for kind, identity in [('status', 'runtime'), ('navigation', 'navigation')]:
                 self.db.execute('INSERT INTO reader_entities VALUES ( %s , %s , 1 , %s ) ON CONFLICT DO NOTHING', (kind, identity, store.wall_clock()))
-            for kind, table in [('feed','feeds'),('folder','folders'),('card','items'),('material','items'),('filter','items'),('theses','items'),('media','items')]:
-                self.db.execute(f'INSERT INTO reader_entities SELECT %s , id , 1 , %s FROM {table} ON CONFLICT DO NOTHING', (kind, store.wall_clock()))
         identity = json.loads(expect_row(self.db.execute("SELECT value FROM state WHERE key='storage-id'").fetchone())[0])
         if not isinstance(identity, str):
             raise ValueError('Invalid storage identity')

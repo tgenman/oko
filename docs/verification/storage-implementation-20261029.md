@@ -464,3 +464,12 @@
   types and ten Playwright scenarios passed, and a Telegram access screenshot was
   inspected. Version 36 has 23 tables and 30 triggers. The remaining status
   owners, processing dirty queues and final review are still open.
+- Migration 037 removes three folder reader-version triggers. Navigation reads
+  folders directly; a folder rename changes navigation but does not invalidate
+  an unchanged runtime status. Startup no longer seeds unused per-resource
+  reader versions across the library.
+- The affected run passed 188 tests and exposed one stale fixture that mutated a
+  Telegram profile through SQL after its trigger had been removed. The fixture
+  now uses the profile owner and the targeted test passed. Types and eight
+  Playwright scenarios passed; the feed-tree screenshot was inspected. Version
+  37 has 23 tables and 27 triggers; final implementation remains open.

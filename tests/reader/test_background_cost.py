@@ -165,7 +165,7 @@ def test_progress_writes_do_not_rebuild_source_configuration(tmp_path):
     store.db.set_trace_callback(None)
     assert not any('FROM feeds' in q for q in queries), queries
     with store.db:
-        store.db.execute("UPDATE telegram_profiles SET user_id=202,state='unavailable'")
+        assert not store.subscriptions.telegram.checked('personal',1,202,11)
     queries.clear()
     store.db.set_trace_callback(queries.append)
     store.jobs.sync_reads()

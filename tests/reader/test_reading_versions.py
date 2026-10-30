@@ -160,6 +160,19 @@ def test_status_etag_tracks_history_member_outcome_without_source_change(tmp_pat
         assert history['history']['progress']['incomplete']==1
 
 
+def test_folder_rename_changes_navigation_without_changing_status(tmp_path):
+    library(tmp_path,[1])
+    app=traced_app(tmp_path)
+    with TestClient(app,headers=HEADERS) as client:
+        wait_for_recovery(app)
+        navigation=client.get('/api/v3/navigation')
+        status=client.get('/api/v3/status/details')
+        folder=navigation.json()['folders'][0]['id']
+        client.portal.call(lambda: app.state.host.require_store().subscriptions.rename_folder(folder,'Renamed folder'))
+        assert client.get('/api/v3/navigation',headers={'If-None-Match':navigation.headers['ETag']}).status_code==200
+        assert client.get('/api/v3/status/details',headers={'If-None-Match':status.headers['ETag']}).status_code==304
+
+
 def test_due_fetch_changes_publication_etag_without_dispatch(tmp_path):
     _,items=library(tmp_path,[1])
     clock=[0.0]

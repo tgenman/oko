@@ -41,4 +41,5 @@ MIGRATIONS = (
     Migration(34, 'history-status', (Path(__file__).parent / 'postgres' / '034-history-status.sql').read_text()),
     Migration(35, 'history-member-status', (Path(__file__).parent / 'postgres' / '035-history-member-status.sql').read_text()),
     Migration(36, 'telegram-read-status', (Path(__file__).parent / 'postgres' / '036-telegram-read-status.sql').read_text()),
+    Migration(37, 'folder-versions', (Path(__file__).parent / 'postgres' / '037-folder-versions.sql').read_text()),
 )
