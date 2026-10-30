@@ -473,3 +473,10 @@
   now uses the profile owner and the targeted test passed. Types and eight
   Playwright scenarios passed; the feed-tree screenshot was inspected. Version
   37 has 23 tables and 27 triggers; final implementation remains open.
+- Migration 038 removes three feed reader-version triggers. Source changes use
+  the owned source revision; title changes update status freshness in the feed
+  owner without invalidating source configuration. Navigation reads live facts.
+- The affected migration, feed, status, Telegram and recovery suites passed 202
+  tests; types and 14 Playwright scenarios passed, and a compact feed-details
+  screenshot was inspected. Version 38 has 23 tables and 24 triggers. Both
+  dirty queues, status reconciliation and final project verification remain open.

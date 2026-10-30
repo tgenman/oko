@@ -3,6 +3,7 @@ from oko.storage.database import expect_row, Connection, Row
 from oko.storage.reading import reading_value
 from oko.storage.settings_repository import SettingsRepository
 from oko.storage.source_configuration import changed as source_changed
+from oko.storage.reader_status import changed as status_changed
 from oko.storage.feed_facts import feed_facts, READER_FEED_COLUMNS
 import json
 import re
@@ -322,6 +323,8 @@ class SubscriptionRepository:
                 self.db.execute('UPDATE feeds SET connection = %s WHERE id = %s', (connection, feed_id))
             if changed:
                 self.details.record(feed_id, 'modified')
+            if 'title' in values and feed.get('title') != values['title']:
+                status_changed(self.db)
             if source_modified:
                 source_changed(self.db)
         return next(f for f in self.feeds() if f['id'] == feed_id)

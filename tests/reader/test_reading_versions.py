@@ -173,6 +173,23 @@ def test_folder_rename_changes_navigation_without_changing_status(tmp_path):
         assert client.get('/api/v3/status/details',headers={'If-None-Match':status.headers['ETag']}).status_code==304
 
 
+def test_feed_rename_updates_status_without_source_revision_change(tmp_path):
+    from oko.subscriptions.subscriptions import FeedPatch
+    feeds,_=library(tmp_path,[1])
+    app=traced_app(tmp_path)
+    with TestClient(app,headers=HEADERS) as client:
+        wait_for_recovery(app)
+        first=client.get('/api/v3/status/details')
+        def rename():
+            store=app.state.host.require_store()
+            before=store.subscriptions.source_revision()
+            store.subscriptions.update_feed(feeds[0],FeedPatch(title='Renamed feed'))
+            return before,store.subscriptions.source_revision()
+        before,after=client.portal.call(rename)
+        assert before==after
+        assert client.get('/api/v3/status/details',headers={'If-None-Match':first.headers['ETag']}).status_code==200
+
+
 def test_due_fetch_changes_publication_etag_without_dispatch(tmp_path):
     _,items=library(tmp_path,[1])
     clock=[0.0]
