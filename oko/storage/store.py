@@ -148,6 +148,7 @@ class Store:
             with self.db:
                 self.problems.recover_processor_duplicates(self.wall_clock())
                 self.problems.finish_processor_change([],None,self.wall_clock())
+            self.problems.recover_processing_problems()
             self.recover_files()
             if self.db.execute(f"SELECT 1 FROM ({owned_ids('= %s')}) owner LIMIT 1", ('demo','demo')).fetchone():
                 self.ensure_demo()
@@ -287,6 +288,10 @@ class Store:
                     publication_links.capture_media_problems(self,effects,{item})
                 if plan.media_problem_children:
                     publication_links.capture_media_problems(self,effects,set(plan.media_problem_children))
+                if plan.processing_problem_exists:
+                    publication_links.capture_processing_problems(self,effects,{item})
+                if plan.processing_problem_children:
+                    publication_links.capture_processing_problems(self,effects,set(plan.processing_problem_children))
                 item_status_changed |= bool(self.db.execute('INSERT INTO publications ( id , source_id , url , published , members , published_known ) VALUES ( %s , %s , %s , %s , %s , %s ) ON CONFLICT DO NOTHING',
                     (item,plan.source_id,publication.url,publication.published,json.dumps(publication.members),publication.published_known)).rowcount)
                 membership=membership_graph.add(self.db,feed,item)

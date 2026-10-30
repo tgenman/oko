@@ -75,6 +75,11 @@ def _stage(store: 'Store', batch: list[str], kind: Kind) -> None:
                 satisfied = repository.satisfied(item,kind)
                 status = 'done' if satisfied else 'pending' if enabled else 'blocked'
                 upsert.append((item,status,json.dumps(dict(input_revision=revision)),json.dumps(dict(signature=signature))))
+    changed=set(unblock)|set(block)|set(cancel)|{row[0] for row in upsert}
+    from oko.domain.collection import CollectionEffects
+    from oko.storage.publication_links import capture_processing_problems
+    effects=CollectionEffects()
+    if changed:capture_processing_problems(store,effects,changed,kinds=(kind,))
     if unblock:
         job_write(store.db, """UPDATE jobs SET status='pending',
             error=CASE WHEN payload::jsonb->>'preclaim_blocked'='true' THEN NULL ELSE error END,
@@ -95,3 +100,6 @@ def _stage(store: 'Store', batch: list[str], kind: Kind) -> None:
                 error=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.error ELSE NULL END,
                 problem_code=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.problem_code ELSE NULL END""",
             (kind,*([row[index] for row in upsert] for index in range(4)),wall,wall,wall))
+
+    if effects.processing_problems_before:
+        store.problems.sync_processing_problems(effects.processing_problems_before,store.wall_clock())

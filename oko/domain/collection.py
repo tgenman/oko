@@ -14,3 +14,5 @@ class CollectionEffects:
     fetch_problems_checked: set[int] = field(default_factory=set)
     media_problems_before: dict[int,list[dict[str,Any]]] = field(default_factory=dict)
     media_problems_checked: set[int] = field(default_factory=set)
+    processing_problems_before: dict[int,list[dict[str,Any]]] = field(default_factory=dict)
+    processing_problems_checked: set[int] = field(default_factory=set)

@@ -93,19 +93,23 @@ class ProcessingState:
                 WHERE m.publication_id=i.id) AS has_owner FROM publications i WHERE i.id=ANY(%s)""", (batch,)).fetchall()
             feedless = [row['id'] for row in rows if not row['has_owner']]
             if feedless:
-                affected=[row['id'] for row in self.store.db.execute("SELECT id FROM jobs WHERE kind IN ('filter','theses') AND item=ANY(%s) AND (processor_visible OR problem_code='processor-config')",(feedless,))]
-                previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
+                processor_affected=[row['id'] for row in self.store.db.execute("SELECT id FROM jobs WHERE kind IN ('filter','theses') AND item=ANY(%s) AND (processor_visible OR problem_code='processor-config')",(feedless,))]
+                processor_previous=self.store.problems.prepare_processor_change(processor_affected,self.store.wall_clock())
+                stage_affected=[row['id'] for row in self.store.db.execute("SELECT id FROM jobs WHERE kind IN ('filter','theses') AND item=ANY(%s) AND problem_code IS NOT NULL AND problem_code<>'' AND problem_code NOT LIKE 'source-%%'",(feedless,))]
+                stage_previous=self.store.problems.saved_processing_candidates(stage_affected)
                 job_write(self.store.db, """UPDATE jobs SET status='cancelled',generation=generation+1,
                     input_snapshot=NULL,error=NULL,problem_code=NULL WHERE item=ANY(%s) AND kind IN ('filter','theses')
                     AND (status IS DISTINCT FROM 'cancelled' OR input_snapshot IS NOT NULL OR error IS NOT NULL OR problem_code IS NOT NULL)""", (feedless,))
-                if affected:
-                    self.store.problems.finish_processor_change(affected,previous,self.store.wall_clock())
+                if processor_affected:
+                    self.store.problems.finish_processor_change(processor_affected,processor_previous,self.store.wall_clock())
                 self.store.db.execute("""UPDATE publications SET filtered_content='{}',summarized_content='{}',
                     processing_metadata=(processing_metadata::jsonb-'filter'-'summary'-'_pass'-'_revision'-'_revision_input')::text,
                     status=CASE WHEN viewed=0 THEN 'ready' ELSE status END WHERE id=ANY(%s)
                     AND (filtered_content IS DISTINCT FROM '{}' OR summarized_content IS DISTINCT FROM '{}'
                          OR processing_metadata::jsonb ?| ARRAY['filter','summary','_pass','_revision','_revision_input']
                          OR (viewed=0 AND status IS DISTINCT FROM 'ready'))""", (feedless,))
+                for job_id,candidates in stage_previous.items():
+                    self.store.problems.sync_processing_problem(job_id,candidates,self.store.wall_clock())
             for row in rows:
                 if row['has_owner']:
                     self.reconcile_accepted_item(row['id'])

@@ -29,6 +29,8 @@ def interrupt(store: 'Store', feeds: set[str] | None = None, *, backoff: bool = 
         previous_fetch=managed_candidates(store,row['id'],store.wall_clock()) if row['kind']=='fetch' and (row['error'] is not None or row['problem_code'] is not None) else []
         from oko.storage.media_job_problems import managed_candidates as media_candidates
         previous_media=media_candidates(store,row['id'],store.wall_clock()) if row['kind']=='download_media' and (row['error'] is not None or row['problem_code'] is not None) else []
+        from oko.storage.processing_job_problems import managed_candidates as processing_candidates
+        previous_processing=processing_candidates(store,row['id'],store.wall_clock()) if row['kind'] in ('filter','theses') and (row['error'] is not None or row['problem_code'] is not None) else []
         job_write(store.db, "UPDATE jobs SET queued_wall=CASE WHEN kind IN ('discover','fetch','download_media') AND status!='pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END, status='pending', generation=generation+1, retry_at=%s, next=%s WHERE id=%s",
             (until,store.clock()+max(0,until-store.wall_clock()) if until else 0,row['id']))
         if row['kind']=='discover' and (row['error'] is not None or row['problem_code'] is not None):
@@ -37,6 +39,8 @@ def interrupt(store: 'Store', feeds: set[str] | None = None, *, backoff: bool = 
             store.problems.sync_fetch(row['id'],previous_fetch,store.wall_clock())
         if previous_media:
             store.problems.sync_media_problem(row['id'],previous_media,store.wall_clock())
+        if previous_processing:
+            store.problems.sync_processing_problem(row['id'],previous_processing,store.wall_clock())
 
 
 def recover(store: 'Store') -> None:
@@ -61,6 +65,8 @@ def fail(store: 'Store', job: 'Job', issue: AdapterIssue, *, cancelled: bool = F
     from oko.storage.media_job_problems import managed_candidates as media_candidates
     previous_media=media_candidates(store,job.id,store.wall_clock()) if job.kind=='download_media' else []
     processor_previous=store.problems.prepare_processor_change([job.id],store.wall_clock())
+    from oko.storage.processing_job_problems import managed_candidates as processing_candidates
+    previous_processing=processing_candidates(store,job.id,store.wall_clock()) if job.kind in ('filter','theses') else []
     row = expect_row(store.db.execute('SELECT retry_delay FROM jobs WHERE id = %s',(job.id,)).fetchone())
     settings = store.subscriptions.retry_settings()
     delay = min(settings['max_seconds'],max(settings['initial_seconds'],row['retry_delay']*2))
@@ -75,3 +81,5 @@ def fail(store: 'Store', job: 'Job', issue: AdapterIssue, *, cancelled: bool = F
         store.problems.sync_fetch(job.id,previous,store.wall_clock())
     if job.kind=='download_media':
         store.problems.sync_media_problem(job.id,previous_media,store.wall_clock())
+    if job.kind in ('filter','theses'):
+        store.problems.sync_processing_problem(job.id,previous_processing,store.wall_clock())

@@ -1225,3 +1225,15 @@ additional writer-path tests passed separately on the exact source snapshot.
 One Starlette/httpx deprecation warning was emitted. This is not full release
 acceptance: other problem categories and final schema requirements remain. No
 working database was migrated.
+
+
+Explicit filter and theses Job problems now use event-owned updates and
+startup recovery; common source/profile codes, processor configuration and
+errors without a code remain on their respective existing paths. Synthetic
+checks cover both stages, transitions to processor errors, graph owner changes,
+legacy records, batch processing, rollback and conditional HTTP. The integrated
+stage/processor/status/worker suite passed 287 PostgreSQL tests, mypy passed
+for ten modules, and 10 Playwright status scenarios passed with screenshot
+inspection. The browser scenarios cover the general panel, not a dedicated
+stage-error flow. One Starlette/httpx deprecation warning was emitted; no
+working database was migrated.

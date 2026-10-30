@@ -39,6 +39,8 @@ class DiscoveryProjection:
     fetch_problem_children: tuple[str,...] = ()
     media_problem_exists: bool = False
     media_problem_children: tuple[str,...] = ()
+    processing_problem_exists: bool = False
+    processing_problem_children: tuple[str,...] = ()
     fingerprint: str | None = None
     content: tuple[dict[str, Any], list[dict[str, Any]]] | None = None
 
@@ -157,6 +159,8 @@ class Publications:
                 (SELECT j.id FROM jobs j WHERE j.kind='delete' AND j.item=publications.id AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)) AS delete_problem_job,
                 EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=publications.id AND m.resource_key IS DISTINCT FROM 'youtube:subtitles' AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%') AS media_problem_exists,
                 ARRAY(SELECT DISTINCT m.publication_id FROM publication_links l JOIN media_files m ON m.publication_id=l.target_publication_id JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE l.source_publication_id=publications.id AND m.resource_key IS DISTINCT FROM 'youtube:subtitles' AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%') AS media_problem_children,
+                EXISTS (SELECT 1 FROM jobs j WHERE j.kind IN ('filter','theses') AND j.item=publications.id AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('processor-config','ai-permission','codex-choice','youtube-admission')) AS processing_problem_exists,
+                ARRAY(SELECT DISTINCT j.item FROM publication_links l JOIN jobs j ON j.kind IN ('filter','theses') AND j.item=l.target_publication_id WHERE l.source_publication_id=publications.id AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('processor-config','ai-permission','codex-choice','youtube-admission')) AS processing_problem_children,
                 (SELECT j.id FROM jobs j WHERE j.kind='fetch' AND j.item=publications.id AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','work-fetch')) AS fetch_problem_job,
                 ARRAY(SELECT j.item FROM LATERAL
                       (SELECT target_publication_id FROM publication_links WHERE source_publication_id=publications.id ORDER BY target_publication_id OFFSET 0) l
@@ -178,6 +182,8 @@ class Publications:
                 plan.fetch_problem_children = tuple(current['fetch_problem_children'])
                 plan.media_problem_exists = bool(current['media_problem_exists'])
                 plan.media_problem_children = tuple(current['media_problem_children'])
+                plan.processing_problem_exists = bool(current['processing_problem_exists'])
+                plan.processing_problem_children = tuple(current['processing_problem_children'])
             described=publication.teaser.adapter_content if publication.teaser else None
             album_changed=bool(current and described and ref.key.platform.value=='telegram'
                 and described.content.get('extra',{}).get('telegram',{}).get('album_id') is not None

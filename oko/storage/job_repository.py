@@ -51,9 +51,9 @@ class JobRepository:
         from oko.storage.media_job_problems import managed_candidates as media_candidates
         previous_media=media_candidates(self.store,job.id,self.store.wall_clock()) if job.kind=='download_media' else []
         discover_before = self.store.db.execute("SELECT problem_code,error FROM jobs WHERE id=%s AND kind='discover'",(job.id,)).fetchone() if job.kind=='discover' else None
-        changed=job_write(self.store.db, "UPDATE jobs SET status = 'done' , error = NULL , problem_code = NULL , manual_once = 0 , retry_at = NULL , retry_delay = 0 , wait_scope = NULL WHERE id = %s AND generation = %s AND status = 'running' AND kind = %s AND item = %s",
-            (job.id,job.generation,job.kind,job.item)).rowcount
-        if changed!=1:
+        changed=job_write(self.store.db, "UPDATE jobs SET status = 'done' , error = NULL , problem_code = NULL , manual_once = 0 , retry_at = NULL , retry_delay = 0 , wait_scope = NULL WHERE id = %s AND generation = %s AND status = 'running' AND kind = %s AND item = %s RETURNING OLD.error AS previous_error, OLD.problem_code AS previous_code",
+            (job.id,job.generation,job.kind,job.item)).fetchone()
+        if changed is None:
             raise JobRejected('Attempt no longer owns this job')
         self.store.problems.finish_processor_change([job.id],processor_previous,self.store.wall_clock())
         if job.kind=='delete' and previous:
@@ -64,6 +64,9 @@ class JobRepository:
             self.store.problems.sync_fetch(job.id,previous_fetch,self.store.wall_clock())
         if job.kind=='download_media' and previous_media:
             self.store.problems.sync_media_problem(job.id,previous_media,self.store.wall_clock(),successful=True)
+        if job.kind in ('filter','theses') and (changed['previous_error'] is not None or changed['previous_code'] is not None):
+            previous_processing=self.store.problems.saved_processing_candidates([job.id]).get(job.id,[])
+            if previous_processing:self.store.problems.sync_processing_problem(job.id,previous_processing,self.store.wall_clock())
         if job.kind=='discover':
             codes=((discover_before['problem_code'] or 'work-discover'),) if discover_before and (discover_before['problem_code'] is not None or discover_before['error'] is not None) else ()
             self.store.problems.sync_discover(job.id,self.store.wall_clock(),previous_codes=codes)
@@ -78,8 +81,12 @@ class JobRepository:
             affected.extend(row['id'] for row in db.execute("SELECT id FROM jobs WHERE kind=%s AND item=ANY(%s) AND (processor_visible OR problem_code='processor-config')",(kind,items[start:start+400])))
         processor_previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
         for item,signature,satisfied,revision in candidates:
-            job=db.execute("SELECT status,payload,problem_code,input_snapshot->>'signature' AS signature FROM jobs WHERE kind=%s AND item=%s",(kind,item)).fetchone()
+            job=db.execute("SELECT status,payload,problem_code,input_snapshot->>'signature' AS signature,id,error FROM jobs WHERE kind=%s AND item=%s",(kind,item)).fetchone()
             previous=job['signature'] if job else None
+            def capture_problem() -> list[dict[str,Any]]:
+                from oko.storage.processing_job_problems import managed_candidates as processing_candidates
+                return processing_candidates(self.store,job['id'],self.store.wall_clock()) if job and job['problem_code'] not in (None,'','processor-config','ai-permission','codex-choice','youtube-admission') and not job['problem_code'].startswith('source-') else []
+            previous_problem: list[dict[str,Any]]=[]
             enabled = processing_input.stage_enabled(self.store, item, kind) if signature is not None else False
             if job and job['status']=='done' and previous is not None and previous==signature:
                 if json.loads(job['payload']).get('input_revision') != revision:
@@ -92,6 +99,7 @@ class JobRepository:
                     if json.loads(job['payload']).get('preclaim_blocked') and not processing_input.can_start(
                             self.store,item,processing_input.processing_feed(self.store,item,kind)):
                         continue
+                    previous_problem=capture_problem()
                     job_write(db, """UPDATE jobs SET status='pending',
                         error=CASE WHEN payload::jsonb->>'preclaim_blocked'='true' THEN NULL ELSE error END,
                         problem_code=CASE WHEN payload::jsonb->>'preclaim_blocked'='true' THEN NULL ELSE problem_code END,
@@ -99,10 +107,13 @@ class JobRepository:
                         WHERE kind=%s AND item=%s AND status='blocked'""", (kind, item))
                     if kind=='filter':self.store.processing.filter_changed(item)
                     self.store.publications.status(item)
+                    if previous_problem:self.store.problems.sync_processing_problem(job['id'],previous_problem,self.store.wall_clock())
                 elif job['status'] == 'pending' and not enabled:
+                    previous_problem=capture_problem()
                     job_write(db, "UPDATE jobs SET status='blocked' WHERE kind=%s AND item=%s AND status='pending'", (kind, item))
                     if kind=='filter':self.store.processing.filter_changed(item)
                     self.store.publications.status(item)
+                    if previous_problem:self.store.problems.sync_processing_problem(job['id'],previous_problem,self.store.wall_clock())
                 continue
             if signature is None and previous is None and (job is None or job[0]=='cancelled'):
                 continue
@@ -111,12 +122,15 @@ class JobRepository:
                     filtering = db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()
                     if filtering and filtering['status'] in ('pending','running'):
                         continue
+                previous_problem=capture_problem()
                 job_write(db, "UPDATE jobs SET status='cancelled', generation=generation+1, error=NULL, problem_code=NULL, input_snapshot=NULL WHERE kind=%s AND item=%s",(kind,item))
                 if kind=='filter' and job:self.store.processing.filter_changed(item)
             else:
+                previous_problem=capture_problem()
                 job_write(db, "INSERT INTO jobs (kind,item,status,payload,input_snapshot) VALUES (%s,%s,%s,%s,%s::jsonb) ON CONFLICT (kind,item) DO UPDATE SET status=excluded.status,payload=excluded.payload,input_snapshot=excluded.input_snapshot,generation=jobs.generation+1,next=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.next ELSE 0 END,error=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.error ELSE NULL END,problem_code=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.problem_code ELSE NULL END",
                     (kind,item,'done' if satisfied else 'pending' if enabled else 'blocked',json.dumps(dict(input_revision=revision)),json.dumps(dict(signature=signature)),self.store.wall_clock(),self.store.wall_clock(),self.store.wall_clock()))
                 if kind=='filter' and job:self.store.processing.filter_changed(item)
+            if previous_problem and job:self.store.problems.sync_processing_problem(job['id'],previous_problem,self.store.wall_clock())
         if affected:
             self.store.problems.finish_processor_change(affected,processor_previous,self.store.wall_clock())
 
@@ -142,10 +156,11 @@ class JobRepository:
     def revoke_changed_running_inputs(self) -> None:
         """Settings writes revoke only running attempts whose stage input changed."""
         from oko.storage.processing_input import signature
-        rows = self.store.db.execute("""SELECT id,kind,item,generation,input_snapshot->>'signature' AS signature
+        rows = self.store.db.execute("""SELECT id,kind,item,generation,error,problem_code,input_snapshot->>'signature' AS signature
             FROM jobs WHERE status='running' AND kind IN ('filter','theses')""").fetchall()
         for row in rows:
             if row['signature'] is None or signature(self.store,row['item'],row['kind']) != row['signature']:
+                previous=self.store.problems.saved_processing_candidates([row['id']]).get(row['id'],[]) if row['error'] is not None or row['problem_code'] is not None else []
                 processor_previous=self.store.problems.prepare_processor_change([row['id']],self.store.wall_clock())
                 changed=job_write(self.store.db, """UPDATE jobs SET status='pending',generation=generation+1,input_snapshot=NULL,
                     next=CASE WHEN wait_scope IS NOT NULL AND retry_at>%s THEN next ELSE 0 END,
@@ -153,19 +168,23 @@ class JobRepository:
                     problem_code=CASE WHEN wait_scope IS NOT NULL AND retry_at>%s THEN problem_code ELSE NULL END
                     WHERE id=%s AND status='running' AND generation=%s""",
                     (self.store.wall_clock(),self.store.wall_clock(),self.store.wall_clock(),row['id'],row['generation'])).rowcount
-                if changed:self.store.problems.finish_processor_change([row['id']],processor_previous,self.store.wall_clock())
+                if changed:
+                    self.store.problems.finish_processor_change([row['id']],processor_previous,self.store.wall_clock())
+                    if previous:self.store.problems.sync_processing_problem(row['id'],previous,self.store.wall_clock())
 
     def retry_processing(self, item: str, kind: Kind) -> bool:
         db=self.store.db
-        before=db.execute("SELECT id,problem_code,processor_visible FROM jobs WHERE kind=%s AND item=%s AND input_snapshot IS NOT NULL",(kind,item)).fetchone()
+        before=db.execute("SELECT id,error,problem_code,processor_visible FROM jobs WHERE kind=%s AND item=%s AND input_snapshot IS NOT NULL",(kind,item)).fetchone()
         if before is None:
             return False
+        stage_previous=self.store.problems.saved_processing_candidates([before['id']]).get(before['id'],[]) if before['error'] is not None or before['problem_code'] is not None else []
         affected=[before['id']] if before['processor_visible'] or before['problem_code']=='processor-config' else []
         previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
         self.store.jobs.forget_execution(kind,item)
         job_write(db, "UPDATE jobs SET status = 'pending' , next = CASE WHEN wait_scope IS NOT NULL THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL THEN retry_at ELSE NULL END , error = CASE WHEN wait_scope IS NOT NULL THEN error ELSE NULL END , generation = generation + 1 WHERE kind = %s AND item = %s",(kind,item))
         if kind=='filter':self.store.processing.filter_changed(item)
         if affected:self.store.problems.finish_processor_change(affected,previous,self.store.wall_clock())
+        if stage_previous:self.store.problems.sync_processing_problem(before['id'],stage_previous,self.store.wall_clock())
         return True
 
     def origin(self, job: Job, signature: str) -> dict[str, Any] | None:
@@ -177,7 +196,9 @@ class JobRepository:
     def fail(self, job: Job, error: str, *, code: str) -> None:
         self.store.jobs.retry(job,self.store.clock(),error,30,code=code)
         if not processing_input.stage_enabled(self.store, job.item, job.kind):
+            previous=self.store.problems.saved_processing_candidates([job.id]).get(job.id,[])
             job_write(self.store.db, "UPDATE jobs SET status='blocked' WHERE id=%s AND generation=%s AND status='pending'", (job.id, job.generation))
+            if previous:self.store.problems.sync_processing_problem(job.id,previous,self.store.wall_clock())
             self.store.publications.status(job.item)
 
     def cancel(self, job: Job) -> None:
@@ -186,21 +207,27 @@ class JobRepository:
         from oko.storage.media_job_problems import managed_candidates as media_candidates
         previous_media=media_candidates(self.store,job.id,self.store.wall_clock()) if job.kind=='download_media' else []
         processor_previous=self.store.problems.prepare_processor_change([job.id],self.store.wall_clock())
+        from oko.storage.processing_job_problems import managed_candidates as processing_candidates
+        previous_processing=processing_candidates(self.store,job.id,self.store.wall_clock()) if job.kind in ('filter','theses') else []
         changed=job_write(self.store.db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 WHERE id = %s AND generation = %s AND status = 'running'",(job.id,job.generation)).rowcount
         if changed:self.store.problems.finish_processor_change([job.id],processor_previous,self.store.wall_clock())
         if changed and job.kind=='filter':self.store.processing.filter_changed(job.item)
         if changed and previous:self.store.problems.sync_fetch(job.id,previous,self.store.wall_clock())
         if changed and previous_media:self.store.problems.sync_media_problem(job.id,previous_media,self.store.wall_clock())
+        if changed and previous_processing:self.store.problems.sync_processing_problem(job.id,previous_processing,self.store.wall_clock())
 
     def block(self, job: Job) -> None:
         from oko.storage.fetch_job_problems import managed_candidates
         previous=managed_candidates(self.store,job.id,self.store.wall_clock()) if job.kind=='fetch' else []
         from oko.storage.media_job_problems import managed_candidates as media_candidates
         previous_media=media_candidates(self.store,job.id,self.store.wall_clock()) if job.kind=='download_media' else []
+        from oko.storage.processing_job_problems import managed_candidates as processing_candidates
+        previous_processing=processing_candidates(self.store,job.id,self.store.wall_clock()) if job.kind in ('filter','theses') else []
         changed=job_write(self.store.db, "UPDATE jobs SET status = 'blocked' WHERE id = %s AND generation = %s AND status = 'running'", (job.id, job.generation)).rowcount
         if changed and job.kind=='filter':self.store.processing.filter_changed(job.item)
         if changed and previous:self.store.problems.sync_fetch(job.id,previous,self.store.wall_clock())
         if changed and previous_media:self.store.problems.sync_media_problem(job.id,previous_media,self.store.wall_clock())
+        if changed and previous_processing:self.store.problems.sync_processing_problem(job.id,previous_processing,self.store.wall_clock())
 
     def manual(self, job: Job) -> bool:
         row=self.store.db.execute('SELECT manual_once FROM jobs WHERE id = %s AND generation = %s',(job.id,job.generation)).fetchone()
@@ -384,28 +411,34 @@ class JobRepository:
                 code = 'ai-permission' if denied else 'processor-config'
                 message = ('Запрещена публичная AI-обработка; выберите локальную модель' if denied
                            else 'Ожидание выбранного обработчика; настройте модель')
+                previous=self.store.problems.saved_processing_candidates([current['id']]).get(current['id'],[]) if current['error'] is not None or current['problem_code'] is not None else []
                 processor_previous=self.store.problems.prepare_processor_change([job['id']],self.store.wall_clock())
                 job_write(db, """UPDATE jobs SET status='pending',next=%s,error=%s,problem_code=%s,
                     payload=jsonb_set(payload::jsonb,'{preclaim_blocked}','true'::jsonb)::text
                     WHERE id=%s AND status='pending'""", (0 if denied else self.store.clock()+30,message,code,job['id']))
                 self.store.problems.finish_processor_change([job['id']],processor_previous,self.store.wall_clock())
+                if previous:self.store.problems.sync_processing_problem(current['id'],previous,self.store.wall_clock())
                 return None
             metadata['_pass'] = dict(feed_id=chosen)
             db.execute('UPDATE publications SET processing_metadata=%s WHERE id=%s', (json.dumps(metadata,ensure_ascii=False),job['item']))
             self.store.processing.reconcile_accepted_item(job['item'])
+            changed_sibling=None
             if job['kind']=='filter' and processing_input.stage_enabled(self.store,job['item'],'theses'):
                 affected=[row['id'] for row in db.execute("SELECT id FROM jobs WHERE kind='theses' AND item=%s AND (processor_visible OR problem_code='processor-config')",(job['item'],))]
-                previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
-                job_write(db, """INSERT INTO jobs(kind,item,status) VALUES ('theses',%s,'blocked')
+                sibling_processor_previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
+                changed_sibling=job_write(db, """INSERT INTO jobs(kind,item,status) VALUES ('theses',%s,'blocked')
                     ON CONFLICT(kind,item) DO UPDATE SET status='blocked'
-                    WHERE jobs.status IN ('pending','cancelled')""", (job['item'],))
-                if affected:self.store.problems.finish_processor_change(affected,previous,self.store.wall_clock())
+                    WHERE jobs.status IN ('pending','cancelled') RETURNING id,error,problem_code""", (job['item'],)).fetchone()
+                if affected:self.store.problems.finish_processor_change(affected,sibling_processor_previous,self.store.wall_clock())
             elif job['kind']=='theses':
                 affected=[row['id'] for row in db.execute("SELECT id FROM jobs WHERE kind='filter' AND item=%s AND (processor_visible OR problem_code='processor-config')",(job['item'],))]
-                previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
-                job_write(db, """UPDATE jobs SET status='cancelled',generation=generation+1
-                    WHERE kind='filter' AND item=%s AND status IN ('pending','blocked')""", (job['item'],))
-                if affected:self.store.problems.finish_processor_change(affected,previous,self.store.wall_clock())
+                sibling_processor_previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
+                changed_sibling=job_write(db, """UPDATE jobs SET status='cancelled',generation=generation+1
+                    WHERE kind='filter' AND item=%s AND status IN ('pending','blocked') RETURNING id,error,problem_code""", (job['item'],)).fetchone()
+                if affected:self.store.problems.finish_processor_change(affected,sibling_processor_previous,self.store.wall_clock())
+            if changed_sibling and (changed_sibling['error'] is not None or changed_sibling['problem_code'] is not None):
+                previous=self.store.problems.saved_processing_candidates([changed_sibling['id']]).get(changed_sibling['id'],[])
+                if previous:self.store.problems.sync_processing_problem(changed_sibling['id'],previous,self.store.wall_clock())
             current = db.execute("SELECT * FROM jobs WHERE id=%s AND status='pending'", (job['id'],)).fetchone()
             if current is None:
                 raise JobRejected('Selected processing candidate is no longer eligible')
@@ -455,6 +488,8 @@ class JobRepository:
             previous_fetch=managed_candidates(self.store,row['id'],self.store.wall_clock()) if row['kind']=='fetch' and (row['error'] is not None or row['problem_code'] is not None) else []
             from oko.storage.media_job_problems import managed_candidates as media_candidates
             previous_media=media_candidates(self.store,row['id'],self.store.wall_clock()) if row['kind']=='download_media' and (row['error'] is not None or row['problem_code'] is not None) else []
+            from oko.storage.processing_job_problems import managed_candidates as processing_candidates
+            previous_processing=processing_candidates(self.store,row['id'],self.store.wall_clock()) if row['kind'] in ('filter','theses') and (row['error'] is not None or row['problem_code'] is not None) else []
             sequence = self.store.db.execute("SELECT value FROM state WHERE key = 'job-dispatch-generation'").fetchone()
             generation = max(row['generation'], int(sequence[0]) if sequence else 0) + 1
             self.store.db.execute("INSERT INTO state VALUES ( 'job-dispatch-generation' , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value", (str(generation),))
@@ -463,6 +498,7 @@ class JobRepository:
             if row['kind']=='read':self.store.problems.sync_read_feed(row['item'],self.store.wall_clock())
             if row['kind']=='fetch' and previous_fetch:self.store.problems.sync_fetch(row['id'],previous_fetch,self.store.wall_clock())
             if row['kind']=='download_media' and previous_media:self.store.problems.sync_media_problem(row['id'],previous_media,self.store.wall_clock())
+            if row['kind'] in ('filter','theses') and previous_processing:self.store.problems.sync_processing_problem(row['id'],previous_processing,self.store.wall_clock())
             if row['kind']=='discover' and (row['error'] is not None or row['problem_code'] is not None):self.store.problems.sync_discover(row['id'],self.store.wall_clock())
             if row['kind'] in ('delete','feed-delete') and previous:
                 self.store.problems.sync_deletion(row['id'],previous,self.store.wall_clock())
@@ -755,6 +791,8 @@ class JobRepository:
         if processor_jobs:self.store.problems.finish_processor_change(processor_jobs,processor_previous,self.store.wall_clock())
         for job_id,previous in effects.media_problems_before.items():
             self.store.problems.sync_media_problem(job_id,previous,self.store.wall_clock())
+        if effects.processing_problems_before:
+            self.store.problems.sync_processing_problems(effects.processing_problems_before,self.store.wall_clock())
 
     def reconcile_cleanup(self) -> None:
         db=self.store.db
@@ -770,11 +808,17 @@ class JobRepository:
         for start in range(0,len(viewed_media),400):
             for job_id,previous in self.store.problems.saved_media_candidates(viewed_media[start:start+400]).items():
                 self.store.problems.sync_media_problem(job_id,previous,self.store.wall_clock())
+        stage_ids=[row['id'] for row in viewed_cancelled if row['kind'] in ('filter','theses')]
+        for start in range(0,len(stage_ids),400):
+            previous_processing=self.store.problems.saved_processing_candidates(stage_ids[start:start+400])
+            if previous_processing:self.store.problems.sync_processing_problems(previous_processing,self.store.wall_clock())
         job_write(db, "INSERT INTO jobs ( kind , item ) SELECT 'delete' , id FROM publications WHERE viewed = 1 ON CONFLICT ( kind , item ) DO UPDATE SET status = 'pending' , generation = jobs . generation + 1 , next = 0 WHERE jobs . status = 'cancelled'")
         job_write(db, "INSERT INTO jobs ( kind , item ) SELECT 'feed-delete' , id FROM feeds WHERE connection = 'deleting' ON CONFLICT DO NOTHING")
         if affected:self.store.problems.finish_processor_change(affected,processor_previous,self.store.wall_clock())
 
     def sync_captured_deletions(self, effects: CollectionEffects) -> None:
+        if effects.processing_problems_before:
+            self.store.problems.sync_processing_problems(effects.processing_problems_before,self.store.wall_clock())
         for job_id,previous in effects.media_problems_before.items():
             self.store.problems.sync_media_problem(job_id,previous,self.store.wall_clock())
         for job_id,previous in effects.fetch_problems_before.items():
@@ -811,16 +855,23 @@ class JobRepository:
         db=self.store.db
         affected=self.store.problems.processor_jobs_for_materials([feed,*sorted(members)])
         processor_previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
+        changed_processing: set[int]=set()
         for item in members:
             job_write(db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status='running' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = CASE WHEN status = 'running' THEN 'pending' ELSE status END , generation = generation + 1 WHERE item = %s AND kind = 'fetch'",(item,))
-            job_write(db, """UPDATE jobs SET status = CASE WHEN status = 'running' THEN 'pending' ELSE status END , generation = generation + 1
-                WHERE item = %s AND kind IN ('filter','theses') AND NOT EXISTS (SELECT 1 FROM feed_publications WHERE publication_id=%s)""",(item,item))
+            stage_rows=job_write(db, """UPDATE jobs SET status = CASE WHEN status = 'running' THEN 'pending' ELSE status END , generation = generation + 1
+                WHERE item = %s AND kind IN ('filter','theses') AND NOT EXISTS (SELECT 1 FROM feed_publications WHERE publication_id=%s) RETURNING id,error,problem_code""",(item,item)).fetchall()
+            changed_processing.update(row['id'] for row in stage_rows if row['error'] is not None or row['problem_code'] is not None)
             changed_media=job_write(db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , generation = generation + 1 WHERE kind = 'download_media' AND status = 'running' AND item IN ( SELECT id FROM media_files WHERE publication_id = %s ) RETURNING id,error,problem_code",(item,)).fetchall()
             changed_ids=[row['id'] for row in changed_media if row['error'] is not None or row['problem_code'] is not None]
             for job_id,previous in self.store.problems.saved_media_candidates(changed_ids).items():
                 self.store.problems.sync_media_problem(job_id,previous,self.store.wall_clock())
         discover=db.execute("SELECT id FROM jobs WHERE kind='discover' AND item=%s AND (error IS NOT NULL OR problem_code IS NOT NULL)",(feed,)).fetchone()
-        job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 WHERE item = %s AND kind NOT IN ( 'delete' , 'feed-delete' )",(feed,))
+        final_rows=job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 WHERE item = %s AND kind NOT IN ( 'delete' , 'feed-delete' ) RETURNING id,kind,error,problem_code",(feed,)).fetchall()
+        changed_processing.update(row['id'] for row in final_rows if row['kind'] in ('filter','theses') and (row['error'] is not None or row['problem_code'] is not None))
+        previous_processing: dict[int,list[dict[str,Any]]]={}
+        changed_ids=sorted(changed_processing)
+        for start in range(0,len(changed_ids),400):previous_processing.update(self.store.problems.saved_processing_candidates(changed_ids[start:start+400]))
+        if previous_processing:self.store.problems.sync_processing_problems(previous_processing,self.store.wall_clock())
         self.store.problems.sync_read_feed(feed,self.store.wall_clock())
         if discover:self.store.problems.sync_discover(discover['id'],self.store.wall_clock())
         self.reconcile_cleanup()
@@ -996,12 +1047,18 @@ class JobRepository:
 
     def invalidate_processing(self) -> None:
         affected=[row['id'] for row in self.store.db.execute("SELECT j.id FROM jobs j WHERE (j.processor_visible OR j.problem_code='processor-config') AND j.kind IN ('filter','theses') AND j.payload::jsonb->>'input_revision' IS DISTINCT FROM (SELECT i.processing_metadata::jsonb->>'_revision' FROM publications i WHERE i.id=j.item)")]
-        previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
+        processor_previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
+        ids=[row['id'] for row in self.store.db.execute("""SELECT id FROM jobs WHERE kind IN ('filter','theses') AND problem_code IS NOT NULL AND problem_code<>'' AND problem_code NOT LIKE 'source-%'
+            AND problem_code NOT IN ('processor-config','ai-permission','codex-choice','youtube-admission','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')
+            AND payload::jsonb->>'input_revision' IS DISTINCT FROM (SELECT i.processing_metadata::jsonb->>'_revision' FROM publications i WHERE i.id=jobs.item)""")]
+        stage_previous: dict[int,list[dict[str,Any]]]={}
+        for start in range(0,len(ids),400):stage_previous.update(self.store.problems.saved_processing_candidates(ids[start:start+400]))
         changed=job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status='running' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = CASE WHEN status = 'running' THEN 'pending' ELSE status END , generation = generation + 1 , error = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN error ELSE NULL END , problem_code = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN problem_code ELSE NULL END , next = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END WHERE kind IN ( 'filter' , 'theses' ) AND payload::jsonb->>'input_revision' IS DISTINCT FROM ( SELECT i.processing_metadata::jsonb->>'_revision' FROM publications i WHERE i . id = jobs . item ) RETURNING kind,item",
             (self.store.wall_clock(),)*4).fetchall()
         for row in changed:
             if row['kind']=='filter':self.store.processing.filter_changed(row['item'])
-        if affected:self.store.problems.finish_processor_change(affected,previous,self.store.wall_clock())
+        if affected:self.store.problems.finish_processor_change(affected,processor_previous,self.store.wall_clock())
+        if stage_previous:self.store.problems.sync_processing_problems(stage_previous,self.store.wall_clock())
 
     @contextmanager
     def cancellation(self) -> Iterator[None]:
