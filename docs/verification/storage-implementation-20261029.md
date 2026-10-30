@@ -1168,3 +1168,15 @@ passed; the integrated checkout passed 134 Python/HTTP tests, six Playwright
 status scenarios and mypy on the three changed modules. A screenshot was
 inspected. The target identity-generation mode and sequence alignment remain
 separate work; no working database was migrated.
+
+
+Explicit non-source fetch errors are now maintained on Job and graph events
+and recovered on startup. Other fetch codes, media, processor configuration and
+YouTube waits remain on the previous path. Synthetic tests cover multiple linked
+roots, changing owners, rollback, legacy collisions and preserving records whose
+objects cannot be associated conclusively. One 100-root synthetic regrouping
+used 29 SQL statements; this is not a production latency measurement. The
+integrated fetch/status/delete/discover suite passed 115 tests, mypy passed for
+eight changed modules, and six Playwright status scenarios passed with desktop
+and mobile screenshots inspected. The browser scenarios covered the general
+status panel, not a dedicated fetch error. No working database was migrated.

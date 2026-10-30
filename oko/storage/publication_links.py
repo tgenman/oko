@@ -30,11 +30,12 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
         return False
     previous={row[0] for row in store.db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id = %s',(item,))}
     capture_deletion_problems(store,effects,previous)
+    capture_fetch_problems(store,effects,previous)
     targets=[]
     for ref in references:
         if (ref.key.platform.value,ref.key.external_id)==(owner['platform'],owner['external_id']):
             continue
-        row=store.db.execute(f"SELECT i.*, {owner_expr('i')} AS feed_id, (SELECT j.id FROM jobs j WHERE j.kind='delete' AND j.item=i.id AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)) AS delete_problem_job FROM publications i WHERE i.platform = %s AND i.external_id = %s",
+        row=store.db.execute(f"SELECT i.*, {owner_expr('i')} AS feed_id, (SELECT j.id FROM jobs j WHERE j.kind='delete' AND j.item=i.id AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)) AS delete_problem_job, (SELECT j.id FROM jobs j WHERE j.kind='fetch' AND j.item=i.id AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','work-fetch')) AS fetch_problem_job FROM publications i WHERE i.platform = %s AND i.external_id = %s",
                              (ref.key.platform.value,ref.key.external_id)).fetchone()
         if row is None:
             identity=str(uuid4())
@@ -44,6 +45,11 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
             effects.fetch[identity]=False
         else:
             identity=row['id']
+            if row['fetch_problem_job'] is not None and row['fetch_problem_job'] not in effects.fetch_problems_checked:
+                from oko.storage.fetch_job_problems import managed_candidates
+                effects.fetch_problems_checked.add(row['fetch_problem_job'])
+                prior=managed_candidates(store,row['fetch_problem_job'],store.wall_clock())
+                if prior:effects.fetch_problems_before[row['fetch_problem_job']]=prior
             if identity not in effects.delete_problems_checked:
                 if row['delete_problem_job'] is not None:
                     effects.delete_problem_ids_before[identity] = store.problems.deletion_problem_ids(row['delete_problem_job'],store.wall_clock())
@@ -94,6 +100,17 @@ def notify_parents_many(store: 'Store', items: set[str]) -> None:
         store.processing.reconcile_accepted_item(row[0])
 
 
+def capture_fetch_problems(store: 'Store', effects: CollectionEffects, items: set[str]) -> None:
+    from oko.storage.fetch_job_problems import managed_candidates
+    for start in range(0,len(items),400):
+        batch=sorted(items)[start:start+400]
+        for row in store.db.execute("SELECT id FROM jobs j WHERE kind='fetch' AND item=ANY(%s) AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','work-fetch')",(batch,)):
+            if row['id'] in effects.fetch_problems_checked:continue
+            effects.fetch_problems_checked.add(row['id'])
+            candidates=managed_candidates(store,row['id'],store.wall_clock())
+            if candidates:effects.fetch_problems_before[row['id']]=candidates
+
+
 def capture_deletion_problems(store: 'Store', effects: CollectionEffects, items: set[str]) -> None:
     missing = sorted(items - effects.delete_problems_checked)
     effects.delete_problems_checked.update(missing)
@@ -107,6 +124,11 @@ def capture_root_deletion_problems(store: 'Store', effects: CollectionEffects, r
     for start in range(0,len(ordered),400):
         batch = ordered[start:start+400]
         capture_deletion_problems(store,effects,set(batch))
+        capture_fetch_problems(store,effects,set(batch))
+        fetch_children=store.db.execute("""SELECT DISTINCT j.item FROM unnest(%s::text[]) root(id)
+            CROSS JOIN LATERAL (SELECT target_publication_id FROM publication_links WHERE source_publication_id=root.id OFFSET 0) link
+            CROSS JOIN LATERAL (SELECT item FROM jobs j WHERE kind='fetch' AND item=link.target_publication_id AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','work-fetch') OFFSET 0) j""",(batch,)).fetchall()
+        capture_fetch_problems(store,effects,{row['item'] for row in fetch_children})
         # Keep the selected roots as the outer relation: unrelated links and
         # unrelated failed Jobs must not turn this into a library-wide join.
         rows = store.db.execute("""SELECT DISTINCT j.id,j.item FROM unnest(%s::text[]) root(id)

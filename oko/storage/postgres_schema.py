@@ -73,4 +73,5 @@ MIGRATIONS = (
     Migration(66, 'delete-problem-recovery-index', (Path(__file__).parent / 'postgres' / '066-delete-problem-recovery-index.sql').read_text()),
     Migration(67, 'discover-problem-index', (Path(__file__).parent / 'postgres' / '067-discover-problem-index.sql').read_text()),
     Migration(68, 'feed-sort-order', (Path(__file__).parent / 'postgres' / '068-feed-sort-order.sql').read_text()),
+    Migration(69, 'fetch-problem-index', (Path(__file__).parent / 'postgres' / '069-fetch-problem-index.sql').read_text()),
 )

@@ -35,6 +35,8 @@ class DiscoveryProjection:
     source_id: str
     delete_problem_job: int | None = None
     delete_problem_children: tuple[str,...] = ()
+    fetch_problem_job: int | None = None
+    fetch_problem_children: tuple[str,...] = ()
     fingerprint: str | None = None
     content: tuple[dict[str, Any], list[dict[str, Any]]] | None = None
 
@@ -151,6 +153,11 @@ class Publications:
             plan=DiscoveryProjection(item,existing[0]['source_id'] if existing else source_id)
             current=self.store.db.execute("""SELECT viewed,members,complete,
                 (SELECT j.id FROM jobs j WHERE j.kind='delete' AND j.item=publications.id AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)) AS delete_problem_job,
+                (SELECT j.id FROM jobs j WHERE j.kind='fetch' AND j.item=publications.id AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','work-fetch')) AS fetch_problem_job,
+                ARRAY(SELECT j.item FROM LATERAL
+                      (SELECT target_publication_id FROM publication_links WHERE source_publication_id=publications.id ORDER BY target_publication_id OFFSET 0) l
+                      CROSS JOIN LATERAL (SELECT j.item FROM jobs j WHERE j.item=l.target_publication_id AND j.kind='fetch'
+                          AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','work-fetch') OFFSET 0) j) AS fetch_problem_children,
                 CASE WHEN viewed=0 AND NOT EXISTS (SELECT 1 FROM feed_publications m WHERE m.publication_id=publications.id AND m.is_primary)
                      THEN ARRAY(SELECT j.item FROM LATERAL
                                 (SELECT target_publication_id FROM publication_links WHERE source_publication_id=publications.id
@@ -163,6 +170,8 @@ class Publications:
                 plan.delete_problem_job = current['delete_problem_job']
             if current:
                 plan.delete_problem_children = tuple(current['delete_problem_children'])
+                plan.fetch_problem_job = current['fetch_problem_job']
+                plan.fetch_problem_children = tuple(current['fetch_problem_children'])
             described=publication.teaser.adapter_content if publication.teaser else None
             album_changed=bool(current and described and ref.key.platform.value=='telegram'
                 and described.content.get('extra',{}).get('telegram',{}).get('album_id') is not None

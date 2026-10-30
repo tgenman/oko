@@ -143,6 +143,7 @@ class Store:
             self.problems.recover_deletion_problems()
             collection_jobs.recover(self)
             self.problems.recover_discover_problems()
+            self.problems.recover_fetch_problems()
             self.recover_files()
             if self.db.execute(f"SELECT 1 FROM ({owned_ids('= %s')}) owner LIMIT 1", ('demo','demo')).fetchone():
                 self.ensure_demo()
@@ -271,6 +272,13 @@ class Store:
                     effects.delete_problems_checked.add(item)
                 if plan.delete_problem_children:
                     publication_links.capture_deletion_problems(self,effects,set(plan.delete_problem_children))
+                if plan.fetch_problem_job is not None and plan.fetch_problem_job not in effects.fetch_problems_checked:
+                    from oko.storage.fetch_job_problems import managed_candidates
+                    effects.fetch_problems_checked.add(plan.fetch_problem_job)
+                    previous_fetch=managed_candidates(self,plan.fetch_problem_job,self.wall_clock())
+                    if previous_fetch:effects.fetch_problems_before[plan.fetch_problem_job]=previous_fetch
+                if plan.fetch_problem_children:
+                    publication_links.capture_fetch_problems(self,effects,set(plan.fetch_problem_children))
                 item_status_changed |= bool(self.db.execute('INSERT INTO publications ( id , source_id , url , published , members , published_known ) VALUES ( %s , %s , %s , %s , %s , %s ) ON CONFLICT DO NOTHING',
                     (item,plan.source_id,publication.url,publication.published,json.dumps(publication.members),publication.published_known)).rowcount)
                 membership=membership_graph.add(self.db,feed,item)

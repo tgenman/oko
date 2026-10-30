@@ -45,6 +45,8 @@ class JobRepository:
 
     def finish(self, job: Job) -> None:
         previous = self.store.problems.deletion_candidates(job.id,self.store.wall_clock()) if job.kind=='delete' else []
+        from oko.storage.fetch_job_problems import managed_candidates
+        previous_fetch=managed_candidates(self.store,job.id,self.store.wall_clock()) if job.kind=='fetch' else []
         discover_before = self.store.db.execute("SELECT problem_code,error FROM jobs WHERE id=%s AND kind='discover'",(job.id,)).fetchone() if job.kind=='discover' else None
         changed=job_write(self.store.db, "UPDATE jobs SET status = 'done' , error = NULL , problem_code = NULL , manual_once = 0 , retry_at = NULL , retry_delay = 0 , wait_scope = NULL WHERE id = %s AND generation = %s AND status = 'running' AND kind = %s AND item = %s",
             (job.id,job.generation,job.kind,job.item)).rowcount
@@ -54,6 +56,8 @@ class JobRepository:
             self.store.problems.sync_deletion(job.id,previous,self.store.wall_clock())
         if job.kind=='read':
             self.store.problems.sync_read_feed(job.item,self.store.wall_clock())
+        if job.kind=='fetch' and previous_fetch:
+            self.store.problems.sync_fetch(job.id,previous_fetch,self.store.wall_clock())
         if job.kind=='discover':
             codes=((discover_before['problem_code'] or 'work-discover'),) if discover_before and (discover_before['problem_code'] is not None or discover_before['error'] is not None) else ()
             self.store.problems.sync_discover(job.id,self.store.wall_clock(),previous_codes=codes)
@@ -158,12 +162,18 @@ class JobRepository:
             self.store.publications.status(job.item)
 
     def cancel(self, job: Job) -> None:
+        from oko.storage.fetch_job_problems import managed_candidates
+        previous=managed_candidates(self.store,job.id,self.store.wall_clock()) if job.kind=='fetch' else []
         changed=job_write(self.store.db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 WHERE id = %s AND generation = %s AND status = 'running'",(job.id,job.generation)).rowcount
         if changed and job.kind=='filter':self.store.processing.filter_changed(job.item)
+        if changed and previous:self.store.problems.sync_fetch(job.id,previous,self.store.wall_clock())
 
     def block(self, job: Job) -> None:
+        from oko.storage.fetch_job_problems import managed_candidates
+        previous=managed_candidates(self.store,job.id,self.store.wall_clock()) if job.kind=='fetch' else []
         changed=job_write(self.store.db, "UPDATE jobs SET status = 'blocked' WHERE id = %s AND generation = %s AND status = 'running'", (job.id, job.generation)).rowcount
         if changed and job.kind=='filter':self.store.processing.filter_changed(job.item)
+        if changed and previous:self.store.problems.sync_fetch(job.id,previous,self.store.wall_clock())
 
     def manual(self, job: Job) -> bool:
         row=self.store.db.execute('SELECT manual_once FROM jobs WHERE id = %s AND generation = %s',(job.id,job.generation)).fetchone()
@@ -228,13 +238,16 @@ class JobRepository:
         return True
 
 
-    def enqueue_fetch(self, item: str) -> None:
-        before = self.store.db.execute("SELECT status,error,next,problem_code FROM jobs WHERE kind='fetch' AND item=%s", (item,)).fetchone()
+    def enqueue_fetch(self, item: str, *, sync_problem: bool = True) -> None:
+        from oko.storage.fetch_job_problems import managed_candidates
+        before = self.store.db.execute("SELECT id,status,error,next,problem_code FROM jobs WHERE kind='fetch' AND item=%s", (item,)).fetchone()
+        previous=managed_candidates(self.store,before['id'],self.store.wall_clock()) if sync_problem and before and (before['error'] is not None or before['problem_code'] is not None) else []
         self.store.db.execute("INSERT INTO jobs ( kind , item , queued_wall ) VALUES ( 'fetch' , %s , extract(epoch FROM clock_timestamp()) ) ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , manual_once = 0 , next = CASE WHEN jobs . problem_code LIKE '%%FloodWaitError' OR ( jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s ) THEN jobs . next ELSE 0 END , error = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . error ELSE NULL END , retry_at = CASE WHEN jobs . problem_code LIKE '%%FloodWaitError' OR ( jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s ) THEN jobs . retry_at ELSE NULL END , generation = jobs . generation + 1", (item,self.store.wall_clock(),self.store.wall_clock(),self.store.wall_clock()))
 
-        after = self.store.db.execute("SELECT status,error,next,problem_code FROM jobs WHERE kind='fetch' AND item=%s", (item,)).fetchone()
+        after = self.store.db.execute("SELECT id,status,error,next,problem_code FROM jobs WHERE kind='fetch' AND item=%s", (item,)).fetchone()
         if before != after:
             status_changed(self.store.db)
+            if previous and after:self.store.problems.sync_fetch(after['id'],previous,self.store.wall_clock())
 
 
     def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False, include_deletions: bool = True, media_only: bool = False, captions_only: bool = False, dependency_feeds: list[str] | None = None, processing_kind: str | None = None) -> Job | None:
@@ -390,12 +403,15 @@ class JobRepository:
         with self.store.db:
             # Keep dispatch generations monotonic even when every old job was removed.
             previous = self.store.problems.deletion_candidates(row['id'],self.store.wall_clock()) if row['kind'] in ('delete','feed-delete') and (row['error'] is not None or row['problem_code'] is not None) else []
+            from oko.storage.fetch_job_problems import managed_candidates
+            previous_fetch=managed_candidates(self.store,row['id'],self.store.wall_clock()) if row['kind']=='fetch' and (row['error'] is not None or row['problem_code'] is not None) else []
             sequence = self.store.db.execute("SELECT value FROM state WHERE key = 'job-dispatch-generation'").fetchone()
             generation = max(row['generation'], int(sequence[0]) if sequence else 0) + 1
             self.store.db.execute("INSERT INTO state VALUES ( 'job-dispatch-generation' , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value", (str(generation),))
             job_write(self.store.db, "UPDATE jobs SET status='running', attempt=attempt+1, generation=%s WHERE id=%s", (generation, row['id']))
             if row['kind']=='filter':self.store.processing.filter_changed(row['item'])
             if row['kind']=='read':self.store.problems.sync_read_feed(row['item'],self.store.wall_clock())
+            if row['kind']=='fetch' and previous_fetch:self.store.problems.sync_fetch(row['id'],previous_fetch,self.store.wall_clock())
             if row['kind']=='discover' and (row['error'] is not None or row['problem_code'] is not None):self.store.problems.sync_discover(row['id'],self.store.wall_clock())
             if row['kind'] in ('delete','feed-delete') and previous:
                 self.store.problems.sync_deletion(row['id'],previous,self.store.wall_clock())
@@ -632,6 +648,7 @@ class JobRepository:
     def apply_collection(self, effects: CollectionEffects) -> None:
         db=self.store.db
         previous_deletions: dict[str, tuple[int,list[dict[str,Any]]]] = {}
+        captured_fetch_items={row['item'] for row in db.execute("SELECT item FROM jobs WHERE kind='fetch' AND id=ANY(%s)",(list(effects.fetch_problems_before),))} if effects.fetch_problems_before else set()
         affected = sorted(set(effects.fetch) | set(effects.delete_problem_ids_before))
         for start in range(0,len(affected),400):
             for row in db.execute("SELECT id,item FROM jobs WHERE kind='delete' AND item=ANY(%s) AND (error IS NOT NULL OR problem_code IS NOT NULL)",(affected[start:start+400],)):
@@ -646,7 +663,7 @@ class JobRepository:
                 deletion_job_id,previous = previous_deletions[item]
                 self.store.problems.sync_deletion(deletion_job_id,previous,self.store.wall_clock())
             if changed:
-                self.enqueue_fetch(item)
+                self.enqueue_fetch(item,sync_problem=item not in captured_fetch_items)
             else:
                 job_write(db, "INSERT INTO jobs ( kind , item , queued_wall ) VALUES ( 'fetch' , %s , extract(epoch FROM clock_timestamp()) ) ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , next = 0 , error = NULL , generation = jobs . generation + 1 WHERE jobs . status = 'done' AND ( jobs . error IS NULL OR jobs . problem_code IS NULL )",(item,))
         for item in sorted(set(previous_deletions) - set(effects.fetch)):
@@ -657,6 +674,8 @@ class JobRepository:
         for item in effects.media:self.schedule_media(item)
         for identity,manual in effects.revalidate.items():self.revalidate_media(identity,manual=manual)
         self.reconcile_cleanup()
+        for job_id,previous in effects.fetch_problems_before.items():
+            self.store.problems.sync_fetch(job_id,previous,self.store.wall_clock())
 
     def reconcile_cleanup(self) -> None:
         db=self.store.db
@@ -666,6 +685,8 @@ class JobRepository:
         job_write(db, "INSERT INTO jobs ( kind , item ) SELECT 'feed-delete' , id FROM feeds WHERE connection = 'deleting' ON CONFLICT DO NOTHING")
 
     def sync_captured_deletions(self, effects: CollectionEffects) -> None:
+        for job_id,previous in effects.fetch_problems_before.items():
+            self.store.problems.sync_fetch(job_id,previous,self.store.wall_clock())
         items = sorted(effects.delete_problem_ids_before)
         for start in range(0,len(items),400):
             for row in self.store.db.execute("SELECT id,item FROM jobs WHERE kind='delete' AND item=ANY(%s) AND (error IS NOT NULL OR problem_code IS NOT NULL)",(items[start:start+400],)):
@@ -675,11 +696,16 @@ class JobRepository:
 
     def change_adapter(self, feed: str) -> None:
         db=self.store.db
+        effects=CollectionEffects()
+        affected={row['item'] for row in db.execute(f"SELECT j.item FROM jobs j JOIN ({owned_ids('= %s')}) owner ON owner.id=j.item WHERE j.kind='fetch' AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%'",(feed,feed))}
+        publication_links.capture_fetch_problems(self.store,effects,affected)
         job_write(db, f"UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL , retry_at = NULL , retry_delay = 0 , wait_scope = NULL , next = 0 WHERE kind = 'download_media' AND item IN ( SELECT m.id FROM media_files m JOIN ({owned_ids('= %s')}) owner ON owner.id=m.publication_id )",(feed,feed))
         job_write(db, "INSERT INTO jobs ( kind , item , queued_wall ) SELECT 'fetch' , items.id , extract(epoch FROM clock_timestamp()) FROM publications items JOIN feed_publications owner ON owner.publication_id=items.id AND owner.is_primary AND owner.is_unviewed WHERE owner.feed_id = %s AND items.viewed = 0 ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , generation = jobs . generation + 1 , next = 0 , retry_at = NULL , retry_delay = 0 , wait_scope = NULL , error = NULL , problem_code = NULL",(feed,))
         job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL WHERE kind = 'read' AND item = %s",(feed,))
         self.store.problems.sync_read_feed(feed,self.store.wall_clock())
         self.enqueue_discovery(feed)
+        for job_id,previous in effects.fetch_problems_before.items():
+            self.store.problems.sync_fetch(job_id,previous,self.store.wall_clock())
 
     def remove_feed(self, feed: str, members: set[str]) -> None:
         db=self.store.db
@@ -805,7 +831,12 @@ class JobRepository:
             self.retry_media(row[0],revalidate_ready=False)
 
     def cancel_history(self, feed: str) -> None:
+        effects=CollectionEffects()
+        affected={row['item'] for row in self.store.db.execute("SELECT j.item FROM history_members h JOIN jobs j ON j.item=h.item AND j.kind='fetch' WHERE h.feed=%s AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%'",(feed,))}
+        publication_links.capture_fetch_problems(self.store,effects,affected)
         job_write(self.store.db, "UPDATE jobs SET status = 'done' , generation = generation + 1 WHERE kind = 'fetch' AND item IN ( SELECT item FROM history_members WHERE feed = %s )",(feed,))
+        for job_id,previous in effects.fetch_problems_before.items():
+            self.store.problems.sync_fetch(job_id,previous,self.store.wall_clock())
 
     def backfill_processing_inputs(self) -> None:
         for _ in self.backfill_processing_steps():
