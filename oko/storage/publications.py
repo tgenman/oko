@@ -145,14 +145,14 @@ class Publications:
                 continue
             item=existing[0]['id'] if existing else str(uuid4())
             plan=DiscoveryProjection(item,existing[0]['source_id'] if existing else source_id)
-            current=self.store.db.execute('SELECT viewed , members FROM items_read WHERE id = %s',(item,)).fetchone() if existing else None
+            current=self.store.db.execute('SELECT viewed , members , complete FROM items_read WHERE id = %s',(item,)).fetchone() if existing else None
             described=publication.teaser.adapter_content if publication.teaser else None
             album_changed=bool(current and described and ref.key.platform.value=='telegram'
                 and described.content.get('extra',{}).get('telegram',{}).get('album_id') is not None
                 and set(publication.members)!=set(json.loads(current['members']))
                 and set(json.loads(current['members'])).issubset(publication.members))
             refresh=bool(current and not current['viewed'] and described and
-                (ref.key.platform.value in ('rss','youtube') and not described.needs_fetch or album_changed))
+                (not current['complete'] or ref.key.platform.value in ('rss','youtube') and not described.needs_fetch or album_changed))
             if publication.teaser and (not existing or refresh):
                 plan.content=self.prepare(item,publication.teaser)
                 plan.fingerprint=publication_input.digest(plan.content[0])

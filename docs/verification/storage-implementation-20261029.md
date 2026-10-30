@@ -746,3 +746,19 @@
   gap; the corrected path rolls back the page and continuation together. The
   affected worker, history, Telegram, YouTube and recovery suites passed 150 tests
   and types; two Playwright scenarios passed, and a Telegram screenshot was inspected.
+- Discovery now takes the graph lock before resolving publication identities,
+  and refuses membership in a deleting feed. The first lock-order and lifecycle
+  tests exposed both omissions; after correction the affected collection and
+  dispatch run passed 157 tests. Resolution is performed in page order so a
+  linked article that also appears as a feed publication shares one row in either
+  order. The source-local identity is retained and repaired for an existing
+  link placeholder; rollback and restart are covered. A subsequent affected run
+  passed 183 tests and types; four focused lock/identity cases passed after the
+  legacy-placeholder correction. Three Playwright cases passed and linked RSS
+  content was inspected.
+- A separate 50-publication discovery transaction under the graph lock measured
+  1.841 seconds and 5,158 SQL statements on the local synthetic database. A proposed
+  broad batching rewrite was rejected by auto-review because job/result safety was
+  insufficiently established. The failing cost regression is retained as a draft
+  under `.scratch/storage-redesign`; no batching rewrite was applied. This measured
+  lock duration and SQL cost remain an open performance issue.

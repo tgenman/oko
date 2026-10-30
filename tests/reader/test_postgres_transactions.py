@@ -827,3 +827,38 @@ def test_scheduled_discovery_deadline_survives_restart_and_clock_change(postgres
         assert job and job.kind=='discover'
     finally:
         reopened.db.close()
+
+
+def test_membership_rejects_deleting_feed_and_rolls_back(postgres_url, tmp_path):
+    from oko.storage import memberships
+    from tests.support.worker_library import worker_library
+    store, item, _, _ = worker_library(tmp_path,database_url=postgres_url)
+    try:
+        with transaction(store.db):
+            store.db.execute("INSERT INTO feeds(id,connection) VALUES ('deleting','deleting')")
+        with pytest.raises(ValueError,match='feed is deleting'):
+            with transaction(store.db):
+                memberships.lock_graph(store.db)
+                memberships.add(store.db,'deleting',item)
+        assert store.db.execute("SELECT 1 FROM feed_publications WHERE feed_id='deleting' AND publication_id=%s", (item,)).fetchone() is None
+    finally:
+        store.db.close()
+
+
+def test_discovery_locks_graph_before_identity_resolution(postgres_url, tmp_path):
+    from oko.collection.contracts import Material, Publication
+    from tests.support.source import publication_packet
+    from tests.support.worker_library import worker_library
+    store, _, _, _ = worker_library(tmp_path,database_url=postgres_url)
+    statements = []
+    try:
+        packet = publication_packet(Publication('another','https://example.org/another',123),Material('Another','Synthetic text'),needs_fetch=False)
+        store.db.set_trace_callback(statements.append)
+        with transaction(store.db):
+            store.collect_discovery([packet],'{}')
+        lock = next(i for i,query in enumerate(statements) if 'pg_advisory_xact_lock' in query)
+        identity = next(i for i,query in enumerate(statements) if 'SELECT id , source_id FROM items_read' in query)
+        assert lock < identity
+    finally:
+        store.db.set_trace_callback(None)
+        store.db.close()

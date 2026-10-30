@@ -1309,3 +1309,42 @@ def test_discovery_page_and_continuation_roll_back_together(tmp_path):
         assert store.db.execute("SELECT status FROM jobs WHERE id=%s", (job.id,)).fetchone()[0] != 'done'
     finally:
         store.db.close()
+
+
+@pytest.mark.parametrize('parent_first',[True,False])
+def test_discovery_page_shares_linked_article_with_its_own_membership(tmp_path,parent_first):
+    from dataclasses import replace
+    from oko.collection.contracts import Publication
+    from tests.support.source import publication_packet
+    store, _, _, _ = worker_library(tmp_path)
+    try:
+        parent = publication_packet(Publication('parent','https://fixture.test/parent',1),Material('Parent','Parent text'),needs_fetch=False)
+        child = publication_packet(Publication('child','https://fixture.test/child',2),Material('Child','Child text'),needs_fetch=False)
+        assert parent.teaser and parent.teaser.adapter_content and child.adapter_reference
+        parent = replace(parent,teaser=replace(parent.teaser,adapter_content=replace(
+            parent.teaser.adapter_content,linked_publications=(child.adapter_reference,))))
+        page = [parent,child] if parent_first else [child,parent]
+        with pytest.raises(ValueError,match='rollback'):
+            with transaction(store.db):
+                store.collect_discovery(page,'{}')
+                assert store.db.execute("SELECT 1 FROM publications WHERE url='https://fixture.test/child'").fetchone()
+                raise ValueError('rollback')
+        assert store.db.execute("SELECT 1 FROM publications WHERE url IN ('https://fixture.test/parent','https://fixture.test/child')").fetchone() is None
+        with transaction(store.db):
+            store.collect_discovery(page,'{}')
+        rows=store.db.execute("SELECT id,complete,content FROM publications WHERE url='https://fixture.test/child'").fetchall()
+        assert len(rows)==1 and rows[0]['complete']==1 and 'Child text' in rows[0]['content']
+        assert store.db.execute("SELECT 1 FROM feed_publications WHERE feed_id='demo' AND publication_id=%s", (rows[0]['id'],)).fetchone()
+        assert store.db.execute("SELECT 1 FROM publication_links WHERE target_publication_id=%s", (rows[0]['id'],)).fetchone()
+        child_id = rows[0]['id']
+        assert store.publication(child_id).id == 'child'
+        # A pre-existing link placeholder with a membership is repaired too.
+        with transaction(store.db):
+            store.db.execute('UPDATE publications SET source_id=%s WHERE id=%s', ('linked:'+child_id,child_id))
+            store.collect_discovery([child],'{}')
+        assert store.publication(child_id).id == 'child'
+        store.db.close()
+        store = Store(tmp_path,lambda _:None)
+        assert store.publication(child_id).id == 'child'
+    finally:
+        store.db.close()

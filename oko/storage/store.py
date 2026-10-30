@@ -187,7 +187,6 @@ class Store:
 
     def collect_discovery(self,publications: list[Publication],cursor: str,feed: str = 'demo',namespace: str = '',*,description: str | None = None,successful: bool = True,source_order: tuple[ExternalKey,...] = ()) -> CollectionEffects:
         effects=CollectionEffects()
-        plans=self.publications.plan(feed,publications)
         with self.db:
             membership_graph.lock_graph(self.db)
             history_items=[]
@@ -206,13 +205,19 @@ class Store:
             base_order=known[ordered[anchor]]+anchor if anchor is not None else 1_000_000_000
             orders={key:base_order-index for index,key in enumerate(ordered)}
             for publication in publications:
-                plan=plans.get(publication.id)
+                # Earlier entries can create linked identities in this page.
+                plan=self.publications.plan(feed,[publication]).get(publication.id)
                 if plan is None:
                     continue
                 item=plan.item
                 item_status_changed |= bool(self.db.execute('INSERT INTO publications ( id , source_id , url , published , members , published_known ) VALUES ( %s , %s , %s , %s , %s , %s ) ON CONFLICT DO NOTHING',
                     (item,plan.source_id,publication.url,publication.published,json.dumps(publication.members),publication.published_known)).rowcount)
                 membership=membership_graph.add(self.db,feed,item)
+                # A link-only placeholder has no source-local identity. Once
+                # observed through a feed, retain the adapter's real identity.
+                if plan.source_id == 'linked:'+item:
+                    self.db.execute('UPDATE publications SET source_id=%s WHERE id=%s AND source_id=%s',
+                                    (feed+':'+publication.id,item,plan.source_id))
                 if membership:
                     added_memberships.append(item)
                     saved_items.add(item)

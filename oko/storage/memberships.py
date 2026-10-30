@@ -14,6 +14,11 @@ def lock_graph(db: Database) -> None:
 
 def add(db: Database, feed: str, item: str) -> bool:
     """Add a membership after acquiring the graph lock in the caller."""
+    owner = db.execute('SELECT connection FROM feeds WHERE id=%s FOR UPDATE', (feed,)).fetchone()
+    if owner is None:
+        raise ValueError('Feed not found')
+    if owner['connection']=='deleting':
+        raise ValueError('The feed is deleting')
     if db.execute('SELECT id FROM publications WHERE id=%s FOR UPDATE', (item,)).fetchone() is None:
         raise ValueError('Publication not found')
     row = db.execute('''INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed)
