@@ -120,6 +120,7 @@ class Store:
             self.youtube = YouTubeAccess(self)
             self.problems = Problems(self)
             with self.db:
+                self.problems.sync_codex_choice(self.wall_clock())
                 self.problems.sync_profiles(self.wall_clock())
             for name in ('content', 'staging'):
                 (root / name).mkdir(exist_ok=True)

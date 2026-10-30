@@ -770,3 +770,19 @@ def test_profile_problem_order_is_stable_across_feed_batches(tmp_path, settings_
         assert len(saved['objects'])==405
     finally:
         store.db.close()
+
+
+def test_codex_problem_recovers_on_startup_without_status_request(tmp_path, settings_database):
+    from oko.subscriptions.subscriptions import Overrides
+    from oko.services.subscriptions import SubscriptionService
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    try:
+        SubscriptionService(lambda: store).update_settings('oko', 'global', Overrides(processor='codex', theses=True))
+        with store.db:
+            store.db.execute("DELETE FROM reader_problems WHERE identity='processor:codex-choice'")
+        store.db.close()
+        store = Store(tmp_path, lambda _: None, database_url=settings_database)
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone()
+    finally:
+        store.db.close()
