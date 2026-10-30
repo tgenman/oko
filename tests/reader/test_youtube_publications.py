@@ -316,3 +316,29 @@ def test_high_importance_youtube_respects_explicitly_disabled_theses(tmp_path):
         assert publication['theses']['state'] == 'disabled'
         assert publication['theses']['result'] is None
         assert not any(request.url.path == '/v1/chat/completions' for request in models)
+
+
+def test_missing_captions_are_downloaded_again_after_reader_detects_loss(tmp_path):
+    from tests.support.storage import database
+    root = publication_root(tmp_path)
+    calls = []
+    class Captions:
+        async def fetch(self, video):
+            calls.append(video)
+            return 'Recovered captions.'
+    def response(request):
+        return httpx.Response(200,text=feed_xml()) if request.url.path=='/feeds/videos.xml' else httpx.Response(200,content=PNG,headers={'content-type':'image/png'})
+    with TestClient(create_app(root,token='test',api_only=True,rss_enabled=True,
+            rss_transport=httpx.MockTransport(response),youtube_captions=Captions(),
+            youtube_history=History([VIDEO]),ai_transport=model_transport([])),headers=HEADERS) as client:
+        client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':True})
+        client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':''})
+        subscribe(client)
+        presence(client,'reader')
+        card=wait_for(client,lambda:next((c for c in read_all_cards(client,'/api/v3/cards') if client.get('/api/v3/publication/'+c['id']).json()['theses']['result']),None))
+        with database(root) as db:
+            key=db.execute("SELECT storage_key FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles'",(card['id'],)).fetchone()[0]
+        (root/key).unlink()
+        client.get('/api/v3/publication/'+card['id'])
+        wait_for(client,lambda: len(calls)>=2 and client.get('/api/v3/publication/'+card['id']).json()['text']=='Recovered captions.')
+        assert calls==[VIDEO,VIDEO]

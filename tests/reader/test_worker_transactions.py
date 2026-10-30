@@ -1257,13 +1257,21 @@ def test_missing_subtitles_schedule_one_read_only_repair(tmp_path):
             assert youtube_media.subtitle_path(store,'missing-caption') is None
             assert item in store.processing._repairs
         assert store.processing.pending()
+        with pytest.raises(ValueError, match='rollback'):
+            with transaction(store.db):
+                store.processing.sync()
+                raise ValueError('rollback')
+        assert item in store.processing._repairs
+        assert store.db.execute("SELECT status FROM media_files WHERE id='missing-caption'").fetchone()[0] == 'ready'
+        assert store.db.execute("SELECT 1 FROM jobs WHERE kind='download_media' AND item='missing-caption'").fetchone() is None
         store.processing.sync()
         assert item not in store.processing._repairs
-        with read_snapshot(store.db), material_read.material_inputs(store.db,{item}):
-            assert youtube_media.subtitle_path(store,'missing-caption') is None
-            assert item in store.processing._repairs
-        store.processing.sync()
-        assert item not in store.processing._repairs
+        row = store.db.execute("SELECT status,storage_key FROM media_files WHERE id='missing-caption'").fetchone()
+        assert row[:] == ('pending_download', None)
+        assert store.db.execute("SELECT status FROM jobs WHERE kind='download_media' AND item='missing-caption'").fetchone()[0] == 'pending'
+        store.db.close()
+        store = Store(tmp_path, lambda _: None)
+        assert store.db.execute("SELECT status FROM jobs WHERE kind='download_media' AND item='missing-caption'").fetchone()[0] == 'pending'
     finally:
         store.db.close()
 
@@ -1415,5 +1423,27 @@ def test_linked_membership_privacy_change_revokes_parent_attempt(tmp_path):
             store.remove_feed(other)
             assert not store.jobs.valid(second)
         assert not store.jobs.valid(job)
+    finally:
+        store.db.close()
+
+
+def test_missing_subtitle_repair_is_rediscovered_after_restart(tmp_path):
+    from oko.storage import youtube_media
+    from oko.storage.transaction import read_snapshot
+    store, item, _, _ = worker_library(tmp_path)
+    try:
+        with store.db:
+            content = json.loads(store.db.execute('SELECT content FROM publications WHERE id=%s', (item,)).fetchone()[0])
+            content['extra']['youtube'] = {'captions':'available','captions_digest':'missing'}
+            content['blocks'].append(dict(type='media',role='subtitles',media_id='missing-caption'))
+            store.db.execute("UPDATE publications SET platform='youtube',content=%s WHERE id=%s", (json.dumps(content),item))
+            store.db.execute("""INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status,storage_key)
+                VALUES ('missing-caption',%s,'youtube:subtitles','https://example.test/captions','captions.txt','ready','missing-caption.txt')""", (item,))
+        with read_snapshot(store.db):
+            assert youtube_media.subtitle_path(store,'missing-caption') is None
+        store.db.close()
+        store = Store(tmp_path, lambda _: None)
+        assert store.db.execute("SELECT status FROM media_files WHERE id='missing-caption'").fetchone()[0] == 'pending_download'
+        assert store.db.execute("SELECT status FROM jobs WHERE kind='download_media' AND item='missing-caption'").fetchone()[0] == 'pending'
     finally:
         store.db.close()

@@ -4,6 +4,7 @@ from oko.storage.reading import retry_time
 from oko.storage.transaction import begin_write
 from oko.storage.job_writes import execute as job_write
 from dataclasses import dataclass
+import json
 from typing import Literal, TYPE_CHECKING
 from collections.abc import Iterator
 
@@ -147,11 +148,26 @@ class ProcessingState:
     def _repair_one(self) -> None:
         item = min(self._repairs)
         self._repairs.remove(item)
-        if self.store.db.in_transaction:
-            self.store.db.after_rollback(lambda: self._repairs.add(item))
         self._repairing.add(item)
         try:
-            self.reconcile_item(item)
+            from oko.storage import memberships, publication_links, youtube_media
+            with self.store.db:
+                begin_write(self.store.db)
+                self.store.db.after_rollback(lambda: self._repairs.add(item))
+                memberships.lock_graph(self.store.db)
+                row = self.store.db.execute("SELECT content FROM items_read WHERE id=%s AND viewed=0", (item,)).fetchone()
+                content = json.loads(row[0]) if row else {}
+                identity = youtube_media.subtitle_id(content)
+                media = self.store.db.execute("SELECT storage_key FROM media_files WHERE id=%s AND publication_id=%s AND status='ready'", (identity,item)).fetchone() if identity else None
+                if media and (not media[0] or not (self.store.root / media[0]).is_file()):
+                    self.store.db.execute("UPDATE media_files SET status='pending_download',storage_key=NULL,reason='' WHERE id=%s", (identity,))
+                    content['extra']['youtube']['captions'] = 'pending'
+                    content['extra']['_reader']['captions'] = 'error'
+                    self.store.db.execute('UPDATE publications SET content=%s WHERE id=%s', (json.dumps(content,ensure_ascii=False),item))
+                    job_write(self.store.db, "UPDATE jobs SET status='cancelled' WHERE kind='download_media' AND item=%s AND status IN ('failed','unavailable')", (identity,))
+                    self.store.jobs.schedule_media(item)
+                    publication_links.notify_parents(self.store,item)
+                self.reconcile_accepted_item(item)
         except BaseException:
             self._repairs.add(item)
             raise
