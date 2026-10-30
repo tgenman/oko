@@ -116,6 +116,25 @@ def test_status_etag_tracks_settings_without_status_trigger(tmp_path):
         assert changed.status_code==200 and changed.headers['ETag']!=first.headers['ETag']
 
 
+def test_status_etag_tracks_history_progress_without_source_revision_change(tmp_path):
+    feeds,_ = library(tmp_path,[1])
+    app = traced_app(tmp_path)
+    with TestClient(app,headers=HEADERS) as client:
+        wait_for_recovery(app)
+        first = client.get('/api/v3/status/details')
+        def change():
+            store=app.state.host.require_store()
+            before=store.subscriptions.source_revision()
+            with store.db:
+                store.subscriptions.history.warnings(feeds[0],['Synthetic history warning'])
+            return before,store.subscriptions.source_revision()
+        before,after = client.portal.call(change)
+        assert before == after
+        changed = client.get('/api/v3/status/details',headers={'If-None-Match':first.headers['ETag']})
+        assert changed.status_code==200
+        assert any('Synthetic history warning' in history['history']['progress']['warnings'] for history in changed.json()['initial_histories'])
+
+
 def test_due_fetch_changes_publication_etag_without_dispatch(tmp_path):
     _,items=library(tmp_path,[1])
     clock=[0.0]

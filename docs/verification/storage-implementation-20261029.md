@@ -441,3 +441,10 @@
   tests; types and ten Playwright scenarios passed, and a synthetic Telegram
   screenshot was inspected. Version 33 has 23 tables and 42 triggers. The
   remaining status, membership and collection triggers and dirty queues remain.
+- Migration 034 removes three history-to-status triggers. The status validator
+  reads the saved history row versions directly, including progress changes that
+  intentionally do not advance the source-configuration revision.
+- The migration, history, status, cost and recovery suites passed 140 tests;
+  types and seven Playwright scenarios passed, and the history screenshot was
+  inspected. Version 34 has 23 tables and 39 triggers. Status GET writes,
+  remaining status triggers and both processing dirty queues are still open.

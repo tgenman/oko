@@ -36,6 +36,11 @@ class VersionQueries:
         return self._storage().subscriptions.source_revision()
 
     @repository_access
+    def history_versions(self) -> list[Any]:
+        row = self._storage().db.execute("SELECT coalesce(jsonb_agg(jsonb_build_array(feed,xmin::text) ORDER BY feed),'[]'::jsonb) FROM initial_history").fetchone()
+        return row[0] if row else []
+
+    @repository_access
     def time_boundaries(self) -> tuple[float | None, float | None, float | None]:
         from oko.storage.reading import reader_now, reader_wall
         store = self._storage()
