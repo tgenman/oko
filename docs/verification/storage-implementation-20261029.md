@@ -1199,3 +1199,13 @@ passed 107 PostgreSQL tests, mypy passed for eight modules and six Playwright
 status scenarios passed; desktop/mobile screenshots were inspected. Browser
 coverage was for the general status panel, not a dedicated media error. No
 working database was migrated.
+
+
+A follow-up fixes media acceptance when the stored file ID changes: the
+confirmed problem is captured under the graph lock before replacement and
+resolved in the same transaction, preserving the previous history. Synthetic
+checks cover stale generation, rollback, negative Job IDs, unrelated legacy
+objects and concurrent graph locking. The integrated suite passed 114
+PostgreSQL tests, mypy for three modules and six Playwright status scenarios;
+desktop/mobile screenshots were inspected. Browser coverage was for the general
+status panel. No working database was changed.

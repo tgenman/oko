@@ -818,18 +818,19 @@ class Problems:
         if not job_ids:return {}
         rows=self.db.execute("SELECT identity,body FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:download_media' AND body::jsonb->>'media_job_id'=ANY(%s)",([str(job) for job in job_ids],)).fetchall()
         groups: dict[int,list[dict[str,Any]]]={}
+        requested={str(job):job for job in job_ids}
         for row in rows:
             body=json.loads(row['body'])
             marker=body.get('media_job_id') if isinstance(body,dict) else None
-            if not isinstance(marker,str) or not marker.isdigit() or not isinstance(body.get('objects'),list):continue
+            if not isinstance(marker,str) or marker not in requested or not isinstance(body.get('objects'),list):continue
             body['id']=body.get('media_job_identity',row['identity'])
-            groups.setdefault(int(marker),[]).append(body)
+            groups.setdefault(requested[marker],[]).append(body)
         return groups
 
-    def sync_media_problem(self, job_id: int, previous: list[dict[str,Any]], now: float) -> None:
+    def sync_media_problem(self, job_id: int, previous: list[dict[str,Any]], now: float, *, successful: bool = False) -> None:
         from oko.storage.media_job_problems import managed_candidates
-        candidates=managed_candidates(self.store,job_id,now)
-        if previous and not candidates:
+        candidates=[] if successful else managed_candidates(self.store,job_id,now)
+        if previous and not candidates and not successful:
             subtitle=self.db.execute("SELECT 1 FROM jobs j JOIN media_files m ON m.id=j.item WHERE j.id=%s AND j.kind='download_media' AND m.resource_key='youtube:subtitles'",(job_id,)).fetchone()
             if subtitle and not self.store.youtube.status(now)['paused']:
                 from oko.storage.media_job_problems import candidates_many
@@ -914,7 +915,7 @@ class Problems:
         finished: dict[str,list[str]]={'resolved':[],'irrelevant':[]}
         for prior in closing:
             owner=prior.get('media_owner')
-            irrelevant=(not prior.get('media_orphan') and (bool(owner and owner not in alive) or bool(prior.get('media_file_id') and prior['media_file_id'] not in existing_files))) or any(obj.get('kind')=='material' and obj['id'] in removed for obj in prior['objects'])
+            irrelevant=not successful and ((not prior.get('media_orphan') and (bool(owner and owner not in alive) or bool(prior.get('media_file_id') and prior['media_file_id'] not in existing_files))) or any(obj.get('kind')=='material' and obj['id'] in removed for obj in prior['objects']))
             finished['irrelevant' if irrelevant else 'resolved'].append(prior['id'])
         for outcome,identities in finished.items():
             if identities:

@@ -129,12 +129,16 @@ class MediaFiles:
         return MediaDownload(row['publication_id'], ExternalReference(ExternalKey(Platform(row['platform']), row['external_id']), row['url']),
             MediaReference(row['resource_key'], row['source_locator'], row['name'], row['mime_type'], row['size_bytes'], row['resource_identity']), temporary, final)
 
-    def current(self, identity: str, download: MediaDownload) -> bool:
-        row=self.store.db.execute('SELECT m . * , i . platform , i . external_id FROM media_files m JOIN publications i ON i . id = m . publication_id WHERE m . id = %s AND i . viewed = 0',(identity,)).fetchone()
-        return bool(row and row['publication_id']==download.publication_id
+    def current(self, identity: str, download: MediaDownload, problem_jobs: list[int] | None = None) -> bool:
+        problem_column="" if problem_jobs is None else ", (SELECT j.id FROM jobs j WHERE j.kind='download_media' AND j.item=m.id AND j.status='running' AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)) AS problem_job"
+        row=self.store.db.execute('SELECT m . * , i . platform , i . external_id'+problem_column+' FROM media_files m JOIN publications i ON i . id = m . publication_id WHERE m . id = %s AND i . viewed = 0',(identity,)).fetchone()
+        valid=bool(row and row['publication_id']==download.publication_id
             and row['platform']==download.publication.key.platform.value and row['external_id']==download.publication.key.external_id
             and (row['resource_key'],row['source_locator'],row['name'],row['mime_type'],row['size_bytes'],row['resource_identity'])==
                 (download.media.key,download.media.locator,download.media.name,download.media.mime_type,download.media.size_bytes,download.media.resource_identity))
+        if valid and row and problem_jobs is not None and row['problem_job'] is not None:
+            problem_jobs.append(row['problem_job'])
+        return valid
 
     def stage(self, identity: str, download: MediaDownload, actual: MediaReference) -> tuple[str, Path, int]:
         store = self.store
@@ -193,8 +197,13 @@ class MediaFiles:
         self.project_header(content, media)
         with store.db:
             memberships.lock_graph(store.db)
-            if not self.current(media_id,download):
+            problem_jobs: list[int]=[]
+            if not self.current(media_id,download,problem_jobs):
                 raise ValueError('Media owner changed')
+            # Capture the real owner and affected roots before the file ID changes.
+            from oko.storage.media_job_problems import managed_candidates
+            problem_job=problem_jobs[0] if problem_jobs else None
+            previous_problem=managed_candidates(store,problem_job,store.wall_clock()) if problem_job is not None else []
             store.db.execute("UPDATE media_files SET id = %s , status = 'ready' , reason = '' , storage_key = %s , size_bytes = %s , source_locator = %s , mime_type = %s , name = %s WHERE id = %s",
                 (identity,str(saved.relative_to(store.root)),size,actual.locator,actual.mime_type,actual.name,media_id))
             store.db.execute('UPDATE publications SET content = %s , media_ids = %s WHERE id = %s', (json.dumps(content,ensure_ascii=False),json.dumps([value['id'] for value in media]),download.publication_id))
@@ -204,6 +213,8 @@ class MediaFiles:
             if subtitles:
                 store.processing.reconcile_accepted_item(download.publication_id)
             publication_links.notify_parents(store,download.publication_id)
+            if problem_job is not None and previous_problem:
+                store.problems.sync_media_problem(problem_job,previous_problem,store.wall_clock(),successful=True)
             store.fault('before_media_commit')
         return True
 

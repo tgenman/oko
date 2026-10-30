@@ -61,7 +61,7 @@ class JobRepository:
         if job.kind=='fetch' and previous_fetch:
             self.store.problems.sync_fetch(job.id,previous_fetch,self.store.wall_clock())
         if job.kind=='download_media' and previous_media:
-            self.store.problems.sync_media_problem(job.id,previous_media,self.store.wall_clock())
+            self.store.problems.sync_media_problem(job.id,previous_media,self.store.wall_clock(),successful=True)
         if job.kind=='discover':
             codes=((discover_before['problem_code'] or 'work-discover'),) if discover_before and (discover_before['problem_code'] is not None or discover_before['error'] is not None) else ()
             self.store.problems.sync_discover(job.id,self.store.wall_clock(),previous_codes=codes)
