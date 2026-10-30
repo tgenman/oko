@@ -1056,3 +1056,34 @@ def test_publication_table_rename_preserves_data_and_views(connections):
         assert db.execute("SELECT url,content FROM publications WHERE id='item'").fetchone() == ('https://example.test','{"blocks":[]}')
         assert db.execute("SELECT feed_id FROM items_read WHERE id='item'").fetchone() == ('feed',)
         verify(db,MIGRATIONS)
+
+
+def test_publication_and_job_status_constraints_preserve_valid_rows(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db,MIGRATIONS[:56])
+        db.execute("INSERT INTO publications(id,status) VALUES ('one','filter_out')")
+        db.execute("INSERT INTO jobs(kind,item,status) VALUES ('filter','one','blocked')")
+        migrate(db,MIGRATIONS)
+        assert db.execute("SELECT status FROM publications WHERE id='one'").fetchone() == ('filter_out',)
+        assert db.execute("SELECT status FROM jobs WHERE item='one'").fetchone() == ('blocked',)
+        with pytest.raises(psycopg.errors.CheckViolation):
+            db.execute("UPDATE publications SET status='invented' WHERE id='one'")
+        with pytest.raises(psycopg.errors.CheckViolation):
+            db.execute("UPDATE jobs SET status='invented' WHERE item='one'")
+        verify(db,MIGRATIONS)
+
+
+@pytest.mark.parametrize(('table','value'), [('publications','invented'),('jobs','invented'),('jobs',None)])
+def test_status_constraint_migration_rejects_invalid_legacy_data(connections, table, value):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db,MIGRATIONS[:56])
+        if table=='publications':
+            db.execute('INSERT INTO publications(id,status) VALUES (%s,%s)', ('one',value))
+        else:
+            db.execute('INSERT INTO jobs(kind,item,status) VALUES (%s,%s,%s)', ('filter','one',value))
+        with pytest.raises(psycopg.errors.RaiseException,match='invalid saved status'):
+            migrate(db,MIGRATIONS)
+        assert db.execute(f'SELECT status FROM {table}').fetchone() == (value,)
+        verify(db,MIGRATIONS[:56])

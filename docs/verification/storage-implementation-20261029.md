@@ -762,3 +762,8 @@
   insufficiently established. The failing cost regression is retained as a draft
   under `.scratch/storage-redesign`; no batching rewrite was applied. This measured
   lock duration and SQL cost remain an open performance issue.
+- Migration 057 adds the agreed publication and Job status constraints. It
+  rejects unknown or null legacy Job states without changing saved data; valid
+  states survive. The affected migration, processing, history and recovery
+  suites passed 281 tests and types; three Playwright scenarios passed and the
+  collection status screenshot was inspected.

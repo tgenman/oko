@@ -61,4 +61,5 @@ MIGRATIONS = (
     Migration(54, 'remove-stage-queue', (Path(__file__).parent / 'postgres' / '054-remove-stage-queue.sql').read_text()),
     Migration(55, 'recovery-index', (Path(__file__).parent / 'postgres' / '055-recovery-index.sql').read_text()),
     Migration(56, 'publications-name', (Path(__file__).parent / 'postgres' / '056-publications-name.sql').read_text()),
+    Migration(57, 'status-constraints', (Path(__file__).parent / 'postgres' / '057-status-constraints.sql').read_text()),
 )
