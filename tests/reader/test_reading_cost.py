@@ -127,3 +127,38 @@ def test_unviewed_index_bounds_archive_work_and_survives_reopen(tmp_path):
         assert small_work.rows < 200, small_work
     finally:
         store.db.close()
+
+
+@pytest.mark.parametrize('has_root', [False,True])
+def test_prune_read_work_does_not_grow_with_unrelated_link_graph(tmp_path,has_root):
+    from oko.storage import publication_links
+    from tests.support.postgres_work import measure_reads
+    from tests.support.storage import Store
+
+    costs = []
+    for size in (100,5000):
+        store = Store(tmp_path/str(size),lambda _:None)
+        try:
+            if has_root:
+                store.subscriptions.ensure_demo()
+            with store.db:
+                store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('target','other_web','target')")
+                if has_root:
+                    store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('root','other_web','root')")
+                    store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('demo','root',true)")
+                    store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root','target')")
+                store.db.execute("""INSERT INTO publications(id,platform,external_id)
+                    SELECT 'foreign-'||n,'other_web','foreign-'||n FROM generate_series(1,%s) n""", (size,))
+                store.db.execute("""INSERT INTO publication_links(source_publication_id,target_publication_id)
+                    SELECT 'foreign-'||n,'foreign-'||(n+1) FROM generate_series(1,%s) n""", (size-1,))
+                store.db._db.execute('ANALYZE publications')
+                store.db._db.execute('ANALYZE publication_links')
+            with store.db:
+                with measure_reads(store.db) as work:
+                    publication_links.prune(store,{'target'})
+                costs.append(work.rows)
+            assert store.db.execute("SELECT viewed FROM publications WHERE id='target'").fetchone()[0] == (0 if has_root else 1)
+            assert store.db.execute("SELECT count(*) FROM publications WHERE id LIKE 'foreign-%%' AND viewed=0").fetchone()[0] == size
+        finally:
+            store.db.close()
+    assert costs[1] <= costs[0] + 100, costs

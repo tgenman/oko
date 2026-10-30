@@ -85,7 +85,27 @@ def prune(store: 'Store', candidates: set[str]) -> None:
     if not candidates:
         return
     memberships.lock_graph(store.db)
-    rows=store.db.execute('WITH RECURSIVE needed ( id ) AS ( SELECT i . id FROM items_read i JOIN feed_publications f ON f . publication_id = i . id WHERE i . viewed = 0 UNION SELECT l . target_publication_id FROM publication_links l JOIN needed n ON n . id = l . source_publication_id ) SELECT id FROM items_read WHERE platform IS NOT NULL AND viewed = 0 AND id NOT IN ( SELECT id FROM needed )').fetchall()
+    rows=store.db.execute('''WITH RECURSIVE component(id) AS (
+        SELECT id FROM publications WHERE id=ANY(%s)
+        UNION
+        SELECT edge.id FROM component c CROSS JOIN LATERAL (
+            SELECT target_publication_id AS id FROM publication_links WHERE source_publication_id=c.id
+            UNION ALL
+            SELECT source_publication_id AS id FROM publication_links WHERE target_publication_id=c.id
+        ) edge
+    ), needed(id) AS (
+        SELECT root.id FROM component c CROSS JOIN LATERAL (
+            SELECT i.id FROM publications i WHERE i.id=c.id AND i.viewed=0
+                AND EXISTS (SELECT 1 FROM feed_publications f WHERE f.publication_id=i.id) OFFSET 0
+        ) root
+        UNION
+        SELECT edge.id FROM needed n CROSS JOIN LATERAL (
+            SELECT target_publication_id AS id FROM publication_links WHERE source_publication_id=n.id OFFSET 0
+        ) edge
+    )
+    SELECT candidate.id FROM component c CROSS JOIN LATERAL (
+        SELECT i.id FROM publications i WHERE i.id=c.id AND i.platform IS NOT NULL AND i.viewed=0 OFFSET 0
+    ) candidate WHERE NOT EXISTS (SELECT 1 FROM needed n WHERE n.id=candidate.id)''', (sorted(candidates),)).fetchall()
     items = [row['id'] for row in rows]
     store.publications.forget_many(items)
     for start in range(0, len(items), 400):

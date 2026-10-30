@@ -1266,3 +1266,18 @@ def test_missing_subtitles_schedule_one_read_only_repair(tmp_path):
         assert item not in store.processing._repairs
     finally:
         store.db.close()
+
+
+def test_viewing_one_component_does_not_clear_unrelated_orphan(tmp_path):
+    store, item, _, _ = worker_library(tmp_path)
+    try:
+        with store.db:
+            store.db.execute("""INSERT INTO publications(id,url,platform,external_id,complete,content,title)
+                SELECT 'unrelated','https://example.test/unrelated','other_web','unrelated',1,content,title
+                FROM publications WHERE id=%s""", (item,))
+        before = store.db.execute("SELECT content,complete,viewed FROM publications WHERE id='unrelated'").fetchone()[:]
+        with transaction(store.db):
+            assert store.viewed_set([item])
+        assert store.db.execute("SELECT content,complete,viewed FROM publications WHERE id='unrelated'").fetchone()[:] == before
+    finally:
+        store.db.close()

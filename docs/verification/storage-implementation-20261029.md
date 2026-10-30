@@ -713,3 +713,14 @@
   and recovery tests passed with types. Three Playwright scenarios passed and
   the missing-captions screenshot was inspected. This supersedes the earlier
   note that read-detected repair had no caller.
+- Reachability cleanup now walks only the undirected component containing the
+  changed publications, then retains the part reachable from its remaining feed
+  roots. Disconnected orphaned content is no longer cleared by an unrelated view.
+  The first component query still caused PostgreSQL to scan 5,003 rows with a
+  5,000-publication foreign graph; indexed lateral lookups reduced the observed
+  scan to four rows in the corresponding synthetic measurement. Tests also cover
+  a retained root and cycles. The broad run passed 160 tests and found one stale
+  query-trace matcher; after updating it, the one-pass and two graph-cost cases
+  passed. Fourteen Playwright scenarios passed and a linked Telegram screenshot
+  was inspected. Larger connected components and concurrent graph changes remain
+  part of the final acceptance/review.

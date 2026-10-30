@@ -49,7 +49,7 @@ def test_completion_removes_captured_library_with_one_reachability_pass(postgres
         queries.clear()
         completed = client.post('/api/v3/folders/demo/completion', json={'token': preview.json()['token']})
         assert completed.status_code == 200, completed.text
-        passes = sum('WITH RECURSIVE needed' in query for query in queries)
+        passes = sum('WITH RECURSIVE component' in query for query in queries)
         completion_calls = len(queries)
         assert read_all_cards(client, '/api/v3/cards') == []
         assert client.post('/api/v3/folders/demo/completion', json={'token': preview.json()['token']}).status_code == 200
