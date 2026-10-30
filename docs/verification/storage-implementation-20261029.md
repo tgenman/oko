@@ -562,3 +562,8 @@
   suites passed 26 tests. Two Playwright scenarios passed and the retained
   result after failed regeneration screenshot was inspected. Settings and
   recovery still use both transitional dirty tables and remain unfinished.
+- Migration 050 removes four obsolete SQL clock/max functions. PostgreSQL's
+  native expressions preserve the old nullable Telegram confirmation behavior
+  and media retry deadlines. Migration, Telegram, media and CLI suites passed
+  195 tests and types; two Playwright scenarios passed, and a media screenshot
+  was inspected. Four JSON compatibility helpers remain installed.

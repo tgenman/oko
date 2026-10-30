@@ -175,7 +175,7 @@ class ReadSync:
         member_changed = False
         if plan.missing:
             member_changed = bool(self.store.db.execute('UPDATE telegram_read_members SET missing=1 WHERE feed=%s AND member=ANY(%s) AND missing IS DISTINCT FROM 1', (feed,list(plan.missing))).rowcount)
-        self.store.db.execute('UPDATE telegram_read_state SET initial = COALESCE ( initial , %s ) , confirmed = oko_max ( confirmed , %s ) , waiting = %s , error = NULL WHERE feed = %s',(plan.initial,confirmed,plan.waiting,feed))
+        self.store.db.execute('UPDATE telegram_read_state SET initial = COALESCE ( initial , %s ) , confirmed = CASE WHEN confirmed IS NULL THEN NULL ELSE greatest(confirmed,%s) END , waiting = %s , error = NULL WHERE feed = %s',(plan.initial,confirmed,plan.waiting,feed))
         if previous is not None and previous[0] is None:
             source_changed(self.store.db)
         current = self.store.db.execute('SELECT initial,confirmed,waiting,error FROM telegram_read_state WHERE feed=%s', (feed,)).fetchone()

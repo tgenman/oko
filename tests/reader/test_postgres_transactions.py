@@ -699,3 +699,16 @@ def test_repeated_fetch_enqueue_keeps_status_revision(postgres_url, tmp_path):
         assert store.read_versions.version('status','runtime')[0] == before
     finally:
         store.db.close()
+
+
+def test_read_confirmation_preserves_legacy_null_frontier(postgres_url, tmp_path):
+    from oko.storage.read_sync import ReadPlan
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO telegram_read_state(feed,initial,confirmed) VALUES ('feed',1,NULL)")
+            store.read_sync.completed('feed', ReadPlan(1,0,10,10), 10)
+            assert store.db.execute("SELECT confirmed FROM telegram_read_state WHERE feed='feed'").fetchone()[0] is None
+    finally:
+        store.db.close()

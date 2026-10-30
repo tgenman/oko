@@ -904,3 +904,12 @@ def test_status_revision_migrates_without_entity_catalog(connections):
         assert db.execute("SELECT to_regclass('reader_entities')").fetchone() == (None,)
         assert db.execute("SELECT (value::jsonb->>'version')::bigint,(value::jsonb->>'changed')::float8 FROM state WHERE key='reader-status-revision'").fetchone() == (42,123.5)
         verify(db, MIGRATIONS)
+
+
+def test_clock_and_max_helpers_are_removed(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:49])
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=current_schema() AND p.proname IN ('oko_max','oko_reader_clock','oko_reader_time')").fetchone() == (0,)
+        verify(db, MIGRATIONS)
