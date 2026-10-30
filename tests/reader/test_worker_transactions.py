@@ -104,6 +104,8 @@ def test_changed_collection_updates_processing_job_in_same_transaction(tmp_path)
         asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
         before = dict(store.db.execute("SELECT generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone())
         previous = saved(store,item)['content']
+        previous_filter = saved(store,item)['filtered_content']
+        assert previous_filter
         store.processing.background = True
         material = StructuredSource(None).describe(store.publication(item), Material('Title','Changed synthetic text'))
 
@@ -118,12 +120,14 @@ def test_changed_collection_updates_processing_job_in_same_transaction(tmp_path)
             after = dict(store.db.execute("SELECT generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone())
             assert after['generation'] > before['generation']
             assert after['input_snapshot'] != before['input_snapshot']
+            assert saved(store,item)['filtered_content'] == {}
 
         with pytest.raises(ValueError, match='synthetic rollback'):
             with transaction(store.db):
                 change()
                 raise ValueError('synthetic rollback')
         assert saved(store,item)['content'] == previous
+        assert saved(store,item)['filtered_content'] == previous_filter
         assert dict(store.db.execute("SELECT generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()) == before
         with transaction(store.db):
             change()

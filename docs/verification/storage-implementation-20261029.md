@@ -697,3 +697,11 @@
   screenshot was inspected. The guarded queue-removal draft was not installed:
   auto-review rejected removal of its remaining consumers as potentially losing
   pending work, so `processing_dirty` remains in the active schema.
+- Confirmed content changes now discard results whose saved source-block hash no
+  longer matches, atomically with the new input and Job; rollback restores them.
+  Changes to settings alone and selected-feed replacement retain saved results,
+  while their signatures decide whether they are current. Disabled stages retain
+  and reuse still-valid results. The two review scenarios that failed the full run
+  now pass under these agreed semantics. Processing, linked inputs, YouTube,
+  recovery and source-deletion suites passed 139 tests and types; five Playwright
+  scenarios passed, with the failed-regeneration screenshot inspected.

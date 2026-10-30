@@ -387,7 +387,23 @@ class Publications:
             if row is None or row['platform'] is None:
                 return False
             current = publication_input.input_hash(self.store,item) if row['feed_id'] is not None and not row['viewed'] else None
+            content = publication_input._reading_content(self.store,item) if row['complete'] and row['content']!='{}' else None
+            available = bool(content is not None and not publication_input.awaiting_input(content)
+                             and not publication_input.awaiting_linked_input(self.store,item,content))
+            source_hash = publication_input.digest(publication_input.blocks(content)) if available and content is not None else None
         metadata = json.loads(row['processing_metadata'])
+        # Results carry the actual source blocks they were derived from. Keep
+        # them when only settings change, but discard them on a confirmed input
+        # change rather than retaining a hidden stale copy indefinitely.
+        saved_filter = metadata.get('filter',{})
+        saved_summary = metadata.get('summary',{})
+        prior_source = saved_filter.get('input_hash')
+        if prior_source is None and row['filtered_content']=='{}':
+            prior_source = saved_summary.get('input_hash')
+        if source_hash is not None and prior_source is not None and source_hash != prior_source:
+            self.store.db.execute("UPDATE publications SET filtered_content='{}',summarized_content='{}' WHERE id=%s", (item,))
+            metadata.pop('filter',None)
+            metadata.pop('summary',None)
         if row['feed_id'] is not None and not row['viewed']:
             if metadata.get('_revision_input')!=current:
                 metadata['_revision_input']=current
