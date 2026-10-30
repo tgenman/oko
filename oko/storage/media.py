@@ -13,7 +13,7 @@ from typing import Any, TYPE_CHECKING
 
 from oko.collection.adapters import AdapterIssue, AdapterErrorKind, ExternalKey, ExternalReference, MediaReference, Platform
 from oko.storage.reading import reading_value, reader_now
-from oko.storage import collection_jobs, publication_links, youtube_media, files, material_read
+from oko.storage import collection_jobs, publication_links, youtube_media, files, material_read, memberships
 
 if TYPE_CHECKING:
     from typing_extensions import Buffer
@@ -187,6 +187,7 @@ class MediaFiles:
             content['extra']['_reader']['captions']='available'
         self.project_header(content, media)
         with store.db:
+            memberships.lock_graph(store.db)
             if not self.current(media_id,download):
                 raise ValueError('Media owner changed')
             store.db.execute("UPDATE media_files SET id = %s , status = 'ready' , reason = '' , storage_key = %s , size_bytes = %s , source_locator = %s , mime_type = %s , name = %s WHERE id = %s",
@@ -251,6 +252,7 @@ class MediaFiles:
                     block['media_id']=identity
         self.project_header(content,media)
         with store.db:
+            memberships.lock_graph(store.db)
             store.db.execute("UPDATE media_files SET id = %s , status = 'unavailable' , reason = %s , storage_key = NULL , size_bytes = NULL WHERE id = %s",(identity,issue.message,media_id))
             store.db.execute('UPDATE items SET content = %s , media_ids = %s WHERE id = %s',(json.dumps(content,ensure_ascii=False),json.dumps([value['id'] for value in media]),owner))
             store.db.execute('INSERT INTO processing_dirty VALUES ( %s ) ON CONFLICT DO NOTHING',(owner,))
@@ -288,6 +290,7 @@ class MediaFiles:
                         value.update(reason=issue.message,status='ready' if keep_file else 'unavailable' if status=='unavailable' or changed else 'pending_download')
                 self.project_header(content,media)
         with store.db:
+            memberships.lock_graph(store.db)
             if content is not None:
                 assert owner is not None
                 store.db.execute('UPDATE media_files SET reason = %s , status = %s WHERE id = %s',

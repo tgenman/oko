@@ -46,4 +46,5 @@ MIGRATIONS = (
     Migration(39, 'youtube-status', (Path(__file__).parent / 'postgres' / '039-youtube-status.sql').read_text()),
     Migration(40, 'profile-message', (Path(__file__).parent / 'postgres' / '040-profile-message.sql').read_text()),
     Migration(41, 'state-status', (Path(__file__).parent / 'postgres' / '041-state-status.sql').read_text()),
+    Migration(42, 'primary-membership', (Path(__file__).parent / 'postgres' / '042-primary-membership.sql').read_text()),
 )

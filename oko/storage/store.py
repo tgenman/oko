@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from oko.collection.telegram.reading import saved_preview
 from oko.storage.collection_status import CollectionStatus
 from oko.storage import material_read, collection_jobs, publication_links, youtube_media
+from oko.storage import memberships as membership_graph
 from oko.storage import processing_input as publication_input
 from oko.storage.reading import reading_value, retry_time, reader_now, saved_content
 from oko.diagnostics import record_caught
@@ -59,6 +60,7 @@ class Store:
                                auto_read: bool | None) -> dict[str,Any]:
         with self.db:
             begin_write(self.db)
+            membership_graph.lock_graph(self.db)
             previous=self.subscriptions.telegram.binding(feed)
             result=self.subscriptions.telegram.change_access(feed,binding,info,auto_read,self.subscriptions)
             self.publications.configure_feed(feed)
@@ -206,6 +208,7 @@ class Store:
         effects=CollectionEffects()
         plans=self.publications.plan(feed,publications)
         with self.db:
+            membership_graph.lock_graph(self.db)
             history_items=[]
             saved_items: set[str] = set()
             added_memberships: list[str] = []
@@ -227,7 +230,7 @@ class Store:
                 item=plan.item
                 self.db.execute('INSERT INTO items ( id , source_id , url , published , members , published_known ) VALUES ( %s , %s , %s , %s , %s , %s ) ON CONFLICT DO NOTHING',
                     (item,plan.source_id,publication.url,publication.published,json.dumps(publication.members),publication.published_known))
-                membership=self.db.execute('INSERT INTO feed_publications (feed_id, publication_id) VALUES ( %s , %s ) ON CONFLICT DO NOTHING RETURNING publication_id',(feed,item)).fetchone()
+                membership=membership_graph.add(self.db,feed,item)
                 if membership:
                     added_memberships.append(item)
                     saved_items.add(item)
@@ -419,6 +422,7 @@ class Store:
         fingerprint=publication_input.digest(prepared[0])
         self.fault('after_file_move')
         with self.db:
+            membership_graph.lock_graph(self.db)
             if not self._has_unviewed(item):
                 return None,effects
             if material.adapter_content and material.adapter_content.metadata.reference.key.platform==Platform.telegram:
@@ -460,6 +464,7 @@ class Store:
     def viewed_set(self, members: list[str]) -> bool:
         members = sorted(set(members))
         with self.db:
+            membership_graph.lock_graph(self.db)
             rows = {}
             memberships: dict[str, list[str]] = {}
             for start in range(0, len(members), 400):
@@ -486,7 +491,7 @@ class Store:
                 marks = ','.join('%s' for _ in batch)
                 if self.db.execute(f"UPDATE history_members SET outcome = 'viewed' WHERE item IN ( {marks} ) AND outcome IN ( 'pending' , 'retrying' )", batch).rowcount:
                     status_changed(self.db)
-                removed = [row[0] for row in self.db.execute(f'DELETE FROM feed_publications WHERE publication_id IN ( {marks} ) RETURNING publication_id', batch)]
+                removed = membership_graph.remove(self.db,items=batch)
                 self.read_versions.memberships_changed(removed)
             publication_links.prune(self, set(members))
             for item, row in rows.items():
@@ -499,6 +504,7 @@ class Store:
     def remove_feed(self, feed: str) -> None:
         self.subscriptions.check_owner('feed', feed)
         with self.db:
+            membership_graph.lock_graph(self.db)
             selected = [r[0] for r in self.db.execute("""SELECT i.id FROM feed_publications m JOIN items i ON i.id=m.publication_id
                 WHERE m.feed_id=%s AND i.processing_metadata::jsonb->'_pass'->>'feed_id'=%s""", (feed,feed))]
             if selected:
@@ -508,7 +514,7 @@ class Store:
             if self.db.execute("UPDATE feeds SET connection = 'deleting' WHERE id = %s AND connection IS DISTINCT FROM 'deleting'", (feed,)).rowcount:
                 source_changed(self.db)
             shared=[r[0] for r in self.db.execute('SELECT id FROM items_by_feed WHERE platform IS NOT NULL AND feed_id = %s',(feed,))]
-            removed = [row[0] for row in self.db.execute('DELETE FROM feed_publications WHERE feed_id = %s RETURNING publication_id',(feed,))]
+            removed = membership_graph.remove(self.db,feed=feed)
             self.read_versions.memberships_changed(removed)
             for item in shared:
                 self.read_sync.mark_item(item)
@@ -709,5 +715,6 @@ class Store:
 
 
     def mark_source_removed(self, item: str) -> None:
+        membership_graph.lock_graph(self.db)
         self.publications.set_source_deleted([item], True)
         publication_links.notify_parents(self,item)

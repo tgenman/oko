@@ -11,7 +11,7 @@ from oko.storage.transaction import transaction
 from oko.storage.source_configuration import changed as source_changed
 from oko.storage.reader_status import changed as status_changed
 from typing import TYPE_CHECKING
-from oko.storage import collection_jobs, material_read, processing_input
+from oko.storage import collection_jobs, material_read, processing_input, memberships
 from oko.collection.adapters import AdapterIssue, AdapterErrorKind
 from oko.collection.contracts import SourceManifest
 from oko.collection.external_media import expected_incomplete
@@ -277,6 +277,7 @@ class JobRepository:
     def _select_processing_feed(self, job: Row) -> Row | None:
         """Choose shared-publication rules in the same transaction as its claim."""
         db = self.store.db
+        memberships.lock_graph(db)
         item = db.execute('SELECT processing_metadata FROM items WHERE id=%s FOR UPDATE', (job['item'],)).fetchone()
         if item is None:
             return job
@@ -676,6 +677,7 @@ class JobRepository:
             return
         self.store.fault('before_feed_claim_release')
         with self.store.db:
+            memberships.lock_graph(self.store.db)
             owned = "SELECT item FROM jobs WHERE kind='delete' AND payload::jsonb->>'cleanup_feed' = %s"
             self.store.db.execute(f"DELETE FROM jobs WHERE kind != 'delete' AND item IN ({owned})", (feed,))
             self.store.db.execute(f'DELETE FROM items WHERE id IN ({owned})', (feed,))
@@ -704,6 +706,7 @@ class JobRepository:
                 shutil.rmtree(path)
         self.store.fault('after_delete_files')
         with self.store.db:
+            memberships.lock_graph(self.store.db)
             self.store.db.execute('UPDATE jobs SET execution_settings=NULL WHERE item=%s AND execution_settings IS NOT NULL', (job.item,))
             self.finish(job)
             self.store.db.execute('DELETE FROM items WHERE id = %s AND viewed = 1 AND platform IS NOT NULL ',(job.item,))

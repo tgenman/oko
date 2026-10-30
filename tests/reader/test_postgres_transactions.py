@@ -474,3 +474,20 @@ def test_source_deletion_and_reader_freshness_roll_back_together(postgres_url, t
         assert after.status_code == 200 and after.json()['source_deleted'] is True
         client.portal.call(mark, False)
         assert client.get(path, headers={'If-None-Match': after.headers['ETag']}).status_code == 304
+
+
+def test_graph_lock_serializes_membership_changes(postgres_url, tmp_path):
+    import psycopg
+    from oko.storage.memberships import lock_graph
+    from tests.support.storage import Store
+    store = Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with psycopg.connect(postgres_url) as other:
+            with transaction(store.db):
+                lock_graph(store.db)
+                assert not other.execute('SELECT pg_try_advisory_xact_lock(hashtextextended(current_schema(),%s))', (0x4F4B4F4752415048,)).fetchone()[0]
+            other.rollback()
+            assert other.execute('SELECT pg_try_advisory_xact_lock(hashtextextended(current_schema(),%s))', (0x4F4B4F4752415048,)).fetchone()[0]
+            other.rollback()
+    finally:
+        store.db.close()

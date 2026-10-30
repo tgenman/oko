@@ -799,3 +799,30 @@ def test_runtime_state_status_triggers_are_removed(connections):
         names = ['reader_v_state_status_delete','reader_v_state_status_insert','reader_v_state_update']
         assert db.execute('SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname=ANY(%s)', (names,)).fetchone() == (0,)
         verify(db, MIGRATIONS)
+
+
+def test_primary_membership_triggers_are_removed(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:41])
+        db.execute("INSERT INTO feeds(id) VALUES ('feed')")
+        db.execute("INSERT INTO items(id) VALUES ('item')")
+        db.execute("INSERT INTO feed_publications(feed_id,publication_id) VALUES ('feed','item')")
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname IN ('membership_primary_insert','membership_primary_delete')").fetchone() == (0,)
+        assert db.execute("SELECT is_primary FROM feed_publications WHERE publication_id='item'").fetchone() == (True,)
+        verify(db, MIGRATIONS)
+
+
+def test_primary_membership_migration_rejects_missing_primary(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:41])
+        db.execute("INSERT INTO feeds(id) VALUES ('feed')")
+        db.execute("INSERT INTO items(id) VALUES ('item')")
+        db.execute("INSERT INTO feed_publications(feed_id,publication_id) VALUES ('feed','item')")
+        db.execute("UPDATE feed_publications SET is_primary=false WHERE publication_id='item'")
+        with pytest.raises(psycopg.errors.RaiseException, match='invalid primary membership'):
+            migrate(db, MIGRATIONS)
+        assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname='membership_primary_insert'").fetchone() == (1,)
+        verify(db, MIGRATIONS[:41])

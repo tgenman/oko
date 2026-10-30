@@ -12,6 +12,6 @@ def library(root, database_url, count):
             row = dict(template, id=identity, source_id='completion:'+identity, external_id='completion:'+identity)
             marks = ['%s::integer::boolean' if field == 'source_deleted' else '%s' for field in fields]
             store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join(marks)+')', tuple(row[field] for field in fields))
-            store.db.execute('INSERT INTO feed_publications VALUES ( %s , %s )', ('demo', identity))
+            store.db.execute('INSERT INTO feed_publications (feed_id,publication_id,is_primary) VALUES ( %s , %s , true )', ('demo', identity))
     store.db.close()
 

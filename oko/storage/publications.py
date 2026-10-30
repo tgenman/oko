@@ -19,7 +19,7 @@ from oko.collection.contracts import Material, Publication
 from oko.domain.collection import CollectionEffects
 from oko.collection.adapters import ExternalReference
 from oko.collection.telegram.adapter import reference
-from oko.storage import publication_links,material_read
+from oko.storage import publication_links,material_read,memberships
 from oko.storage.reading import reading_value
 from oko.storage.reader_status import changed as status_changed
 
@@ -424,10 +424,11 @@ class Publications:
     def forget_many(self, items: list[str]) -> None:
         """Clear saved copies without re-evaluating graph reachability."""
         db = self.store.db
+        memberships.lock_graph(db)
         for start in range(0, len(items), 400):
             batch = items[start:start+400]
             marks = ','.join('%s' for _ in batch)
-            removed = [row[0] for row in db.execute(f'DELETE FROM feed_publications WHERE publication_id IN ( {marks} ) RETURNING publication_id', batch)]
+            removed = memberships.remove(db,items=batch)
             self.store.read_versions.memberships_changed(removed)
             db.execute(f'DELETE FROM publication_links WHERE source_publication_id IN ( {marks} ) OR target_publication_id IN ( {marks} )', batch+batch)
             db.execute(f'DELETE FROM media_files WHERE publication_id IN ( {marks} )', batch)

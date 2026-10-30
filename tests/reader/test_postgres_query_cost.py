@@ -109,7 +109,7 @@ def test_compact_cards_batch_links_and_processing_permissions(postgres_url, tmp_
             identity = f'{n:032x}'
             row = dict(template, id=identity, source_id=identity, external_id=identity)
             store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', tuple(row[f] for f in fields))
-            store.db.execute('INSERT INTO feed_publications VALUES ( %s , %s )', ('demo', identity))
+            store.db.execute('INSERT INTO feed_publications (feed_id,publication_id,is_primary) VALUES ( %s , %s , true )', ('demo', identity))
     store.db.close()
     queries = request_queries(monkeypatch)
     app = traced_app(tmp_path, database_url=postgres_url)
@@ -201,7 +201,7 @@ def test_saved_subtitles_batch_paths_but_recheck_files(postgres_url, tmp_path, m
             if n:
                 row = dict(template, id=identity, source_id=identity, external_id=identity, platform='youtube', content=json.dumps(content))
                 store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', [row[f] for f in fields])
-                store.db.execute('INSERT INTO feed_publications VALUES ( %s , %s )', ('demo', identity))
+                store.db.execute('INSERT INTO feed_publications (feed_id,publication_id,is_primary) VALUES ( %s , %s , true )', ('demo', identity))
             else:
                 store.db.execute('UPDATE items SET content = %s , platform = %s WHERE id = %s', (json.dumps(content), 'youtube', identity))
             (tmp_path / 'media' / media).write_text('Synthetic captions')

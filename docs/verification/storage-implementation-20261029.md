@@ -494,3 +494,14 @@
   passed 228 tests; types and 11 Playwright scenarios passed, with a model-settings
   screenshot inspected. Version 41 has 23 tables and 17 triggers. The remaining
   Job, item, journal and membership triggers and both dirty queues remain open.
+- Migration 042 moves primary membership selection and replacement to Python,
+  serialized by a transaction-scoped graph lock. It rejects pre-existing
+  memberships without exactly one primary. Synthetic fixtures now supply that
+  state explicitly; archived membership flags continue to match viewed state.
+- The affected broad run passed 216 tests and failed one new migration assertion
+  because it counted other test schemas; after fixing the assertion and lock
+  ordering for source removal, the targeted repeat passed 154 tests and types.
+  A first run without the test database URL failed at setup. Four Playwright
+  scenarios passed and the shared-publication screenshot was inspected. A fresh
+  version 42 schema has 23 tables and 15 non-internal triggers. Processing dirty
+  queues, status reconciliation, remaining triggers and final review remain open.

@@ -6,6 +6,7 @@ from uuid import uuid4
 from oko.collection.adapters import ExternalReference
 from oko.domain.collection import CollectionEffects
 from oko.storage.reading import reading_value, saved_content
+from oko.storage import memberships
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
@@ -21,6 +22,7 @@ def children(store: 'Store',item: str) -> list[Row]:
 
 
 def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], effects: CollectionEffects) -> bool:
+    memberships.lock_graph(store.db)
     owner=expect_row(store.db.execute('SELECT * FROM items_read WHERE id = %s',(item,)).fetchone())
     if owner['feed_id'] is None:
         return False
@@ -73,6 +75,7 @@ def text(store: 'Store', item: str) -> str:
 
 
 def notify_parents(store: 'Store', item: str) -> None:
+    memberships.lock_graph(store.db)
     for row in store.db.execute('SELECT source_publication_id FROM publication_links WHERE target_publication_id = %s',(item,)).fetchall():
         store.db.execute('INSERT INTO processing_dirty VALUES ( %s ) ON CONFLICT DO NOTHING',(row[0],))
         store.read_sync.mark_item(row[0])
@@ -84,6 +87,7 @@ def notify_parents(store: 'Store', item: str) -> None:
 def prune(store: 'Store', candidates: set[str]) -> None:
     if not candidates:
         return
+    memberships.lock_graph(store.db)
     rows=store.db.execute('WITH RECURSIVE needed ( id ) AS ( SELECT i . id FROM items_read i JOIN feed_publications f ON f . publication_id = i . id WHERE i . viewed = 0 UNION SELECT l . target_publication_id FROM publication_links l JOIN needed n ON n . id = l . source_publication_id ) SELECT id FROM items_read WHERE platform IS NOT NULL AND viewed = 0 AND id NOT IN ( SELECT id FROM needed )').fetchall()
     items = [row['id'] for row in rows]
     store.publications.forget_many(items)

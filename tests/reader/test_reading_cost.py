@@ -85,7 +85,7 @@ def test_unviewed_index_bounds_archive_work_and_survives_reopen(tmp_path):
         store.db._db.execute('ALTER TABLE feed_publications SET (autovacuum_enabled=false)')
         store.db.executemany("INSERT INTO items ( id , published , viewed , platform , external_id ) VALUES ( %s , %s , %s , 'other_web' , %s )",
             [(f'archive-{n:05}', n, int(n >= 100), f'archive-{n:05}') for n in range(20000)])
-        store.db.executemany("INSERT INTO feed_publications(feed_id,publication_id) VALUES ('demo',%s)", [(f'archive-{n:05}',) for n in range(20000)])
+        store.db.executemany("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) SELECT 'demo',id,true,viewed=0 FROM items WHERE id=%s", [(f'archive-{n:05}',) for n in range(20000)])
         assert store.db.execute("SELECT 1 FROM pg_indexes WHERE schemaname=current_schema() AND indexname='items_unviewed_order'").fetchone()
         store.db._db.execute('ANALYZE items')
     store.db.close()
@@ -117,9 +117,9 @@ def test_unviewed_index_bounds_archive_work_and_survives_reopen(tmp_path):
         with store.db:
             store.db.execute("INSERT INTO feeds(id) VALUES ('foreign'),('small')")
             store.db.execute("INSERT INTO items(id,viewed) SELECT 'foreign-' || n,0 FROM generate_series(1,1500) AS n")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id) SELECT 'foreign',id FROM items WHERE id LIKE 'foreign-%'")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'foreign',id,true FROM items WHERE id LIKE 'foreign-%'")
             store.db.execute("INSERT INTO items(id,viewed) SELECT 'small-' || n,0 FROM generate_series(1,10) AS n")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id) SELECT 'small',id FROM items WHERE id LIKE 'small-%'")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'small',id,true FROM items WHERE id LIKE 'small-%'")
             store.db._db.execute('ANALYZE items')
         with measure_reads(store.db) as small_work:
             small_rows = store.db.execute("SELECT id FROM unviewed_items_by_feed WHERE feed_id='small'").fetchall()

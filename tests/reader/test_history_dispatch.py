@@ -29,7 +29,7 @@ def test_history_admission_only_blocks_enrolled_fetches(tmp_path, transport, mod
         with store.db:
             store.db.execute('UPDATE feeds SET transport = %s WHERE id = %s', (transport, 'demo'))
             store.db.executemany('INSERT INTO items ( id ) VALUES ( %s )', [('enrolled',), ('live',)])
-            store.db.executemany('INSERT INTO feed_publications (feed_id, publication_id) VALUES (%s, %s)', [('demo', 'enrolled'), ('demo', 'live')])
+            store.db.executemany('INSERT INTO feed_publications (feed_id, publication_id, is_primary) VALUES (%s, %s, true)', [('demo', 'enrolled'), ('demo', 'live')])
             store.db.execute('INSERT INTO initial_history ( feed , selection , paused , scan_complete ) VALUES ( %s , %s , %s , %s )',
                              ('demo', json.dumps(dict(mode=mode, cancelled=bool(paused))), paused, complete))
             store.db.execute("INSERT INTO history_members(feed,item) VALUES ('demo','enrolled')")
@@ -64,7 +64,7 @@ def test_postgres_rejects_null_memberships_and_preserves_dispatch(tmp_path, item
         with pytest.raises(psycopg.errors.NotNullViolation) if invalid else nullcontext():
             with store.db:
                 store.db.execute('INSERT INTO items ( id ) VALUES ( %s )', (item,))
-                store.db.execute("INSERT INTO feed_publications (feed_id,publication_id) VALUES ('demo',%s)", (item,))
+                store.db.execute("INSERT INTO feed_publications (feed_id,publication_id,is_primary) VALUES ('demo',%s,true)", (item,))
                 store.db.execute("INSERT INTO jobs ( kind , item ) VALUES ( 'fetch' , %s )", (item,))
                 store.db.execute('INSERT INTO initial_history ( feed , selection , paused ) VALUES ( %s , %s , %s )',
                                  ('demo', json.dumps(dict(cancelled=bool(paused))), paused))
@@ -92,7 +92,7 @@ def test_foreign_cancelled_history_does_not_add_linear_dispatch_work(tmp_path, a
                 store.db.executemany("INSERT INTO history_members ( feed , item , outcome ) VALUES ( 'archive' , %s , 'loaded' )",
                                      [(f'old-{i}',) for i in range(count)])
                 store.db.execute("INSERT INTO items(id) VALUES ('live')")
-                store.db.execute("INSERT INTO feed_publications(feed_id,publication_id) VALUES ('demo','live')")
+                store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('demo','live',true)")
                 store.db.execute("INSERT INTO jobs(kind,item) VALUES ('fetch','live')")
                 if analyze:
                     analyze_schema(store.db)
@@ -120,7 +120,7 @@ def archive_seed(root):
             store.db.execute("INSERT INTO initial_history(feed,selection,paused,scan_complete) VALUES ('archive','{\"mode\":\"count\",\"cancelled\":true}',1,1)")
             store.db.executemany("INSERT INTO items ( id , viewed , platform , external_id ) VALUES ( %s , 1 , 'other_web' , %s )",
                                  [(f'old-{i}',f'old-{i}') for i in range(10000)])
-            store.db.executemany("INSERT INTO feed_publications (feed_id,publication_id) VALUES ('archive',%s)", [(f'old-{i}',) for i in range(10000)])
+            store.db.executemany("INSERT INTO feed_publications (feed_id,publication_id,is_primary,is_unviewed) VALUES ('archive',%s,true,false)", [(f'old-{i}',) for i in range(10000)])
             store.db.executemany("INSERT INTO jobs ( kind , item , status ) VALUES ( 'fetch' , %s , 'done' )",
                                  [(f'old-{i}',) for i in range(10000)])
     finally:
