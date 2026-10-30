@@ -924,3 +924,11 @@ worker, recovery, settings, YouTube and release suites passed 257 tests, with
 two additional migration failure/success cases and nine Playwright cases passed.
 Mypy passed and the status screenshot was inspected. No working database was
 migrated as part of these checks.
+
+Independent Standards and Spec reviews of the queue-removal diff both identified
+that the outcome test no longer checked the dependent theses Job. The test now
+checks both stages and rollback for filter success, retry, cancellation and block,
+including a validated filter result. Both reviewers confirmed the finding was
+addressed. Six focused cases and the complete affected worker-transaction suite
+(78 tests) passed after that test-only change. No additional application code was
+changed by the review fix.
