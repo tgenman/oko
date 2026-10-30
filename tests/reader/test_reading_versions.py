@@ -135,6 +135,31 @@ def test_status_etag_tracks_history_progress_without_source_revision_change(tmp_
         assert any('Synthetic history warning' in history['history']['progress']['warnings'] for history in changed.json()['initial_histories'])
 
 
+def test_status_etag_tracks_history_member_outcome_without_source_change(tmp_path):
+    feeds, items = library(tmp_path,[1])
+    app = traced_app(tmp_path)
+    with TestClient(app,headers=HEADERS) as client:
+        wait_for_recovery(app)
+        def seed():
+            store=app.state.host.require_store()
+            with store.db:
+                store.db.execute("INSERT INTO history_members(feed,item,outcome) VALUES (%s,%s,'loaded') ON CONFLICT(feed,item) DO UPDATE SET outcome='loaded'", (feeds[0],items[0]))
+        client.portal.call(seed)
+        first = client.get('/api/v3/status/details')
+        def change():
+            store=app.state.host.require_store()
+            before=store.subscriptions.source_revision()
+            with store.db:
+                store.subscriptions.history.saved(items[0],False)
+            return before,store.subscriptions.source_revision()
+        before,after=client.portal.call(change)
+        assert before==after
+        changed=client.get('/api/v3/status/details',headers={'If-None-Match':first.headers['ETag']})
+        assert changed.status_code==200
+        history=next(h for h in changed.json()['initial_histories'] if h['feed_id']==feeds[0])
+        assert history['history']['progress']['incomplete']==1
+
+
 def test_due_fetch_changes_publication_etag_without_dispatch(tmp_path):
     _,items=library(tmp_path,[1])
     clock=[0.0]

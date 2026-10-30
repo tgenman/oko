@@ -448,3 +448,11 @@
   types and seven Playwright scenarios passed, and the history screenshot was
   inspected. Version 34 has 23 tables and 39 triggers. Status GET writes,
   remaining status triggers and both processing dirty queues are still open.
+- Migration 035 moves history-member status freshness to the Python owners of
+  insert, outcome change, viewing and cleanup. Duplicate inserts and unchanged
+  outcomes do not create a new signal; an outcome and its status signal roll
+  back together. Three triggers/functions were removed.
+- The affected migration, history, Telegram and recovery suites passed 222
+  tests; types and eight Playwright scenarios passed, and the history screenshot
+  was inspected. Version 35 has 23 tables and 36 triggers. Status GET writes and
+  processing queues still require the remaining implementation.

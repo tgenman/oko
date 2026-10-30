@@ -295,6 +295,32 @@ def test_telegram_initial_boundary_advances_source_revision_atomically(tmp_path,
         store.db.close()
 
 
+def test_history_member_status_signal_is_idempotent_and_rolls_back(tmp_path, settings_database):
+    from tests.support.storage import Store
+    from oko.storage.transaction import transaction
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        with transaction(store.db):
+            store.subscriptions.history.enroll('synthetic',['item'],False)
+        before = store.read_versions.version('status','runtime')['version']
+        with transaction(store.db):
+            store.subscriptions.history.saved('item',True)
+        loaded = store.read_versions.version('status','runtime')['version']
+        assert loaded > before
+        with transaction(store.db):
+            store.subscriptions.history.saved('item',True)
+        assert store.read_versions.version('status','runtime')['version'] == loaded
+        with pytest.raises(ValueError,match='synthetic rollback'):
+            with transaction(store.db):
+                store.subscriptions.history.saved('item',False)
+                assert store.read_versions.version('status','runtime')['version'] > loaded
+                raise ValueError('synthetic rollback')
+        assert store.read_versions.version('status','runtime')['version'] == loaded
+        assert store.db.execute("SELECT outcome FROM history_members WHERE item='item'").fetchone()[0] == 'loaded'
+    finally:
+        store.db.close()
+
+
 def test_folder_settings_follow_rollback_and_new_folder_identity(tmp_path, settings_database):
     from tests.support.storage import Store
     from oko.storage.transaction import transaction

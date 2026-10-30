@@ -20,6 +20,7 @@ from oko.storage.publications import Publications
 from oko.storage.media import MediaFiles
 from oko.storage.reader_versions import ReaderVersions
 from oko.storage.source_configuration import changed as source_changed
+from oko.storage.reader_status import changed as status_changed
 from oko.storage.postgres_connection import PostgresConnection
 from oko.storage.problems import Problems
 from oko.storage.youtube import YouTubeAccess
@@ -483,7 +484,8 @@ class Store:
             for start in range(0, len(members), 400):
                 batch = members[start:start+400]
                 marks = ','.join('%s' for _ in batch)
-                self.db.execute(f"UPDATE history_members SET outcome = 'viewed' WHERE item IN ( {marks} ) AND outcome IN ( 'pending' , 'retrying' )", batch)
+                if self.db.execute(f"UPDATE history_members SET outcome = 'viewed' WHERE item IN ( {marks} ) AND outcome IN ( 'pending' , 'retrying' )", batch).rowcount:
+                    status_changed(self.db)
                 removed = [row[0] for row in self.db.execute(f'DELETE FROM feed_publications WHERE publication_id IN ( {marks} ) RETURNING publication_id', batch)]
                 self.read_versions.memberships_changed(removed)
             publication_links.prune(self, set(members))

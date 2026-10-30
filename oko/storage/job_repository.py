@@ -9,6 +9,7 @@ from collections.abc import Callable,Iterator
 from contextlib import contextmanager
 from oko.storage.transaction import transaction
 from oko.storage.source_configuration import changed as source_changed
+from oko.storage.reader_status import changed as status_changed
 from typing import TYPE_CHECKING
 from oko.storage import collection_jobs, material_read, processing_input
 from oko.collection.adapters import AdapterIssue, AdapterErrorKind
@@ -683,6 +684,8 @@ class JobRepository:
                 deleted = self.store.db.execute(f'DELETE FROM {table} WHERE feed = %s', (feed,)).rowcount
                 if table=='initial_history' and deleted:
                     source_changed(self.store.db)
+                if table=='history_members' and deleted:
+                    status_changed(self.store.db)
             self.store.db.execute('UPDATE jobs SET feed_id=NULL, collection_attempt=NULL WHERE feed_id=%s AND collection_attempt IS NOT NULL', (feed,))
             self.store.subscriptions.clear_settings('feed', feed)
             self.store.db.execute('DELETE FROM state WHERE key = %s', ('feed-status:'+feed,))
