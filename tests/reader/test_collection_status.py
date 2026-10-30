@@ -2,6 +2,7 @@
 from tests.support.cards import read_all_cards
 import threading
 import asyncio
+import pytest
 from fastapi.testclient import TestClient
 from oko.collection.demo import DemoSource
 from tests.support.app import create_app
@@ -254,3 +255,36 @@ def test_postgres_collection_details_are_bounded_and_keep_diagnostics(postgres_u
     assert costs[-1][1] <= costs[0][1] + 2, costs
     assert costs[-1][2] < 150_000, costs
     assert costs[-1][3] <= costs[0][3] + 1000, costs
+
+
+@pytest.mark.parametrize('patch', [
+    {'importance':'high'},
+    {'public_ai':True},
+    {'new_folder':'Other'},
+    {'importance':'high', 'initial_days':'unchanged'},
+])
+def test_feed_rules_change_does_not_interrupt_collection(tmp_path, patch):
+    started, release = threading.Event(), threading.Event()
+    class SlowSource(DemoSource):
+        async def discover(self, cursor):
+            started.set()
+            while not release.is_set():
+                await asyncio.sleep(.01)
+            return await super().discover(cursor)
+    with TestClient(create_app(tmp_path, token='test', source=SlowSource(), api_only=True), headers=HEADERS) as client:
+        try:
+            presence(client, 'reader')
+            assert started.wait(3)
+            before = client.get('/api/v3/collection-status').json()['sources'][0]['operation']['attempt_id']
+            if patch.get('initial_days') == 'unchanged':
+                feed = next(f for f in client.get('/api/v3/subscriptions').json()['feeds'] if f['id']=='demo')
+                patch = dict(patch, initial_days=feed['initial_days'])
+            response = client.patch('/api/v3/feeds/demo', json=patch)
+            assert response.status_code == 200, response.text
+            state = client.get('/api/v3/collection-status').json()['sources'][0]
+            assert state['state'] == 'collecting'
+            assert state['operation']['attempt_id'] == before
+            release.set()
+            wait_for(client, lambda: client.get('/api/v3/collection-status').json()['sources'][0]['state'] == 'complete')
+        finally:
+            release.set()
