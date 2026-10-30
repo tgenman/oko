@@ -644,8 +644,8 @@ class JobRepository:
                     store.db.execute("UPDATE media_files SET status = 'pending_download' , reason = '' WHERE id = %s",(subtitles,))
                     content['extra']['youtube']['captions']='pending'
                     store.db.execute('UPDATE items SET content = %s WHERE id = %s',(json.dumps(content,ensure_ascii=False),item))
-                    store.db.execute('INSERT INTO processing_dirty VALUES ( %s ) ON CONFLICT DO NOTHING',(item,))
                     job_write(store.db, "INSERT INTO jobs ( kind , item , queued_wall ) VALUES ( 'download_media' , %s , extract(epoch FROM clock_timestamp()) ) ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , generation = jobs . generation + 1 , next = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . next ELSE 0 END , retry_at = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . retry_at ELSE NULL END WHERE jobs . status != 'running'",(subtitles,store.wall_clock(),store.wall_clock()))
+                    store.processing.reconcile_accepted_item(item)
 
         if revalidate_ready:
             for resource in store.db.execute("SELECT id FROM media_files WHERE publication_id = %s AND status = 'ready'",(item,)).fetchall():

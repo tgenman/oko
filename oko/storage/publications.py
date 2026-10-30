@@ -304,7 +304,6 @@ class Publications:
                 result=dict(hidden=filtered.get('hidden',False),reason=filtered['reason'],removed=[r['text'] for r in filtered['removed']])
                 refreshed=publication_input.filtered(publication_input.content(store,item),item,result)
                 store.db.execute('UPDATE items SET filtered_content = %s WHERE id = %s',(json.dumps(refreshed,ensure_ascii=False),item))
-        store.db.execute('INSERT INTO processing_dirty VALUES ( %s ) ON CONFLICT DO NOTHING',(item,))
         self.reconcile(item)
         publication_links.notify_parents(store,item)
 

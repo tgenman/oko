@@ -197,9 +197,8 @@ class MediaFiles:
             store.read_sync.mark_item(download.publication_id)
             store.read_sync.saved_publication(download.publication_id)
             if subtitles:
-                store.db.execute('INSERT INTO processing_dirty VALUES ( %s ) ON CONFLICT DO NOTHING',(download.publication_id,))
+                store.processing.reconcile_accepted_item(download.publication_id)
             publication_links.notify_parents(store,download.publication_id)
-            if subtitles:store.publications.reconcile(download.publication_id)
             store.fault('before_media_commit')
         return True
 
@@ -253,7 +252,7 @@ class MediaFiles:
             memberships.lock_graph(store.db)
             store.db.execute("UPDATE media_files SET id = %s , status = 'unavailable' , reason = %s , storage_key = NULL , size_bytes = NULL WHERE id = %s",(identity,issue.message,media_id))
             store.db.execute('UPDATE items SET content = %s , media_ids = %s WHERE id = %s',(json.dumps(content,ensure_ascii=False),json.dumps([value['id'] for value in media]),owner))
-            store.db.execute('INSERT INTO processing_dirty VALUES ( %s ) ON CONFLICT DO NOTHING',(owner,))
+            store.processing.reconcile_accepted_item(owner)
             publication_links.notify_parents(store,owner)
         store.processing.sync()
 
@@ -295,7 +294,7 @@ class MediaFiles:
                 store.db.execute('UPDATE items SET content = %s WHERE id = %s', (json.dumps(content,ensure_ascii=False),owner))
                 store.subscriptions.history.saved(owner,False)
                 if subtitles:
-                    store.db.execute('INSERT INTO processing_dirty VALUES ( %s ) ON CONFLICT DO NOTHING',(owner,))
+                    store.processing.reconcile_accepted_item(owner)
                 publication_links.notify_parents(store,owner)
         if content is not None:
             if subtitles:

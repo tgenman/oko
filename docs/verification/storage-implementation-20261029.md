@@ -609,3 +609,10 @@
   tests and types; two Playwright scenarios passed and the hidden publication
   screenshot was inspected. Settings, membership and media paths still use the
   remaining publication dirty queue.
+- Collection, linked-parent and subtitles acceptance/failure/retry now reconcile
+  affected processing Jobs directly; they no longer enqueue and immediately
+  consume a publication marker. Collection and linked-parent tests verify both
+  atomic Job changes and absence of a transient queue insert. The affected
+  media, YouTube, processing and recovery suites passed 169 tests and types;
+  four Playwright scenarios passed and the ready-captions screenshot was inspected.
+  Membership changes, settings and startup still use the publication dirty queue.

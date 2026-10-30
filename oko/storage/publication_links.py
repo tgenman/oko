@@ -54,8 +54,6 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
     store.db.executemany('INSERT INTO publication_links VALUES ( %s , %s ) ON CONFLICT DO NOTHING',[(item,target) for target in targets])
     prune(store,previous-set(targets))
     changed=previous!=set(targets)
-    if changed:
-        store.db.execute('INSERT INTO processing_dirty VALUES ( %s ) ON CONFLICT DO NOTHING',(item,))
     return changed
 
 
@@ -78,7 +76,6 @@ def text(store: 'Store', item: str) -> str:
 def notify_parents(store: 'Store', item: str) -> None:
     memberships.lock_graph(store.db)
     for row in store.db.execute('SELECT source_publication_id FROM publication_links WHERE target_publication_id = %s',(item,)).fetchall():
-        store.db.execute('INSERT INTO processing_dirty VALUES ( %s ) ON CONFLICT DO NOTHING',(row[0],))
         store.read_sync.mark_item(row[0])
         store.read_sync.saved_publication(row[0])
         store.processing.reconcile_accepted_item(row[0])

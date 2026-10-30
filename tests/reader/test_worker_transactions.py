@@ -108,7 +108,13 @@ def test_changed_collection_updates_processing_job_in_same_transaction(tmp_path)
         material = StructuredSource(None).describe(store.publication(item), Material('Title','Changed synthetic text'))
 
         def change():
-            CollectionService(execution.require_store).collected(item,material,manual=False)
+            statements = []
+            store.db.set_trace_callback(statements.append)
+            try:
+                CollectionService(execution.require_store).collected(item,material,manual=False)
+            finally:
+                store.db.set_trace_callback(None)
+            assert not any('INSERT INTO processing_dirty' in statement for statement in statements)
             after = dict(store.db.execute("SELECT generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone())
             assert after['generation'] > before['generation']
             assert after['input_snapshot'] != before['input_snapshot']
@@ -140,7 +146,13 @@ def test_changed_linked_article_updates_parent_job_in_same_transaction(tmp_path)
         next(block for block in content['blocks'] if block['type']=='text' and block['role']=='body')['text'] = 'Changed linked article'
         def change():
             store.db.execute("UPDATE items SET content=%s WHERE id='linked'", (json.dumps(content),))
-            publication_links.notify_parents(store,'linked')
+            statements = []
+            store.db.set_trace_callback(statements.append)
+            try:
+                publication_links.notify_parents(store,'linked')
+            finally:
+                store.db.set_trace_callback(None)
+            assert not any('INSERT INTO processing_dirty' in statement for statement in statements)
             after = dict(store.db.execute("SELECT generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone())
             assert after['generation'] > before['generation'] and after['input_snapshot'] != before['input_snapshot']
         with pytest.raises(ValueError, match='synthetic rollback'):
