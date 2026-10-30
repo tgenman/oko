@@ -1261,3 +1261,15 @@ for six modules, and 10 Playwright status scenarios passed with a screenshot
 inspected. The NULL-code behavior was tested through HTTP, not a dedicated
 browser scenario. One Starlette/httpx deprecation warning was emitted. No
 working database was migrated; other status categories remain.
+
+
+Fetch Jobs with an empty code or explicit work-fetch code now use event-owned
+problem updates; NULL codes remain on the previous time-dependent path. Recovery
+uses indexed matching against Jobs and retains confirmed IDs across handoffs,
+while different explicit error codes create distinct occurrences and ambiguous
+legacy records are preserved. YouTube admission retains its own indexed lookup.
+The integrated fetch/processing/worker/status suite passed 253 PostgreSQL tests,
+mypy passed for seven modules, and 10 Playwright status scenarios passed with a
+screenshot inspected. Browser coverage was for the general panel, not a dedicated
+fetch error. One Starlette/httpx warning was emitted. No working database was
+migrated.

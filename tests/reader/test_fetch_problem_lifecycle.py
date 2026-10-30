@@ -48,7 +48,7 @@ def test_fetch_failure_is_recovered_at_startup(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','article',true)")
@@ -150,7 +150,7 @@ def test_restart_recovers_legacy_fetch_occurrence_without_losing_id(tmp_path,pos
     legacy=dict(code='article-limit',section='object',title='legacy',consequence='saved',next_step='retry',objects=[dict(kind='material',id='article')],action=None,operation='producer:fetch',state='current',next_at=None)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),('b','b','B','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('b','article',true)")
@@ -183,7 +183,7 @@ def test_restart_closes_stale_legacy_fetch_problem(tmp_path,postgres_url):
     legacy=dict(code='article-limit',section='object',title='legacy',consequence='saved',next_step='retry',objects=[dict(kind='material',id='article')],action=None,operation='producer:fetch',state='current',next_at=None)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','article',true)")
@@ -233,7 +233,7 @@ def test_ambiguous_legacy_fetch_record_survives_recovery_and_get(tmp_path,postgr
     body=dict(code='article-limit',section='object',title='legacy',consequence='saved',next_step='retry',objects=[],action=None,operation='producer:status',state='current',next_at=None)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('old','job:article-limit:feed:fetch:item:read:part','background',%s,1)",(json.dumps(body),))
         store.db.close();store=Store(tmp_path,lambda _:None,database_url=postgres_url)
         store.problems.snapshot(2)
@@ -246,7 +246,7 @@ def test_unidentifiable_legacy_fetch_record_is_preserved(tmp_path,postgres_url):
     body=dict(code='article-limit',section='object',title='legacy',consequence='saved',next_step='retry',objects=[],action=None,operation='producer:status',state='current',next_at=None)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('old','job:article-limit:feed:fetch:article','background',%s,1)",(json.dumps(body),))
         store.db.close();store=Store(tmp_path,lambda _:None,database_url=postgres_url)
         store.problems.snapshot(2)
@@ -281,7 +281,7 @@ def test_recovery_active_fetch_jobs_has_bounded_round_trips(tmp_path,postgres_ur
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) SELECT 'fetch','f-'||n,'failed','failure','article-limit' FROM generate_series(1,1000) n")
         sql=[];store.db.set_trace_callback(sql.append)
         try:store.problems.recover_fetch_problems()
@@ -296,7 +296,7 @@ def test_recovery_batch_isolates_ambiguous_fetch_identity(tmp_path,postgres_url)
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('item:read:part')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','item:read:part',true)")
@@ -328,7 +328,7 @@ def test_restart_recovers_old_owner_when_job_has_no_owner_snapshot(tmp_path,post
     body=dict(code='article-limit',section='object',title='legacy',consequence='saved',next_step='retry',objects=[dict(kind='material',id='article')],action=None,operation='producer:fetch',state='current',next_at=None)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),('b','b','B','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('b','article',true)")
@@ -345,7 +345,7 @@ def test_restart_merges_legacy_owners_by_first_occurrence(tmp_path,postgres_url)
     body=dict(code='article-limit',section='object',title='legacy',consequence='saved',next_step='retry',objects=[dict(kind='material',id='article')],action=None,operation='producer:fetch',state='current',next_at=None)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),('b','b','B','default','rss','rss','connected','[]'),('c','c','C','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('c','article',true)")
@@ -361,7 +361,7 @@ def test_recovery_stale_fetch_problems_batches_updates(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) SELECT 'p-'||n,'job:article-limit:feed:fetch:item-'||n,'background',jsonb_build_object('code','article-limit','section','object','title','x','consequence','c','next_step','n','operation','producer:fetch','state','current','objects',jsonb_build_array(jsonb_build_object('kind','material','id','item-'||n)))::text,1 FROM generate_series(1,1000) n")
         sql=[];store.db.set_trace_callback(sql.append)
         try:store.problems.recover_fetch_problems()
@@ -376,7 +376,7 @@ def test_fetch_recovery_first_page_ignores_unrelated_jobs(tmp_path,postgres_url)
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) SELECT 'discover','foreign-'||n,'failed','failure','source-connection' FROM generate_series(1,10000) n")
             store.db._db.execute('ANALYZE jobs')
         sql=[];store.db.set_trace_callback(sql.append)
@@ -392,7 +392,7 @@ def test_recovery_mixed_fetch_jobs_has_bounded_round_trips(tmp_path,postgres_url
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) SELECT 'fetch','f-'||n,'failed','failure','article-limit' FROM generate_series(1,1000) n")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) SELECT 'old-'||n,'job:article-limit:f-'||n||':fetch:f-'||n,'background',jsonb_build_object('code','article-limit','section','object','title','x','consequence','c','next_step','n','operation','producer:fetch','state','current','objects',jsonb_build_array(jsonb_build_object('kind','material','id','f-'||n)))::text,1 FROM generate_series(1,1000,100) n")
         sql=[];store.db.set_trace_callback(sql.append)
@@ -489,7 +489,7 @@ def test_recovery_existing_fetch_jobs_has_bounded_round_trips(tmp_path,postgres_
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) SELECT 'fetch','f-'||n,'failed','failure','article-limit' FROM generate_series(1,1000) n")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) SELECT 'old-'||n,'job:article-limit:f-'||n||':fetch:f-'||n,'background',jsonb_build_object('code','article-limit','section','object','title','x','consequence','c','next_step','n','operation','producer:fetch','state','current','objects',jsonb_build_array(jsonb_build_object('kind','material','id','f-'||n)))::text,1 FROM generate_series(1,1000) n")
         sql=[];store.db.set_trace_callback(sql.append)
@@ -506,7 +506,7 @@ def test_recovery_keeps_oldest_occurrence_when_current_identity_exists(tmp_path,
     body=dict(code='article-limit',section='object',title='legacy',consequence='saved',next_step='retry',objects=[dict(kind='material',id='article')],action=None,operation='producer:fetch',state='current',next_at=None)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),('b','b','B','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('b','article',true)")
@@ -570,7 +570,7 @@ def test_restart_viewed_fetch_problem_is_irrelevant(tmp_path,postgres_url):
     body=dict(code='article-limit',section='object',title='legacy',consequence='saved',next_step='retry',objects=[dict(kind='material',id='article')],action=None,operation='producer:fetch',state='current',next_at=None)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id,viewed) VALUES ('article',1)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','article','failed','failure','article-limit')")
@@ -615,7 +615,7 @@ def test_fetch_record_recovery_ignores_unrelated_problems(tmp_path,postgres_url)
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             body=json.dumps(dict(code='x',operation='producer:read',objects=[]))
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) SELECT 'p-'||n,'job:x:'||n,'background',%s,1 FROM generate_series(1,10000) n",(body,))
             store.db._db.execute('ANALYZE reader_problems')
@@ -623,6 +623,6 @@ def test_fetch_record_recovery_ignores_unrelated_problems(tmp_path,postgres_url)
         try:store.problems.recover_fetch_problems()
         finally:store.db.set_trace_callback(None)
         query=next(q for q in sql if q.startswith('SELECT id,identity,body,created FROM reader_problems'))
-        plan=store.db._db.execute('EXPLAIN (ANALYZE,FORMAT JSON) '+query,(float('-inf'),'',)).fetchone()[0][0]
+        plan=store.db._db.execute('EXPLAIN (ANALYZE,FORMAT JSON) '+query,()).fetchone()[0][0]
         assert scan_rows(plan['Plan'])<1000,plan
     finally:store.db.close()

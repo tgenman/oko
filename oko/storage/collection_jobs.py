@@ -25,7 +25,7 @@ def interrupt(store: 'Store', feeds: set[str] | None = None, *, backoff: bool = 
             continue
         until = (max(row['retry_at'] or 0, store.wall_clock()+max(initial,row['retry_delay'])) if backoff
             else row['retry_at'] if row['wait_scope'] else None)
-        from oko.storage.fetch_job_problems import managed_candidates
+        from oko.storage.fetch_job_problems import previous_candidates as managed_candidates
         previous_fetch=managed_candidates(store,row['id'],store.wall_clock()) if row['kind']=='fetch' and (row['error'] is not None or row['problem_code'] is not None) else []
         from oko.storage.media_job_problems import managed_candidates as media_candidates
         previous_media=media_candidates(store,row['id'],store.wall_clock()) if row['kind']=='download_media' and (row['error'] is not None or row['problem_code'] is not None) else []
@@ -60,7 +60,7 @@ def failure_status(issue: AdapterIssue) -> str:
 def fail(store: 'Store', job: 'Job', issue: AdapterIssue, *, cancelled: bool = False) -> None:
     if not store.jobs.valid(job):
         return
-    from oko.storage.fetch_job_problems import managed_candidates
+    from oko.storage.fetch_job_problems import previous_candidates as managed_candidates
     previous=managed_candidates(store,job.id,store.wall_clock()) if job.kind=='fetch' else []
     from oko.storage.media_job_problems import managed_candidates as media_candidates
     previous_media=media_candidates(store,job.id,store.wall_clock()) if job.kind=='download_media' else []

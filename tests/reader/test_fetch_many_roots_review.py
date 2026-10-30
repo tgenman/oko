@@ -6,7 +6,7 @@ def test_recovery_shared_fetch_has_bounded_roundtrips(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id) SELECT 'f-'||n FROM generate_series(1,30) n")
             store.db.execute("INSERT INTO publications(id,viewed) SELECT 'r-'||n,0 FROM generate_series(1,30) n")
             store.db.execute("INSERT INTO publications(id,viewed) VALUES ('target',0)")
@@ -26,7 +26,7 @@ def test_recovery_shared_fetch_moved_owners_is_bounded(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id) SELECT 'f-'||n FROM generate_series(1,30) n")
             store.db.execute("INSERT INTO publications(id,viewed) SELECT 'r-'||n,0 FROM generate_series(1,30) n")
             store.db.execute("INSERT INTO publications(id,viewed) VALUES ('target',0)")
@@ -46,7 +46,7 @@ def test_ambiguous_legacy_identity_does_not_finish_unrelated_active_material(tmp
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('target')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','target',true)")
@@ -78,7 +78,7 @@ def test_recovery_maps_old_occurrence_to_its_matching_root(tmp_path,postgres_url
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected','[]'),('y','y','Y','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('root-x'),('root-y'),('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('x','root-x',true),('y','root-y',true)")
@@ -114,7 +114,7 @@ def test_misleading_fetch_identity_with_live_different_job_is_preserved(tmp_path
     body=dict(code='article-limit',section='object',title='old',consequence='c',next_step='n',state='current',operation='producer:status',objects=[dict(kind='material',id='target')])
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('target'),('ghost')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','target',true),('feed','ghost',true)")
@@ -131,7 +131,7 @@ def test_recovery_hundred_moved_roots_has_bounded_sql(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id) SELECT 'f-'||n FROM generate_series(1,100) n")
             store.db.execute("INSERT INTO publications(id,viewed) SELECT 'r-'||n,0 FROM generate_series(1,100) n")
             store.db.execute("INSERT INTO publications(id,viewed) VALUES ('target',0)")
@@ -151,7 +151,7 @@ def test_done_fetch_error_must_protect_ambiguous_legacy(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id) VALUES ('feed')")
             store.db.execute("INSERT INTO publications(id) VALUES ('target')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','target',true)")

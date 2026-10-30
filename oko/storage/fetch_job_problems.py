@@ -35,7 +35,8 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float) -> dict[int,
         if group not in results:
             body: dict[str,Any]=dict(id=identity,code=code,section='object',title='Не удалось загрузить материал',
                 consequence='Сохранённое содержимое остаётся доступным.',next_step='Включите обработку, чтобы повторить попытку.' if row['status']=='blocked' else 'Повторите загрузку вручную.' if row['status'] in ('done','failed') else 'Проверьте доступность источника.' if row['status']=='unavailable' else 'Око повторит попытку автоматически.',
-                objects=[],action=None,operation='producer:fetch',fetch_owner=feed,created_at=now,state='retrying' if row['status']=='running' or not row['error'] else 'current',finished_at=None,outcome=None,next_at=None)
+                objects=[],action=None,operation='producer:fetch',fetch_owner=feed,_code_present=row['problem_code'] is not None,created_at=now,state='retrying' if row['status']=='running' or not row['error'] else 'current',finished_at=None,outcome=None,next_at=None)
+            if code=='work-fetch':body['fetch_implicit_code']=row['problem_code'] in (None,'')
             if row['error']:body['reason']=row['error']
             if code=='source-reconnect':body.update(section='action',next_step='Проверьте привязку источника; доступ не изменяется автоматически.')
             results[group]=body
@@ -57,11 +58,24 @@ def managed_candidates(store: 'Store', job_id: int, now: float) -> list[dict[str
     """Only per-publication failures with explicit, non-shared codes."""
     rows=candidates(store,job_id,now)
     excluded={'codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'}
-    return [dict(row,fetch_job_id=str(job_id)) for row in rows
-            if row['code'] and row['code']!='work-fetch' and row['code'] not in excluded and not row['code'].startswith('source-')]
+    return [dict({k:v for k,v in row.items() if k!='_code_present'},fetch_job_id=str(job_id)) for row in rows
+            if row['_code_present'] and row['code'] and row['code'] not in excluded and not row['code'].startswith('source-')]
 
 
 def managed_candidates_many(store: 'Store', job_ids: list[int], now: float) -> dict[int,list[dict[str, Any]]]:
     excluded={'codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'}
     groups=candidates_many(store,job_ids,now)
-    return {job_id:[dict(row,fetch_job_id=str(job_id)) for row in rows if row['code'] and row['code']!='work-fetch' and row['code'] not in excluded and not row['code'].startswith('source-')] for job_id,rows in groups.items()}
+    return {job_id:[dict({k:v for k,v in row.items() if k!='_code_present'},fetch_job_id=str(job_id)) for row in rows if row['_code_present'] and row['code'] and row['code'] not in excluded and not row['code'].startswith('source-')] for job_id,rows in groups.items()}
+
+
+def previous_candidates(store: 'Store', job_id: int, now: float) -> list[dict[str, Any]]:
+    """Capture the prior GET-owned NULL error when an event changes its code."""
+    rows=candidates(store,job_id,now)
+    excluded={'codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'}
+    eligible=[dict({k:v for k,v in row.items() if k!='_code_present'},fetch_job_id=str(job_id)) for row in rows
+              if row['code'] not in excluded and not row['code'].startswith('source-')]
+    if eligible and any(not row['_code_present'] for row in rows):
+        job=store.db.execute('SELECT item FROM jobs WHERE id=%s',(job_id,)).fetchone()
+        if job:
+            for row in eligible:row['_fetch_item']=job['item']
+    return eligible

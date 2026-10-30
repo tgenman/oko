@@ -6,7 +6,7 @@ def test_legacy_unrelated_material_without_job_is_preserved(tmp_path,postgres_ur
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id) VALUES ('feed')")
             store.db.execute("INSERT INTO publications(id) VALUES ('unrelated')")
             body=dict(code='article-limit',section='object',title='old',consequence='c',next_step='n',state='current',operation='producer:status',objects=[dict(kind='material',id='unrelated')])
@@ -23,7 +23,7 @@ def test_unrelated_legacy_without_job_survives_get(tmp_path,postgres_url):
     body=dict(code='article-limit',section='object',title='old',consequence='c',next_step='n',state='current',operation='producer:status',objects=[dict(kind='material',id='unrelated')])
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('unrelated')")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('old','job:article-limit:feed:fetch:ghost','background',%s,1)",(json.dumps(body),))
@@ -39,7 +39,7 @@ def test_legacy_invalid_object_is_not_silently_finished(tmp_path,postgres_url):
     body=dict(code='article-limit',section='object',title='old',consequence='c',next_step='n',state='current',operation='producer:status',objects=[dict(kind='material',id='target'),dict(kind='feed',id='elsewhere')])
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('target')")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('old','job:article-limit:feed:fetch:target','background',%s,1)",(json.dumps(body),))
@@ -55,7 +55,7 @@ def test_proven_legacy_link_without_job_can_finish(tmp_path,postgres_url):
     body=dict(code='article-limit',section='object',title='old',consequence='c',next_step='n',state='current',operation='producer:status',objects=[dict(kind='material',id='root')])
     try:
         with store.db:
-            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v1'")
+            store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO publications(id) VALUES ('root'),('target')")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root','target')")
