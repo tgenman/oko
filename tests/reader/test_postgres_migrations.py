@@ -1203,3 +1203,59 @@ def test_unviewed_view_removal_rolls_back_on_failure(connections):
         assert db.execute("SELECT to_regclass('unviewed_items_by_feed')").fetchone()[0] is not None
         assert db.execute('SELECT max(version) FROM oko_schema_migrations').fetchone()[0] == 60
         verify(db, MIGRATIONS[:60])
+
+
+def test_feed_ownership_selection_matches_view_and_is_bounded(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    from tests.support.postgres_work import scan_rows
+    with connections() as db:
+        migrate(db, MIGRATIONS[:61])
+        db.execute("INSERT INTO feeds(id,platform,external_id) VALUES ('first','rss','https://first.test'),('second','rss','https://second.test')")
+        db.execute("INSERT INTO publications(id,platform,external_id,viewed) SELECT 'foreign-'||n,'rss','f-'||n,0 FROM generate_series(1,10000) n")
+        db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) SELECT 'second',id,true,true FROM publications")
+        db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('live','rss','live',0),('cleanup','rss','cleanup',1),('orphan','rss','orphan',0)")
+        db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('first','live',true,true),('second','live',false,true)")
+        db.execute("INSERT INTO jobs(kind,item,payload,status) VALUES ('delete','cleanup','{\"cleanup_feed\":\"first\"}','pending')")
+        assert db.execute('(SELECT * FROM items_read EXCEPT ALL SELECT * FROM items_by_feed) UNION ALL (SELECT * FROM items_by_feed EXCEPT ALL SELECT * FROM items_read)').fetchall()==[]
+        for table in ('publications','feed_publications','jobs'):
+            db.execute('ANALYZE '+table)
+        from oko.storage.publication_owners import owned_ids
+        direct=owned_ids("= 'first'")
+        assert sorted(db.execute(direct).fetchall()) == sorted(db.execute("SELECT id FROM items_by_feed WHERE feed_id='first'").fetchall())
+        plan=db.execute('EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) '+direct).fetchone()[0][0]['Plan']
+        assert scan_rows(plan)<100,plan
+
+
+def test_feed_owner_view_removal_preserves_memberships_and_cleanup(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    from oko.storage.publication_owners import owned_ids
+    with connections() as db:
+        migrate(db, MIGRATIONS[:61])
+        db.execute("INSERT INTO feeds(id,platform,external_id) VALUES ('first','rss','https://first.test'),('second','rss','https://second.test')")
+        db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('shared','rss','shared',0),('cleanup','rss','cleanup',1),('orphan','rss','orphan',0)")
+        db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('first','shared',true,true),('second','shared',false,true)")
+        db.execute("INSERT INTO jobs(kind,item,payload,status) VALUES ('delete','cleanup','{\"cleanup_feed\":\"first\"}','pending')")
+        db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('primary-wins','rss','primary-wins',1)")
+        db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('second','primary-wins',true,false)")
+        db.execute("INSERT INTO jobs(kind,item,payload,status) VALUES ('delete','primary-wins','{\"cleanup_feed\":\"first\"}','pending')")
+        before=db.execute("SELECT id FROM items_by_feed WHERE feed_id='first' ORDER BY id").fetchall()
+        assert before == [('cleanup',),('shared',)]
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT to_regclass('items_by_feed')").fetchone()[0] is None
+        assert sorted(db.execute(owned_ids("= 'first'")).fetchall()) == before
+        assert db.execute("SELECT count(*) FROM publications").fetchone()[0] == 4
+        assert db.execute("SELECT count(*) FROM feed_publications").fetchone()[0] == 3
+        assert db.execute("SELECT count(*) FROM jobs WHERE kind='delete'").fetchone()[0] == 2
+        verify(db, MIGRATIONS)
+
+
+def test_feed_owner_view_removal_rolls_back_on_failure(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:61])
+        failing=Migration(62, MIGRATIONS[61].name, MIGRATIONS[61].sql+'; SELECT missing_column FROM feed_publications')
+        with pytest.raises(psycopg.errors.UndefinedColumn):
+            migrate(db, (*MIGRATIONS[:61], failing))
+        assert db.execute("SELECT to_regclass('items_by_feed')").fetchone()[0] is not None
+        assert db.execute('SELECT max(version) FROM oko_schema_migrations').fetchone()[0] == 61
+        verify(db, MIGRATIONS[:61])

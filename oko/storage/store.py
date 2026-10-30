@@ -1,3 +1,4 @@
+from oko.storage.publication_owners import owned_ids
 from oko.storage.database import expect_row, Connection, Row, INTEGRITY_ERRORS
 from oko.collection.external_media import saved_external, expected_incomplete
 from oko.collection.adapters import ExternalKey, ExternalReference, Platform, MediaReference, PublicationContent, PublicationMetadata
@@ -132,7 +133,7 @@ class Store:
                 job_write(self.db, "UPDATE jobs SET next = 0 WHERE status = 'pending' AND next IS DISTINCT FROM 0")
             collection_jobs.recover(self)
             self.recover_files()
-            if self.db.execute("SELECT 1 FROM items_by_feed WHERE feed_id = 'demo' LIMIT 1").fetchone():
+            if self.db.execute(f"SELECT 1 FROM ({owned_ids('= %s')}) owner LIMIT 1", ('demo','demo')).fetchone():
                 self.ensure_demo()
             self.read_versions = ReaderVersions(self)
             self.processing.background = defer_recovery
@@ -389,12 +390,12 @@ class Store:
     def ready_sources(self, feeds: list[str]) -> int:
         if not feeds:
             return 0
-        return int(expect_row(self.db.execute("""SELECT count(*) FROM unnest(%s::text[]) f(id)
+        return int(expect_row(self.db.execute(f"""SELECT count(*) FROM unnest(%s::text[]) f(id)
             WHERE NOT EXISTS (SELECT 1 FROM jobs j
                 WHERE j.item=CASE f.id WHEN 'demo' THEN '' ELSE f.id END
                     AND j.status IN ('pending','running') AND j.kind IN ('discover','feed-delete') OFFSET 0)
-            AND NOT EXISTS (SELECT 1 FROM items_by_feed i WHERE i.feed_id=f.id AND EXISTS (
-                SELECT 1 FROM jobs j WHERE j.item=i.id AND j.status IN ('pending','running')
+            AND NOT EXISTS (SELECT 1 FROM ({owned_ids('= f.id')}) owner WHERE EXISTS (
+                SELECT 1 FROM jobs j WHERE j.item=owner.id AND j.status IN ('pending','running')
                     AND j.kind IN ('fetch','filter','theses','delete') OFFSET 0) OFFSET 0)""",
             (feeds,)).fetchone())[0])
 
@@ -552,7 +553,7 @@ class Store:
                 self.db.execute("UPDATE publications SET processing_metadata=(processing_metadata::jsonb-'_pass')::text WHERE id=ANY(%s)", (selected,))
             if self.db.execute("UPDATE feeds SET connection = 'deleting' WHERE id = %s AND connection IS DISTINCT FROM 'deleting'", (feed,)).rowcount:
                 source_changed(self.db)
-            shared=[r[0] for r in self.db.execute('SELECT id FROM items_by_feed WHERE platform IS NOT NULL AND feed_id = %s',(feed,))]
+            shared=[r[0] for r in self.db.execute(f'SELECT p.id FROM ({owned_ids("= %s")}) owner JOIN publications p ON p.id=owner.id WHERE p.platform IS NOT NULL',(feed,feed))]
             removed = membership_graph.remove(self.db,feed=feed)
             self.read_versions.memberships_changed(removed)
             for item in shared:
@@ -560,7 +561,7 @@ class Store:
             publication_links.prune(self,set(shared))
             for item in shared:
                 self._remember_cleanup_owner(item, feed)
-            items = [r[0] for r in self.db.execute('SELECT id FROM items_by_feed WHERE feed_id = %s', (feed,))]
+            items = [r[0] for r in self.db.execute(owned_ids('= %s'), (feed,feed))]
             self.problems.forget_materials(set(items), self.wall_clock())
             for item in items:
                 self.filters.forget(item)

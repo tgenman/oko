@@ -66,4 +66,5 @@ MIGRATIONS = (
     Migration(59, 'remove-processing-dirty', (Path(__file__).parent / 'postgres' / '059-remove-processing-dirty.sql').read_text()),
     Migration(60, 'remove-reading-memberships-view', (Path(__file__).parent / 'postgres' / '060-remove-reading-memberships-view.sql').read_text()),
     Migration(61, 'remove-unviewed-items-view', (Path(__file__).parent / 'postgres' / '061-remove-unviewed-items-view.sql').read_text()),
+    Migration(62, 'remove-feed-owner-view', (Path(__file__).parent / 'postgres' / '062-remove-feed-owner-view.sql').read_text()),
 )

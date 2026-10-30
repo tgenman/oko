@@ -2,6 +2,7 @@
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
+from oko.storage.publication_owners import owned_ids
 from oko.storage.store import Store
 from oko.storage import material_read, publication_links
 from oko.storage.reading import reader_now
@@ -74,8 +75,8 @@ class ReaderFacts:
         return [row['id'] for row in self.storage().db.execute('SELECT id FROM publications WHERE viewed = 1')]
 
     def feed_members(self, identity: str) -> set[str]:
-        return {row[0] for row in self.storage().db.execute('''SELECT publication_id FROM feed_publications WHERE feed_id=%s
-            UNION SELECT id FROM items_by_feed WHERE feed_id=%s''', (identity,identity))}
+        return {row[0] for row in self.storage().db.execute(f'''SELECT publication_id FROM feed_publications WHERE feed_id=%s
+            UNION SELECT id FROM ({owned_ids('= %s')}) owner''', (identity,identity,identity))}
 
     def deletion_feeds(self) -> set[str]:
         return {row[0] for row in self.storage().db.execute("SELECT DISTINCT feed_id FROM items_read WHERE id IN ( SELECT item FROM jobs WHERE kind = 'delete' AND status != 'done' )")}

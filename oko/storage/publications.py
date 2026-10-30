@@ -3,6 +3,7 @@
 All supported sources use the same current storage.
 """
 from oko.storage.media_paths import existing_file
+from oko.storage.publication_owners import owned_ids
 from oko.storage.database import expect_row
 from oko.storage.reading import reading_snapshot, saved_content
 from copy import deepcopy
@@ -119,7 +120,7 @@ class Publications:
         db=self.store.db
         db.execute("UPDATE feeds SET cursor = '' WHERE id = %s",(feed,))
         db.execute("UPDATE media_files SET status = 'unavailable' , reason = 'Обновляется описание вложения после смены доступа' WHERE status != 'ready' AND publication_id IN ( SELECT p.id FROM feed_publications m JOIN publications p ON p.id=m.publication_id WHERE m.feed_id = %s AND m.is_primary AND m.is_unviewed AND p.viewed = 0 )",(feed,))
-        marked = [row[0] for row in db.execute('SELECT id FROM items_by_feed WHERE feed_id=%s AND source_deleted', (feed,))]
+        marked = [row[0] for row in db.execute(f'SELECT p.id FROM ({owned_ids("= %s")}) owner JOIN publications p ON p.id=owner.id WHERE p.source_deleted', (feed,feed))]
         self.set_source_deleted(marked, False)
         db.execute("UPDATE publications SET status = 'pending_collection' WHERE id IN (SELECT p.id FROM feed_publications m JOIN publications p ON p.id=m.publication_id WHERE m.feed_id = %s AND m.is_primary AND m.is_unviewed AND p.viewed = 0)",(feed,))
         if db.execute('DELETE FROM telegram_read_state WHERE feed = %s',(feed,)).rowcount:
@@ -139,7 +140,7 @@ class Publications:
                 (ref.key.platform.value, ref.key.external_id, source_id)).fetchall()
             if not existing and publication.members:
                 placeholders = ','.join('%s' for _ in publication.members)
-                existing = self.store.db.execute(f'SELECT DISTINCT i . id , i . source_id FROM items_by_feed i CROSS JOIN jsonb_array_elements_text(i.members::jsonb) m(value) WHERE i . feed_id = %s AND CAST ( m . value AS BIGINT ) IN ( {placeholders} )', (feed, *publication.members)).fetchall()
+                existing = self.store.db.execute(f'SELECT DISTINCT i . id , i . source_id FROM ({owned_ids("= %s")}) owner JOIN publications i ON i.id=owner.id CROSS JOIN jsonb_array_elements_text(i.members::jsonb) m(value) WHERE CAST ( m . value AS BIGINT ) IN ( {placeholders} )', (feed, feed, *publication.members)).fetchall()
             if len(existing)>1:
                 raise ValueError('Conflicting publication identity or Telegram album membership')
             if publication.observed_only and not existing:

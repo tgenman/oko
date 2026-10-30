@@ -1006,3 +1006,21 @@ assertion, the affected transaction suites passed 118 tests; a checkout run of
 transaction, status and reading suites passed 60. Mypy passed on 157 files.
 Twenty-six Playwright material scenarios passed and the opened-publication
 screenshot was inspected. The `items_read` view itself remains in use.
+
+
+Migration 062 removes `items_by_feed`. Its consumers now use indexed membership
+and cleanup-Job selection, retaining the rule that a primary membership takes
+precedence over a cleanup owner. Synthetic upgrade and forced-failure tests
+preserved publications, memberships and cleanup Jobs and verified rollback.
+On one analyzed synthetic dataset with 10,000 unrelated publications, selecting
+one feed scanned 4 relation rows and 11 buffers via the old view, 3 rows and 8
+buffers via the direct query, and 20,007 rows and 30,172 buffers via a naive
+`items_read` substitution. These are single EXPLAIN measurements, not production
+latencies. Two readiness/cleanup cost scenarios passed; a broader cost run was
+interrupted after its first passing test.
+
+The temporary-copy regression passed 306 tests, plus 14 release/CLI tests; the
+task checkout passed 245 migration and transaction tests. Mypy passed on 158
+files. Twelve Playwright feed/status scenarios passed and the feed screenshot
+was inspected. No working database was migrated. `items_read` and status GET
+reconciliation remain.

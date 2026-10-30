@@ -1,5 +1,6 @@
 """Attempt identity, conditional transitions and saved execution parameters."""
 from oko.storage.job_writes import execute as job_write
+from oko.storage.publication_owners import owned_ids
 from oko.storage.database import expect_row, Database, Row
 import json
 import shutil
@@ -200,7 +201,7 @@ class JobRepository:
                 if row['error'] or unavailable or not material or not material.get('full',False):
                     job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , manual_once = CASE WHEN ( status = 'done' AND error IS NOT NULL ) OR EXISTS ( SELECT 1 FROM publications i WHERE i.id=jobs.item AND i.source_deleted ) THEN 1 ELSE manual_once END , status = 'pending' , next = CASE WHEN problem_code LIKE '%%FloodWaitError' OR problem_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'fetch' AND item = %s", (self.store.wall_clock(),self.store.wall_clock(),row['id']))
             for kind in ('filter','theses'):
-                for row in self.store.db.execute('SELECT j . item FROM jobs j JOIN items_by_feed i ON i . id = j . item WHERE i . feed_id = %s AND j . kind = %s AND j . error IS NOT NULL',(feed,kind)).fetchall():
+                for row in self.store.db.execute(f'SELECT j.item FROM jobs j JOIN ({owned_ids("= %s")}) owner ON owner.id=j.item WHERE j.kind = %s AND j.error IS NOT NULL',(feed,feed,kind)).fetchall():
                     self.retry_processing(row[0],kind)
 
 
@@ -401,7 +402,7 @@ class JobRepository:
 
     def restore_telegram_wait(self, feed: str, deadline: float) -> None:
         with self.store.db:
-            job_write(self.store.db, "UPDATE jobs SET next = %s WHERE status = 'pending' AND problem_code LIKE '%%:FloodWaitError' AND ( item = %s OR item IN ( SELECT id FROM items_by_feed WHERE feed_id = %s ) )", (deadline, feed, feed))
+            job_write(self.store.db, f"UPDATE jobs SET next = %s WHERE status = 'pending' AND problem_code LIKE '%%:FloodWaitError' AND ( item = %s OR item IN ( {owned_ids('= %s')} ) )", (deadline, feed, feed, feed))
 
 
     def interrupted(self, feeds: set[str] | None = None) -> None:
@@ -409,8 +410,9 @@ class JobRepository:
         params: tuple[str, ...] = ()
         if feeds is not None:
             placeholders = ','.join('%s' for _ in feeds) or "''"
-            selection += f" AND (item IN ({placeholders}) OR item IN (SELECT id FROM items_by_feed WHERE feed_id IN ({placeholders})) OR item IN (SELECT m.id FROM media_files m JOIN items_by_feed i ON i.id=m.publication_id WHERE i.feed_id IN ({placeholders})))"
-            params = (*feeds, *feeds, *feeds)
+            owner_query = owned_ids(f'IN ({placeholders})')
+            selection += f" AND (item IN ({placeholders}) OR item IN ({owner_query}) OR item IN (SELECT m.id FROM media_files m JOIN ({owner_query}) owner ON owner.id=m.publication_id))"
+            params = (*feeds, *feeds, *feeds, *feeds, *feeds)
         with self.store.db:
             # A configuration cancellation is not a failed discovery request.
             job_write(self.store.db, f"UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , generation = generation + 1 , next = CASE WHEN wait_scope IS NULL THEN 0 ELSE next END , retry_at = CASE WHEN wait_scope IS NULL THEN NULL ELSE retry_at END WHERE kind = 'discover' AND {selection}",params)
@@ -447,7 +449,7 @@ class JobRepository:
         if not want_captions:
             rows=self.store.db.execute("SELECT DISTINCT i . id , m . status FROM publications i JOIN feed_publications owner ON owner.publication_id=i.id AND owner.is_primary AND owner.is_unviewed JOIN media_files m ON m . publication_id = i . id WHERE owner.feed_id = %s AND i . viewed = 0 AND m . resource_key = 'youtube:subtitles'",(feed,)).fetchall()
             with self.store.db:
-                job_write(self.store.db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL WHERE kind = 'download_media' AND status IN ( 'pending' , 'running' ) AND item IN ( SELECT m . id FROM media_files m JOIN items_by_feed i ON i . id = m . publication_id WHERE i . feed_id = %s AND m . resource_key = 'youtube:subtitles' )",(feed,))
+                job_write(self.store.db, f"UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL WHERE kind = 'download_media' AND status IN ( 'pending' , 'running' ) AND item IN ( SELECT m.id FROM media_files m JOIN ({owned_ids('= %s')}) owner ON owner.id=m.publication_id WHERE m.resource_key = 'youtube:subtitles' )",(feed,feed))
                 for row in rows:
                     if row['status']=='pending_download':
                         self.enqueue_fetch(row['id'])
@@ -618,7 +620,7 @@ class JobRepository:
 
     def change_adapter(self, feed: str) -> None:
         db=self.store.db
-        job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL , retry_at = NULL , retry_delay = 0 , wait_scope = NULL , next = 0 WHERE kind = 'download_media' AND item IN ( SELECT m . id FROM media_files m JOIN items_by_feed i ON i . id = m . publication_id WHERE i . feed_id = %s )",(feed,))
+        job_write(db, f"UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL , retry_at = NULL , retry_delay = 0 , wait_scope = NULL , next = 0 WHERE kind = 'download_media' AND item IN ( SELECT m.id FROM media_files m JOIN ({owned_ids('= %s')}) owner ON owner.id=m.publication_id )",(feed,feed))
         job_write(db, "INSERT INTO jobs ( kind , item , queued_wall ) SELECT 'fetch' , items.id , extract(epoch FROM clock_timestamp()) FROM publications items JOIN feed_publications owner ON owner.publication_id=items.id AND owner.is_primary AND owner.is_unviewed WHERE owner.feed_id = %s AND items.viewed = 0 ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , generation = jobs . generation + 1 , next = 0 , retry_at = NULL , retry_delay = 0 , wait_scope = NULL , error = NULL , problem_code = NULL",(feed,))
         job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL WHERE kind = 'read' AND item = %s",(feed,))
         self.enqueue_discovery(feed)
