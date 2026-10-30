@@ -185,9 +185,6 @@ class Problems:
 
     def candidates(self, now: float) -> list[dict[str, Any]]:
         current: list[dict[str, Any]] = []
-        codex_choice = self.codex_choice(now)
-        if codex_choice is not None:
-            current.append(codex_choice)
         feeds = {feed['id']: feed for feed in self.store.subscriptions.feeds()}
         bindings=self.store.subscriptions.telegram.bindings(list(feeds))
         groups = self.profile_candidates(now,feeds,bindings)
@@ -393,7 +390,7 @@ class Problems:
             added: list[tuple[str,str,str,str,float]] = []
             changed = False
             for row in existing.values():
-                if row['identity'] not in identities:
+                if row['identity'] not in identities and row['identity'] != 'processor:codex-choice':
                     body = json.loads(row['body'])
                     irrelevant = body['code'] == 'codex-choice' and self.store.codex_config() is None
                     irrelevant = irrelevant or any(obj['kind'] == 'material' and self.store.publications.source_deleted(obj['id']) for obj in body['objects'])

@@ -109,7 +109,7 @@ class CollectionState:
     def startup(self, injected: bool, source_feed: str) -> float:
         store=self.store
         if injected and source_feed=='demo' or store.db.execute("SELECT 1 FROM unviewed_items_by_feed WHERE feed_id = 'demo' AND viewed = 0 LIMIT 1").fetchone():
-            store.subscriptions.ensure_demo()
+            store.ensure_demo()
         if injected:store.subscriptions.check_owner('feed',source_feed)
         return store.subscriptions.feed_refresh_minutes()*60
 

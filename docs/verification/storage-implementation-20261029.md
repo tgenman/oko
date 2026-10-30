@@ -932,3 +932,19 @@ including a validated filter result. Both reviewers confirmed the finding was
 addressed. Six focused cases and the complete affected worker-transaction suite
 (78 tests) passed after that test-only change. No additional application code was
 changed by the review fix.
+
+
+On 30 October, the missing Codex-model problem was moved out of status
+reconciliation: Store startup, settings/configuration and feed creation update
+it, and completion of feed deletion reevaluates it when the removed feed needed
+Codex. Deleting one of two such feeds retains the problem; deleting the last
+finishes it in the deletion transaction and rollback restores it. Global
+settings can independently retain it. The status read no longer recreates a
+missing problem. A demo feed inherits the same producer behavior.
+
+On synthetic PostgreSQL, 143 settings, status, subscription, Telegram binding
+and worker-transaction tests passed; mypy passed on 157 files. Eight Playwright
+status and Codex settings scenarios passed, and the status screenshot was
+inspected. Other problem categories are still reconciled by status GET; this is
+not a claim that GET is fully read-only. Deleting a feed that required Codex
+currently reevaluates effective feed settings, so this path can scan feeds.

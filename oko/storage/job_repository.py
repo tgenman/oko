@@ -694,6 +694,8 @@ class JobRepository:
         self.store.fault('before_feed_claim_release')
         with self.store.db:
             memberships.lock_graph(self.store.db)
+            feed_exists = self.store.db.execute('SELECT 1 FROM feeds WHERE id=%s', (feed,)).fetchone() is not None
+            affects_codex = feed_exists and self.store.problems.codex_choice(self.store.wall_clock(), feed=feed) is not None
             owned = "SELECT item FROM jobs WHERE kind='delete' AND payload::jsonb->>'cleanup_feed' = %s"
             job_write(self.store.db, f"DELETE FROM jobs WHERE kind != 'delete' AND item IN ({owned})", (feed,))
             if self.store.db.execute(f'DELETE FROM publications WHERE id IN ({owned})', (feed,)).rowcount:
@@ -711,6 +713,8 @@ class JobRepository:
             self.store.subscriptions.telegram.release(feed)
             if self.store.db.execute('DELETE FROM feeds WHERE id = %s', (feed,)).rowcount:
                 source_changed(self.store.db)
+                if affects_codex:
+                    self.store.problems.sync_codex_choice(self.store.wall_clock())
 
 
     def delete(self, job: Job) -> None:

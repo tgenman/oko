@@ -812,3 +812,81 @@ def test_youtube_subscription_updates_model_problem_atomically(tmp_path, setting
         assert current()['id'] == problem_id
     finally:
         store.db.close()
+
+
+def test_deleting_last_codex_feed_finishes_problem_atomically(tmp_path, settings_database):
+    from types import SimpleNamespace
+    from oko.storage.transaction import transaction
+    from oko.subscriptions.subscriptions import AddFeed
+    from oko.services.subscriptions import SubscriptionService
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    service = SubscriptionService(lambda: store)
+    try:
+        feeds = [service.add_feed(AddFeed(url='https://www.youtube.com/feeds/videos.xml?channel_id=UC'+ch*22,
+                    title=ch, folder='Folder', verification='synthetic')) for ch in ('a', 'b')]
+        problem = store.db.execute("SELECT id FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone()['id']
+        store.jobs.finish_feed_deletion(SimpleNamespace(item=feeds[0]['id']))
+        assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s', (problem,)).fetchone()['finished'] is None
+        with pytest.raises(ValueError, match='rollback'):
+            with transaction(store.db):
+                store.jobs.finish_feed_deletion(SimpleNamespace(item=feeds[1]['id']))
+                assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s', (problem,)).fetchone()['outcome'] == 'irrelevant'
+                raise ValueError('rollback')
+        assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s', (problem,)).fetchone()['finished'] is None
+        store.jobs.finish_feed_deletion(SimpleNamespace(item=feeds[1]['id']))
+        assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s', (problem,)).fetchone()['outcome'] == 'irrelevant'
+    finally:
+        store.db.close()
+
+
+def test_status_does_not_recreate_missing_codex_problem(tmp_path, settings_database):
+    from oko.subscriptions.subscriptions import Overrides
+    from oko.services.subscriptions import SubscriptionService
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    try:
+        SubscriptionService(lambda: store).update_settings('oko', 'global', Overrides(processor='codex', theses=True))
+        with store.db:
+            store.db.execute("DELETE FROM reader_problems WHERE identity='processor:codex-choice'")
+        state = store.problems.snapshot(store.wall_clock())
+        assert not any(problem['code'] == 'codex-choice' for problem in state['current'])
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='processor:codex-choice'").fetchone() is None
+    finally:
+        store.db.close()
+
+
+def test_demo_feed_inherits_folder_model_problem_on_creation(tmp_path, settings_database):
+    from oko.subscriptions.subscriptions import Overrides
+    from oko.services.subscriptions import SubscriptionService
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO folders(id,title,position) VALUES ('demo','Demo',1)")
+        SubscriptionService(lambda: store).update_settings('folder', 'demo', Overrides(processor='codex', theses=True))
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone() is None
+        store.ensure_demo()
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone()
+    finally:
+        store.db.close()
+
+
+def test_deleting_feed_keeps_problem_needed_by_global_settings(tmp_path, settings_database):
+    from types import SimpleNamespace
+    from oko.subscriptions.subscriptions import AddFeed, Overrides
+    from oko.services.subscriptions import SubscriptionService
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    service = SubscriptionService(lambda: store)
+    try:
+        service.update_settings('oko', 'global', Overrides(processor='codex', theses=True))
+        feed = service.add_feed(AddFeed(url='https://www.youtube.com/feeds/videos.xml?channel_id=UC'+'c'*22,
+                                       title='Video', folder='Folder', verification='synthetic'))
+        problem = store.db.execute("SELECT id FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone()['id']
+        store.jobs.finish_feed_deletion(SimpleNamespace(item=feed['id']))
+        assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s', (problem,)).fetchone()['finished'] is None
+        store.jobs.finish_feed_deletion(SimpleNamespace(item=feed['id']))
+        assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s', (problem,)).fetchone()['finished'] is None
+    finally:
+        store.db.close()

@@ -133,7 +133,7 @@ class Store:
             collection_jobs.recover(self)
             self.recover_files()
             if self.db.execute("SELECT 1 FROM items_by_feed WHERE feed_id = 'demo' LIMIT 1").fetchone():
-                self.subscriptions.ensure_demo()
+                self.ensure_demo()
             self.read_versions = ReaderVersions(self)
             self.processing.background = defer_recovery
             self.processing.recovering = True
@@ -196,6 +196,12 @@ class Store:
             if path.name not in ('_media','_telegram'):
                 shutil.rmtree(path) if path.is_dir() else path.unlink()
 
+
+    def ensure_demo(self) -> None:
+        with self.db:
+            membership_graph.lock_graph(self.db)
+            self.subscriptions.ensure_demo()
+            self.problems.sync_codex_feed_added('demo', self.wall_clock())
 
     def pause_history(self, feed: str, paused: bool) -> dict[str, Any]:
         self.subscriptions.check_owner('feed', feed)
