@@ -34,6 +34,13 @@ class Problems:
         self._receipt_cleanup_cursor: tuple[float, int] | None = None
         # Recovery projection only: preserve the original service records for rollback.
         self._startup_pending = {row[0] for row in self.db.execute("SELECT id FROM reader_action_results WHERE result = 'pending'")}
+        pending = sorted(self._startup_pending)
+        for start in range(0,len(pending),100):
+            with self.db:
+                for identity in pending[start:start+100]:
+                    receipt = self.db.execute('SELECT identity FROM reader_action_results WHERE id=%s', (identity,)).fetchone()
+                    if receipt:
+                        self.sync_action(receipt['identity'], self.store.wall_clock())
 
     def cleanup_receipts(self, cutoff: float) -> None:
         previous = self._receipt_cleanup_cursor
@@ -62,17 +69,17 @@ class Problems:
                         state='current', finished_at=None, outcome=None, next_at=None)
         return None
 
-    def sync_codex_choice(self, now: float) -> None:
-        """Persist the configuration obstacle with the settings change."""
-        candidate = self.codex_choice(now)
-        existing = self.db.execute("SELECT id,body FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone()
+    def sync_candidate(self, identity: str, candidate: dict[str, Any] | None, now: float) -> None:
+        """Persist one producer's problem in the same transaction as its cause."""
+        existing = self.db.execute('SELECT id,body FROM reader_problems WHERE identity=%s AND finished IS NULL', (identity,)).fetchone()
         if candidate is None:
             if existing:
-                outcome = 'irrelevant' if self.store.codex_config() is None else 'resolved'
+                outcome = 'irrelevant' if identity=='processor:codex-choice' and self.store.codex_config() is None else 'resolved'
                 self.db.execute('UPDATE reader_problems SET finished=%s,outcome=%s WHERE id=%s', (now,outcome,existing['id']))
                 status_changed(self.db)
             return
-        candidate['operation'] = 'producer:status'
+        if not identity.startswith('action:'):
+            candidate.setdefault('operation','producer:status')
         body = {key: value for key,value in candidate.items() if key not in ('id','created_at','finished_at','outcome')}
         body['objects'] = [{key:value for key,value in obj.items() if key!='label'} for obj in candidate['objects']]
         encoded = json.dumps(body)
@@ -81,9 +88,41 @@ class Problems:
                 self.db.execute('UPDATE reader_problems SET body=%s WHERE id=%s',(encoded,existing['id']))
                 status_changed(self.db)
         else:
+            origin = 'action' if identity.startswith('action:') else 'background'
             self.db.execute('INSERT INTO reader_problems(id,identity,origin,body,created,finished,outcome) VALUES (%s,%s,%s,%s,%s,NULL,NULL)',
-                            (uuid.uuid4().hex,candidate['id'],'background',encoded,now))
+                            (uuid.uuid4().hex,identity,origin,encoded,now))
             status_changed(self.db)
+
+    def sync_codex_choice(self, now: float) -> None:
+        self.sync_candidate('processor:codex-choice', self.codex_choice(now), now)
+
+    def action_candidate(self, receipt: Any) -> dict[str, Any] | None:
+        if receipt['result'] not in ('failed','unknown','pending'):
+            return None
+        if receipt['result'] == 'pending' and receipt['id'] not in self._startup_pending and not self.db.execute('SELECT 1 FROM reader_problems WHERE identity=%s AND finished IS NULL', ('action:'+receipt['identity'],)).fetchone():
+            return None
+        context = json.loads(receipt['body'])
+        unknown = receipt['result'] == 'unknown' or receipt['result'] == 'pending' and receipt['id'] in self._startup_pending
+        receipt_action: dict[str, Any] | None = context['action']
+        if unknown and receipt_action and receipt_action['kind'] not in ('settings', 'feed-settings', 'material', 'add'):
+            receipt_action = None
+        operation = receipt['identity']
+        if context.get('command_context'):
+            try:
+                error = json.loads(context['command_error']) if context.get('command_error') else None
+            except (ValueError,TypeError):
+                error = None
+            operation = json.dumps(dict(context=context['command_context'],error=error))
+        return dict(id='action:' + receipt['identity'],code='action-unknown' if unknown else 'action-failed',section='wait' if unknown else 'action',
+            title='Результат действия пока неизвестен' if unknown else context['title'],
+            consequence='Око сверяет результат; действие не повторяется автоматически.' if unknown else 'Не удалось подтвердить выполнение действия.',
+            next_step='Проверьте состояние после восстановления связи.' if unknown else 'Вернитесь к действию, чтобы исправить проблему.',
+            objects=context['objects'],action=receipt_action,operation=operation,request_id=receipt['id'],
+            state='retrying' if receipt['result'] == 'pending' and not unknown else 'current',created_at=receipt['started'],finished_at=None,outcome=None,next_at=None)
+
+    def sync_action(self, identity: str, now: float) -> None:
+        receipt = self.db.execute('SELECT * FROM reader_action_results WHERE identity=%s ORDER BY sequence DESC LIMIT 1', (identity,)).fetchone()
+        self.sync_candidate('action:'+identity, self.action_candidate(receipt) if receipt else None, now)
 
     def candidates(self, now: float) -> list[dict[str, Any]]:
         current: list[dict[str, Any]] = []
@@ -196,26 +235,9 @@ class Problems:
                 groups[identity]['state'] = 'retrying'
         current.extend(groups.values())
         for receipt in self.db.execute("SELECT * FROM reader_action_results r WHERE sequence = ( SELECT max ( sequence ) FROM reader_action_results WHERE identity = r . identity ) AND result IN ( 'failed' , 'unknown' , 'pending' ) ").fetchall():
-            if receipt['result'] == 'pending' and receipt['id'] not in self._startup_pending and not self.db.execute('SELECT 1 FROM reader_problems WHERE identity = %s AND finished IS NULL', ('action:' + receipt['identity'],)).fetchone():
-                continue
-            context = json.loads(receipt['body'])
-            unknown = receipt['result'] == 'unknown' or receipt['result'] == 'pending' and receipt['id'] in self._startup_pending
-            receipt_action: dict[str, Any] | None = context['action']
-            if unknown and receipt_action and receipt_action['kind'] not in ('settings', 'feed-settings', 'material', 'add'):
-                receipt_action = None
-            operation = receipt['identity']
-            if context.get('command_context'):
-                try:
-                    error = json.loads(context['command_error']) if context.get('command_error') else None
-                except (ValueError,TypeError):
-                    error = None
-                operation = json.dumps(dict(context=context['command_context'],error=error))
-            current.append(dict(id='action:' + receipt['identity'],code='action-unknown' if unknown else 'action-failed',section='wait' if unknown else 'action',
-                title='Результат действия пока неизвестен' if unknown else context['title'],
-                consequence='Око сверяет результат; действие не повторяется автоматически.' if unknown else 'Не удалось подтвердить выполнение действия.',
-                next_step='Проверьте состояние после восстановления связи.' if unknown else 'Вернитесь к действию, чтобы исправить проблему.',
-                objects=context['objects'],action=receipt_action,operation=operation,request_id=receipt['id'],
-                state='retrying' if receipt['result'] == 'pending' and not unknown else 'current',created_at=receipt['started'],finished_at=None,outcome=None,next_at=None))
+            candidate = self.action_candidate(receipt)
+            if candidate is not None:
+                current.append(candidate)
         return current
 
     def command_record(self, identity: str) -> CommandRecord | None:
@@ -239,22 +261,28 @@ class Problems:
             prior = self.db.execute('SELECT identity,result FROM reader_action_results WHERE id = %s', (identity,)).fetchone()
             if restart and prior and prior['identity'] != (expected_identity or context['identity']):
                 raise CommandContextMismatch('Контекст команды не совпадает')
+            was_startup_pending = identity in self._startup_pending
             if restart:
                 self._startup_pending.discard(identity)
             inserted = self.db.execute('INSERT INTO reader_action_results ( id , identity , body , started , result ) VALUES ( %s , %s , %s , %s , %s ) ON CONFLICT DO NOTHING',
                             (identity, context['identity'], json.dumps(context), now, 'pending')).rowcount
+            if restart and was_startup_pending:
+                self.db.after_rollback(lambda: self._startup_pending.add(identity))
             if inserted or restart and prior and prior['result'] != 'pending':
                 status_changed(self.db)
             if restart:
                 self.db.execute("UPDATE reader_action_results SET body = %s , started = %s , completed = NULL , result = 'pending' WHERE id = %s", (json.dumps(context), now, identity))
+            self.sync_action(context['identity'],now)
 
     def action_finished(self, identity: str, succeeded: bool, now: float) -> None:
         with self.db:
             result = 'succeeded' if succeeded else 'failed'
-            prior = self.db.execute('SELECT result FROM reader_action_results WHERE id = %s', (identity,)).fetchone()
+            prior = self.db.execute('SELECT result,identity FROM reader_action_results WHERE id = %s', (identity,)).fetchone()
             self.db.execute("UPDATE reader_action_results SET completed = %s , result = %s WHERE id = %s AND result != 'abandoned'", (now, result, identity))
             if prior and prior['result'] not in ('abandoned', result):
                 status_changed(self.db)
+            if prior and prior['result'] != 'abandoned':
+                self.sync_action(prior['identity'],now)
 
     def report_action(self, identity: str, context: dict[str, Any], result: str, now: float) -> str:
         existed = self.command_record(identity)
@@ -269,6 +297,7 @@ class Problems:
                 self.db.execute('UPDATE reader_action_results SET result = %s WHERE id = %s', (result, identity))
                 if result != row['result']:
                     status_changed(self.db)
+                self.sync_action(row['identity'],now)
             return result
         return str(row['result'])
 
