@@ -803,3 +803,27 @@ def test_processor_configuration_does_not_interrupt_unrelated_fetch(postgres_url
         assert response.status_code==200, response.text
         with psycopg.connect(postgres_url) as db:
             assert db.execute("SELECT status,generation FROM jobs WHERE kind='fetch' AND item=%s", (item,)).fetchone() == ('running',42)
+
+
+def test_scheduled_discovery_deadline_survives_restart_and_clock_change(postgres_url, tmp_path):
+    from tests.support.storage import Store
+    monotonic = [100.0]
+    wall = [1000.0]
+    options = dict(database_url=postgres_url,clock=lambda:monotonic[0],wall_clock=lambda:wall[0])
+    store = Store(tmp_path,lambda _:None,**options)
+    try:
+        store.subscriptions.ensure_demo()
+        store.jobs.enqueue_discovery('demo',160.0)
+        assert store.jobs.next_job(159.0) is None
+    finally:
+        store.db.close()
+    monotonic[0],wall[0] = 500.0,1020.0
+    reopened = Store(tmp_path,lambda _:None,**options)
+    try:
+        saved = reopened.db.execute("SELECT next,retry_at FROM jobs WHERE kind='discover' AND item=''").fetchone()
+        assert saved[:] == (540.0,1060.0)
+        assert reopened.jobs.next_job(539.0) is None
+        job = reopened.jobs.next_job(540.0)
+        assert job and job.kind=='discover'
+    finally:
+        reopened.db.close()

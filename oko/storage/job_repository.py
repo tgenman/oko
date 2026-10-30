@@ -157,9 +157,15 @@ class JobRepository:
 
 
     def enqueue_discovery(self, feed: str = 'demo', next_at: float = 0) -> None:
+        # Monotonic deadlines belong to this process; persist their wall-clock
+        # equivalent so a continuation keeps its remaining delay after restart.
+        retry_at = self.store.wall_clock()+max(0,next_at-self.store.clock()) if next_at else None
         with self.store.db:
-            job_write(self.store.db, "INSERT INTO jobs ( kind , item , next , queued_wall ) VALUES ( 'discover' , %s , %s , extract(epoch FROM clock_timestamp()) ) ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , next = excluded . next , error = NULL WHERE jobs . status = 'done'", ('' if feed == 'demo' else feed, next_at))
-
+            job_write(self.store.db, """INSERT INTO jobs(kind,item,next,retry_at,queued_wall)
+                VALUES ('discover',%s,%s,%s,extract(epoch FROM clock_timestamp()))
+                ON CONFLICT(kind,item) DO UPDATE SET queued_wall=excluded.queued_wall,status='pending',
+                    next=excluded.next,retry_at=excluded.retry_at,error=NULL WHERE jobs.status='done'""",
+                ('' if feed=='demo' else feed,next_at,retry_at))
 
     def refresh_feed(self, feed: str) -> None:
         """Admit one manual refresh without restarting work already in progress."""

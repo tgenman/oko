@@ -734,3 +734,10 @@
   tests and types. Five Playwright scenarios passed and the model-settings
   screenshot was inspected. Queue and source-ID cutovers remain blocked by the
   separate auto-review rejections recorded above.
+- Delayed discovery continuation now stores an absolute wall-clock deadline in
+  the existing retry field and reconstructs the process-local deadline on restart.
+  A synthetic test with changed monotonic and wall clocks first exposed the
+  previously lost delay, then passed. The affected collection, history, Telegram,
+  YouTube and recovery suites passed 78 tests and types; three Playwright scenarios
+  passed, and the mobile collection-status screenshot was inspected. The final
+  `next_run_at` physical schema remains to be implemented.
