@@ -120,7 +120,7 @@ class MediaFiles:
             return None
         temporary = store.root/'staging'/'_media'/(attempt+'-'+secrets.token_hex(8))
         temporary.parent.mkdir(parents=True, exist_ok=True)
-        final = store.root/'media'/row['publication_id']/(str(uuid4()) if row['status']=='ready' else row['id'])
+        final = store.root/'media'/row['publication_id']/str(uuid4())
         self.active_paths.update((temporary, final))
         return MediaDownload(row['publication_id'], ExternalReference(ExternalKey(Platform(row['platform']), row['external_id']), row['url']),
             MediaReference(row['resource_key'], row['source_locator'], row['name'], row['mime_type'], row['size_bytes'], row['resource_identity']), temporary, final)
@@ -145,7 +145,7 @@ class MediaFiles:
         same=bool(download.final.name!=identity and previous and previous['storage_key']
             and (store.root/previous['storage_key']).is_file()
             and files.file_digest(download.temporary)==files.file_digest(store.root/previous['storage_key']))
-        accepted_identity=identity if same else download.final.name
+        accepted_identity=identity if same or previous and previous['status']=='pending_download' else download.final.name
         saved=store.root/previous['storage_key'] if same and previous else download.final
         with download.temporary.open('rb') as stream:
             os.fsync(stream.fileno())
@@ -153,7 +153,8 @@ class MediaFiles:
             download.temporary.unlink()
         else:
             saved.parent.mkdir(parents=True,exist_ok=True)
-            os.replace(download.temporary,saved)
+            os.link(download.temporary,saved)
+            download.temporary.unlink()
             files.fsync_directory(saved.parent)
             files.fsync_directory(saved.parent.parent)
         store.fault('after_media_move')

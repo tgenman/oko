@@ -22,6 +22,34 @@ def accept_material(store,service,item,material):
         store.jobs.apply_collection(effects)
 
 
+def test_retry_does_not_overwrite_a_file_left_by_an_uncommitted_download(tmp_path):
+    store,item,execution,tasks=worker_library(tmp_path)
+    try:
+        service=CollectionService(execution.require_store)
+        source=StructuredSource(None)
+        accept_material(store,service,item,image_material(source,store,item))
+        job=store.jobs.next_job(store.clock(),feeds=['demo'],media_only=True)
+        first=store.media.begin(job.item,'first',False)
+        first.temporary.write_bytes(b'abandoned')
+        store.media.stage(job.item,first,replace(first.media,size_bytes=9))
+        store.media.release(first)
+
+        retry=store.media.begin(job.item,'retry',False)
+        retry.temporary.write_bytes(b'new bytes')
+        actual=replace(retry.media,size_bytes=9)
+        staged=store.media.stage(job.item,retry,actual)
+        with store.jobs.transaction(lambda:True):
+            store.media.accept(job.item,retry,actual,staged)
+            store.jobs.finish(job)
+        store.media.release(retry)
+
+        assert first.final.read_bytes()==b'abandoned'
+        saved_file=store.media.file(item,job.item)
+        assert saved_file is not None and saved_file[0].read_bytes()==b'new bytes'
+    finally:
+        store.db.close()
+
+
 @pytest.mark.parametrize('failed',[False,True])
 def test_old_download_success_or_error_cannot_replace_a_refreshed_locator(tmp_path,failed):
     async def scenario():
