@@ -640,29 +640,48 @@ def test_filter_claim_and_rollback_preserve_attempt_state(tmp_path):
 
 @pytest.mark.parametrize('outcome', ['finish','retry','cancel','block'])
 def test_filter_job_outcome_reconciles_dependants_in_same_transaction(tmp_path,outcome):
-    store, item, _, _ = worker_library(tmp_path)
+    from oko.processing.contracts import FilterResult
+    from oko.services.processing import ProcessingService
+    from oko.subscriptions.subscriptions import AddFeed, Overrides
+    store, item, execution, _ = worker_library(tmp_path)
     try:
+        other=store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other',title='Other',folder='Other',verification='synthetic'))['id']
+        service=ProcessingService(execution.require_store)
         with transaction(store.db):
+            store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)',(other,item))
+            store.subscriptions.update_settings('feed',other,Overrides(filter_enabled=False,theses=True))
             store.processing.reconcile_accepted_item(item)
-            job = store.jobs.claim_processing('filter',store.clock())
+            job=store.jobs.claim_processing('filter',store.clock())
             assert job is not None
+            prepared=service.prepare(item,'filter')
+            assert prepared.input is not None
+            store.jobs.save_input(job,prepared.input)
+        def stages():
+            return {row['kind']:(row['status'],row['generation']) for row in store.db.execute(
+                "SELECT kind,status,generation FROM jobs WHERE item=%s AND kind IN ('filter','theses')",(item,))}
+        before=stages()
+        assert before['filter'][0]=='running' and before['theses'][0]=='blocked'
         def apply():
-            if outcome=='retry':
+            if outcome=='finish':
+                service.accept(prepared.input,FilterResult(hidden=False,reason='',removed=[]),None)
+                store.jobs.finish(job)
+            elif outcome=='retry':
                 store.jobs.retry(job,store.clock(),'Synthetic error')
             else:
                 getattr(store.jobs,outcome)(job)
+            states=stages()
+            assert states['filter'][0]=={'finish':'done','retry':'pending','cancel':'cancelled','block':'blocked'}[outcome]
+            assert states['theses'][0]=={'finish':'pending','retry':'blocked','cancel':'cancelled','block':'pending'}[outcome]
         with pytest.raises(ValueError, match='synthetic rollback'):
             with transaction(store.db):
                 apply()
                 raise ValueError('synthetic rollback')
-        assert store.jobs.valid(job)
+        assert stages()==before and store.jobs.valid(job)
+        assert saved(store,item)['filtered_content']=={}
         with transaction(store.db):
             apply()
-        expected={'finish':'done','retry':'pending','cancel':'cancelled','block':'blocked'}[outcome]
-        assert store.db.execute('SELECT status FROM jobs WHERE id=%s',(job.id,)).fetchone()[0] == expected
     finally:
         store.db.close()
-
 
 def test_nested_service_uses_one_begin_and_a_caught_failure_cannot_commit(tmp_path):
     store,item,execution,tasks=worker_library(tmp_path)
