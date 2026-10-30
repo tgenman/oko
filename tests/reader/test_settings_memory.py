@@ -786,3 +786,29 @@ def test_codex_problem_recovers_on_startup_without_status_request(tmp_path, sett
         assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone()
     finally:
         store.db.close()
+
+
+def test_youtube_subscription_updates_model_problem_atomically(tmp_path, settings_database):
+    from oko.storage.transaction import transaction
+    from oko.subscriptions.subscriptions import AddFeed
+    from oko.services.subscriptions import SubscriptionService
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    service = SubscriptionService(lambda: store)
+    feed = AddFeed(url='https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa', title='YouTube', folder='Folder', verification='synthetic')
+    def current():
+        return store.db.execute("SELECT id FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone()
+    try:
+        assert current() is None
+        with pytest.raises(ValueError, match='rollback'):
+            with transaction(store.db):
+                service.add_feed(feed)
+                assert current() is not None
+                raise ValueError('rollback')
+        assert current() is None
+        service.add_feed(feed)
+        problem_id = current()['id']
+        service.add_feed(AddFeed(url='https://source.test/feed', title='RSS', folder='Folder', verification='synthetic'))
+        assert current()['id'] == problem_id
+    finally:
+        store.db.close()

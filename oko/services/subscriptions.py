@@ -2,6 +2,9 @@
 
 from oko.storage.access import repository_access
 from collections.abc import Callable
+from contextlib import nullcontext
+from oko.storage.transaction import transaction
+from oko.storage import memberships
 from dataclasses import dataclass
 from typing import Any
 from oko.storage.store import Store
@@ -50,7 +53,13 @@ class SubscriptionService:
 
     @repository_access
     def add_feed(self, value: AddFeed) -> dict[str, Any]:
-        return self._storage().subscriptions.add_feed(value)
+        repository = self._storage()
+        boundary = nullcontext() if repository.db.transaction_depth else transaction(repository.db)
+        with boundary:
+            memberships.lock_graph(repository.db)
+            feed = repository.subscriptions.add_feed(value)
+            repository.problems.sync_codex_feed_added(feed['id'], repository.wall_clock())
+            return feed
 
     @repository_access
     def patch_feed(self, identity: str, value: FeedPatch) -> tuple[dict[str, Any], bool]:

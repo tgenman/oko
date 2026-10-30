@@ -75,7 +75,9 @@ class Store:
     def connect_telegram(self, binding: dict[str,Any], info: dict[str,Any], source: str, folder: str, history: InitialHistory | None, auto_read: bool) -> dict[str,Any]:
         boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
         with boundary:
+            membership_graph.lock_graph(self.db)
             result = self.subscriptions.telegram.connect(binding,info,source,folder,history,auto_read,self.subscriptions)
+            self.problems.sync_codex_feed_added(result['id'], self.wall_clock())
             if binding['kind']=='client':
                 self.problems.sync_profiles(self.wall_clock(), {str(binding.get('role') or result['id'])})
             return result

@@ -56,8 +56,9 @@ class Problems:
             feeds = {f['id']: f for f in self.store.subscriptions.feeds()}
         return self.reconcile(candidates, now, feeds)
 
-    def codex_choice(self, now: float) -> dict[str, Any] | None:
-        configurations=[self.store.subscriptions.effective('oko','global'),*self.store.subscriptions.effective_feeds().values()]
+    def codex_choice(self, now: float, *, feed: str | None = None) -> dict[str, Any] | None:
+        configurations = ([self.store.subscriptions.effective('feed', feed, details=False)] if feed is not None else
+                          [self.store.subscriptions.effective('oko','global'),*self.store.subscriptions.effective_feeds().values()])
         needs_codex = any((values := configuration['effective'])['processor']['value'] == 'codex' and
                          any(values[key]['value'] for key in ('theses', 'prompt_filters')) for configuration in configurations)
         if needs_codex and self.store.codex_config() is None:
@@ -92,6 +93,11 @@ class Problems:
             self.db.execute('INSERT INTO reader_problems(id,identity,origin,body,created,finished,outcome) VALUES (%s,%s,%s,%s,%s,NULL,NULL)',
                             (uuid.uuid4().hex,identity,origin,encoded,now))
             status_changed(self.db)
+
+    def sync_codex_feed_added(self, feed: str, now: float) -> None:
+        candidate = self.codex_choice(now, feed=feed)
+        if candidate is not None:
+            self.sync_candidate('processor:codex-choice', candidate, now)
 
     def sync_codex_choice(self, now: float) -> None:
         self.sync_candidate('processor:codex-choice', self.codex_choice(now), now)
