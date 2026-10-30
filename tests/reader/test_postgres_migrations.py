@@ -855,3 +855,12 @@ def test_collection_queue_triggers_are_removed(connections):
         assert db.execute("SELECT queued_wall FROM jobs WHERE item='feed'").fetchone()[0] == queued
         assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname IN ('collection_queued_insert','collection_queued_update')").fetchone() == (0,)
         verify(db, MIGRATIONS)
+
+
+def test_action_status_triggers_are_removed(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:44])
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname LIKE 'reader_v_reader_action_results_status_%'").fetchone() == (0,)
+        verify(db, MIGRATIONS)

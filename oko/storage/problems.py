@@ -5,6 +5,7 @@ from oko.collection.contracts import SourceManifest
 from oko.collection.external_media import expected_incomplete
 from oko.storage.reading import reading_snapshot
 from oko.storage import problem_links
+from oko.storage.reader_status import changed as status_changed
 from dataclasses import dataclass
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -206,20 +207,25 @@ class Problems:
 
     def action_started(self, identity: str, context: dict[str, Any], now: float, *, restart: bool = False, expected_identity: str | None = None) -> None:
         with self.db:
-            prior = self.db.execute('SELECT identity FROM reader_action_results WHERE id = %s', (identity,)).fetchone()
+            prior = self.db.execute('SELECT identity,result FROM reader_action_results WHERE id = %s', (identity,)).fetchone()
             if restart and prior and prior['identity'] != (expected_identity or context['identity']):
                 raise CommandContextMismatch('Контекст команды не совпадает')
             if restart:
                 self._startup_pending.discard(identity)
-            self.db.execute('INSERT INTO reader_action_results ( id , identity , body , started , result ) VALUES ( %s , %s , %s , %s , %s ) ON CONFLICT DO NOTHING',
-                            (identity, context['identity'], json.dumps(context), now, 'pending'))
+            inserted = self.db.execute('INSERT INTO reader_action_results ( id , identity , body , started , result ) VALUES ( %s , %s , %s , %s , %s ) ON CONFLICT DO NOTHING',
+                            (identity, context['identity'], json.dumps(context), now, 'pending')).rowcount
+            if inserted or restart and prior and prior['result'] != 'pending':
+                status_changed(self.db)
             if restart:
                 self.db.execute("UPDATE reader_action_results SET body = %s , started = %s , completed = NULL , result = 'pending' WHERE id = %s", (json.dumps(context), now, identity))
 
     def action_finished(self, identity: str, succeeded: bool, now: float) -> None:
         with self.db:
-            self.db.execute("UPDATE reader_action_results SET completed = %s , result = %s WHERE id = %s AND result != 'abandoned'",
-                            (now, 'succeeded' if succeeded else 'failed', identity))
+            result = 'succeeded' if succeeded else 'failed'
+            prior = self.db.execute('SELECT result FROM reader_action_results WHERE id = %s', (identity,)).fetchone()
+            self.db.execute("UPDATE reader_action_results SET completed = %s , result = %s WHERE id = %s AND result != 'abandoned'", (now, result, identity))
+            if prior and prior['result'] not in ('abandoned', result):
+                status_changed(self.db)
 
     def report_action(self, identity: str, context: dict[str, Any], result: str, now: float) -> str:
         existed = self.command_record(identity)
@@ -232,6 +238,8 @@ class Problems:
         if row['result'] in ('pending', 'unknown'):
             with self.db:
                 self.db.execute('UPDATE reader_action_results SET result = %s WHERE id = %s', (result, identity))
+                if result != row['result']:
+                    status_changed(self.db)
             return result
         return str(row['result'])
 
@@ -244,6 +252,7 @@ class Problems:
             return False
         with self.db:
             self.db.execute("UPDATE reader_action_results SET result = 'abandoned' WHERE id = %s", (receipt['id'],))
+            status_changed(self.db)
             self.db.execute("UPDATE reader_problems SET finished = %s , outcome = 'irrelevant' WHERE id = %s", (now, identity))
         return True
 
@@ -272,6 +281,8 @@ class Problems:
                 # Typed receipts retain confirmed execution facts after content cleanup.
                 result = row['result'] if body.get('command_context') else 'abandoned'
                 self.db.execute('UPDATE reader_action_results SET body = %s , result = %s WHERE id = %s', (json.dumps(body), result, row['id']))
+                if result != row['result']:
+                    status_changed(self.db)
 
     def reconcile(self, candidates: list[dict[str, Any]], now: float, feeds: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
         """Preserve occurrence identity; completed records never become current on restart."""

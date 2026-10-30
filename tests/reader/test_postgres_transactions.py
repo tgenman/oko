@@ -567,3 +567,32 @@ def test_fetch_queue_time_survives_repeat_and_changes_after_retry(postgres_url, 
         assert queued['status'] == 'pending' and queued['queued_wall'] > 1
     finally:
         store.db.close()
+
+
+def test_action_status_freshness_is_atomic_and_ignores_duplicate_start(postgres_url, tmp_path):
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=postgres_url)
+    context = dict(identity='action', title='Action', objects=[], action=None)
+    def revision():
+        row = store.db.execute("SELECT version FROM reader_entities WHERE kind='status' AND identity='runtime'").fetchone()
+        return row[0] if row else 0
+    try:
+        first = revision()
+        with pytest.raises(RuntimeError, match='rollback'):
+            with transaction(store.db):
+                store.problems.action_started('receipt', context, 1)
+                assert revision() > first
+                raise RuntimeError('rollback')
+        assert revision() == first
+        store.problems.action_started('receipt', context, 1)
+        started = revision()
+        assert started > first
+        store.problems.action_started('receipt', context, 1)
+        assert revision() == started
+        store.problems.action_finished('receipt', True, 2)
+        finished = revision()
+        assert finished > started
+        store.problems.action_finished('receipt', True, 2)
+        assert revision() == finished
+    finally:
+        store.db.close()

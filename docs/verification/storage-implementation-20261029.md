@@ -519,3 +519,10 @@
   eight Playwright scenarios passed; a source-collection screenshot was inspected.
   A fresh schema has 23 tables and 12 non-internal triggers. The remaining status
   owners, transitional tables, final schema and full review remain open.
+- Migration 045 moves action receipt status freshness to the Python owner,
+  including superseded receipt cleanup. Duplicate starts do not invalidate status
+  and rollback restores both the receipt and its status version. The affected
+  journal, HTTP status and transaction suites passed 145 tests, types passed, and
+  16 Playwright scenarios passed; the status panel screenshot was inspected.
+  Problem, publication and Job status triggers remain, as do the transitional
+  queues and final schema work.
