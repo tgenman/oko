@@ -1273,3 +1273,18 @@ mypy passed for seven modules, and 10 Playwright status scenarios passed with a
 screenshot inspected. Browser coverage was for the general panel, not a dedicated
 fetch error. One Starlette/httpx warning was emitted. No working database was
 migrated.
+
+
+A derived, indexed publication classification bounds selection of candidates
+for the existing material-incomplete status calculation. Startup backfills it
+in batches under a transaction lock; application content writers update it
+atomically, and unknown or unfinished classifications remain candidates. The
+original content is preserved, including Python-valid JSON unsupported by
+JSONB. Synthetic checks covered concurrent startup, rollback/restart, real
+writer paths, HTTP, 609 numeric forms and a 10,000-publication query. The
+integrated suite passed 178 PostgreSQL tests, mypy passed for 161 files and
+10 Playwright status scenarios passed with a screenshot inspected. One
+Starlette/httpx warning was emitted. This is a query optimization only:
+material-incomplete can still be created or closed by GET, and direct external
+SQL content updates bypass the application-maintained classification. No
+working database was migrated.

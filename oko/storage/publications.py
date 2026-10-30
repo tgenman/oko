@@ -74,6 +74,9 @@ class Publications:
                 f'UPDATE publications SET source_deleted={literal} WHERE id=ANY(%s) AND source_deleted IS DISTINCT FROM {literal} RETURNING id', (batch,))]
             if not changed:
                 continue
+            if not deleted:
+                from oko.storage.incomplete_index import classify_newly_eligible
+                classify_newly_eligible(self.store.db,changed)
             status_changed(self.store.db)
 
     def feed(self, feed: str) -> bool:
@@ -349,6 +352,8 @@ class Publications:
         store.db.execute('UPDATE publications SET content = %s , media_ids = %s , title = %s , status = %s WHERE id = %s',
             (json.dumps(content, ensure_ascii=False), json.dumps([r['id'] for r in media]),
              content['extra']['_reader']['title'], 'pending_filtering', item))
+        from oko.storage.incomplete_index import save_class
+        save_class(store.db,item,content)
         if previous and old['platform'] != 'youtube' and old_header.get('title') != content['extra']['_reader']['title']:
             metadata_row = expect_row(store.db.execute('SELECT processing_metadata FROM publications WHERE id = %s', (item,)).fetchone())
             metadata = json.loads(metadata_row[0])
@@ -512,7 +517,7 @@ class Publications:
             self.store.read_versions.memberships_changed(removed)
             db.execute(f'DELETE FROM publication_links WHERE source_publication_id IN ( {marks} ) OR target_publication_id IN ( {marks} )', batch+batch)
             db.execute(f'DELETE FROM media_files WHERE publication_id IN ( {marks} )', batch)
-            db.execute(f"UPDATE publications SET content = '{{}}' , media_ids = '[]' , filtered_content = '{{}}' , summarized_content = '{{}}' , processing_metadata = '{{}}' WHERE id IN ( {marks} )", batch)
+            db.execute(f"UPDATE publications SET content = '{{}}' , incomplete_class = 1 , media_ids = '[]' , filtered_content = '{{}}' , summarized_content = '{{}}' , processing_metadata = '{{}}' WHERE id IN ( {marks} )", batch)
             self.store.processing.memberships_removed(removed)
         if effects is None:
             for job_id,previous in local_effects.media_problems_before.items():

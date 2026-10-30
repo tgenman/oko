@@ -2507,11 +2507,19 @@ class Problems:
                 objects=objects,action=None,created_at=now,state='retrying',finished_at=None,outcome=None,next_at=youtube['next_at'])
         affected = {obj['id'] for group in groups.values() for obj in group['objects'] if obj['kind'] == 'material'}
         known_partial = {obj['id'] for record in self.db.execute("SELECT body FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'code' = 'material-incomplete'") for obj in json.loads(record['body'])['objects']}
-        saved = self.db.execute("SELECT i . id , i . feed_id AS feed_id , i.content::jsonb#>>'{extra,_reader}' AS header , f . status AS fetch_status , f . problem_code AS fetch_code , EXISTS ( SELECT 1 FROM media_files m WHERE m . publication_id = i . id AND EXISTS ( SELECT 1 FROM jobs j WHERE j . item = m . id AND j . kind = 'download_media' AND j . status IN ( 'pending' , 'running' ) AND j . error IS NULL AND j . problem_code IS NULL ) ) AS media_waiting , CASE WHEN i . platform = 'youtube' THEN EXISTS ( SELECT 1 FROM media_files m JOIN jobs j ON j . item = m . id AND j . kind = 'download_media' WHERE m . publication_id = i . id AND m . resource_key = 'youtube:subtitles' AND j . status = 'pending' AND j . problem_code IS NULL ) ELSE FALSE END AS caption_waiting FROM publications i LEFT JOIN jobs f ON f . item = i . id AND f . kind = 'fetch' WHERE i . viewed = 0 AND i . feed_id IS NOT NULL AND i . complete = 1 AND NOT i . source_deleted AND CASE WHEN jsonb_typeof(i.content::jsonb#>'{extra,_reader,full}')='boolean' THEN NOT (i.content::jsonb#>>'{extra,_reader,full}')::boolean ELSE (i.content::jsonb#>>'{extra,_reader,full}')::integer=0 END".replace('i . feed_id', owner_expr('i'))).fetchall()
+        saved = self.db.execute("SELECT i . id , i . feed_id AS feed_id , i.content AS content_raw , f . status AS fetch_status , f . problem_code AS fetch_code , EXISTS ( SELECT 1 FROM media_files m WHERE m . publication_id = i . id AND EXISTS ( SELECT 1 FROM jobs j WHERE j . item = m . id AND j . kind = 'download_media' AND j . status IN ( 'pending' , 'running' ) AND j . error IS NULL AND j . problem_code IS NULL ) ) AS media_waiting , CASE WHEN i . platform = 'youtube' THEN EXISTS ( SELECT 1 FROM media_files m JOIN jobs j ON j . item = m . id AND j . kind = 'download_media' WHERE m . publication_id = i . id AND m . resource_key = 'youtube:subtitles' AND j . status = 'pending' AND j . problem_code IS NULL ) ELSE FALSE END AS caption_waiting FROM publications i LEFT JOIN jobs f ON f . item = i . id AND f . kind = 'fetch' WHERE i . viewed = 0 AND i . feed_id IS NOT NULL AND i . complete = 1 AND NOT i . source_deleted AND i.incomplete_class IS DISTINCT FROM 1".replace('i . feed_id', owner_expr('i'))).fetchall()
         for row in saved:
+            from oko.storage.incomplete_index import content_class
+            raw_content=json.loads(row['content_raw'])
+            classification=content_class(row['content_raw'])
+            if classification==1:
+                continue
+            if classification==2:
+                raise ValueError('Unrecognized publication completeness value')
             if row['id'] in affected:
                 continue
-            header = self.header(row['header'])
+            raw_header=raw_content.get('extra',{}).get('_reader')
+            header = self.header(json.dumps(raw_header) if raw_header is not None else None)
             if header.get('full', True) or (youtube['paused'] and feeds.get(row['feed_id'], {}).get('kind') == 'youtube'):
                 continue
             if header.get('expected_incomplete'):

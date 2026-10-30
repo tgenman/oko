@@ -161,6 +161,8 @@ class ProcessingState:
                     content['extra']['youtube']['captions'] = 'pending'
                     content['extra']['_reader']['captions'] = 'error'
                     self.store.db.execute('UPDATE publications SET content=%s WHERE id=%s', (json.dumps(content,ensure_ascii=False),item))
+                    from oko.storage.incomplete_index import save_class
+                    save_class(self.store.db,item,content)
                     job_write(self.store.db, "UPDATE jobs SET status='cancelled' WHERE kind='download_media' AND item=%s AND status IN ('failed','unavailable')", (identity,))
                     self.store.jobs.schedule_media(item,sync_processor=False)
                     if affected:self.store.problems.finish_processor_change(affected,previous,self.store.wall_clock())

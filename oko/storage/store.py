@@ -122,6 +122,8 @@ class Store:
             self.read_sync = ReadSync(self)
             self.youtube = YouTubeAccess(self)
             self.problems = Problems(self)
+            from oko.storage.incomplete_index import recover as recover_incomplete_class
+            recover_incomplete_class(self)
             with self.db:
                 self.problems.sync_codex_choice(self.wall_clock())
                 self.problems.sync_profiles(self.wall_clock())
@@ -478,6 +480,8 @@ class Store:
                     for row in missing:
                         self.db.execute("UPDATE media_files SET status = 'unavailable' , reason = %s , storage_key = NULL WHERE id = %s",(error.label,row['id']))
                     self.db.execute('UPDATE publications SET content = %s WHERE id = %s',(json.dumps(content,ensure_ascii=False),item))
+                    from oko.storage.incomplete_index import save_class
+                    save_class(self.db,item,content)
                     self.collection_history(item,replace(material,collection_error=error))
                 return error,effects
         if (material.source_manifest and material.source_manifest.post_web_unavailable
