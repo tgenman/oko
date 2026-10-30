@@ -480,3 +480,10 @@
   tests; types and 14 Playwright scenarios passed, and a compact feed-details
   screenshot was inspected. Version 38 has 23 tables and 24 triggers. Both
   dirty queues, status reconciliation and final project verification remain open.
+- Migration 039 removes three YouTube status triggers. The status validator reads
+  the saved admission deadline and strike count directly, and still changes at
+  pause expiry without a background write.
+- The affected migration, YouTube, status and worker suites passed 222 tests;
+  types and seven Playwright scenarios passed, and a YouTube settings screenshot
+  was inspected. Version 39 has 23 tables and 21 triggers; dirty queues and status
+  GET reconciliation remain unfinished.

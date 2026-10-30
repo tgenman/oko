@@ -771,3 +771,12 @@ def test_feed_reader_version_triggers_are_removed(connections):
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname IN ('reader_v_feed_delete','reader_v_feed_insert','reader_v_feed_update')").fetchone() == (0,)
         verify(db, MIGRATIONS)
+
+
+def test_youtube_status_triggers_are_removed(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:38])
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname LIKE 'reader_v_youtube_access_status_%'").fetchone() == (0,)
+        verify(db, MIGRATIONS)

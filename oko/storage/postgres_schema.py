@@ -43,4 +43,5 @@ MIGRATIONS = (
     Migration(36, 'telegram-read-status', (Path(__file__).parent / 'postgres' / '036-telegram-read-status.sql').read_text()),
     Migration(37, 'folder-versions', (Path(__file__).parent / 'postgres' / '037-folder-versions.sql').read_text()),
     Migration(38, 'feed-versions', (Path(__file__).parent / 'postgres' / '038-feed-versions.sql').read_text()),
+    Migration(39, 'youtube-status', (Path(__file__).parent / 'postgres' / '039-youtube-status.sql').read_text()),
 )

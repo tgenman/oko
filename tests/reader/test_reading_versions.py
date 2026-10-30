@@ -505,6 +505,15 @@ def test_status_etag_changes_when_youtube_wait_expires_without_background_write(
             client.portal.call(app.state.host.execution._actions.release)
 
 
+def test_status_etag_tracks_youtube_admission_without_status_trigger(tmp_path):
+    app=traced_app(tmp_path,clock=lambda:0,wall_clock=lambda:1800000000)
+    with TestClient(app,headers=HEADERS) as client:
+        first=client.get('/api/v3/status/details')
+        client.portal.call(lambda: app.state.host.require_store().youtube.start(1800000000))
+        changed=client.get('/api/v3/status/details',headers={'If-None-Match':first.headers['ETag']})
+        assert changed.status_code==200 and changed.json()['youtube']['admission']=='waiting'
+
+
 def test_status_etag_expires_finished_problem_without_background_write(tmp_path):
     from tests.support.codex import CodexService, configure_codex
     wall = [1800000000.0]
