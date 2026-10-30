@@ -7,6 +7,7 @@ from oko.collection.adapters import ExternalReference
 from oko.domain.collection import CollectionEffects
 from oko.storage.reading import reading_value, saved_content
 from oko.storage import memberships
+from oko.storage.reader_status import changed as status_changed
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
@@ -36,6 +37,7 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
             identity=str(uuid4())
             store.db.execute("INSERT INTO items ( id , source_id , url , published , members , published_known , platform , external_id , discovered_at ) VALUES ( %s , %s , %s , 0 , '[]' , 0 , %s , %s , %s )",
                 (identity,'linked:'+identity,ref.url,ref.key.platform.value,ref.key.external_id,store.wall_clock()))
+            status_changed(store.db)
             effects.fetch[identity]=False
         else:
             identity=row['id']

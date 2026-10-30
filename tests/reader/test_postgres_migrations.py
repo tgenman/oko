@@ -873,3 +873,13 @@ def test_problem_status_triggers_are_removed(connections):
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname LIKE 'reader_v_reader_problems_status_%'").fetchone() == (0,)
         verify(db, MIGRATIONS)
+
+
+def test_item_status_triggers_are_removed(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:46])
+        migrate(db, MIGRATIONS)
+        names = ['reader_v_item_data','reader_v_item_insert','reader_v_item_delete']
+        assert db.execute('SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname=ANY(%s)', (names,)).fetchone() == (0,)
+        verify(db, MIGRATIONS)

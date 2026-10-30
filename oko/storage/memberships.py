@@ -1,6 +1,7 @@
 """Transaction-owned publication graph and primary membership operations."""
 from oko.storage.database import Database
 from oko.storage.transaction import begin_write
+from oko.storage.reader_status import changed as status_changed
 
 
 _GRAPH_LOCK = 0x4F4B4F4752415048
@@ -46,6 +47,8 @@ def set_viewed(db: Database, items: list[str], viewed: bool) -> None:
     """Update publication and transitional membership state in one transaction."""
     if not items:
         return
-    db.execute('UPDATE items SET viewed=%s,complete=0 WHERE id=ANY(%s)', (int(viewed),items))
+    changed = db.execute('UPDATE items SET viewed=%s,complete=0 WHERE id=ANY(%s) AND (viewed IS DISTINCT FROM %s OR complete IS DISTINCT FROM 0)', (int(viewed),items,int(viewed))).rowcount
+    if changed:
+        status_changed(db)
     db.execute('UPDATE feed_publications SET is_unviewed=%s::integer::boolean WHERE publication_id=ANY(%s) AND is_unviewed IS DISTINCT FROM %s::integer::boolean',
                (not viewed,items,not viewed))

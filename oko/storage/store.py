@@ -210,6 +210,7 @@ class Store:
         with self.db:
             membership_graph.lock_graph(self.db)
             history_items=[]
+            item_status_changed = False
             saved_items: set[str] = set()
             added_memberships: list[str] = []
             envelope=HistoryEnvelope.decode(cursor,adapter='client' if namespace=='telegram' else 'web') if namespace in ('telegram','telegram-web') else None
@@ -228,8 +229,8 @@ class Store:
                 if plan is None:
                     continue
                 item=plan.item
-                self.db.execute('INSERT INTO items ( id , source_id , url , published , members , published_known ) VALUES ( %s , %s , %s , %s , %s , %s ) ON CONFLICT DO NOTHING',
-                    (item,plan.source_id,publication.url,publication.published,json.dumps(publication.members),publication.published_known))
+                item_status_changed |= bool(self.db.execute('INSERT INTO items ( id , source_id , url , published , members , published_known ) VALUES ( %s , %s , %s , %s , %s , %s ) ON CONFLICT DO NOTHING',
+                    (item,plan.source_id,publication.url,publication.published,json.dumps(publication.members),publication.published_known)).rowcount)
                 membership=membership_graph.add(self.db,feed,item)
                 if membership:
                     added_memberships.append(item)
@@ -239,16 +240,17 @@ class Store:
                     raise ValueError('Adapter did not return a publication external key')
                 rank=orders.get(publication.adapter_reference.key)
                 if rank is not None and not publication.published_known:
-                    self.db.execute('UPDATE items SET source_order = %s WHERE id = %s AND source_order IS DISTINCT FROM %s',(rank,item,rank))
+                    item_status_changed |= bool(self.db.execute('UPDATE items SET source_order = %s WHERE id = %s AND source_order IS DISTINCT FROM %s',(rank,item,rank)).rowcount)
                 self.publications.identify(item,publication.adapter_reference)
                 if plan.content is not None:
                     assert plan.fingerprint is not None
                     self.publications.publish(item,plan.content,plan.fingerprint,effects)
-                    self.db.execute('UPDATE items SET complete = 1 WHERE id = %s',(item,))
+                    item_status_changed |= bool(self.db.execute('UPDATE items SET complete = 1 WHERE id = %s AND complete IS DISTINCT FROM 1',(item,)).rowcount)
                     saved_items.add(item)
                 row=expect_row(self.db.execute('SELECT * FROM items_read WHERE id = %s',(item,)).fetchone())
                 if publication.published_known and not row['published_known']:
                     self.db.execute('UPDATE items SET published = %s , published_known = 1 , published_at = %s WHERE id = %s',(publication.published,publication.published,item))
+                    item_status_changed = True
                 if publication.id in enrolled:
                     history_items.append(item)
                 needs_fetch=publication.teaser is None or publication.teaser.adapter_content is None or publication.teaser.adapter_content.needs_fetch
@@ -260,9 +262,12 @@ class Store:
                     members=sorted(set(json.loads(row['members']))|set(publication.members))
                     if members!=json.loads(row['members']):
                         self.db.execute('UPDATE items SET members = %s WHERE id = %s',(json.dumps(members),item))
+                        item_status_changed = True
                         saved_items.add(item)
                         effects.fetch[item]=True
                     effects.fetch.setdefault(item,False)
+            if item_status_changed:
+                status_changed(self.db)
             self.read_versions.memberships_changed(added_memberships)
             if envelope or 'history_enroll' in selection:
                 self.subscriptions.history.enroll(feed,history_items,envelope.selection.scan_complete if envelope else selection['scan_complete'])
@@ -428,9 +433,11 @@ class Store:
             if material.adapter_content and material.adapter_content.metadata.reference.key.platform==Platform.telegram:
                 self.publications.identify(item,material.adapter_content.metadata.reference)
             self.publications.publish(item,prepared,fingerprint,effects)
-            self.db.execute('UPDATE items SET complete = 1 WHERE id = %s',(item,))
+            item_status_changed = bool(self.db.execute('UPDATE items SET complete = 1 WHERE id = %s AND complete IS DISTINCT FROM 1',(item,)).rowcount)
             if material.members:
-                self.db.execute('UPDATE items SET members = %s WHERE id = %s',(json.dumps(material.members),item))
+                item_status_changed |= bool(self.db.execute('UPDATE items SET members = %s WHERE id = %s AND members IS DISTINCT FROM %s',(json.dumps(material.members),item,json.dumps(material.members))).rowcount)
+            if item_status_changed:
+                status_changed(self.db)
             self.read_sync.mark_item(item)
             self.read_sync.saved_publication(item)
             publication_links.notify_parents(self,item)

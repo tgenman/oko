@@ -680,7 +680,8 @@ class JobRepository:
             memberships.lock_graph(self.store.db)
             owned = "SELECT item FROM jobs WHERE kind='delete' AND payload::jsonb->>'cleanup_feed' = %s"
             self.store.db.execute(f"DELETE FROM jobs WHERE kind != 'delete' AND item IN ({owned})", (feed,))
-            self.store.db.execute(f'DELETE FROM items WHERE id IN ({owned})', (feed,))
+            if self.store.db.execute(f'DELETE FROM items WHERE id IN ({owned})', (feed,)).rowcount:
+                status_changed(self.store.db)
             self.store.db.execute("DELETE FROM jobs WHERE item = %s OR (kind='delete' AND payload::jsonb->>'cleanup_feed' = %s)", (feed, feed))
             for table in ('history_members', 'initial_history', 'telegram_read_members', 'telegram_read_state'):
                 deleted = self.store.db.execute(f'DELETE FROM {table} WHERE feed = %s', (feed,)).rowcount
@@ -709,7 +710,8 @@ class JobRepository:
             memberships.lock_graph(self.store.db)
             self.store.db.execute('UPDATE jobs SET execution_settings=NULL WHERE item=%s AND execution_settings IS NOT NULL', (job.item,))
             self.finish(job)
-            self.store.db.execute('DELETE FROM items WHERE id = %s AND viewed = 1 AND platform IS NOT NULL ',(job.item,))
+            if self.store.db.execute('DELETE FROM items WHERE id = %s AND viewed = 1 AND platform IS NOT NULL ',(job.item,)).rowcount:
+                status_changed(self.store.db)
 
 
     def retry_linked(self, item: str) -> None:

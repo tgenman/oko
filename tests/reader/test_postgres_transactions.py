@@ -625,3 +625,33 @@ def test_problem_status_freshness_is_atomic_and_unchanged_on_repeat(postgres_url
         assert revision() > updated
     finally:
         store.db.close()
+
+
+def test_viewed_status_version_changes_atomically(postgres_url, tmp_path):
+    from oko.storage import memberships
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=postgres_url)
+    def revision():
+        return store.db.execute("SELECT version FROM reader_entities WHERE kind='status' AND identity='runtime'").fetchone()[0]
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO items(id) VALUES ('item')")
+        before = revision()
+        with pytest.raises(RuntimeError, match='rollback'):
+            with transaction(store.db):
+                memberships.lock_graph(store.db)
+                memberships.set_viewed(store.db,['item'],True)
+                assert revision() > before
+                raise RuntimeError('rollback')
+        assert revision() == before
+        with transaction(store.db):
+            memberships.lock_graph(store.db)
+            memberships.set_viewed(store.db,['item'],True)
+        after = revision()
+        assert after > before
+        with transaction(store.db):
+            memberships.lock_graph(store.db)
+            memberships.set_viewed(store.db,['item'],True)
+        assert revision() == after
+    finally:
+        store.db.close()

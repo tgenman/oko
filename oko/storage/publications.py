@@ -109,6 +109,8 @@ class Publications:
 
     def identify(self, item: str, ref: ExternalReference) -> None:
         row = expect_row(self.store.db.execute('SELECT * FROM items_read WHERE id = %s', (item,)).fetchone())
+        if row['url'] != ref.url:
+            status_changed(self.store.db)
         self.store.db.execute('UPDATE items SET platform = %s , external_id = %s , url = %s , published_at = %s , discovered_at = COALESCE ( discovered_at , %s ) WHERE id = %s',
             (ref.key.platform.value, ref.key.external_id, ref.url, row['published'] if row['published_known'] else None,
              self.store.wall_clock(), item))

@@ -532,3 +532,10 @@
   The affected journal, status, transaction and load suites passed 154 tests;
   types and 16 Playwright scenarios passed, with a current-status screenshot
   inspected. Publication and Job status triggers and the transitional queues remain.
+- Migration 047 removes the three publication status triggers. Publication owners
+  update the status version when relevant facts change; transaction rollback and
+  repeated unchanged viewed transitions are covered. Per-publication trigger
+  versions have no remaining reader. The affected suites passed 225 tests and
+  types; nine Playwright scenarios passed, and the viewed shared-publication
+  screenshot was inspected. Job status triggers, dirty queues, the final schema
+  and full review remain open.
