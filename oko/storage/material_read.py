@@ -26,6 +26,7 @@ class Inputs:
     state: dict[str, str] = field(default_factory=dict)
     state_keys: set[str] = field(default_factory=set)
     subtitles: dict[str, str | None] = field(default_factory=dict)
+    subtitle_owners: dict[str, str] = field(default_factory=dict)
     related_items: dict[str, Row] = field(default_factory=dict)
     children: dict[str, list[Row]] = field(default_factory=dict)
     owners: dict[str, set[str]] = field(default_factory=dict)
@@ -145,8 +146,9 @@ def material_inputs(db: Database, identities: set[str], *, include_subtitles: bo
     subtitle_ids = sorted(value.subtitles)
     for start in range(0, len(subtitle_ids), 400):
         batch = subtitle_ids[start:start+400]
-        value.subtitles.update({row['id']: row['storage_key'] for row in db.execute(
-            "SELECT id , storage_key FROM media_files WHERE status = 'ready' AND id = ANY ( %s )", (batch,))})
+        for row in db.execute("SELECT id,storage_key,publication_id FROM media_files WHERE status='ready' AND id=ANY(%s)", (batch,)):
+            value.subtitles[row['id']] = row['storage_key']
+            value.subtitle_owners[row['id']] = row['publication_id']
     token = _current.set(value)
     try:
         yield

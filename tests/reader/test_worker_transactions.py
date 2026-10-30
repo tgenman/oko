@@ -1238,3 +1238,31 @@ def test_linked_source_privacy_change_reconciles_parent_job_atomically(tmp_path)
             change()
     finally:
         store.db.close()
+
+
+def test_missing_subtitles_schedule_one_read_only_repair(tmp_path):
+    from oko.storage import material_read, youtube_media
+    from oko.storage.transaction import read_snapshot
+    store, item, _, _ = worker_library(tmp_path)
+    try:
+        with store.db:
+            row = store.db.execute('SELECT content FROM publications WHERE id=%s', (item,)).fetchone()
+            content = json.loads(row[0])
+            content['extra']['youtube'] = {'captions':'available','captions_digest':'missing'}
+            content['blocks'].append(dict(type='media',role='subtitles',media_id='missing-caption'))
+            store.db.execute("UPDATE publications SET platform='youtube',content=%s WHERE id=%s", (json.dumps(content),item))
+            store.db.execute("""INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status,storage_key)
+                VALUES ('missing-caption',%s,'youtube:subtitles','https://example.test/captions','captions.txt','ready','missing-caption.txt')""", (item,))
+        with read_snapshot(store.db):
+            assert youtube_media.subtitle_path(store,'missing-caption') is None
+            assert item in store.processing._repairs
+        assert store.processing.pending()
+        store.processing.sync()
+        assert item not in store.processing._repairs
+        with read_snapshot(store.db), material_read.material_inputs(store.db,{item}):
+            assert youtube_media.subtitle_path(store,'missing-caption') is None
+            assert item in store.processing._repairs
+        store.processing.sync()
+        assert item not in store.processing._repairs
+    finally:
+        store.db.close()

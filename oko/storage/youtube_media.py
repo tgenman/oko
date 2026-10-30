@@ -19,11 +19,17 @@ def subtitle_path(store: 'Store', identity: str | None) -> Path | None:
     inputs = current(store.db)
     if inputs is not None and identity is not None and identity in inputs.subtitles:
         key = inputs.subtitles[identity]
+        owner = inputs.subtitle_owners.get(identity)
     else:
-        row=store.db.execute("SELECT storage_key FROM media_files WHERE id = %s AND status = 'ready'",(identity,)).fetchone()
+        row=store.db.execute("SELECT storage_key,publication_id FROM media_files WHERE id=%s AND status='ready'",(identity,)).fetchone()
         key = row[0] if row else None
+        owner = row[1] if row else None
     path=store.root/key if key else None
-    return path if path and path.is_file() else None
+    if path and path.is_file():
+        return path
+    if owner:
+        store.processing.repair(owner)
+    return None
 
 
 def add_input(store: 'Store', content: dict[str,Any]) -> dict[str,Any]:

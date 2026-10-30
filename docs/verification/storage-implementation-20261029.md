@@ -705,3 +705,11 @@
   now pass under these agreed semantics. Processing, linked inputs, YouTube,
   recovery and source-deletion suites passed 139 tests and types; five Playwright
   scenarios passed, with the failed-regeneration screenshot inspected.
+- A ready subtitle whose local file is missing now schedules an in-memory
+  reconciliation from both point and batched reads, without writing in the
+  read-only snapshot. A repair already in progress cannot enqueue itself again,
+  and rollback retains the request. The focused test first failed because no
+  read path scheduled repair; after the fix 124 processing, YouTube, read-cost
+  and recovery tests passed with types. Three Playwright scenarios passed and
+  the missing-captions screenshot was inspected. This supersedes the earlier
+  note that read-detected repair had no caller.

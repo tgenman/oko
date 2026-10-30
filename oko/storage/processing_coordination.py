@@ -24,6 +24,7 @@ class ProcessingState:
     def __init__(self, store: 'Store') -> None:
         self.store = store
         self._repairs: set[str] = set()
+        self._repairing: set[str] = set()
         self.recovering = False
         self.background = False
         self.theses = SummaryResults(store)
@@ -113,7 +114,8 @@ class ProcessingState:
 
     def repair(self, item: str) -> None:
         """A read can discover missing bytes without writing inside its snapshot."""
-        self._repairs.add(item)
+        if item not in self._repairing:
+            self._repairs.add(item)
 
     def filter_changed(self, item: str) -> None:
         """Update the dependent stage in the same transaction as the filter Job."""
@@ -147,11 +149,14 @@ class ProcessingState:
         self._repairs.remove(item)
         if self.store.db.in_transaction:
             self.store.db.after_rollback(lambda: self._repairs.add(item))
+        self._repairing.add(item)
         try:
             self.reconcile_item(item)
         except BaseException:
             self._repairs.add(item)
             raise
+        finally:
+            self._repairing.discard(item)
 
     def reconcile_item(self, item: str) -> None:
         # Accepted state and both stage Jobs commit with removal of the marker.
