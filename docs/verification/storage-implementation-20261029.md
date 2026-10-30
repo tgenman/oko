@@ -1209,3 +1209,19 @@ objects and concurrent graph locking. The integrated suite passed 114
 PostgreSQL tests, mypy for three modules and six Playwright status scenarios;
 desktop/mobile screenshots were inspected. Browser coverage was for the general
 status panel. No working database was changed.
+
+
+The shared processor-configuration problem now uses explicit event-owned
+updates and indexed Job visibility. Startup recovery retains malformed legacy
+records, batches duplicate reconciliation and preserves the oldest occurrence.
+Timed YouTube suppression reserves a stable occurrence before its deadline so
+HTTP can reflect the boundary without writing during GET; rollback and restart
+are covered synthetically. Graph and media updates capture affected history in
+their transactions. Conditional HTTP requests, 10,000 unrelated/hidden Jobs,
+legacy collisions, 1000 duplicates and cross-kind IDs were checked. The exact
+integrated suite passed 506 PostgreSQL tests; mypy passed on 159 files; 10
+Playwright status scenarios passed and a screenshot was inspected. Four
+additional writer-path tests passed separately on the exact source snapshot.
+One Starlette/httpx deprecation warning was emitted. This is not full release
+acceptance: other problem categories and final schema requirements remain. No
+working database was migrated.

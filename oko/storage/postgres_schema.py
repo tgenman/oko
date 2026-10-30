@@ -75,4 +75,5 @@ MIGRATIONS = (
     Migration(68, 'feed-sort-order', (Path(__file__).parent / 'postgres' / '068-feed-sort-order.sql').read_text()),
     Migration(69, 'fetch-problem-index', (Path(__file__).parent / 'postgres' / '069-fetch-problem-index.sql').read_text()),
     Migration(70, 'media-problem-index', (Path(__file__).parent / 'postgres' / '070-media-problem-index.sql').read_text()),
+    Migration(71, 'processor-visible-index', (Path(__file__).parent / 'postgres' / '071-processor-visible-index.sql').read_text()),
 )

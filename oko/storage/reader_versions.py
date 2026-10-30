@@ -16,6 +16,7 @@ class ReaderVersions:
     def __init__(self, store: 'Store') -> None:
         self.store, self.db = store, store.db
         self._next_action_cleanup = float('-inf')
+        self._processor_youtube_paused = store.problems.processor_youtube_paused(store.wall_clock())
         with self.db:
             self.db.execute("INSERT INTO state(key,value) VALUES ('storage-id',%s) ON CONFLICT DO NOTHING", (json.dumps(str(uuid.uuid4())),))
         identity = json.loads(expect_row(self.db.execute("SELECT value FROM state WHERE key='storage-id'").fetchone())[0])
@@ -42,14 +43,16 @@ class ReaderVersions:
     def time_boundaries(self) -> tuple[Any, ...]:
         from oko.storage.reading import reader_now, reader_wall
         wall = reader_wall(self.store.wall_clock())
+        reservation=self.store.problems.processor_reservation()
+        reserved_id=reservation['id'] if reservation else None
         row = self.db.execute("""SELECT
             (SELECT next FROM jobs WHERE status='pending' AND kind IN ('fetch','filter','theses') AND next>%s ORDER BY next LIMIT 1),
             (SELECT blocked_until FROM youtube_access WHERE id=1 AND blocked_until>%s),
-            (SELECT finished FROM reader_problems WHERE finished>%s ORDER BY finished LIMIT 1),
+            (SELECT finished FROM reader_problems WHERE finished>%s AND id IS DISTINCT FROM %s ORDER BY finished LIMIT 1),
             (SELECT jsonb_build_array(next_at,blocked_until,strikes) FROM youtube_access WHERE id=1),
             (SELECT coalesce(jsonb_agg(jsonb_build_array(key,value) ORDER BY key),'[]'::jsonb)
              FROM state WHERE key='work-enabled' OR key='processor:codex' OR key LIKE 'feed-status:%%')""",
-            (reader_now(self.store.clock()),wall,wall-86400)).fetchone()
+            (reader_now(self.store.clock()),wall,wall-86400,reserved_id)).fetchone()
         return (row[0],row[1],row[2],row[3],row[4]) if row else (None,None,None,None,None)
 
     def advance(self, now: float | None = None, wall: float | None = None) -> None:
@@ -57,8 +60,16 @@ class ReaderVersions:
         wall=self.store.wall_clock() if wall is None else wall
         with self.db:
             begin_write(self.db)
+            paused=self.store.problems.processor_youtube_paused(wall)
+            if paused!=self._processor_youtube_paused:
+                self.store.problems.finish_processor_change([],None,wall)
+                old_paused=self._processor_youtube_paused
+                self.db.after_rollback(lambda: setattr(self,'_processor_youtube_paused',old_paused))
+                self.db.after_commit(lambda: setattr(self,'_processor_youtube_paused',paused))
             cutoff = wall-86400
-            expired = [row['id'] for row in self.db.execute('SELECT id FROM reader_problems WHERE finished <= %s ORDER BY finished,id LIMIT 200',(cutoff,))]
+            reservation=self.store.problems.processor_reservation()
+            reserved_id=reservation['id'] if reservation else None
+            expired = [row['id'] for row in self.db.execute('SELECT id FROM reader_problems WHERE finished <= %s AND id IS DISTINCT FROM %s ORDER BY finished,id LIMIT 200',(cutoff,reserved_id))]
             removed = self.db.execute('DELETE FROM reader_problems WHERE id=ANY(%s) AND finished <= %s',(expired,cutoff)).rowcount if expired else 0
             if removed:
                 from oko.storage.reader_status import changed as status_changed

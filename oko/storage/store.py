@@ -145,6 +145,9 @@ class Store:
             self.problems.recover_discover_problems()
             self.problems.recover_fetch_problems()
             self.problems.recover_media_problems()
+            with self.db:
+                self.problems.recover_processor_duplicates(self.wall_clock())
+                self.problems.finish_processor_change([],None,self.wall_clock())
             self.recover_files()
             if self.db.execute(f"SELECT 1 FROM ({owned_ids('= %s')}) owner LIMIT 1", ('demo','demo')).fetchone():
                 self.ensure_demo()
@@ -527,6 +530,16 @@ class Store:
     def folder_contents(self, folder: str) -> FolderContents:
         return self.reading.folder_contents(folder)
 
+    def set_processor_viewed(self, items: list[str], viewed: bool) -> None:
+        """Prototype: keep processor visibility in the same graph transaction."""
+        affected=self.problems.processor_jobs_for_materials(items)
+        previous=self.problems.prepare_processor_change(affected,self.wall_clock())
+        if previous is not None and viewed:
+            previous['objects']=[obj for obj in previous['objects'] if obj['kind']!='material' or obj['id'] not in items]
+        membership_graph.set_viewed(self.db,items,viewed)
+        if affected:
+            self.problems.finish_processor_change(affected,previous,self.wall_clock(),removed_outcome='irrelevant' if viewed else 'resolved')
+
     def viewed(self, item: str) -> bool:
         if self.db.execute("SELECT 1 FROM jobs WHERE kind = 'delete' AND item = %s",(item,)).fetchone():
             return True
@@ -586,8 +599,11 @@ class Store:
             selected = [r[0] for r in self.db.execute("""SELECT i.id FROM feed_publications m JOIN publications i ON i.id=m.publication_id
                 WHERE m.feed_id=%s AND i.processing_metadata::jsonb->'_pass'->>'feed_id'=%s""", (feed,feed))]
             if selected:
+                affected=[row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE item=ANY(%s) AND kind IN ('filter','theses') AND status!='done' AND (processor_visible OR problem_code='processor-config')",(selected,))]
+                previous=self.problems.prepare_processor_change(affected,self.wall_clock())
                 job_write(self.db, """UPDATE jobs SET status='cancelled',generation=generation+1,input_snapshot=NULL
                     WHERE item=ANY(%s) AND kind IN ('filter','theses') AND status!='done'""", (selected,))
+                if affected:self.problems.finish_processor_change(affected,previous,self.wall_clock(),removed_outcome='irrelevant')
                 self.db.execute("UPDATE publications SET processing_metadata=(processing_metadata::jsonb-'_pass')::text WHERE id=ANY(%s)", (selected,))
             if self.db.execute("UPDATE feeds SET connection = 'deleting' WHERE id = %s AND connection IS DISTINCT FROM 'deleting'", (feed,)).rowcount:
                 source_changed(self.db)
@@ -614,7 +630,7 @@ class Store:
                     self.publications.forget(item,effects=effects)
                 self.jobs.forget_input('theses', [item])
                 # This is local cleanup, not viewed(): never create read eligibility.
-                membership_graph.set_viewed(self.db,[item],True)
+                self.set_processor_viewed([item],True)
             self.processing.memberships_removed(removed)
             publication_links.notify_parents_many(self, set(removed))
             if binding and binding['kind']=='client':
@@ -758,9 +774,12 @@ class Store:
         with boundary:
             membership_graph.lock_graph(self.db)
             self.subscriptions.settings.set_state('processor:codex', config.model_dump_json())
+            ids=[row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE status='pending' AND problem_code='processor-config' AND payload::jsonb->>'preclaim_blocked'='true'")]
+            processor_previous=self.problems.prepare_processor_change(ids,self.wall_clock())
             job_write(self.db, """UPDATE jobs SET status='pending',next=0,error=NULL,problem_code=NULL,
                 payload=(payload::jsonb-'preclaim_blocked')::text
                 WHERE status='pending' AND problem_code='processor-config' AND payload::jsonb->>'preclaim_blocked'='true'""")
+            self.problems.finish_processor_change(ids,processor_previous,self.wall_clock())
             self.problems.sync_codex_choice(self.wall_clock())
 
     @reading_value

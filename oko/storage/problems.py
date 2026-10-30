@@ -1,6 +1,6 @@
 """Current reader obstacles; identity and recovery are independent of message text."""
 from oko.storage.publication_owners import owner_expr
-from oko.storage.database import expect_row
+from oko.storage.database import expect_row, Row
 import json
 import hashlib
 import math
@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Any, Callable
 if TYPE_CHECKING:
     from oko.storage.store import Store
 
+
+_PROCESSOR_VALID_SQL = 'created >= -62135596800 AND created < 253402300800 AND finished IS NULL AND body::jsonb->>\'code\'=\'processor-config\' AND jsonb_typeof(body::jsonb->\'title\')=\'string\' AND jsonb_typeof(body::jsonb->\'consequence\')=\'string\' AND jsonb_typeof(body::jsonb->\'next_step\')=\'string\' AND jsonb_typeof(body::jsonb->\'operation\')=\'string\' AND body::jsonb->>\'state\' IN (\'current\',\'retrying\') AND (body::jsonb->\'next_at\' IS NULL OR jsonb_typeof(body::jsonb->\'next_at\')=\'null\') AND (NOT (body::jsonb ? \'reason\') OR jsonb_typeof(body::jsonb->\'reason\')=\'string\') AND (NOT (body::jsonb ? \'request_id\') OR (jsonb_typeof(body::jsonb->\'request_id\')=\'string\' AND (body::jsonb->>\'request_id\') COLLATE "C" ~ \'^[A-Za-z0-9_-]{1,100}$\')) AND jsonb_typeof(body::jsonb->\'objects\')=\'array\' AND NOT (body::jsonb @? \'$.objects[*] ? (@.type() != "object" || !exists(@.kind) || @.kind.type() != "string" || !exists(@.id) || @.id.type() != "string" || @.id == "" || (@.kind != "settings" && @.kind != "feed" && @.kind != "folder" && @.kind != "material"))\') AND NOT (body::jsonb @? \'$.objects[*].keyvalue() ? (@.key != "kind" && @.key != "id" && @.key != "label")\')'
 
 def _action_context(raw: str) -> dict[str, Any] | None:
     try:
@@ -161,6 +163,7 @@ class Problems:
         self.store = store
         self.db = store.db
         self._receipt_cleanup_cursor: tuple[float, int] | None = None
+        self._processor_transaction_captures: dict[int,dict[str,Any]] = {}
         self._recovering_actions = True
         # Recovery projection only: preserve the original service records for rollback.
         self._startup_pending = {row[0] for row in self.db.execute("SELECT id FROM reader_action_results WHERE result = 'pending'")}
@@ -1681,6 +1684,322 @@ class Problems:
                 for job in self.db.execute("SELECT id FROM jobs WHERE kind='discover' AND (item=%s OR feed_id=%s) AND (problem_code IS NOT NULL OR error IS NOT NULL)",(feed,feed)):
                     self.sync_discover(job['id'],now)
 
+    def processor_youtube_paused(self, now: float) -> bool:
+        from oko.storage.reading import reader_wall
+        return bool(self.store.youtube._limits()['blocked_until']>reader_wall(now))
+
+    def processor_configuration_rows(self, job_ids: list[int] | None = None) -> list[Row]:
+        restriction=' AND id=ANY(%s)' if job_ids is not None else ''
+        params=(job_ids,) if job_ids is not None else ()
+        return list(self.db.execute(f"""SELECT jobs.id,jobs.kind,jobs.item,jobs.status,jobs.error,jobs.feed_id,
+            CASE WHEN jobs.kind='read' THEN jobs.item ELSE coalesce({owner_expr('items')},{owner_expr('media_owner')},{owner_expr('linked_root')}) END AS resolved_feed_id,
+            coalesce(items.viewed,media_owner.viewed) AS viewed, m.resource_key,
+            CASE WHEN jobs.kind='read' OR (jobs.kind='download_media' AND m.id IS NULL) THEN NULL ELSE coalesce(linked_root.id,m.publication_id,jobs.item) END AS affected_item
+            FROM (SELECT * FROM jobs WHERE processor_visible{restriction} ORDER BY kind,item OFFSET 0) jobs
+            LEFT JOIN publications items ON jobs.kind!='download_media' AND items.id=jobs.item
+            LEFT JOIN media_files m ON jobs.kind='download_media' AND m.id=jobs.item
+            LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
+            LEFT JOIN publication_links link ON link.target_publication_id=coalesce(items.id,media_owner.id)
+            LEFT JOIN publications linked_root ON linked_root.id=link.source_publication_id AND linked_root.viewed=0
+            WHERE (jobs.status IN ('pending','running','failed','unavailable','blocked')
+                OR (jobs.status='done' AND jobs.kind='fetch' AND jobs.error IS NOT NULL)) ORDER BY jobs.kind,jobs.item,linked_root.id""",params).fetchall())
+    def processor_configuration_candidate(self, now: float, job_ids: list[int] | None = None, *, overrides: dict[int,dict[str,Any]] | None = None) -> dict[str, Any] | None:
+        rows=self.processor_configuration_rows(job_ids)
+        return self.processor_candidate_from_rows(rows,now,self.processor_youtube_paused(now),overrides=overrides)
+
+    @staticmethod
+    def processor_candidate_from_rows(rows: list[Row], now: float, paused: bool, *, overrides: dict[int,dict[str,Any]] | None = None) -> dict[str,Any] | None:
+        candidate: dict[str,Any] | None=None
+        seen: set[tuple[str,Any]] = set()
+        applied: set[int]=set()
+        for row in rows:
+            if overrides and row['id'] in overrides:
+                if row['id'] in applied:
+                    continue
+                applied.add(row['id'])
+                captured=overrides[row['id']]
+                if candidate is None:
+                    candidate=dict(captured,objects=[])
+                for obj in captured['objects']:
+                    key=(obj['kind'],obj['id'])
+                    if key not in seen:
+                        candidate['objects'].append(obj)
+                        seen.add(key)
+                continue
+            kind=row['kind']
+            if kind=='download_media' and row['resource_key']=='youtube:subtitles' and paused:
+                continue
+            if row['viewed'] and kind not in ('delete','feed-delete','discover','read'):
+                continue
+            feed=(row['item'] if kind in ('discover','read','feed-delete') else row['resolved_feed_id'] or row['feed_id']) or row['item'] or 'demo'
+            if candidate is None:
+                candidate=dict(id='processor:configuration',code='processor-config',section='action',title='Требуется настройка обработчика',
+                    consequence='Око продолжает попытки удаления.' if kind in ('delete','feed-delete') else 'Сохранённое содержимое остаётся доступным.',
+                    next_step='Включите обработку, чтобы повторить попытку.' if row['status']=='blocked' else 'Повторите загрузку вручную.' if row['status'] in ('done','failed') else 'Проверьте доступность источника.' if row['status']=='unavailable' else 'Откройте настройки обработчика.',
+                    objects=[],action=None,operation='producer:'+kind,created_at=now,
+                    state='retrying' if row['status']=='running' or not row['error'] else 'current',finished_at=None,outcome=None,next_at=None)
+                if kind!='delete' and row['error']:
+                    candidate['reason']=row['error']
+            obj_kind='feed' if kind in ('discover','read','feed-delete') else 'material'
+            obj_id=feed if obj_kind=='feed' else row['affected_item']
+            if kind!='delete' and isinstance(obj_id,str) and obj_id and (obj_kind,obj_id) not in seen:
+                candidate['objects'].append(dict(kind=obj_kind,id=obj_id))
+                seen.add((obj_kind,obj_id))
+        return candidate
+
+    def refresh_processor_visibility(self, job_ids: list[int]) -> bool:
+        """Prototype: refresh only explicitly affected Jobs; caller owns transaction."""
+        changed=False
+        for start in range(0,len(job_ids),400):
+            rows=self.db.execute("""UPDATE jobs j SET processor_visible=requested.visible,processor_caption=requested.caption FROM (
+                SELECT j.id,coalesce(j.problem_code='processor-config' AND EXISTS (SELECT 1 FROM media_files m WHERE j.kind='download_media' AND m.id=j.item AND m.resource_key='youtube:subtitles'),false) AS caption,coalesce(j.problem_code='processor-config' AND
+                    (j.status IN ('pending','running','failed','unavailable','blocked')
+                        OR (j.kind='fetch' AND j.status='done' AND j.error IS NOT NULL))
+                    AND (j.kind IN ('delete','feed-delete','discover','read') OR CASE WHEN j.kind='download_media' THEN coalesce(
+                        (SELECT p.viewed FROM media_files m JOIN publications p ON p.id=m.publication_id WHERE m.id=j.item),0)=0 ELSE coalesce(
+                        (SELECT p.viewed FROM publications p WHERE p.id=j.item),0)=0 END),false) AS visible
+                FROM jobs j WHERE j.id=ANY(%s) AND (j.processor_visible OR j.processor_caption OR j.problem_code='processor-config') OFFSET 0) AS requested
+                WHERE j.id=requested.id AND (j.processor_visible IS DISTINCT FROM requested.visible OR j.processor_caption IS DISTINCT FROM requested.caption) RETURNING j.id""",(job_ids[start:start+400],)).fetchall()
+            if rows:
+                changed=True
+        if changed:
+            status_changed(self.db)
+        return changed
+
+    def processor_jobs_for_materials(self, items: list[str]) -> list[int]:
+        ids: set[int]=set()
+        for start in range(0,len(items),400):
+            batch=items[start:start+400]
+            rows=self.db.execute("""SELECT j.id FROM jobs j WHERE j.item=ANY(%s)
+                    AND (j.processor_visible OR j.problem_code='processor-config')
+                UNION SELECT j.id FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id
+                    WHERE m.publication_id=ANY(%s) AND (j.processor_visible OR j.problem_code='processor-config')""",(batch,batch)).fetchall()
+            ids.update(row['id'] for row in rows)
+        return sorted(ids)
+
+    def any_visible_processor(self, now: float, excluded: list[int] | None = None) -> bool:
+        excluded=excluded or []
+        ordinary=self.db.execute('SELECT 1 FROM jobs WHERE processor_visible AND NOT processor_caption AND NOT (id=ANY(%s)) LIMIT 1',(excluded,)).fetchone()
+        if ordinary:
+            return True
+        if self.processor_youtube_paused(now):
+            return False
+        return self.db.execute('SELECT 1 FROM jobs WHERE processor_visible AND processor_caption AND NOT (id=ANY(%s)) LIMIT 1',(excluded,)).fetchone() is not None
+
+    def capture_processor_history(self, job_id: int, now: float) -> None:
+        self.capture_processor_histories([job_id],now)
+
+    def capture_processor_histories(self, job_ids: list[int], now: float) -> None:
+        """Keep only affected pre-graph-change facts inside the owning transaction."""
+        if not self.db.transaction_depth or not job_ids:
+            return
+        self.prepare_processor_change([],now)
+        paused=self.processor_youtube_paused(now)
+        ordered=sorted(set(job_ids)-self._processor_transaction_captures.keys())
+        for start in range(0,len(ordered),400):
+            rows=self.processor_configuration_rows(ordered[start:start+400])
+            groups: dict[int,list[Row]] = {}
+            for row in rows:
+                groups.setdefault(row['id'],[]).append(row)
+            for job_id,job_rows in groups.items():
+                previous=self.processor_candidate_from_rows(job_rows,now,paused)
+                if previous is None:
+                    continue
+                self._processor_transaction_captures[job_id]=previous
+                def clear(identity: int = job_id, expected: dict[str,Any] = previous) -> None:
+                    if self._processor_transaction_captures.get(identity) is expected:
+                        self._processor_transaction_captures.pop(identity,None)
+                self.db.after_commit(clear)
+                self.db.after_rollback(clear)
+
+    def processor_history_before_finish(self, job_id: int, now: float) -> dict[str,Any] | None:
+        return self.processor_history_before_batch([job_id],now)
+
+    def processor_history_before_batch(self, job_ids: list[int], now: float) -> dict[str,Any] | None:
+        captures: dict[int,dict[str,Any]] = {}
+        for job_id in job_ids:
+            old=self._processor_transaction_captures.pop(job_id,None)
+            if old is not None:
+                captures[job_id]=old
+        previous=self.prepare_processor_change(job_ids,now)
+        if previous is None or not captures:
+            return previous
+        return self.processor_configuration_candidate(now,overrides=captures)
+
+    def prepare_processor_change(self, job_ids: list[int], now: float) -> dict[str,Any] | None:
+        if self.processor_resume_candidate(now):
+            self.finish_processor_change([],None,now)
+        if not job_ids or not self.db.execute('SELECT 1 FROM jobs WHERE id=ANY(%s) AND processor_visible LIMIT 1',(job_ids,)).fetchone():
+            return None
+        if self.any_visible_processor(now,job_ids):
+            return None
+        return self.processor_configuration_candidate(now)
+
+    def prepare_processor_pause(self, now: float) -> dict[str,Any] | None:
+        if self.db.execute('SELECT 1 FROM jobs WHERE processor_visible AND NOT processor_caption LIMIT 1').fetchone():
+            return None
+        return self.processor_configuration_candidate(now)
+
+    @staticmethod
+    def valid_processor_problem(raw: str) -> bool:
+        try:
+            body=json.loads(raw)
+        except (TypeError,ValueError):
+            return False
+        if not isinstance(body,dict) or body.get('code')!='processor-config':
+            return False
+        if any(not isinstance(body.get(field),str) for field in ('title','consequence','next_step','operation')):
+            return False
+        if body.get('state') not in ('current','retrying') or body.get('next_at') is not None:
+            return False
+        if any(field in body and not isinstance(body[field],str) for field in ('reason','request_id')):
+            return False
+        if 'request_id' in body and not re.fullmatch(r'[A-Za-z0-9_-]{1,100}',body['request_id']):
+            return False
+        objects=body.get('objects')
+        return isinstance(objects,list) and all(isinstance(obj,dict) and obj.get('kind') in ('settings','feed','folder','material') and isinstance(obj.get('id'),str) and bool(obj['id']) and not (set(obj)-{'kind','id','label'}) for obj in objects)
+
+    def processor_current(self) -> Any:
+        row=self.db.execute("SELECT id,identity,body,created FROM reader_problems WHERE identity='processor:configuration' AND finished IS NULL").fetchone()
+        if row and _readable_timestamp(row['created']) and self.valid_processor_problem(row['body']):
+            return row
+        return self.db.execute("SELECT id,identity,body FROM reader_problems WHERE "+_PROCESSOR_VALID_SQL+" AND body::jsonb->>'processor_group_identity'='processor:configuration' ORDER BY created,id COLLATE \"C\" LIMIT 1").fetchone()
+
+    def recover_processor_duplicates(self, now: float) -> None:
+        canonical=self.db.execute("SELECT id,identity,body,created FROM reader_problems WHERE identity='processor:configuration' AND finished IS NULL").fetchone()
+        if canonical and (not _readable_timestamp(canonical['created']) or not self.valid_processor_problem(canonical['body'])):
+            canonical=None
+        query="SELECT id,identity,created FROM reader_problems WHERE "+_PROCESSOR_VALID_SQL+" AND body::jsonb->>'processor_group_identity'='processor:configuration' AND identity!='processor:configuration'"
+        first=self.db.execute(query+' ORDER BY created,id COLLATE "C" LIMIT 1').fetchone()
+        winner: Row | None
+        if canonical and first:
+            winner=canonical if (canonical['created'],canonical['id']) <= (first['created'],first['id']) else first
+        else:
+            winner=canonical or first
+        if not winner:
+            return
+        changed=False
+        if canonical and canonical['id']!=winner['id']:
+            changed=bool(self.db.execute("UPDATE reader_problems SET finished=%s,outcome='irrelevant' WHERE id=%s AND finished IS NULL",(now,canonical['id'])).rowcount)
+        cursor: tuple[float,str] | None=None
+        while True:
+            boundary='' if cursor is None else ' AND (created,id COLLATE "C")>(%s,%s)'
+            params=() if cursor is None else cursor
+            rows=self.db.execute(query+boundary+' ORDER BY created,id COLLATE "C" LIMIT 100',params).fetchall()
+            if not rows:
+                break
+            cursor=(rows[-1]['created'],rows[-1]['id'])
+            duplicate_ids=[row['id'] for row in rows if row['id']!=winner['id']]
+            if duplicate_ids and self.db.execute("UPDATE reader_problems SET finished=%s,outcome='irrelevant' WHERE id=ANY(%s) AND finished IS NULL",(now,duplicate_ids)).rowcount:
+                changed=True
+            self.store.fault('processor_duplicate_recovery_batch')
+        if changed:
+            status_changed(self.db)
+
+    def processor_new_identity(self) -> str:
+        if not self.db.execute("SELECT 1 FROM reader_problems WHERE identity='processor:configuration' AND finished IS NULL").fetchone():
+            return 'processor:configuration'
+        for _ in range(3):
+            identity='processor:configuration-isolated:'+uuid.uuid4().hex
+            if not self.db.execute('SELECT 1 FROM reader_problems WHERE identity=%s AND finished IS NULL',(identity,)).fetchone():
+                return identity
+        raise RuntimeError('Unable to allocate processor group identity')
+
+    @staticmethod
+    def processor_reservation_body(deadline: float) -> dict[str,Any]:
+        return dict(code='processor-config',section='action',title='Резерв идентификатора',
+            consequence='Служебная запись.',next_step='Ожидание.',objects=[],action=None,
+            operation='processor:reservation',state='current',next_at=None,
+            processor_reservation=True,deadline=deadline)
+
+    def processor_reservation(self) -> dict[str,Any] | None:
+        pointer=self.db.execute('SELECT processor_reservation_id FROM youtube_access WHERE id=1').fetchone()
+        if not pointer or pointer['processor_reservation_id'] is None:
+            return None
+        identity=pointer['processor_reservation_id']
+        if not isinstance(identity,str) or not identity.startswith('processor-reserved-'):
+            return None
+        reserved=self.db.execute("SELECT body FROM reader_problems WHERE id=%s AND identity=%s AND finished IS NOT NULL",(identity,'processor:reservation:'+identity)).fetchone()
+        if not reserved:
+            return None
+        try:
+            body=json.loads(reserved['body'])
+        except (TypeError,ValueError):
+            return None
+        if not isinstance(body,dict) or body.get('processor_reservation') is not True or not isinstance(body.get('deadline'),(int,float)):
+            return None
+        return dict(id=identity,deadline=body['deadline'])
+
+    def prepare_processor_reservation(self, now: float) -> None:
+        paused=self.processor_youtube_paused(now)
+        caption=self.db.execute('SELECT 1 FROM jobs WHERE processor_visible AND processor_caption LIMIT 1').fetchone()
+        normal=self.db.execute('SELECT 1 FROM jobs WHERE processor_visible AND NOT processor_caption LIMIT 1').fetchone()
+        reservation=self.processor_reservation()
+        if paused and caption and not normal:
+            deadline=self.store.youtube._limits()['blocked_until']
+            if reservation is None:
+                pointer=expect_row(self.db.execute('SELECT processor_reservation_id FROM youtube_access WHERE id=1').fetchone())
+                if pointer[0] is not None:
+                    return  # Preserve an unrecognised pointer.
+                for _ in range(3):
+                    candidate='processor-reserved-'+uuid.uuid4().hex
+                    inserted=self.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created,finished,outcome) VALUES (%s,%s,'background',%s,%s,%s,'irrelevant') ON CONFLICT(id) DO NOTHING",(candidate,'processor:reservation:'+candidate,json.dumps(self.processor_reservation_body(deadline)),now,now)).rowcount
+                    if inserted:
+                        reservation=dict(id=candidate,deadline=deadline)
+                        self.db.execute('UPDATE youtube_access SET processor_reservation_id=%s WHERE id=1',(candidate,))
+                        break
+                else:
+                    raise RuntimeError('Unable to reserve processor occurrence identity')
+            if reservation['deadline']!=deadline:
+                self.db.execute('UPDATE reader_problems SET body=%s,finished=%s WHERE id=%s AND identity=%s',(json.dumps(self.processor_reservation_body(deadline)),now,reservation['id'],'processor:reservation:'+reservation['id']))
+        elif reservation is not None and ((paused and (normal or not caption)) or (not normal and not caption)):
+            self.db.execute('UPDATE youtube_access SET processor_reservation_id=NULL WHERE id=1 AND processor_reservation_id=%s',(reservation['id'],))
+            self.db.execute("DELETE FROM reader_problems WHERE id=%s AND identity=%s",(reservation['id'],'processor:reservation:'+reservation['id']))
+
+    def processor_resume_candidate(self, now: float) -> tuple[str,dict[str,Any],float] | None:
+        reservation=self.processor_reservation()
+        if not reservation or now<float(reservation['deadline']) or self.processor_youtube_paused(now):
+            return None
+        if self.processor_current():
+            return None
+        candidate=self.processor_configuration_candidate(now)
+        if candidate is None:
+            return None
+        return reservation['id'],candidate,float(reservation['deadline'])
+
+    def finish_processor_change(self, job_ids: list[int], previous: dict[str,Any] | None, now: float, *, removed_outcome: str = 'resolved') -> None:
+        changed=self.refresh_processor_visibility(job_ids)
+        if job_ids and not changed and previous is None:
+            return
+        self.prepare_processor_reservation(now)
+        visible=self.any_visible_processor(now)
+        existing=self.processor_current()
+        if visible and not existing:
+            identity=self.processor_new_identity()
+            candidate: dict[str,Any]=dict(id='processor:configuration',code='processor-config',section='action',title='Требуется настройка обработчика',
+                consequence='Сохранённое содержимое остаётся доступным.',next_step='Откройте настройки обработчика.',objects=[],action=None,
+                operation='producer:processor-config',created_at=now,state='current',finished_at=None,outcome=None,next_at=None)
+            candidate['id']=identity
+            if identity!='processor:configuration':
+                candidate['processor_group_identity']='processor:configuration'
+            resumed=self.processor_resume_candidate(now)
+            if resumed:
+                body={key:value for key,value in candidate.items() if key not in ('id','created_at','finished_at','outcome','_legacy_ids')}
+                activated=self.db.execute("UPDATE reader_problems SET identity=%s,body=%s,created=%s,finished=NULL,outcome=NULL WHERE id=%s AND identity=%s AND finished IS NOT NULL",(identity,json.dumps(body),resumed[2],resumed[0],'processor:reservation:'+resumed[0])).rowcount
+                if activated!=1:
+                    raise RuntimeError('Processor occurrence reservation disappeared')
+                self.db.execute('UPDATE youtube_access SET processor_reservation_id=NULL WHERE id=1 AND processor_reservation_id=%s',(resumed[0],))
+            else:
+                self.sync_candidate(identity,candidate,now)
+        elif not visible and existing:
+            identity=existing['identity']
+            if previous is not None:
+                previous['id']=identity
+                if identity!='processor:configuration':
+                    previous['processor_group_identity']='processor:configuration'
+                self.sync_candidate(identity,previous,now)
+            self.sync_candidate(identity,None,now,removed_outcome=removed_outcome)
+
     def candidates(self, now: float) -> list[dict[str, Any]]:
         current: list[dict[str, Any]] = []
         feeds = {feed['id']: feed for feed in self.store.subscriptions.feeds()}
@@ -1688,7 +2007,7 @@ class Problems:
                          for obj in json.loads(row['body'])['objects'] if obj['kind'] == 'feed'}
         groups: dict[str | tuple[str,str] | tuple[str,str,str], dict[str, Any]] = {}
         youtube = self.store.youtube.status(now)
-        jobs = self.db.execute(f"SELECT jobs . * , coalesce ( {owner_expr('items')} , {owner_expr('media_owner')} , {owner_expr('linked_root')} ) AS resolved_feed_id , coalesce ( items . viewed , media_owner . viewed ) AS viewed , m . resource_key AS resource_key , coalesce ( linked_root . id , m . publication_id , jobs . item ) AS affected_item FROM (SELECT * FROM (SELECT * FROM jobs WHERE (kind IS DISTINCT FROM 'read' OR problem_code='processor-config') AND (kind IS DISTINCT FROM 'discover' OR problem_code='processor-config') AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL AND problem_code<>'' AND problem_code NOT LIKE 'source-%' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','work-fetch')) AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')) AND (problem_code IS NOT NULL OR error IS NOT NULL) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL AND problem_code<>'' AND problem_code NOT LIKE 'source-%' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','work-download_media')) UNION ALL SELECT j.* FROM media_files subtitle JOIN jobs j ON j.kind='download_media' AND j.item=subtitle.id WHERE subtitle.resource_key='youtube:subtitles' AND j.kind='download_media' AND j.item IS NOT NULL AND j.item<>'' AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','work-download_media')) status_jobs ORDER BY kind,item OFFSET 0) jobs LEFT JOIN publications items ON items . id = jobs . item LEFT JOIN media_files m ON jobs . kind = 'download_media' AND m . id = jobs . item LEFT JOIN publications media_owner ON media_owner . id = m . publication_id LEFT JOIN publication_links link ON link . target_publication_id = coalesce ( items . id , media_owner . id ) LEFT JOIN publications linked_root ON linked_root . id = link . source_publication_id AND linked_root . viewed = 0 WHERE ( jobs . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' , 'blocked' ) OR ( jobs . status = 'done' AND jobs . kind = 'fetch' AND jobs . problem_code IS NOT NULL AND jobs . error IS NOT NULL ) ) AND ( jobs . problem_code IS NOT NULL OR jobs . error IS NOT NULL ) AND (jobs.kind IS DISTINCT FROM 'read' OR jobs.problem_code='processor-config') AND NOT (jobs.kind IN ('delete','feed-delete') AND coalesce(nullif(jobs.problem_code,''),'work-'||jobs.kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))").fetchall()
+        jobs = self.db.execute(f"SELECT jobs . * , coalesce ( {owner_expr('items')} , {owner_expr('media_owner')} , {owner_expr('linked_root')} ) AS resolved_feed_id , coalesce ( items . viewed , media_owner . viewed ) AS viewed , m . resource_key AS resource_key , coalesce ( linked_root . id , m . publication_id , jobs . item ) AS affected_item FROM (SELECT * FROM (SELECT * FROM jobs WHERE kind IS DISTINCT FROM 'read' AND kind IS DISTINCT FROM 'discover' AND problem_code IS DISTINCT FROM 'processor-config' AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL AND problem_code<>'' AND problem_code NOT LIKE 'source-%' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','work-fetch')) AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')) AND (problem_code IS NOT NULL OR error IS NOT NULL) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL AND problem_code<>'' AND problem_code NOT LIKE 'source-%' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','work-download_media')) UNION ALL SELECT j.* FROM media_files subtitle JOIN jobs j ON j.kind='download_media' AND j.item=subtitle.id WHERE subtitle.resource_key='youtube:subtitles' AND j.kind='download_media' AND j.item IS NOT NULL AND j.item<>'' AND j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','work-download_media')) status_jobs ORDER BY kind,item OFFSET 0) jobs LEFT JOIN publications items ON items . id = jobs . item LEFT JOIN media_files m ON jobs . kind = 'download_media' AND m . id = jobs . item LEFT JOIN publications media_owner ON media_owner . id = m . publication_id LEFT JOIN publication_links link ON link . target_publication_id = coalesce ( items . id , media_owner . id ) LEFT JOIN publications linked_root ON linked_root . id = link . source_publication_id AND linked_root . viewed = 0 WHERE ( jobs . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' , 'blocked' ) OR ( jobs . status = 'done' AND jobs . kind = 'fetch' AND jobs . problem_code IS NOT NULL AND jobs . error IS NOT NULL ) ) AND ( jobs . problem_code IS NOT NULL OR jobs . error IS NOT NULL ) AND jobs.kind IS DISTINCT FROM 'read' AND jobs.problem_code IS DISTINCT FROM 'processor-config' AND NOT (jobs.kind IN ('delete','feed-delete') AND coalesce(nullif(jobs.problem_code,''),'work-'||jobs.kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))").fetchall()
         for job in jobs:
             resolved_feed = job['item'] if job['kind']=='read' else job['resolved_feed_id'] or job['feed_id']
             code = job['problem_code']
@@ -1868,6 +2187,8 @@ class Problems:
     def forget_materials(self, members: set[str], now: float) -> None:
         """Deletion wins over keeping an expanded/history row; retain only service facts."""
         for row in problem_links.material_records(self.db, 'problem', members):
+            if row['identity']=='processor:configuration':
+                continue
             if row['origin']=='action' or row['identity'].startswith('action:'):
                 receipt = self.db.execute('SELECT identity,body FROM reader_action_results WHERE identity=%s ORDER BY sequence DESC LIMIT 1',(row['identity'][7:],)).fetchone() if row['identity'].startswith('action:') else None
                 if _action_problem_body(row['body']) is None or not receipt or _action_receipt_context(receipt['body'],receipt['identity']) is None:
@@ -2138,8 +2459,10 @@ class Problems:
             for row in existing.values():
                 if row['id'] in remapped or row['id'] in merged:
                     continue
-                if row['identity'] not in identities and row['identity'] != 'processor:codex-choice' and not row['identity'].startswith(('action:', 'profile:')):
+                if row['identity'] not in identities and row['identity'] not in ('processor:codex-choice','processor:configuration') and not row['identity'].startswith(('action:', 'profile:')):
                     body = json.loads(row['body'])
+                    if isinstance(body,dict) and body.get('code')=='processor-config' and body.get('processor_group_identity')=='processor:configuration':
+                        continue
                     code=body.get('code')
                     eligible_fetch=(isinstance(code,str) and bool(code) and not code.startswith('source-') and code not in ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','work-fetch'))
                     if eligible_fetch and body.get('operation')=='producer:fetch':
@@ -2193,12 +2516,16 @@ class Problems:
         current: list[dict[str, Any]] = []
         recent: list[dict[str, Any]] = []
         rows = self.db.execute('SELECT * FROM reader_problems WHERE finished IS NULL OR finished > %s ORDER BY created DESC', (now - 86400,)).fetchall()
+        reservation=self.processor_reservation()
+        processor_current=self.processor_current()
         action_identities=sorted({row['identity'][7:] for row in rows if row['identity'].startswith('action:')})
         receipts: dict[str,Any] = {}
         for start in range(0,len(action_identities),400):
             for saved_receipt in self.db.execute('SELECT r.identity,r.id,r.body,r.result,r.started FROM unnest(%s::text[]) target(identity) CROSS JOIN LATERAL (SELECT identity,id,body,result,started FROM reader_action_results WHERE identity=target.identity ORDER BY sequence DESC LIMIT 1) r',(action_identities[start:start+400],)):
                 receipts[saved_receipt['identity']]=saved_receipt
         for row in rows:
+            if reservation and row['id']==reservation['id'] and row['identity']=='processor:reservation:'+reservation['id']:
+                continue
             current_receipt=receipts.get(row['identity'][7:]) if row['identity'].startswith('action:') else None
             bad_receipt=bool(row['finished'] is None and (current_receipt is None or current_receipt['result'] in ('failed','unknown','pending') and _action_receipt_context(current_receipt['body'],current_receipt['identity']) is None))
             is_action=row['origin']=='action' or row['identity'].startswith('action:')
@@ -2221,6 +2548,13 @@ class Problems:
                         latest = self.action_candidate(current_receipt)
                         if latest is not None:
                             problem=latest
+            processor_legacy=(row['identity']=='processor:configuration' and (not isinstance(problem,dict) or problem.get('code') in (None,'processor-config')) or isinstance(problem,dict) and problem.get('code')=='processor-config' and problem.get('processor_group_identity')=='processor:configuration')
+            if processor_legacy and (bad_created or bad_finished or bad_outcome or not self.valid_processor_problem(row['body'])):
+                problem=dict(code='processor-config',section='action',title='Сохранённое состояние обработчика требует проверки',consequence='Исходная запись сохранена.',next_step='Проверьте настройки обработчика.',objects=[],action=None,operation='producer:processor-config-legacy',state='current',next_at=None)
+            if row['finished'] is None and processor_current and row['id']==processor_current['id']:
+                projected=self.processor_configuration_candidate(now)
+                if projected is not None:
+                    problem=projected
             if row['finished'] is None:
                 candidate = by_identity.get(row['identity'], {})
                 if candidate.get('reason'):
@@ -2230,11 +2564,16 @@ class Problems:
             visible_id = row['id']
             if not visible_id:
                 visible_id = _legacy_problem_id(row['identity'])
-            finished = None if generic and (bad_finished or bad_outcome) else row['finished']
-            created = now if generic and bad_created else row['created']
+            finished = None if (generic or processor_legacy) and (bad_finished or bad_outcome) else row['finished']
+            created = now if (generic or processor_legacy) and bad_created else row['created']
             problem.update(id=visible_id, created_at=created, finished_at=finished,
                            outcome=None if finished is None else row['outcome'], state='finished' if finished is not None else problem['state'])
             (recent if finished is not None else current).append(problem)
+        resumed=self.processor_resume_candidate(now)
+        if resumed:
+            identity,problem,created=resumed
+            problem.update(id=identity,created_at=created,finished_at=None,outcome=None)
+            current.append(problem)
         return dict(current=current, recent=recent, count=len(current), updated_at=now)
 
     @staticmethod

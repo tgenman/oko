@@ -66,10 +66,25 @@ class YouTubeAccess:
 
     def blocked(self, wall: float, retry_after: float) -> None:
         with self.db:
+            if self.store.problems.processor_resume_candidate(wall):
+                self.store.problems.finish_processor_change([],None,wall)
+            previous=self.store.problems.prepare_processor_pause(wall)
             strikes = min(6, expect_row(self.db.execute('SELECT strikes FROM youtube_access WHERE id = 1').fetchone())[0] + 1)
             until = wall + max(min(900 * 2 ** (strikes - 1), 21600), retry_after)
             self.db.execute('UPDATE youtube_access SET strikes = %s , blocked_until = %s WHERE id = 1', (strikes, until))
+            self.store.problems.finish_processor_change([],previous,wall)
+            old_paused=self.store.read_versions._processor_youtube_paused
+            self.db.after_rollback(lambda: setattr(self.store.read_versions,'_processor_youtube_paused',old_paused))
+            self.db.after_commit(lambda: setattr(self.store.read_versions,'_processor_youtube_paused',True))
 
     def completed(self) -> None:
         with self.db:
+            reservation=self.store.problems.processor_reservation()
+            if reservation is not None:
+                deadline=min(float(reservation['deadline']),self.store.wall_clock())
+                self.db.execute('UPDATE reader_problems SET body=%s WHERE id=%s AND identity=%s',(json.dumps(self.store.problems.processor_reservation_body(deadline)),reservation['id'],'processor:reservation:'+reservation['id']))
             self.db.execute('UPDATE youtube_access SET strikes = 0 , blocked_until = 0 WHERE id = 1')
+            self.store.problems.finish_processor_change([],None,self.store.wall_clock())
+            old_paused=self.store.read_versions._processor_youtube_paused
+            self.db.after_rollback(lambda: setattr(self.store.read_versions,'_processor_youtube_paused',old_paused))
+            self.db.after_commit(lambda: setattr(self.store.read_versions,'_processor_youtube_paused',False))

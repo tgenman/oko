@@ -93,9 +93,13 @@ class ProcessingState:
                 WHERE m.publication_id=i.id) AS has_owner FROM publications i WHERE i.id=ANY(%s)""", (batch,)).fetchall()
             feedless = [row['id'] for row in rows if not row['has_owner']]
             if feedless:
+                affected=[row['id'] for row in self.store.db.execute("SELECT id FROM jobs WHERE kind IN ('filter','theses') AND item=ANY(%s) AND (processor_visible OR problem_code='processor-config')",(feedless,))]
+                previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
                 job_write(self.store.db, """UPDATE jobs SET status='cancelled',generation=generation+1,
                     input_snapshot=NULL,error=NULL,problem_code=NULL WHERE item=ANY(%s) AND kind IN ('filter','theses')
                     AND (status IS DISTINCT FROM 'cancelled' OR input_snapshot IS NOT NULL OR error IS NOT NULL OR problem_code IS NOT NULL)""", (feedless,))
+                if affected:
+                    self.store.problems.finish_processor_change(affected,previous,self.store.wall_clock())
                 self.store.db.execute("""UPDATE publications SET filtered_content='{}',summarized_content='{}',
                     processing_metadata=(processing_metadata::jsonb-'filter'-'summary'-'_pass'-'_revision'-'_revision_input')::text,
                     status=CASE WHEN viewed=0 THEN 'ready' ELSE status END WHERE id=ANY(%s)
@@ -147,12 +151,15 @@ class ProcessingState:
                 identity = youtube_media.subtitle_id(content)
                 media = self.store.db.execute("SELECT storage_key FROM media_files WHERE id=%s AND publication_id=%s AND status='ready'", (identity,item)).fetchone() if identity else None
                 if media and (not media[0] or existing_file(self.store.root,media[0]) is None):
+                    affected=self.store.problems.processor_jobs_for_materials([item])
+                    previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
                     self.store.db.execute("UPDATE media_files SET status='pending_download',storage_key=NULL,reason='' WHERE id=%s", (identity,))
                     content['extra']['youtube']['captions'] = 'pending'
                     content['extra']['_reader']['captions'] = 'error'
                     self.store.db.execute('UPDATE publications SET content=%s WHERE id=%s', (json.dumps(content,ensure_ascii=False),item))
                     job_write(self.store.db, "UPDATE jobs SET status='cancelled' WHERE kind='download_media' AND item=%s AND status IN ('failed','unavailable')", (identity,))
-                    self.store.jobs.schedule_media(item)
+                    self.store.jobs.schedule_media(item,sync_processor=False)
+                    if affected:self.store.problems.finish_processor_change(affected,previous,self.store.wall_clock())
                     publication_links.notify_parents(self.store,item)
                 self.reconcile_accepted_item(item)
         except BaseException:

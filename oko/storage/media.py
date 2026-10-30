@@ -204,6 +204,10 @@ class MediaFiles:
             from oko.storage.media_job_problems import managed_candidates
             problem_job=problem_jobs[0] if problem_jobs else None
             previous_problem=managed_candidates(store,problem_job,store.wall_clock()) if problem_job is not None else []
+            if identity!=media_id:
+                job=store.db.execute("SELECT id FROM jobs WHERE kind='download_media' AND item=%s AND processor_visible",(media_id,)).fetchone()
+                if job:
+                    store.problems.capture_processor_history(job['id'],store.wall_clock())
             store.db.execute("UPDATE media_files SET id = %s , status = 'ready' , reason = '' , storage_key = %s , size_bytes = %s , source_locator = %s , mime_type = %s , name = %s WHERE id = %s",
                 (identity,str(saved.relative_to(store.root)),size,actual.locator,actual.mime_type,actual.name,media_id))
             store.db.execute('UPDATE publications SET content = %s , media_ids = %s WHERE id = %s', (json.dumps(content,ensure_ascii=False),json.dumps([value['id'] for value in media]),download.publication_id))
@@ -266,6 +270,9 @@ class MediaFiles:
         self.project_header(content,media)
         with store.db:
             memberships.lock_graph(store.db)
+            job=store.db.execute("SELECT id FROM jobs WHERE kind='download_media' AND item=%s AND processor_visible",(media_id,)).fetchone()
+            if job:
+                store.problems.capture_processor_history(job['id'],store.wall_clock())
             store.db.execute("UPDATE media_files SET id = %s , status = 'unavailable' , reason = %s , storage_key = NULL , size_bytes = NULL WHERE id = %s",(identity,issue.message,media_id))
             store.db.execute('UPDATE publications SET content = %s , media_ids = %s WHERE id = %s',(json.dumps(content,ensure_ascii=False),json.dumps([value['id'] for value in media]),owner))
             store.processing.reconcile_accepted_item(owner)

@@ -216,8 +216,10 @@ def test_read_processor_configuration_error_remains_in_shared_projection(tmp_pat
     try:
         setup(store)
         with store.db:
-            store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('read','feed','failed','failure','processor-config')")
+            job=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('read','feed','failed','failure','processor-config') RETURNING id").fetchone()[0]
             store.problems.sync_read_feed('feed',1)
+            store.problems.finish_processor_change([job],None,1)
+        assert store.problems.processor_current() is not None
         state=store.problems.snapshot(2)
         assert any(p['code']=='processor-config' for p in state['current'])
     finally:store.db.close()

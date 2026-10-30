@@ -32,6 +32,14 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
     capture_deletion_problems(store,effects,previous)
     capture_fetch_problems(store,effects,previous)
     capture_media_problems(store,effects,previous)
+    keys=sorted({(ref.key.platform.value,ref.key.external_id) for ref in references if (ref.key.platform.value,ref.key.external_id)!=(owner['platform'],owner['external_id'])})
+    existing: set[str]=set()
+    for start in range(0,len(keys),400):
+        batch=keys[start:start+400]
+        existing.update(row['id'] for row in store.db.execute("SELECT p.id FROM unnest(%s::text[],%s::text[]) AS v(platform,external_id) JOIN publications p ON p.platform=v.platform AND p.external_id=v.external_id",([key[0] for key in batch],[key[1] for key in batch])))
+    if previous!=existing or len(existing)<len(keys):
+        affected=store.problems.processor_jobs_for_materials(sorted(previous | existing))
+        store.problems.capture_processor_histories(affected,store.wall_clock())
     targets=[]
     for ref in references:
         if (ref.key.platform.value,ref.key.external_id)==(owner['platform'],owner['external_id']):
@@ -60,7 +68,7 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
             if row['url']!=ref.url:
                 raise ValueError('Conflicting linked publication identity')
             if row['viewed'] and row['feed_id'] is None:
-                memberships.set_viewed(store.db,[identity],False)
+                store.set_processor_viewed([identity],False)
                 effects.fetch[identity]=True
             elif owner['platform']=='rss':
                 effects.refresh_links.add(identity)
@@ -69,6 +77,8 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
     store.db.executemany('INSERT INTO publication_links VALUES ( %s , %s ) ON CONFLICT DO NOTHING',[(item,target) for target in targets])
     prune(store,previous-set(targets),effects=effects)
     changed=previous!=set(targets)
+    if changed and store.problems.processor_jobs_for_materials(sorted(previous | set(targets))):
+        status_changed(store.db)
     return changed
 
 
@@ -200,7 +210,7 @@ def prune(store: 'Store', candidates: set[str], *, effects: CollectionEffects | 
         store.publications.set_source_deleted(batch, False)
         store.jobs.forget_input('filter', batch)
         store.jobs.forget_input('theses', batch)
-        memberships.set_viewed(store.db,batch,True)
+        store.set_processor_viewed(batch,True)
 
 
 def project_header(store: 'Store', item: str, header: dict[str,Any]) -> dict[str,Any]:

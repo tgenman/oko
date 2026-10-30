@@ -17,6 +17,10 @@ def reconcile_settings(store: 'Store', identities: list[str]) -> None:
     if not store.db.in_transaction:
         raise RuntimeError('Settings reconciliation requires an owned transaction')
     ordered = sorted(set(identities))
+    affected: list[int]=[]
+    for start in range(0,len(ordered),400):
+        affected.extend(row['id'] for row in store.db.execute("SELECT id FROM jobs WHERE kind IN ('filter','theses') AND item=ANY(%s) AND (processor_visible OR problem_code='processor-config')",(ordered[start:start+400],)))
+    processor_previous=store.problems.prepare_processor_change(affected,store.wall_clock())
     for start in range(0,len(ordered),400):
         batch = ordered[start:start+400]
         for kind in ('filter','theses'):
@@ -26,6 +30,8 @@ def reconcile_settings(store: 'Store', identities: list[str]) -> None:
         if changes:
             store.db.execute("""UPDATE publications i SET status=v.status FROM unnest(%s::text[],%s::text[]) AS v(id,status)
                 WHERE i.id=v.id AND i.status IS DISTINCT FROM v.status""", ([r[0] for r in changes],[r[1] for r in changes]))
+    if affected:
+        store.problems.finish_processor_change(affected,processor_previous,store.wall_clock())
 
 
 def _stage(store: 'Store', batch: list[str], kind: Kind) -> None:

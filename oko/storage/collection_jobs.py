@@ -60,6 +60,7 @@ def fail(store: 'Store', job: 'Job', issue: AdapterIssue, *, cancelled: bool = F
     previous=managed_candidates(store,job.id,store.wall_clock()) if job.kind=='fetch' else []
     from oko.storage.media_job_problems import managed_candidates as media_candidates
     previous_media=media_candidates(store,job.id,store.wall_clock()) if job.kind=='download_media' else []
+    processor_previous=store.problems.prepare_processor_change([job.id],store.wall_clock())
     row = expect_row(store.db.execute('SELECT retry_delay FROM jobs WHERE id = %s',(job.id,)).fetchone())
     settings = store.subscriptions.retry_settings()
     delay = min(settings['max_seconds'],max(settings['initial_seconds'],row['retry_delay']*2))
@@ -67,6 +68,7 @@ def fail(store: 'Store', job: 'Job', issue: AdapterIssue, *, cancelled: bool = F
     until = max(store.wall_clock()+delay,issue.retry_at.timestamp() if issue.retry_at else 0) if status=='pending' else None
     job_write(store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' AND %s = 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = %s , next = %s , retry_at = %s , retry_delay = %s , wait_scope = %s , error = %s , problem_code = %s WHERE id = %s AND generation = %s",(status,status,store.clock()+max(0,until-store.wall_clock()) if until else 0,
         until,delay,issue.scope if issue.kind==AdapterErrorKind.source_wait else None,None if cancelled else issue.message,None if cancelled else issue.code,job.id,job.generation))
+    store.problems.finish_processor_change([job.id],processor_previous,store.wall_clock())
     if job.kind=='discover':
         store.problems.sync_discover(job.id,store.wall_clock())
     if job.kind=='fetch':

@@ -327,6 +327,8 @@ class Publications:
         content['extra']['_input_hash'] = fingerprint
         retained={row['id'] for row in media}
         removed=[(row[0],) for row in store.db.execute('SELECT id FROM media_files WHERE publication_id = %s',(item,)) if row[0] not in retained]
+        processor_jobs=[row['id'] for row in store.db.execute("SELECT j.id FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=%s AND j.processor_visible",(item,))]
+        store.problems.capture_processor_histories(processor_jobs,store.wall_clock())
         store.db.execute('DELETE FROM media_files WHERE publication_id = %s', (item,))
         for row in media:
             store.db.execute('INSERT INTO media_files ( id , publication_id , resource_key , source_locator , name , mime_type , size_bytes , storage_key , status , reason , resource_identity ) VALUES ( %(id)s , %(publication_id)s , %(resource_key)s , %(source_locator)s , %(name)s , %(mime_type)s , %(size_bytes)s , %(storage_key)s , %(status)s , %(reason)s , %(resource_identity)s )', row)
