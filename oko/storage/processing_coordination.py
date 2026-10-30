@@ -64,15 +64,8 @@ class ProcessingState:
                 after = row[0]
                 self.reconcile_item(after)
                 yield
-        while True:
-            if self._repairs:
-                self._repair_one()
-                yield
-                continue
-            row = self.store.db.execute('SELECT item FROM processing_dirty ORDER BY item LIMIT 1').fetchone()
-            if row is None:
-                break
-            self.reconcile_item(row[0])
+        while self._repairs:
+            self._repair_one()
             yield
 
     def invalidate(self, scope: str = 'oko', owner: str = 'global') -> None:
@@ -109,7 +102,6 @@ class ProcessingState:
                     AND (filtered_content IS DISTINCT FROM '{}' OR summarized_content IS DISTINCT FROM '{}'
                          OR processing_metadata::jsonb ?| ARRAY['filter','summary','_pass','_revision','_revision_input']
                          OR (viewed=0 AND status IS DISTINCT FROM 'ready'))""", (feedless,))
-                self.store.db.execute('DELETE FROM processing_dirty WHERE item=ANY(%s)', (feedless,))
             for row in rows:
                 if row['has_owner']:
                     self.reconcile_accepted_item(row['id'])
@@ -123,9 +115,6 @@ class ProcessingState:
         """Update the dependent stage in the same transaction as the filter Job."""
         from oko.storage.processing_state import ProcessingRepository
         from oko.storage.reading import reading_snapshot
-        # An already queued publication has broader changes to reconcile first.
-        if self.store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone():
-            return
         repository = ProcessingRepository(self.store)
         with reading_snapshot():
             candidates = [(identity, signature, repository.satisfied(identity,'theses'), repository.revision(identity))
@@ -134,7 +123,7 @@ class ProcessingState:
         self.store.publications.status(item)
 
     def pending(self) -> bool:
-        return bool(self._repairs or self.store.db.execute('SELECT 1 FROM processing_dirty LIMIT 1').fetchone())
+        return bool(self._repairs)
 
     def sync(self) -> None:
         """Reconcile persisted affected publications in dependency order."""
@@ -142,9 +131,6 @@ class ProcessingState:
             return
         while self._repairs:
             self._repair_one()
-        items = [row[0] for row in self.store.db.execute('SELECT item FROM processing_dirty')]
-        for item in items:
-            self.reconcile_item(item)
 
     def _repair_one(self) -> None:
         item = min(self._repairs)
@@ -176,7 +162,7 @@ class ProcessingState:
             self._repairing.discard(item)
 
     def reconcile_item(self, item: str) -> None:
-        # Accepted state and both stage Jobs commit with removal of the marker.
+        # Accepted state and both stage Jobs commit together.
         with self.store.db:
             begin_write(self.store.db)
             self.reconcile_accepted_item(item)
@@ -189,13 +175,9 @@ class ProcessingState:
             raise RuntimeError('Accepted publication requires an owned transaction')
         repository = ProcessingRepository(self.store)
         self.store.publications.reconcile(item)
-        self.store.db.execute('DELETE FROM processing_dirty WHERE item=%s', (item,))
         for kind in ('filter','theses'):
             with reading_snapshot():
                 candidates = [(identity, signature, repository.satisfied(identity,kind), repository.revision(identity))
                               for identity,signature in repository.candidates(kind,item=item)]
             self.store.jobs.reconcile(kind,candidates)
-            # The filter transition can invalidate the dependent stage; this
-            # transaction evaluates it immediately.
-            self.store.db.execute('DELETE FROM processing_dirty WHERE item=%s', (item,))
         self.store.publications.status(item)

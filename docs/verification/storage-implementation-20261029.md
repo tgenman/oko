@@ -910,3 +910,17 @@ in `.scratch/storage-redesign/youtube-pause-producer-draft.patch`; further work
 must update affected owners without a feed-wide traversal and preserve linked
 ownership, expiry, retry, rollback and restart. Status GET can still persist the
 shared YouTube problem in the committed code.
+
+After the user explicitly accepted losing outstanding `processing_dirty` markers,
+migration 059 drops that queue and the application no longer consumes it. A
+synthetic migration with pending and orphan markers preserved the tested saved
+publication and Job; a fault during migration rolled the schema, marker and Job
+back. The resulting synthetic catalogue contained 20 tables including the
+migration ledger and no non-internal triggers; remaining compatibility views and
+other transitional fields mean the full target schema is not yet established.
+The temporary first run passed 252 tests and had one failure caused by a fixture
+cursor; the corrected focused case passed. In the task branch, the migration,
+worker, recovery, settings, YouTube and release suites passed 257 tests, with
+two additional migration failure/success cases and nine Playwright cases passed.
+Mypy passed and the status screenshot was inspected. No working database was
+migrated as part of these checks.

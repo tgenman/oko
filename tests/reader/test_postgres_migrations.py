@@ -992,10 +992,10 @@ def test_stage_queue_migration_preserves_pending_work(connections):
         migrate(db, MIGRATIONS[:53])
         db.execute("INSERT INTO processing_stage_dirty(kind,item) VALUES ('filter','pending'),('theses','pending'),('filter','other')")
         db.execute("INSERT INTO processing_dirty(item) VALUES ('existing')")
-        migrate(db, MIGRATIONS)
+        migrate(db, MIGRATIONS[:58])
         assert db.execute("SELECT to_regclass('processing_stage_dirty')").fetchone() == (None,)
         assert db.execute('SELECT item FROM processing_dirty ORDER BY item').fetchall() == [('existing',),('other',),('pending',)]
-        verify(db, MIGRATIONS)
+        verify(db, MIGRATIONS[:58])
 
 
 def test_dirty_settings_work_is_reconciled_after_restart(postgres_database_url, tmp_path):
@@ -1034,12 +1034,11 @@ def test_dirty_settings_work_is_reconciled_after_restart(postgres_database_url, 
         db.execute("UPDATE settings SET value='\"Changed synthetic rules\"'::jsonb WHERE field='prompt_filters' AND folder_id IS NULL AND feed_id IS NULL")
         db.execute('INSERT INTO processing_dirty(item) VALUES (%s) ON CONFLICT DO NOTHING', (item,))
         migrate(db,MIGRATIONS)
-        assert db.execute('SELECT item FROM processing_dirty WHERE item=%s', (item,)).fetchone() == (item,)
+        assert db.execute("SELECT to_regclass('processing_dirty')").fetchone()[0] is None
     recovered = Store(root,lambda _:None,database_url=postgres_database_url)
     try:
         current = recovered.db.execute("SELECT generation,input_snapshot->>'signature' FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()
         assert current[0] > original[0] and current[1] != original[1]
-        assert recovered.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
     finally:
         recovered.db.close()
 
@@ -1114,3 +1113,35 @@ def test_job_constraint_migration_rejects_ambiguous_legacy_data(connections, fie
             migrate(db,MIGRATIONS)
         assert db.execute(f'SELECT {field} FROM jobs WHERE item=%s', ('item',)).fetchone() == (value,)
         verify(db,MIGRATIONS[:57])
+
+
+def test_dirty_queue_cutover_discards_markers_and_preserves_saved_work(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db,MIGRATIONS[:58])
+        db.execute("INSERT INTO publications(id,status,content) VALUES ('item','pending_filtering','{\"blocks\":[]}')")
+        db.execute("INSERT INTO jobs(kind,item,status,generation,attempt) VALUES ('filter','item','pending',7,3)")
+        db.execute("INSERT INTO processing_dirty(item) VALUES ('item'),('orphan')")
+        migrate(db,MIGRATIONS)
+        assert db.execute("SELECT to_regclass('processing_dirty')").fetchone()[0] is None
+        assert db.execute("SELECT status,content FROM publications WHERE id='item'").fetchone()==('pending_filtering','{\"blocks\":[]}')
+        assert db.execute("SELECT status,generation,attempt FROM jobs WHERE kind='filter' AND item='item'").fetchone()==('pending',7,3)
+        assert db.execute("SELECT count(*) FROM pg_tables WHERE schemaname=current_schema()").fetchone()[0]==20
+        assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND NOT t.tgisinternal").fetchone()[0]==0
+        verify(db,MIGRATIONS)
+
+
+def test_dirty_queue_cutover_failure_rolls_back_schema_and_markers(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db,MIGRATIONS[:58])
+        db.execute("INSERT INTO publications(id,status) VALUES ('item','pending_filtering')")
+        db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('filter','item','pending',7)")
+        db.execute("INSERT INTO processing_dirty(item) VALUES ('item')")
+        latest=MIGRATIONS[58]
+        broken=Migration(latest.version,latest.name,latest.sql+'; SELECT missing_column FROM publications')
+        with pytest.raises(psycopg.errors.UndefinedColumn):
+            migrate(db,(*MIGRATIONS[:58],broken))
+        assert db.execute('SELECT item FROM processing_dirty').fetchall()==[('item',)]
+        assert db.execute("SELECT status,generation FROM jobs WHERE kind='filter' AND item='item'").fetchone()==('pending',7)
+        verify(db,MIGRATIONS[:58])

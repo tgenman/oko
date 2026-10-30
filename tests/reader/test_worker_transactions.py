@@ -425,19 +425,16 @@ def test_membership_removal_records_effects_and_rolls_back_together(tmp_path):
         with transaction(store.db):
             store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
             store.read_versions.memberships_changed([item])
-            store.db.execute('DELETE FROM processing_dirty WHERE item=%s', (item,))
         before = store.read_versions.version('status','runtime')['version']
         def remove():
             store.remove_feed(second)
             assert store.read_versions.version('status','runtime')['version'] > before
-            assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
         with pytest.raises(ValueError,match='synthetic rollback'):
             with transaction(store.db):
                 remove()
                 raise ValueError('synthetic rollback')
         assert store.read_versions.version('status','runtime')['version'] == before
         assert store.db.execute('SELECT 1 FROM feed_publications WHERE feed_id=%s AND publication_id=%s', (second,item)).fetchone()
-        assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
         with transaction(store.db):
             remove()
     finally:
@@ -622,22 +619,21 @@ def test_disabled_admission_never_begins_and_next_transaction_is_usable(tmp_path
     store.db.close()
 
 
-def test_filter_claim_reconciles_dependants_in_the_same_transaction(tmp_path):
+def test_filter_claim_and_rollback_preserve_attempt_state(tmp_path):
     store, item, _, _ = worker_library(tmp_path)
     try:
         with transaction(store.db):
             store.processing.reconcile_accepted_item(item)
-            store.db.execute('DELETE FROM processing_dirty WHERE item=%s', (item,))
+        before = store.db.execute("SELECT status,generation FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()[:]
         with pytest.raises(ValueError, match='synthetic rollback'):
             with transaction(store.db):
                 job = store.jobs.claim_processing('filter',store.clock())
-                assert job is not None
-                assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
+                assert job is not None and store.jobs.valid(job)
                 raise ValueError('synthetic rollback')
-        assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
+        assert store.db.execute("SELECT status,generation FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()[:] == before
         with transaction(store.db):
-            assert store.jobs.claim_processing('filter',store.clock()) is not None
-            assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
+            job = store.jobs.claim_processing('filter',store.clock())
+            assert job is not None and store.jobs.valid(job)
     finally:
         store.db.close()
 
@@ -650,21 +646,20 @@ def test_filter_job_outcome_reconciles_dependants_in_same_transaction(tmp_path,o
             store.processing.reconcile_accepted_item(item)
             job = store.jobs.claim_processing('filter',store.clock())
             assert job is not None
-            store.db.execute('DELETE FROM processing_dirty WHERE item=%s', (item,))
         def apply():
             if outcome=='retry':
                 store.jobs.retry(job,store.clock(),'Synthetic error')
             else:
                 getattr(store.jobs,outcome)(job)
-            assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
         with pytest.raises(ValueError, match='synthetic rollback'):
             with transaction(store.db):
                 apply()
                 raise ValueError('synthetic rollback')
         assert store.jobs.valid(job)
-        assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
         with transaction(store.db):
             apply()
+        expected={'finish':'done','retry':'pending','cancel':'cancelled','block':'blocked'}[outcome]
+        assert store.db.execute('SELECT status FROM jobs WHERE id=%s',(job.id,)).fetchone()[0] == expected
     finally:
         store.db.close()
 
@@ -784,7 +779,8 @@ def test_collection_failure_does_not_stop_filter_and_summary_crons(tmp_path):
         async def discover(self,cursor):raise SourceError('Synthetic unavailable source',retryable=False)
         async def fetch(self,publication):raise AssertionError('unexpected fetch')
     store,item,execution,tasks=worker_library(tmp_path)
-    with store.db:store.db.execute("UPDATE feeds SET cursor='' WHERE id='demo'")
+    with store.db:
+        store.db.execute("UPDATE feeds SET cursor='' WHERE id='demo'")
     store.db.close()
     with TestClient(create_app(tmp_path,source=FailedSource(),token='test',api_only=True,ai_transport=transport([],theses=True)),headers=HEADERS) as client:
         wait_for(client,lambda:client.get('/api/v3/publication/'+item).json()['theses']['result'])
@@ -1023,7 +1019,6 @@ def test_viewed_publication_kept_as_link_revokes_own_processing_atomically(tmp_p
             assert not store.jobs.valid(job)
             row = store.db.execute('SELECT complete,viewed,content,filtered_content,summarized_content FROM publications WHERE id=%s', (item,)).fetchone()
             assert row[:] == (1,0,original,'{}','{}')
-            assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
         with pytest.raises(ValueError, match='rollback'):
             with transaction(store.db):
                 view()
@@ -1043,7 +1038,6 @@ def test_startup_reconciles_publications_without_seeding_dirty_queue(tmp_path):
     try:
         with store.db:
             store.db.execute("DELETE FROM jobs WHERE kind='filter' AND item=%s", (item,))
-            store.db.execute('DELETE FROM processing_dirty')
         store.db.set_trace_callback(statements.append)
         for _ in store.processing.recovery_steps(seed=True):
             pass
@@ -1057,19 +1051,15 @@ def test_startup_reconciles_publications_without_seeding_dirty_queue(tmp_path):
 def test_read_repair_reconciles_without_queue_and_survives_rollback(tmp_path):
     store, item, _, _ = worker_library(tmp_path)
     try:
-        with store.db:
-            store.db.execute('DELETE FROM processing_dirty')
         store.processing.repair(item)
         with pytest.raises(ValueError, match='rollback'):
             with transaction(store.db):
                 store.processing.sync()
                 assert item not in store.processing._repairs
-                assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
                 raise ValueError('rollback')
         assert item in store.processing._repairs
         store.processing.sync()
         assert item not in store.processing._repairs
-        assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
     finally:
         store.db.close()
 
@@ -1168,13 +1158,10 @@ def test_display_only_setting_does_not_enqueue_processing(tmp_path):
     from oko.subscriptions.subscriptions import Overrides
     store, item, execution, _ = worker_library(tmp_path)
     try:
-        with store.db:
-            store.db.execute('DELETE FROM processing_dirty')
         store.processing.background = True
         before = tuple(store.db.execute("SELECT status,generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone())
         with transaction(store.db):
             SubscriptionService(execution.require_store).update_settings('feed','demo',Overrides(originals=False))
-        assert store.db.execute('SELECT 1 FROM processing_dirty LIMIT 1').fetchone() is None
         assert tuple(store.db.execute("SELECT status,generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()) == before
     finally:
         store.db.close()
@@ -1186,8 +1173,6 @@ def test_rule_change_updates_pending_job_without_a_dirty_marker(tmp_path):
     store, item, execution, _ = worker_library(tmp_path)
     try:
         store.processing.background = True
-        with store.db:
-            store.db.execute('DELETE FROM processing_dirty')
         before = dict(store.db.execute("SELECT generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone())
         service = SubscriptionService(execution.require_store)
         def change():
@@ -1195,7 +1180,6 @@ def test_rule_change_updates_pending_job_without_a_dirty_marker(tmp_path):
             after = dict(store.db.execute("SELECT generation,input_snapshot FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone())
             assert after['generation'] > before['generation']
             assert after['input_snapshot'] != before['input_snapshot']
-            assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
         with pytest.raises(ValueError, match='rollback'):
             with transaction(store.db):
                 change()

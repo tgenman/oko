@@ -18,7 +18,7 @@ class ProcessingRepository:
 
     def candidates(self, kind: Kind, *, item: str) -> list[tuple[str,str | None]]:
         # Reconciliation is publication-owned; there is no stage queue to scan.
-        query = "SELECT i.id FROM items_read i WHERE i.id=%s AND i.viewed=0 AND i.platform IS NOT NULL AND i.feed_id IS NOT NULL AND i.complete=1 AND NOT EXISTS (SELECT 1 FROM processing_dirty p WHERE p.item=i.id)"
+        query = "SELECT i.id FROM items_read i WHERE i.id=%s AND i.viewed=0 AND i.platform IS NOT NULL AND i.feed_id IS NOT NULL AND i.complete=1"
         parameters: tuple[str | int, ...] = (item,)
         rows=self.store.db.execute(query,parameters).fetchall()
         operation=self.store.filters if kind=='filter' else self.store.processing.theses

@@ -19,7 +19,6 @@ def reconcile_settings(store: 'Store', identities: list[str]) -> None:
     ordered = sorted(set(identities))
     for start in range(0,len(ordered),400):
         batch = ordered[start:start+400]
-        store.db.execute('DELETE FROM processing_dirty WHERE item=ANY(%s)', (batch,))
         for kind in ('filter','theses'):
             _stage(store,batch,kind)
         with material_read.material_inputs(store.db,set(batch)), reading_snapshot():

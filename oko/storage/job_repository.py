@@ -240,8 +240,6 @@ class JobRepository:
                 AND NOT ((jobs.kind='filter' AND i.status IN ('pending_filtering','filter_out'))
                       OR (jobs.kind='theses' AND (i.status IN ('pending_summary','ready')
                           OR (i.status='pending_filtering' AND i.processing_metadata::jsonb->'_pass'->>'feed_id' IS NULL)))))"""
-            if self.store.processing.background:
-                query += " AND NOT EXISTS (SELECT 1 FROM processing_dirty p WHERE p.item=jobs.item)"
         elif deleting_only:
             query += " AND kind IN ('delete','feed-delete')"
         elif media_only:
@@ -335,7 +333,6 @@ class JobRepository:
             elif job['kind']=='theses':
                 job_write(db, """UPDATE jobs SET status='cancelled',generation=generation+1
                     WHERE kind='filter' AND item=%s AND status IN ('pending','blocked')""", (job['item'],))
-                db.execute('DELETE FROM processing_dirty WHERE item=%s', (job['item'],))
             current = db.execute("SELECT * FROM jobs WHERE id=%s AND status='pending'", (job['id'],)).fetchone()
             if current is None:
                 raise JobRejected('Selected processing candidate is no longer eligible')
