@@ -1317,3 +1317,16 @@ passed for nine modules and 10 Playwright status scenarios passed with a
 screenshot inspected. Media errors were exercised through HTTP, not a dedicated
 browser scenario. One Starlette/httpx warning was emitted. No working database
 was migrated.
+
+
+A follow-up repair handles previously isolated work-fetch occurrences when
+the code changes, including installations where an earlier recovery already
+created duplicates. Confirmed identical raw records retain the oldest ID and
+other rows remain in history as irrelevant; ambiguous records are preserved.
+Recovery is paginated by Job and limits rows loaded into Python per group.
+Synthetic checks cover 10,000 identical or differing records, multiple roots,
+rollback, restart and locking. The integrated suite passed 183 PostgreSQL tests,
+mypy on 161 files and 10 Playwright status scenarios with screenshot inspection.
+One Starlette/httpx warning was emitted. This repair assumes byte-identical
+confirmed records for the same Job are duplicate active occurrences; their
+history rows are retained. No working database was migrated.

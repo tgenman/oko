@@ -1,0 +1,1 @@
+CREATE INDEX reader_fetch_work_job_owner ON reader_problems (((body::jsonb->>'fetch_job_id') COLLATE "C"),id COLLATE "C") WHERE finished IS NULL AND body::jsonb->>'operation'='producer:fetch' AND body::jsonb->>'code'='work-fetch' AND body::jsonb->>'fetch_job_identity' IS NOT NULL AND body::jsonb->>'fetch_job_id' IS NOT NULL;

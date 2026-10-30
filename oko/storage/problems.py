@@ -364,6 +364,158 @@ class Problems:
                 if candidate.get('_legacy_id'):legacy_keys.add(candidate['_legacy_id'])
         identities=list(counts)
         if not identities:return []
+        markers={str(job_id):job_id for job_id in projected}
+        marked: dict[int,list[Any]]={}
+        for record in self.db.execute("""SELECT r.id,r.identity,r.body,r.created,target.marker
+            FROM unnest(%s::text[]) target(marker) CROSS JOIN LATERAL (
+                SELECT id,identity,body,created FROM reader_problems WHERE finished IS NULL
+                  AND body::jsonb->>'operation'='producer:fetch' AND body::jsonb->>'code'='work-fetch'
+                  AND body::jsonb->>'fetch_job_identity' IS NOT NULL AND body::jsonb->>'fetch_job_id' IS NOT NULL
+                  AND (body::jsonb->>'fetch_job_id') COLLATE "C"=target.marker COLLATE "C"
+                ORDER BY id COLLATE "C" LIMIT 101
+            ) r""",(list(markers),)):
+            if record['marker'] in markers:marked.setdefault(markers[record['marker']],[]).append(record)
+        items_by_id={row['id']:row['item'] for row in self.db.execute('SELECT id,item FROM jobs WHERE id=ANY(%s)',(list(marked),))} if marked else {}
+        allowed_body_fields={'code','section','title','consequence','next_step','objects','action','operation',
+            'fetch_owner','fetch_implicit_code','state','next_at','reason','fetch_job_id','fetch_job_identity',
+            'status_job_identity','status_job_target'}
+        overflow={job_id for job_id,records_for_job in marked.items() if len(records_for_job)>100}
+        # Large groups are streamed in SQL: ambiguous bodies stay untouched, and
+        # byte-identical proven duplicates are closed in bounded pages.
+        for job_id in list(overflow):
+            item=items_by_id.get(job_id)
+            allowed={obj['id'] for candidate in projected[job_id] for obj in candidate['objects'] if obj.get('kind')=='material'} | {item}
+            first=marked[job_id][0]
+            try:body=json.loads(first['body'])
+            except (ValueError,TypeError):continue
+            canonical=body.get('fetch_job_identity') if isinstance(body,dict) else None
+            objects=body.get('objects') if isinstance(body,dict) else None
+            if (not isinstance(body,dict) or set(body)-allowed_body_fields or not isinstance(canonical,str)
+                or not canonical.startswith('job:work-fetch:') or canonical.count(':fetch:')!=1
+                or canonical.split(':fetch:',1)[1]!=item or body.get('fetch_job_id')!=str(job_id)
+                or not isinstance(body.get('fetch_implicit_code'),bool)
+                or (body.get('status_job_target') is not None and body.get('status_job_identity') is None)
+                or (body.get('status_job_identity') is not None and (body.get('status_job_identity')!=canonical or body.get('status_job_target')!=item))
+                or not isinstance(objects,list) or not objects or any(not isinstance(obj,dict) or obj.get('kind')!='material' or obj.get('id') not in allowed for obj in objects)
+                or not _readable_timestamp(first['created'])):continue
+            marker=str(job_id)
+            mismatch=self.db.execute("""SELECT 1 FROM reader_problems WHERE finished IS NULL
+                AND body::jsonb->>'operation'='producer:fetch' AND body::jsonb->>'code'='work-fetch'
+                AND body::jsonb->>'fetch_job_identity' IS NOT NULL AND body::jsonb->>'fetch_job_id' IS NOT NULL
+                AND (body::jsonb->>'fetch_job_id') COLLATE "C"=%s
+                AND (body COLLATE "C"<>%s COLLATE "C" OR created IS NULL OR NOT (created>=-62135596800 AND created<=253402300799)) LIMIT 1""",(marker,first['body'])).fetchone()
+            if mismatch:continue
+            winner=self.db.execute("""SELECT id,identity,body,created,body::jsonb->>'fetch_job_id' AS marker FROM reader_problems
+                WHERE finished IS NULL AND body::jsonb->>'operation'='producer:fetch' AND body::jsonb->>'code'='work-fetch'
+                AND body::jsonb->>'fetch_job_identity' IS NOT NULL AND body::jsonb->>'fetch_job_id' IS NOT NULL
+                AND (body::jsonb->>'fetch_job_id') COLLATE "C"=%s ORDER BY created,id COLLATE "C" LIMIT 1""",(marker,)).fetchone()
+            if not winner or not _readable_timestamp(winner['created']):continue
+            changed=False
+            while True:
+                closed=self.db.execute("""UPDATE reader_problems SET finished=%s,outcome='irrelevant' WHERE id IN (
+                    SELECT id FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:fetch'
+                    AND body::jsonb->>'code'='work-fetch' AND body::jsonb->>'fetch_job_identity' IS NOT NULL
+                    AND body::jsonb->>'fetch_job_id' IS NOT NULL AND (body::jsonb->>'fetch_job_id') COLLATE "C"=%s
+                    AND id<>%s ORDER BY id COLLATE "C" LIMIT 400) RETURNING id""",(now,marker,winner['id'])).fetchall()
+                if not closed:break
+                changed=True
+            if changed:status_changed(self.db)
+            marked[job_id]=[winner]
+            overflow.remove(job_id)
+        duplicate_ids: list[str]=[]
+        for job_id,records_for_job in marked.items():
+            if job_id in overflow:continue
+            item=items_by_id.get(job_id)
+            allowed={obj['id'] for candidate in projected[job_id] for obj in candidate['objects'] if obj.get('kind')=='material'} | {item}
+            equivalent: dict[str,list[Any]]={}
+            for record in records_for_job:
+                try:body=json.loads(record['body'])
+                except (ValueError,TypeError):continue
+                canonical=body.get('fetch_job_identity') if isinstance(body,dict) else None
+                objects=body.get('objects') if isinstance(body,dict) else None
+                if (not isinstance(body,dict) or set(body)-allowed_body_fields or not isinstance(canonical,str) or not canonical.startswith('job:work-fetch:') or canonical.count(':fetch:')!=1
+                    or canonical.split(':fetch:',1)[1]!=item or body.get('fetch_job_id')!=str(job_id)
+                    or not isinstance(body.get('fetch_implicit_code'),bool)
+                    or (body.get('status_job_target') is not None and body.get('status_job_identity') is None)
+                    or (body.get('status_job_identity') is not None and (body.get('status_job_identity')!=canonical or body.get('status_job_target')!=item))
+                    or not isinstance(objects,list) or not objects or any(not isinstance(obj,dict) or obj.get('kind')!='material' or obj.get('id') not in allowed for obj in objects)
+                    or not _readable_timestamp(record['created'])):continue
+                equivalent.setdefault(record['body'],[]).append(record)
+            removed: set[str]=set()
+            for same in equivalent.values():
+                if len(same)<2:continue
+                same.sort(key=lambda row:(row['created'],row['id']))
+                removed.update(row['id'] for row in same[1:])
+            if removed:
+                duplicate_ids.extend(sorted(removed))
+                marked[job_id]=[row for row in records_for_job if row['id'] not in removed]
+        if duplicate_ids:
+            for start in range(0,len(duplicate_ids),400):
+                self.db.execute("UPDATE reader_problems SET finished=%s,outcome='irrelevant' WHERE id=ANY(%s) AND finished IS NULL",(now,duplicate_ids[start:start+400]))
+            status_changed(self.db)
+        # Opaque or large legacy groups are never rewritten as a side effect of
+        # matching a newer error. Publish a distinct newer cause only when its
+        # own candidate identities have a bounded number of existing matches.
+        protected=set(overflow)
+        for job_id,records_for_job in marked.items():
+            item=items_by_id.get(job_id)
+            allowed={obj['id'] for candidate in projected[job_id] for obj in candidate['objects'] if obj.get('kind')=='material'} | {item}
+            for record in records_for_job:
+                try:body=json.loads(record['body'])
+                except (ValueError,TypeError):
+                    protected.add(job_id);break
+                canonical=body.get('fetch_job_identity') if isinstance(body,dict) else None
+                objects=body.get('objects') if isinstance(body,dict) else None
+                if (not isinstance(body,dict) or set(body)-allowed_body_fields or not isinstance(canonical,str)
+                    or not canonical.startswith('job:work-fetch:') or canonical.count(':fetch:')!=1
+                    or canonical.split(':fetch:',1)[1]!=item or body.get('fetch_job_id')!=str(job_id)
+                    or not isinstance(body.get('fetch_implicit_code'),bool)
+                    or (body.get('status_job_target') is not None and body.get('status_job_identity') is None)
+                    or (body.get('status_job_identity') is not None and (body.get('status_job_identity')!=canonical or body.get('status_job_target')!=item))
+                    or not isinstance(objects,list) or not objects or any(not isinstance(obj,dict) or obj.get('kind')!='material' or obj.get('id') not in allowed for obj in objects)
+                    or not _readable_timestamp(record['created'])):
+                    protected.add(job_id);break
+        processed:set[int]=set()
+        for job_id in protected:
+            parts=projected[job_id]
+            if len(parts)<=100 and all(part['code']!='work-fetch' for part in parts):
+                identity_keys=sorted({value for part in parts for value in (part['id'],part.get('_legacy_id')) if value})
+                own=self.db.execute("SELECT 1 FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:fetch' AND body::jsonb->>'fetch_job_identity'=ANY(%s) LIMIT 101",(identity_keys,)).fetchall()
+                status=self.db.execute("SELECT 1 FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:fetch' AND body::jsonb->>'status_job_identity'=ANY(%s) LIMIT 101",(identity_keys,)).fetchall()
+                if len(own)<=100 and len(status)<=100:self.sync_fetch(job_id,[],now)
+            processed.add(job_id)
+        complex_jobs=[job_id for job_id,parts in projected.items() if len(parts)>1 and job_id in marked and job_id not in protected]
+        for job_id in complex_jobs:
+            item=items_by_id.get(job_id)
+            allowed={obj['id'] for candidate in projected[job_id] for obj in candidate['objects'] if obj.get('kind')=='material'} | {item}
+            previous=[];keys=set()
+            for record in marked[job_id]:
+                try:body=json.loads(record['body'])
+                except (ValueError,TypeError):break
+                canonical=body.get('fetch_job_identity') if isinstance(body,dict) else None
+                objects=body.get('objects') if isinstance(body,dict) else None
+                implicit=body.get('fetch_implicit_code') if isinstance(body,dict) else None
+                if (not isinstance(canonical,str) or not canonical.startswith('job:work-fetch:') or canonical.count(':fetch:')!=1
+                    or canonical.split(':fetch:',1)[1]!=item or canonical in keys or not isinstance(implicit,bool)
+                    or body.get('fetch_job_id')!=str(job_id)
+                    or (body.get('status_job_target') is not None and body.get('status_job_identity') is None)
+                    or (body.get('status_job_identity') is not None and (body.get('status_job_identity')!=canonical or body.get('status_job_target')!=item))
+                    or not isinstance(objects,list) or not objects or any(not isinstance(obj,dict) or obj.get('kind')!='material' or obj.get('id') not in allowed for obj in objects)):
+                    break
+                keys.add(canonical)
+                previous.append(dict(id=canonical,code='work-fetch',objects=objects,fetch_job_id=str(job_id),fetch_implicit_code=implicit,_fetch_item=item))
+            else:
+                self.sync_fetch(job_id,previous,now)
+                processed.add(job_id)
+        if processed:
+            projected={job_id:parts for job_id,parts in projected.items() if job_id not in processed}
+            counts={};legacy_keys=set()
+            for parts in projected.values():
+                for candidate in parts:
+                    counts[candidate['id']]=counts.get(candidate['id'],0)+1
+                    if candidate.get('_legacy_id'):legacy_keys.add(candidate['_legacy_id'])
+            identities=list(counts)
+            if not identities:return []
         item_jobs: dict[str,tuple[int,dict[str,Any]]]={}
         for job_id,candidates in projected.items():
             if len(candidates)!=1:continue
@@ -378,6 +530,11 @@ class Problems:
             grouped: dict[int,list[Any]]={}
             for record in records:
                 if record['item'] in item_jobs:grouped.setdefault(item_jobs[record['item']][0],[]).append(record)
+            seen={record['id'] for record in records}
+            for job_id,_ in item_jobs.values():
+                for record in marked.get(job_id,[]):
+                    if record['id'] not in seen:
+                        grouped.setdefault(job_id,[]).append(record)
             occupied_legacy={row['identity'] for row in self.db.execute('SELECT identity FROM reader_problems WHERE finished IS NULL AND identity=ANY(%s)',(identities,))}
             updates: list[tuple[str,str,str]]=[]
             fallback: dict[int,list[dict[str,Any]]]={}
@@ -387,12 +544,15 @@ class Problems:
                 old=prior[0]
                 try:body=json.loads(old['body'])
                 except (TypeError,ValueError):continue
-                if not isinstance(body,dict) or body.get('fetch_job_id') not in (None,str(job_id)):continue
-                old_identity=body.get('status_job_identity',old['identity'])
-                if not isinstance(old_identity,str) or not old_identity.startswith('job:work-fetch:') or old_identity.count(':fetch:')!=1:continue
+                if not isinstance(body,dict) or set(body)-allowed_body_fields or body.get('fetch_job_id') not in (None,str(job_id)):continue
+                old_identity=body.get('fetch_job_identity',body.get('status_job_identity',old['identity']))
+                if (not isinstance(old_identity,str) or not old_identity.startswith('job:work-fetch:') or old_identity.count(':fetch:')!=1
+                    or old_identity.split(':fetch:',1)[1]!=item):continue
+                if body.get('fetch_job_identity') is not None and body.get('status_job_identity') is not None and body['status_job_identity']!=body['fetch_job_identity']:continue
                 objects=body.get('objects')
                 allowed={obj['id'] for obj in candidate['objects'] if obj.get('kind')=='material'} | {item}
                 if not isinstance(objects,list) or not objects or any(not isinstance(obj,dict) or obj.get('kind')!='material' or obj.get('id') not in allowed for obj in objects):continue
+                if body.get('status_job_target') is not None and body.get('status_job_identity') is None:continue
                 if body.get('status_job_identity') is not None and body.get('status_job_target')!=item:continue
                 if candidate['code']!='work-fetch':
                     if body.get('fetch_job_id')!=str(job_id):continue  # Unmarked legacy has no proof of its former raw code.
@@ -447,8 +607,41 @@ class Problems:
             status_changed(self.db)
         return [row for row in rows if row['id'] in complex_ids]
 
+    def recover_fetch_isolated_work(self) -> None:
+        """Repair event-owned work-fetch occurrences left by older recovery."""
+        from oko.storage.transaction import begin_write
+        cursor: str | None=None
+        while True:
+            query="""SELECT id,body::jsonb->>'fetch_job_id' AS marker FROM reader_problems
+                WHERE finished IS NULL AND body::jsonb->>'operation'='producer:fetch' AND body::jsonb->>'code'='work-fetch'
+                  AND body::jsonb->>'fetch_job_identity' IS NOT NULL AND body::jsonb->>'fetch_job_id' IS NOT NULL"""
+            if cursor is not None:query+=""" AND (body::jsonb->>'fetch_job_id') COLLATE "C">%s"""
+            query+=""" ORDER BY (body::jsonb->>'fetch_job_id') COLLATE "C",id COLLATE "C" LIMIT 100"""
+            with self.db:
+                begin_write(self.db)
+                self.db.execute("SELECT pg_advisory_xact_lock(hashtextextended(current_schema(),%s))",(746582093,))
+                if self.db.execute("SELECT 1 FROM state WHERE key='fetch-isolated-work-recovered-v1'").fetchone():return
+                records=self.db.execute(query,(cursor,) if cursor is not None else ()).fetchall()
+                if not records:
+                    self.db.execute("INSERT INTO state(key,value) VALUES ('fetch-isolated-work-recovered-v1','true') ON CONFLICT DO NOTHING")
+                    return
+                ids=set()
+                for row in records:
+                    marker=row['marker']
+                    if isinstance(marker,str) and len(marker)<=20 and re.fullmatch(r'-?(?:0|[1-9][0-9]*)',marker):
+                        number=int(marker)
+                        if str(number)==marker and -(2**63)<=number<2**63:ids.add(number)
+                jobs=self.db.execute("SELECT id FROM jobs WHERE kind='fetch' AND id=ANY(%s) ORDER BY id",(sorted(ids),)).fetchall() if ids else []
+                if jobs:self.recover_fetch_batch(list(jobs),self.store.wall_clock())
+            # The batch reconciles every saved occurrence for each selected Job.
+            # Advance past the last complete Job even when it has >100 rows.
+            cursor=records[-1]['marker']
+            self.store.fault('fetch_isolated_work_recovery_batch')
+
     def recover_fetch_problems(self) -> None:
-        if self.db.execute("SELECT 1 FROM state WHERE key='fetch-problems-recovered-v2'").fetchone():return
+        if self.db.execute("SELECT 1 FROM state WHERE key='fetch-problems-recovered-v2'").fetchone():
+            self.recover_fetch_isolated_work()
+            return
         problem_cursor: tuple[float,str] | None=None
         while True:
             query="""SELECT id,identity,body,created FROM reader_problems WHERE finished IS NULL AND identity LIKE 'job:%%' AND coalesce(body::jsonb->>'fetch_job_identity',identity) LIKE 'job:%%:fetch:%%' AND body::jsonb->>'operation' IN ('producer:fetch','producer:status')
@@ -541,6 +734,7 @@ class Problems:
             cursor=rows[-1]['id']
             self.store.fault('fetch_problem_recovery_batch')
         with self.db:self.db.execute("INSERT INTO state(key,value) VALUES ('fetch-problems-recovered-v2','true') ON CONFLICT DO NOTHING")
+        self.recover_fetch_isolated_work()
 
     def fetch_record_matches(self, record: Any, candidate: dict[str, Any]) -> bool:
         try:body=json.loads(record['body'])

@@ -81,4 +81,5 @@ MIGRATIONS = (
     Migration(74, 'fetch-present-code-index', (Path(__file__).parent / 'postgres' / '074-fetch-present-code-index.sql').read_text()),
     Migration(75, 'incomplete-class', (Path(__file__).parent / 'postgres' / '075-incomplete-class.sql').read_text()),
     Migration(76, 'media-present-code-index', (Path(__file__).parent / 'postgres' / '076-media-present-code-index.sql').read_text()),
+    Migration(77, 'fetch-work-job-index', (Path(__file__).parent / 'postgres' / '077-fetch-work-job-index.sql').read_text()),
 )
