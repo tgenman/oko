@@ -868,3 +868,14 @@ transaction suites passed 80 tests, followed by three focused recovery/rollback
 cases after batching. Mypy passed. Ten Playwright cases passed with two workers;
 the mobile status screenshot was inspected. Other problem producers still need
 migration, so status GET as a whole is not yet read-only.
+
+Telegram profile problems now follow profile checks, verified configuration,
+connection/access changes, feed deletion and startup recovery. A synthetic HTTP
+case verifies the profile problem record does not change during status reads;
+rollback, restoration, restart and two feeds sharing one profile were checked.
+The first broad run passed 155 tests and failed one new test that treated an
+independent Job error as the same profile problem. After identifying the profile
+by its saved ID, 76 affected tests, 17 focused tests and the shared-profile case
+passed. Mypy and seven Playwright cases passed; the Telegram profile screenshot
+was inspected. Other problem producers remain on the old status-reconciliation
+path, so GET status is still not generally read-only.
