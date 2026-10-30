@@ -27,6 +27,8 @@ def interrupt(store: 'Store', feeds: set[str] | None = None, *, backoff: bool = 
             else row['retry_at'] if row['wait_scope'] else None)
         job_write(store.db, "UPDATE jobs SET queued_wall=CASE WHEN kind IN ('discover','fetch','download_media') AND status!='pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END, status='pending', generation=generation+1, retry_at=%s, next=%s WHERE id=%s",
             (until,store.clock()+max(0,until-store.wall_clock()) if until else 0,row['id']))
+        if row['kind']=='discover' and (row['error'] is not None or row['problem_code'] is not None):
+            store.problems.sync_discover(row['id'],store.wall_clock())
 
 
 def recover(store: 'Store') -> None:
@@ -53,3 +55,5 @@ def fail(store: 'Store', job: 'Job', issue: AdapterIssue, *, cancelled: bool = F
     until = max(store.wall_clock()+delay,issue.retry_at.timestamp() if issue.retry_at else 0) if status=='pending' else None
     job_write(store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' AND %s = 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = %s , next = %s , retry_at = %s , retry_delay = %s , wait_scope = %s , error = %s , problem_code = %s WHERE id = %s AND generation = %s",(status,status,store.clock()+max(0,until-store.wall_clock()) if until else 0,
         until,delay,issue.scope if issue.kind==AdapterErrorKind.source_wait else None,None if cancelled else issue.message,None if cancelled else issue.code,job.id,job.generation))
+    if job.kind=='discover':
+        store.problems.sync_discover(job.id,store.wall_clock())

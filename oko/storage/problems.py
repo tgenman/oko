@@ -137,6 +137,25 @@ def new_read_problem_token() -> str:
     return uuid.uuid4().hex
 
 
+def legacy_discover_classification(identity: str, body: Any) -> str:
+    if not identity.startswith('job:') or not isinstance(body,dict):
+        return 'other'
+    operation=body.get('operation')
+    if operation=='producer:discover':
+        return 'discover'
+    if operation not in (None,'producer:status'):
+        return 'other'
+    code=body.get('code')
+    if not isinstance(code,str) or not identity.startswith('job:'+code+':'):
+        return 'ambiguous' if ':discover' in identity else 'other'
+    tail=identity[len('job:'+code+':'):]
+    kinds=('fetch','discover','download_media','filter','theses','read','delete','feed-delete')
+    found=[kind for kind in kinds if tail.endswith(':'+kind) and len(tail)>len(kind)+1] if code.startswith('source-') else [kind for kind in kinds if ':'+kind+':' in tail]
+    if len(found)==1:
+        return 'discover' if found[0]=='discover' else 'other'
+    return 'ambiguous' if ':discover' in tail else 'other'
+
+
 class Problems:
     def __init__(self, store: 'Store') -> None:
         self.store = store
@@ -490,6 +509,263 @@ class Problems:
             return False
         return all(isinstance(obj,dict) and obj.get('kind')=='feed' and isinstance(obj.get('id'),str) for obj in body['objects'])
 
+    def discover_profile_suppresses(self, feed: str, code: str) -> bool:
+        if code not in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'):
+            return False
+        binding=self.db.execute('SELECT indexed_role FROM telegram_bindings WHERE feed=%s',(feed,)).fetchone()
+        profile_identity='profile:'+(binding['indexed_role'] if binding and binding['indexed_role'] else feed)
+        profile=self.db.execute("SELECT body FROM reader_problems WHERE identity=%s AND finished IS NULL",(profile_identity,)).fetchone()
+        return bool(profile and any(obj.get('kind')=='feed' and obj.get('id')==feed for obj in json.loads(profile['body'])['objects']))
+
+    def recover_simple_discover_batch(self, rows: list[Any], now: float) -> list[Any]:
+        """Recover independent first occurrences in bulk and return the complex cases."""
+        unsupported={'codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'}
+        pairs=[]
+        counts: dict[str,int]={}
+        for row in rows:
+            feed=row['item']
+            if not isinstance(feed,str) or not feed or feed=='demo':
+                continue
+            code=row['problem_code'] or 'work-discover'
+            identity='job:'+code+':'+feed+':discover'+('' if code.startswith('source-') else ':'+feed)
+            counts[identity]=counts.get(identity,0)+1
+            if row['feed_id'] not in (None,feed) or row['status'] not in ('pending','running','failed','unavailable','blocked') or code in unsupported:
+                continue
+            pairs.append((row,identity))
+        if not pairs:return rows
+        feeds=[row['item'] for row,_ in pairs]
+        identities=[identity for _,identity in pairs]
+        all_items=[row['item'] for row in rows if isinstance(row['item'],str) and row['item']]
+        publication_ids={row['id'] for row in self.db.execute('SELECT id FROM publications WHERE id=ANY(%s)',(all_items,))}
+        deleting_feeds={row['id'] for row in self.db.execute("SELECT id FROM feeds WHERE id=ANY(%s) AND connection='deleting'",(feeds,))}
+        occupied={row['identity'] for row in self.db.execute('SELECT identity FROM reader_problems WHERE identity=ANY(%s) AND finished IS NULL',(identities,))}
+        prior_feeds={row['feed'] for row in self.db.execute("""SELECT target.feed FROM unnest(%s::text[]) target(feed) CROSS JOIN LATERAL (
+            SELECT 1 FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:discover'
+            AND (body::jsonb->'objects') @> jsonb_build_array(jsonb_build_object('kind','feed','id',target.feed)) LIMIT 1) p""",(feeds,))}
+        # Complex jobs may still own a legacy identity that collides with an
+        # otherwise simple job; preserve the original per-job ordering there.
+        legacy_sources=[row for row in rows if row['item'] in publication_ids or row['feed_id'] not in (None,row['item'])]
+        legacy_keys: set[str] = set()
+        if legacy_sources:
+            legacy_rows=self.db.execute(f"""SELECT j.id,j.item,j.problem_code,coalesce({owner_expr('items')},{owner_expr('linked_root')},j.feed_id) AS legacy_owner
+                FROM jobs j LEFT JOIN publications items ON items.id=j.item
+                LEFT JOIN publication_links link ON link.target_publication_id=items.id
+                LEFT JOIN publications linked_root ON linked_root.id=link.source_publication_id AND linked_root.viewed=0
+                WHERE j.id=ANY(%s)""",([row['id'] for row in legacy_sources],)).fetchall()
+            for row in legacy_rows:
+                code=row['problem_code'] or 'work-discover'
+                owner=row['legacy_owner'] or row['item'] or 'demo'
+                legacy_keys.add('job:'+code+':'+owner+':discover'+('' if code.startswith('source-') else ':'+(row['item'] or '')))
+        simple=[(row,identity) for row,identity in pairs if counts[identity]==1 and row['item'] not in publication_ids and row['item'] not in deleting_feeds and identity not in occupied and row['item'] not in prior_feeds and identity not in legacy_keys]
+        if not simple:return rows
+        simple_ids={row['id'] for row,_ in simple}
+        added=[]
+        for row,identity in simple:
+            code=row['problem_code'] or 'work-discover'
+            body=dict(code=code,section='object',title='Не удалось обновить источник',consequence='Сохранённое содержимое остаётся доступным.',next_step='Включите обработку, чтобы повторить попытку.' if row['status']=='blocked' else 'Повторите загрузку вручную.' if row['status']=='failed' else 'Проверьте доступность источника.' if row['status']=='unavailable' else 'Око повторит попытку автоматически.',objects=[dict(kind='feed',id=row['item'])],action=None,operation='producer:discover',state='retrying' if row['status']=='running' or not row['error'] else 'current',next_at=None)
+            if row['error']:body['reason']=row['error']
+            if code=='source-reconnect':body.update(section='action',next_step='Проверьте привязку источника; доступ не изменяется автоматически.')
+            added.append((uuid.uuid4().hex,identity,'background',json.dumps(body),now))
+        self.db.execute("""INSERT INTO reader_problems(id,identity,origin,body,created,finished,outcome)
+            SELECT id,identity,origin,body,created,NULL,NULL FROM unnest(%s::text[],%s::text[],%s::text[],%s::text[],%s::double precision[]) AS p(id,identity,origin,body,created)""",tuple([row[i] for row in added] for i in range(5)))
+        status_changed(self.db)
+        return [row for row in rows if row['id'] not in simple_ids]
+
+    def recover_discover_problems(self) -> None:
+        if self.db.execute("SELECT 1 FROM state WHERE key='discover-problems-recovered-v1'").fetchone():
+            return
+        cursor = None
+        while True:
+            rows = self.db.execute("SELECT * FROM jobs WHERE kind='discover' AND (error IS NOT NULL OR problem_code IS NOT NULL)" + (" AND id>%s" if cursor is not None else "") + " ORDER BY id LIMIT 100", (cursor,) if cursor is not None else ()).fetchall()
+            if not rows:
+                break
+            with self.db:
+                complex_rows=self.recover_simple_discover_batch(list(rows),self.store.wall_clock())
+                for row in complex_rows:
+                    self.sync_discover(row['id'],self.store.wall_clock())
+            cursor=rows[-1]['id']
+            self.store.fault('discover_problem_recovery_batch')
+        record_cursor = None
+        while True:
+            rows=self.db.execute("""SELECT id,identity,body FROM reader_problems WHERE finished IS NULL AND identity LIKE 'job:%%'
+                AND (body::jsonb->>'operation'='producer:discover' OR ((body::jsonb->>'operation' IS NULL OR body::jsonb->>'operation'='producer:status') AND identity LIKE '%%:discover%%'))""" + (' AND id>%s' if record_cursor is not None else ' AND id>=%s') + ' ORDER BY id LIMIT 100',(record_cursor if record_cursor is not None else '',)).fetchall()
+            if not rows:
+                break
+            parsed: list[tuple[Any,str,set[str]]] = []
+            all_feeds: set[str] = set()
+            for record in rows:
+                try:body=json.loads(record['body'])
+                except (TypeError,ValueError):continue
+                code=body.get('code') if isinstance(body,dict) else None
+                objects=body.get('objects') if isinstance(body,dict) else None
+                if not isinstance(code,str) or not isinstance(objects,list) or any(not isinstance(obj,dict) or obj.get('kind')!='feed' or not isinstance(obj.get('id'),str) for obj in objects):continue
+                feeds={obj['id'] for obj in objects if obj['id']}
+                if not feeds or legacy_discover_classification(record['identity'],body)!='discover':continue
+                parsed.append((record,code,feeds))
+                all_feeds.update(feeds)
+            with self.db:
+                aliases=sorted(all_feeds | ({''} if 'demo' in all_feeds else set()))
+                active={(row['item'] or 'demo',row['code']) for row in self.db.execute("SELECT item,coalesce(problem_code,'work-discover') AS code FROM jobs WHERE kind='discover' AND (item=ANY(%s) OR (item IS NULL AND %s=1)) AND status IN ('pending','running','failed','unavailable','blocked') AND (error IS NOT NULL OR problem_code IS NOT NULL)",(aliases,'demo' in all_feeds))} if aliases else set()
+                legacy_active: set[tuple[str,str]] = set()
+                if all_feeds:
+                    legacy_active.update((row['feed_id'],row['code']) for row in self.db.execute("""SELECT owner.feed_id,coalesce(j.problem_code,'work-discover') AS code FROM feed_publications owner
+                        JOIN jobs j ON j.item=owner.publication_id AND j.kind='discover'
+                        WHERE owner.feed_id=ANY(%s) AND owner.is_primary AND j.status IN ('pending','running','failed','unavailable','blocked')
+                          AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)""",(sorted(all_feeds),)))
+                    legacy_active.update((row['feed_id'],row['code']) for row in self.db.execute("""SELECT owner.feed_id,coalesce(j.problem_code,'work-discover') AS code FROM feed_publications owner
+                        JOIN publications root ON root.id=owner.publication_id AND root.viewed=0 JOIN publication_links link ON link.source_publication_id=root.id
+                        JOIN jobs j ON j.item=link.target_publication_id AND j.kind='discover'
+                        WHERE owner.feed_id=ANY(%s) AND owner.is_primary AND j.status IN ('pending','running','failed','unavailable','blocked')
+                          AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)
+                          AND NOT EXISTS (SELECT 1 FROM feed_publications target WHERE target.publication_id=j.item AND target.is_primary)""",(sorted(all_feeds),)))
+                present={row['id'] for row in self.db.execute("SELECT id FROM feeds WHERE id=ANY(%s) AND connection!='deleting'",(sorted(all_feeds),))} if all_feeds else set()
+                profile_feeds={feed for record,code,feeds in parsed if code in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') for feed in feeds if (feed,code) in active}
+                bindings={row['feed']:row['indexed_role'] for row in self.db.execute('SELECT feed,indexed_role FROM telegram_bindings WHERE feed=ANY(%s)',(sorted(profile_feeds),))} if profile_feeds else {}
+                profile_ids={feed:'profile:'+(bindings.get(feed) or feed) for feed in profile_feeds}
+                profiles={row['identity']:json.loads(row['body']) for row in self.db.execute('SELECT identity,body FROM reader_problems WHERE identity=ANY(%s) AND finished IS NULL',(list(profile_ids.values()),))} if profile_ids else {}
+                suppressed={feed for feed,identity in profile_ids.items() if identity in profiles and any(obj.get('kind')=='feed' and obj.get('id')==feed for obj in profiles[identity]['objects'])}
+                resolved: list[str]=[]
+                irrelevant: list[str]=[]
+                for record,code,feeds in parsed:
+                    if any((feed,code) in legacy_active or ((feed,code) in active and feed not in suppressed) for feed in feeds):continue
+                    (resolved if feeds & present else irrelevant).append(record['id'])
+                for outcome,ids in (('resolved',resolved),('irrelevant',irrelevant)):
+                    if ids:
+                        self.db.execute('UPDATE reader_problems SET finished=%s,outcome=%s WHERE id=ANY(%s) AND finished IS NULL',(self.store.wall_clock(),outcome,ids))
+                        status_changed(self.db)
+            record_cursor=rows[-1]['id']
+            self.store.fault('discover_problem_record_recovery_batch')
+        with self.db:
+            self.db.execute("INSERT INTO state(key,value) VALUES ('discover-problems-recovered-v1','true') ON CONFLICT DO NOTHING")
+
+    def discover_legacy_active(self, owner: str, code: str, excluded_job: int) -> bool:
+        params=(owner,excluded_job,code)
+        query="""SELECT 1 FROM jobs j WHERE j.kind='discover' AND j.item=%s AND j.id!=%s AND j.status IN ('pending','running','failed','unavailable','blocked') AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL) AND coalesce(j.problem_code,'work-discover')=%s LIMIT 1"""
+        if self.db.execute(query,params).fetchone():return True
+        query="""SELECT 1 FROM feed_publications owner JOIN jobs j ON j.item=owner.publication_id AND j.kind='discover'
+            WHERE owner.feed_id=%s AND owner.is_primary AND j.id!=%s AND j.status IN ('pending','running','failed','unavailable','blocked')
+              AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL) AND coalesce(j.problem_code,'work-discover')=%s LIMIT 1"""
+        if self.db.execute(query,params).fetchone():return True
+        query="""SELECT 1 FROM feed_publications owner JOIN publications root ON root.id=owner.publication_id AND root.viewed=0
+            JOIN publication_links link ON link.source_publication_id=root.id JOIN jobs j ON j.item=link.target_publication_id AND j.kind='discover'
+            WHERE owner.feed_id=%s AND owner.is_primary AND j.id!=%s AND j.status IN ('pending','running','failed','unavailable','blocked')
+              AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL) AND coalesce(j.problem_code,'work-discover')=%s
+              AND NOT EXISTS (SELECT 1 FROM feed_publications target WHERE target.publication_id=j.item AND target.is_primary) LIMIT 1"""
+        return self.db.execute(query,params).fetchone() is not None
+
+    def discover_legacy_owners(self, row: Any) -> list[str]:
+        rows=self.db.execute(f"""SELECT coalesce({owner_expr('items')},{owner_expr('linked_root')},%s) AS feed
+            FROM (SELECT %s::text AS item) j LEFT JOIN publications items ON items.id=j.item
+            LEFT JOIN publication_links link ON link.target_publication_id=items.id
+            LEFT JOIN publications linked_root ON linked_root.id=link.source_publication_id AND linked_root.viewed=0""",(row['feed_id'],row['item'])).fetchall()
+        return sorted({r['feed'] or row['item'] or 'demo' for r in rows})
+
+    def sync_discover(self, job_id: int, now: float, *, previous_codes: tuple[str,...] = ()) -> None:
+        changed = self.db.execute("SELECT * FROM jobs WHERE id=%s AND kind='discover'", (job_id,)).fetchone()
+        if not changed:
+            return
+        feed = changed['item'] or 'demo'
+        old = self.db.execute("SELECT identity,body FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:discover' AND (body::jsonb->'objects') @> %s::jsonb", (json.dumps([dict(kind='feed',id=feed)]),)).fetchall()
+        jobs=self.db.execute("SELECT * FROM jobs WHERE kind='discover' AND (item=ANY(%s) OR (item IS NULL AND %s=1)) AND status IN ('pending','running','failed','unavailable','blocked') AND (error IS NOT NULL OR problem_code IS NOT NULL) ORDER BY id",(['','demo'] if feed=='demo' else [feed],feed=='demo')).fetchall()
+        feed_row=self.db.execute('SELECT connection FROM feeds WHERE id=%s',(feed,)).fetchone()
+        deleting=bool(feed_row and feed_row['connection']=='deleting')
+        candidates: dict[str,dict[str,Any]]={}
+        for row in (() if deleting else jobs):
+            code=row['problem_code'] or 'work-discover'
+            if code in ('codex-choice','ai-permission','youtube-admission','processor-config'):
+                continue
+            if self.discover_profile_suppresses(feed,code):
+                continue
+            identity='job:'+code+':'+feed+':discover'+('' if code.startswith('source-') else ':'+(row['item'] or ''))
+            if identity in candidates:
+                continue
+            body=dict(id=identity,code=code,section='object',title='Не удалось обновить источник',consequence='Сохранённое содержимое остаётся доступным.',next_step='Включите обработку, чтобы повторить попытку.' if row['status']=='blocked' else 'Повторите загрузку вручную.' if row['status']=='failed' else 'Проверьте доступность источника.' if row['status']=='unavailable' else 'Око повторит попытку автоматически.',objects=[dict(kind='feed',id=feed)],action=None,operation='producer:discover',state='retrying' if row['status']=='running' or not row['error'] else 'current',next_at=None)
+            if row['error']:body['reason']=row['error']
+            if code=='source-reconnect':body.update(section='action',next_step='Проверьте привязку источника; доступ не изменяется автоматически.')
+            candidates[identity]=body
+        current={}
+        for canonical,candidate in candidates.items():
+            identity=canonical
+            if not self.db.execute('SELECT 1 FROM reader_problems WHERE identity=%s AND finished IS NULL',(canonical,)).fetchone():
+                for row in jobs:
+                    code=row['problem_code'] or 'work-discover'
+                    expected='job:'+code+':'+feed+':discover'+('' if code.startswith('source-') else ':'+(row['item'] or ''))
+                    if expected!=canonical:
+                        continue
+                    for old_owner in self.discover_legacy_owners(row):
+                        legacy='job:'+code+':'+old_owner+':discover'+('' if code.startswith('source-') else ':'+(row['item'] or ''))
+                        if legacy==canonical:
+                            continue
+                        previous=self.db.execute('SELECT id,body FROM reader_problems WHERE identity=%s AND finished IS NULL',(legacy,)).fetchone()
+                        if not previous:
+                            continue
+                        saved=json.loads(previous['body'])
+                        if not isinstance(saved,dict):continue
+                        other_jobs=self.discover_legacy_active(old_owner,code,row['id']) if code.startswith('source-') else False
+                        if not other_jobs and legacy_discover_classification(legacy,saved)=='discover' and saved.get('code')==code and any(obj.get('kind')=='feed' and obj.get('id')==old_owner for obj in saved.get('objects',[]) if isinstance(obj,dict)):
+                            self.db.execute('UPDATE reader_problems SET identity=%s WHERE id=%s',(canonical,previous['id']))
+                            status_changed(self.db)
+                            self.sync_candidate(canonical,candidate,now)
+                            break
+                    if self.db.execute('SELECT 1 FROM reader_problems WHERE identity=%s AND finished IS NULL',(canonical,)).fetchone():
+                        break
+            previous=next((record for record in old if json.loads(record['body']).get('discover_job_identity')==canonical),None)
+            if previous:
+                identity=previous['identity']
+                candidate['id']=identity
+                candidate['discover_job_identity']=canonical
+            else:
+                occupied=self.db.execute('SELECT body FROM reader_problems WHERE identity=%s AND finished IS NULL',(identity,)).fetchone()
+                legacy_match=False
+                if occupied:
+                    saved=json.loads(occupied['body'])
+                    saved=saved if isinstance(saved,dict) else {}
+                    kinds=('fetch','discover','download_media','filter','theses','read','delete','feed-delete')
+                    tail=identity[len('job:'+candidate['code']+':'):]
+                    found=[kind for kind in kinds if tail.endswith(':'+kind) and len(tail)>len(kind)+1] if candidate['code'].startswith('source-') else [kind for kind in kinds if ':'+kind+':' in tail]
+                    legacy_match=(saved.get('operation') in (None,'producer:status') and saved.get('code')==candidate['code'] and found==['discover'] and any(obj.get('kind')=='feed' and obj.get('id')==feed for obj in saved.get('objects',[]) if isinstance(obj,dict)))
+                same_cause=False
+                if occupied:
+                    saved=json.loads(occupied['body'])
+                    saved=saved if isinstance(saved,dict) else {}
+                    same_cause=(saved.get('operation')=='producer:discover' and saved.get('code')==candidate['code'] and saved.get('discover_job_identity',canonical)==canonical and any(obj.get('kind')=='feed' and obj.get('id')==feed for obj in saved.get('objects',[]) if isinstance(obj,dict)))
+                if occupied and not same_cause and not legacy_match:
+                    digest=hashlib.sha256(canonical.encode()).hexdigest()
+                    for _ in range(3):
+                        alternate='job:discover-isolated:'+digest+':'+uuid.uuid4().hex
+                        if not self.db.execute('SELECT 1 FROM reader_problems WHERE identity=%s AND finished IS NULL',(alternate,)).fetchone():
+                            identity=alternate
+                            candidate['id']=identity
+                            candidate['discover_job_identity']=canonical
+                            break
+                    else:
+                        raise RuntimeError('Unable to allocate discover problem identity')
+            current[identity]=candidate
+        completed_codes=set(previous_codes)
+        for prior in old:
+            if prior['identity'] not in current:
+                body=json.loads(prior['body'])
+                if isinstance(body.get('code'),str):completed_codes.add(body['code'])
+        for code in completed_codes:
+            if any(candidate['code']==code for candidate in current.values()):
+                continue
+            for previous_owner in self.discover_legacy_owners(changed):
+                if previous_owner==feed:
+                    continue
+                legacy='job:'+code+':'+previous_owner+':discover'+('' if code.startswith('source-') else ':'+(changed['item'] or ''))
+                shared=self.db.execute('SELECT body FROM reader_problems WHERE identity=%s AND finished IS NULL',(legacy,)).fetchone()
+                if shared:
+                    saved=json.loads(shared['body'])
+                    if (isinstance(saved,dict) and saved.get('code')==code and legacy_discover_classification(legacy,saved)=='discover'
+                        and any(obj.get('kind')=='feed' and obj.get('id')==previous_owner for obj in saved.get('objects',[]) if isinstance(obj,dict))
+                        and (not code.startswith('source-') or not self.discover_legacy_active(previous_owner,code,changed['id']))):
+                        self.sync_candidate(legacy,None,now,removed_outcome='irrelevant' if deleting else 'resolved')
+        for prior in old:
+            if prior['identity'] not in current:
+                self.sync_candidate(prior['identity'],None,now,removed_outcome='irrelevant' if deleting else 'resolved')
+        for identity,candidate in current.items():
+            self.sync_candidate(identity,candidate,now)
+
     def sync_read_feed(self, feed: str | None, now: float, *, legacy_identities: tuple[str,...] = ()) -> None:
         """Reconcile only the read Job and current read problems of one feed."""
         from oko.storage.read_job_problems import ReadJobProblem, candidates as read_candidates, classify_legacy
@@ -788,6 +1064,10 @@ class Problems:
             for start in range(0,len(feed_ids),400):
                 for job in self.db.execute("SELECT item FROM jobs WHERE kind='read' AND item=ANY(%s)",(feed_ids[start:start+400],)):
                     self.sync_read_feed(job['item'],now)
+        if self.db.execute("SELECT 1 FROM state WHERE key='discover-problems-recovered-v1'").fetchone():
+            for feed in sorted(affected):
+                for job in self.db.execute("SELECT id FROM jobs WHERE kind='discover' AND (item=%s OR feed_id=%s) AND (problem_code IS NOT NULL OR error IS NOT NULL)",(feed,feed)):
+                    self.sync_discover(job['id'],now)
 
     def candidates(self, now: float) -> list[dict[str, Any]]:
         current: list[dict[str, Any]] = []
@@ -796,10 +1076,12 @@ class Problems:
                          for obj in json.loads(row['body'])['objects'] if obj['kind'] == 'feed'}
         groups: dict[str | tuple[str,str] | tuple[str,str,str], dict[str, Any]] = {}
         youtube = self.store.youtube.status(now)
-        jobs = self.db.execute(f"SELECT jobs . * , coalesce ( {owner_expr('items')} , {owner_expr('media_owner')} , {owner_expr('linked_root')} ) AS resolved_feed_id , coalesce ( items . viewed , media_owner . viewed ) AS viewed , m . resource_key AS resource_key , coalesce ( linked_root . id , m . publication_id , jobs . item ) AS affected_item FROM (SELECT * FROM jobs WHERE (kind IS DISTINCT FROM 'read' OR problem_code='processor-config') AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')) AND (problem_code IS NOT NULL OR error IS NOT NULL) ORDER BY kind,item OFFSET 0) jobs LEFT JOIN publications items ON items . id = jobs . item LEFT JOIN media_files m ON jobs . kind = 'download_media' AND m . id = jobs . item LEFT JOIN publications media_owner ON media_owner . id = m . publication_id LEFT JOIN publication_links link ON link . target_publication_id = coalesce ( items . id , media_owner . id ) LEFT JOIN publications linked_root ON linked_root . id = link . source_publication_id AND linked_root . viewed = 0 WHERE ( jobs . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' , 'blocked' ) OR ( jobs . status = 'done' AND jobs . kind = 'fetch' AND jobs . problem_code IS NOT NULL AND jobs . error IS NOT NULL ) ) AND ( jobs . problem_code IS NOT NULL OR jobs . error IS NOT NULL ) AND (jobs.kind IS DISTINCT FROM 'read' OR jobs.problem_code='processor-config') AND NOT (jobs.kind IN ('delete','feed-delete') AND coalesce(nullif(jobs.problem_code,''),'work-'||jobs.kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))").fetchall()
+        jobs = self.db.execute(f"SELECT jobs . * , coalesce ( {owner_expr('items')} , {owner_expr('media_owner')} , {owner_expr('linked_root')} ) AS resolved_feed_id , coalesce ( items . viewed , media_owner . viewed ) AS viewed , m . resource_key AS resource_key , coalesce ( linked_root . id , m . publication_id , jobs . item ) AS affected_item FROM (SELECT * FROM jobs WHERE (kind IS DISTINCT FROM 'read' OR problem_code='processor-config') AND (kind IS DISTINCT FROM 'discover' OR problem_code='processor-config') AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')) AND (problem_code IS NOT NULL OR error IS NOT NULL) ORDER BY kind,item OFFSET 0) jobs LEFT JOIN publications items ON items . id = jobs . item LEFT JOIN media_files m ON jobs . kind = 'download_media' AND m . id = jobs . item LEFT JOIN publications media_owner ON media_owner . id = m . publication_id LEFT JOIN publication_links link ON link . target_publication_id = coalesce ( items . id , media_owner . id ) LEFT JOIN publications linked_root ON linked_root . id = link . source_publication_id AND linked_root . viewed = 0 WHERE ( jobs . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' , 'blocked' ) OR ( jobs . status = 'done' AND jobs . kind = 'fetch' AND jobs . problem_code IS NOT NULL AND jobs . error IS NOT NULL ) ) AND ( jobs . problem_code IS NOT NULL OR jobs . error IS NOT NULL ) AND (jobs.kind IS DISTINCT FROM 'read' OR jobs.problem_code='processor-config') AND NOT (jobs.kind IN ('delete','feed-delete') AND coalesce(nullif(jobs.problem_code,''),'work-'||jobs.kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))").fetchall()
         for job in jobs:
             resolved_feed = job['item'] if job['kind']=='read' else job['resolved_feed_id'] or job['feed_id']
             code = job['problem_code']
+            if job['kind']=='discover' and code!='processor-config':
+                continue
             if job['kind']=='read' and code!='processor-config':
                 continue
             if code in ('codex-choice', 'ai-permission'):
@@ -1183,6 +1465,8 @@ class Problems:
                     continue
                 if row['identity'] not in identities and row['identity'] != 'processor:codex-choice' and not row['identity'].startswith(('action:', 'profile:')):
                     body = json.loads(row['body'])
+                    if legacy_discover_classification(row['identity'],body) in ('discover','ambiguous'):
+                        continue
                     if row['identity'].startswith('job:') and body.get('code') in ('delete','feed-delete','work-delete','work-feed-delete'):
                         operation=body.get('operation')
                         if operation in ('producer:delete','producer:feed-delete') or (operation in (None,'producer:status') and (':delete:' in row['identity'] or ':feed-delete:' in row['identity']) and row['identity'] not in finished_foreign):

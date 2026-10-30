@@ -1,0 +1,6 @@
+CREATE INDEX jobs_discover_problem_feed ON jobs(feed_id,item,id) WHERE kind='discover' AND (error IS NOT NULL OR problem_code IS NOT NULL);
+CREATE INDEX reader_discover_problem_objects_gin ON reader_problems USING gin ((body::jsonb->'objects') jsonb_path_ops) WHERE finished IS NULL AND body::jsonb->>'operation'='producer:discover';
+DROP INDEX jobs_unmanaged_problems;
+CREATE INDEX jobs_unmanaged_problems ON jobs(kind,item) WHERE (kind IS DISTINCT FROM 'read' OR problem_code='processor-config') AND (kind IS DISTINCT FROM 'discover' OR problem_code='processor-config') AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')) AND (problem_code IS NOT NULL OR error IS NOT NULL);
+CREATE INDEX reader_discover_problem_recovery ON reader_problems(id) WHERE finished IS NULL AND identity LIKE 'job:%' AND (body::jsonb->>'operation'='producer:discover' OR ((body::jsonb->>'operation' IS NULL OR body::jsonb->>'operation'='producer:status') AND identity LIKE '%:discover%'));
+CREATE INDEX jobs_discover_problem_recovery ON jobs(id) WHERE kind='discover' AND (error IS NOT NULL OR problem_code IS NOT NULL);

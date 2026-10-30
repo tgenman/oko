@@ -45,6 +45,7 @@ class JobRepository:
 
     def finish(self, job: Job) -> None:
         previous = self.store.problems.deletion_candidates(job.id,self.store.wall_clock()) if job.kind=='delete' else []
+        discover_before = self.store.db.execute("SELECT problem_code,error FROM jobs WHERE id=%s AND kind='discover'",(job.id,)).fetchone() if job.kind=='discover' else None
         changed=job_write(self.store.db, "UPDATE jobs SET status = 'done' , error = NULL , problem_code = NULL , manual_once = 0 , retry_at = NULL , retry_delay = 0 , wait_scope = NULL WHERE id = %s AND generation = %s AND status = 'running' AND kind = %s AND item = %s",
             (job.id,job.generation,job.kind,job.item)).rowcount
         if changed!=1:
@@ -53,6 +54,9 @@ class JobRepository:
             self.store.problems.sync_deletion(job.id,previous,self.store.wall_clock())
         if job.kind=='read':
             self.store.problems.sync_read_feed(job.item,self.store.wall_clock())
+        if job.kind=='discover':
+            codes=((discover_before['problem_code'] or 'work-discover'),) if discover_before and (discover_before['problem_code'] is not None or discover_before['error'] is not None) else ()
+            self.store.problems.sync_discover(job.id,self.store.wall_clock(),previous_codes=codes)
         if job.kind=='filter':
             self.store.processing.filter_changed(job.item)
 
@@ -175,11 +179,12 @@ class JobRepository:
         # equivalent so a continuation keeps its remaining delay after restart.
         retry_at = self.store.wall_clock()+max(0,next_at-self.store.clock()) if next_at else None
         with self.store.db:
-            job_write(self.store.db, """INSERT INTO jobs(kind,item,next,retry_at,queued_wall)
+            changed=job_write(self.store.db, """INSERT INTO jobs(kind,item,next,retry_at,queued_wall)
                 VALUES ('discover',%s,%s,%s,extract(epoch FROM clock_timestamp()))
                 ON CONFLICT(kind,item) DO UPDATE SET queued_wall=excluded.queued_wall,status='pending',
-                    next=excluded.next,retry_at=excluded.retry_at,error=NULL WHERE jobs.status='done'""",
-                ('' if feed=='demo' else feed,next_at,retry_at))
+                    next=excluded.next,retry_at=excluded.retry_at,error=NULL WHERE jobs.status='done' RETURNING id,error,problem_code""",
+                ('' if feed=='demo' else feed,next_at,retry_at)).fetchone()
+            if changed and (changed['error'] is not None or changed['problem_code'] is not None):self.store.problems.sync_discover(changed['id'],self.store.wall_clock())
 
     def refresh_feed(self, feed: str) -> None:
         """Admit one manual refresh without restarting work already in progress."""
@@ -194,7 +199,8 @@ class JobRepository:
                 self.store.subscriptions.history.pause(feed, False)
             if not active:
                 self.enqueue_discovery(feed)
-                job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , next = CASE WHEN problem_code LIKE '%%FloodWaitError' OR problem_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'discover' AND item = %s AND status != 'running'", (self.store.wall_clock(),self.store.wall_clock(),discovery))
+                changed_discover=job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , next = CASE WHEN problem_code LIKE '%%FloodWaitError' OR problem_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'discover' AND item = %s AND status != 'running' RETURNING id,error,problem_code", (self.store.wall_clock(),self.store.wall_clock(),discovery)).fetchone()
+                if changed_discover and (changed_discover['error'] is not None or changed_discover['problem_code'] is not None):self.store.problems.sync_discover(changed_discover['id'],self.store.wall_clock())
             for row in self.store.db.execute("SELECT i . id , i . members , i . source_deleted , j . error , j . status FROM publications i JOIN feed_publications owner ON owner.publication_id=i.id AND owner.is_primary AND owner.is_unviewed JOIN jobs j ON j . item = i . id AND j . kind = 'fetch' WHERE owner.feed_id = %s AND i . viewed = 0 AND j . status != 'running'", (feed,)).fetchall():
                 material = self.store.material(row['id'])
                 unavailable = row['source_deleted']
@@ -390,6 +396,7 @@ class JobRepository:
             job_write(self.store.db, "UPDATE jobs SET status='running', attempt=attempt+1, generation=%s WHERE id=%s", (generation, row['id']))
             if row['kind']=='filter':self.store.processing.filter_changed(row['item'])
             if row['kind']=='read':self.store.problems.sync_read_feed(row['item'],self.store.wall_clock())
+            if row['kind']=='discover' and (row['error'] is not None or row['problem_code'] is not None):self.store.problems.sync_discover(row['id'],self.store.wall_clock())
             if row['kind'] in ('delete','feed-delete') and previous:
                 self.store.problems.sync_deletion(row['id'],previous,self.store.wall_clock())
         current = expect_row(self.store.db.execute('SELECT * FROM jobs WHERE id = %s', (row['id'],)).fetchone())
@@ -429,7 +436,9 @@ class JobRepository:
             params = (*feeds, *feeds, *feeds, *feeds, *feeds)
         with self.store.db:
             # A configuration cancellation is not a failed discovery request.
-            job_write(self.store.db, f"UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , generation = generation + 1 , next = CASE WHEN wait_scope IS NULL THEN 0 ELSE next END , retry_at = CASE WHEN wait_scope IS NULL THEN NULL ELSE retry_at END WHERE kind = 'discover' AND {selection}",params)
+            changed_discover=job_write(self.store.db, f"UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , generation = generation + 1 , next = CASE WHEN wait_scope IS NULL THEN 0 ELSE next END , retry_at = CASE WHEN wait_scope IS NULL THEN NULL ELSE retry_at END WHERE kind = 'discover' AND {selection} RETURNING id,error,problem_code",params).fetchall()
+            for row in changed_discover:
+                if row['error'] is not None or row['problem_code'] is not None:self.store.problems.sync_discover(row['id'],self.store.wall_clock())
             collection_jobs.interrupt(self.store,feeds,backoff=False)
             changed=job_write(self.store.db, f"UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status='pending', generation=generation+1 WHERE {selection} RETURNING id,kind,item,error,problem_code", params).fetchall()
             for row in changed:
@@ -577,6 +586,7 @@ class JobRepository:
         if job:
             changed=job_write(self.store.db, "UPDATE jobs SET problem_code = %s WHERE id = %s AND generation = %s AND status = 'pending'",(job.kind+':FloodWaitError',job.id,job.generation)).rowcount
             if changed and job.kind=='read':self.store.problems.sync_read_feed(job.item,self.store.wall_clock())
+            if changed and job.kind=='discover':self.store.problems.sync_discover(job.id,self.store.wall_clock())
 
     def fail_media(self, job: Job, issue: AdapterIssue) -> None:
         collection_jobs.fail(self.store,job,issue,cancelled=issue.kind==AdapterErrorKind.media_changed)
@@ -651,7 +661,7 @@ class JobRepository:
     def reconcile_cleanup(self) -> None:
         db=self.store.db
         job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL WHERE kind = 'download_media' AND status IN ( 'pending' , 'running' , 'failed' , 'unavailable' ) AND item NOT IN ( SELECT id FROM media_files )")
-        job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL WHERE kind != 'delete' AND status != 'cancelled' AND item IN ( SELECT id FROM publications WHERE viewed = 1 )")
+        job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL WHERE kind NOT IN ('delete','discover') AND status != 'cancelled' AND item IN ( SELECT id FROM publications WHERE viewed = 1 )")
         job_write(db, "INSERT INTO jobs ( kind , item ) SELECT 'delete' , id FROM publications WHERE viewed = 1 ON CONFLICT ( kind , item ) DO UPDATE SET status = 'pending' , generation = jobs . generation + 1 , next = 0 WHERE jobs . status = 'cancelled'")
         job_write(db, "INSERT INTO jobs ( kind , item ) SELECT 'feed-delete' , id FROM feeds WHERE connection = 'deleting' ON CONFLICT DO NOTHING")
 
@@ -678,8 +688,10 @@ class JobRepository:
             job_write(db, """UPDATE jobs SET status = CASE WHEN status = 'running' THEN 'pending' ELSE status END , generation = generation + 1
                 WHERE item = %s AND kind IN ('filter','theses') AND NOT EXISTS (SELECT 1 FROM feed_publications WHERE publication_id=%s)""",(item,item))
             job_write(db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , generation = generation + 1 WHERE kind = 'download_media' AND status = 'running' AND item IN ( SELECT id FROM media_files WHERE publication_id = %s )",(item,))
+        discover=db.execute("SELECT id FROM jobs WHERE kind='discover' AND item=%s AND (error IS NOT NULL OR problem_code IS NOT NULL)",(feed,)).fetchone()
         job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 WHERE item = %s AND kind NOT IN ( 'delete' , 'feed-delete' )",(feed,))
         self.store.problems.sync_read_feed(feed,self.store.wall_clock())
+        if discover:self.store.problems.sync_discover(discover['id'],self.store.wall_clock())
         self.reconcile_cleanup()
         # Retain cleanup ownership independently of reading membership. A
         # publication can lose its last membership before its files are removed.

@@ -142,6 +142,7 @@ class Store:
             self.problems.recover_read_problems()
             self.problems.recover_deletion_problems()
             collection_jobs.recover(self)
+            self.problems.recover_discover_problems()
             self.recover_files()
             if self.db.execute(f"SELECT 1 FROM ({owned_ids('= %s')}) owner LIMIT 1", ('demo','demo')).fetchone():
                 self.ensure_demo()
@@ -578,6 +579,8 @@ class Store:
             if self.db.execute("UPDATE feeds SET connection = 'deleting' WHERE id = %s AND connection IS DISTINCT FROM 'deleting'", (feed,)).rowcount:
                 source_changed(self.db)
             self.problems.sync_read_feed(feed,self.wall_clock())
+            for row in self.db.execute("SELECT id FROM jobs WHERE kind='discover' AND (item=%s OR feed_id=%s) AND (error IS NOT NULL OR problem_code IS NOT NULL)",(feed,feed)):
+                self.problems.sync_discover(row['id'],self.wall_clock())
             shared=[r[0] for r in self.db.execute(f'SELECT p.id FROM ({owned_ids("= %s")}) owner JOIN publications p ON p.id=owner.id WHERE p.platform IS NOT NULL',(feed,feed))]
             effects = CollectionEffects()
             publication_links.capture_root_deletion_problems(self,effects,set(shared))

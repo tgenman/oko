@@ -1148,3 +1148,15 @@ proved. The integrated checkout passed 275 PostgreSQL tests and 10 Playwright
 status scenarios, with a screenshot inspected; mypy passed on 157 files. No
 working database was migrated. Remaining status categories still reconcile on
 GET; this is not full acceptance of the target schema.
+
+
+Discover Job problems now use event-owned updates and startup recovery; the
+shared processor configuration problem remains on the previous status path.
+Recovery preserves identifiable legacy occurrences, retains ambiguous records,
+and batches independent jobs. A synthetic mixed recovery of 1000 jobs with 10
+existing occurrences used 10 indexed per-job reads instead of 1000, retaining all
+10 IDs; one local measurement is not a production benchmark. The integrated
+discovery/delete/status suite passed 54 PostgreSQL tests and mypy for four changed
+modules. Six Playwright status scenarios passed and desktop/mobile screenshots
+were inspected; no browser scenario specifically exercised a discover error.
+No working database was migrated; full acceptance and other GET writers remain.
