@@ -73,7 +73,18 @@ class ProcessingState:
         self._repairs.add(item)
 
     def filter_changed(self, item: str) -> None:
-        self.store.db.execute('INSERT INTO processing_dirty(item) VALUES (%s) ON CONFLICT DO NOTHING', (item,))
+        """Update the dependent stage in the same transaction as the filter Job."""
+        from oko.storage.processing_state import ProcessingRepository
+        from oko.storage.reading import reading_snapshot
+        # An already queued publication has broader changes to reconcile first.
+        if self.store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone():
+            return
+        repository = ProcessingRepository(self.store)
+        with reading_snapshot():
+            candidates = [(identity, signature, repository.satisfied(identity,'theses'), repository.revision(identity))
+                          for identity,signature in repository.candidates('theses',item=item)]
+        self.store.jobs.reconcile('theses',candidates)
+        self.store.publications.status(item)
 
     def pending(self) -> bool:
         return bool(self._repairs or self.store.db.execute('SELECT 1 FROM processing_dirty LIMIT 1').fetchone())

@@ -601,3 +601,11 @@
   was inspected. A fresh schema has 21 tables, no application triggers and no
   schema-local functions. The remaining `processing_dirty` queue and final
   physical schema still require work.
+- Filter Job claims and outcomes now reconcile dependent theses and publication
+  state inside the same transaction without adding a publication queue marker.
+  An existing broader publication marker still takes precedence. Tests cover an
+  obsolete running theses attempt being revoked together with filter claim and
+  restored on rollback. The affected processing and recovery suites passed 126
+  tests and types; two Playwright scenarios passed and the hidden publication
+  screenshot was inspected. Settings, membership and media paths still use the
+  remaining publication dirty queue.

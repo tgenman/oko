@@ -602,7 +602,7 @@ def test_disabled_admission_never_begins_and_next_transaction_is_usable(tmp_path
     store.db.close()
 
 
-def test_filter_claim_marks_dependants_in_the_same_transaction(tmp_path):
+def test_filter_claim_reconciles_dependants_in_the_same_transaction(tmp_path):
     store, item, _, _ = worker_library(tmp_path)
     try:
         with transaction(store.db):
@@ -612,18 +612,18 @@ def test_filter_claim_marks_dependants_in_the_same_transaction(tmp_path):
             with transaction(store.db):
                 job = store.jobs.claim_processing('filter',store.clock())
                 assert job is not None
-                assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone()
+                assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
                 raise ValueError('synthetic rollback')
         assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
         with transaction(store.db):
             assert store.jobs.claim_processing('filter',store.clock()) is not None
-            assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone()
+            assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
     finally:
         store.db.close()
 
 
 @pytest.mark.parametrize('outcome', ['finish','retry','cancel','block'])
-def test_filter_job_outcome_marks_dependants_in_same_transaction(tmp_path,outcome):
+def test_filter_job_outcome_reconciles_dependants_in_same_transaction(tmp_path,outcome):
     store, item, _, _ = worker_library(tmp_path)
     try:
         with transaction(store.db):
@@ -636,7 +636,7 @@ def test_filter_job_outcome_marks_dependants_in_same_transaction(tmp_path,outcom
                 store.jobs.retry(job,store.clock(),'Synthetic error')
             else:
                 getattr(store.jobs,outcome)(job)
-            assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone()
+            assert store.db.execute('SELECT 1 FROM processing_dirty WHERE item=%s', (item,)).fetchone() is None
         with pytest.raises(ValueError, match='synthetic rollback'):
             with transaction(store.db):
                 apply()
@@ -961,4 +961,22 @@ def test_accepted_publication_reconciles_jobs_without_stage_queue(tmp_path):
         assert not any('INSERT INTO processing_stage_dirty' in statement for statement in statements)
     finally:
         store.db.set_trace_callback(None)
+        store.db.close()
+
+
+def test_filter_claim_revokes_obsolete_theses_atomically(tmp_path):
+    store, item, _, _ = worker_library(tmp_path)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO jobs(kind,item,status,generation,input_snapshot) VALUES ('theses',%s,'running',7,%s::jsonb) ON CONFLICT(kind,item) DO UPDATE SET status='running',generation=7,input_snapshot=excluded.input_snapshot", (item,'{"signature":"old"}'))
+        with pytest.raises(ValueError, match='rollback'):
+            with transaction(store.db):
+                assert store.jobs.claim_processing('filter',store.clock()) is not None
+                assert store.db.execute("SELECT status,generation FROM jobs WHERE kind='theses' AND item=%s", (item,)).fetchone()[:] == ('cancelled',8)
+                raise ValueError('rollback')
+        assert store.db.execute("SELECT status,generation FROM jobs WHERE kind='theses' AND item=%s", (item,)).fetchone()[:] == ('running',7)
+        with transaction(store.db):
+            assert store.jobs.claim_processing('filter',store.clock()) is not None
+        assert store.db.execute("SELECT status,generation FROM jobs WHERE kind='theses' AND item=%s", (item,)).fetchone()[:] == ('cancelled',8)
+    finally:
         store.db.close()
