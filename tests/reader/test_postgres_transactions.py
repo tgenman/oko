@@ -521,3 +521,49 @@ def test_viewed_membership_changes_and_rollback_together(postgres_url, tmp_path)
         assert store.db.execute("SELECT is_unviewed FROM feed_publications WHERE publication_id='item'").fetchone()[0] is True
     finally:
         store.db.close()
+
+
+def test_discovery_queue_time_is_preserved_until_requeued(postgres_url, tmp_path):
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=postgres_url)
+    try:
+        store.jobs.enqueue_discovery('feed')
+        first = store.db.execute("SELECT queued_wall FROM jobs WHERE kind='discover' AND item='feed'").fetchone()[0]
+        assert first is not None
+        store.jobs.enqueue_discovery('feed')
+        assert store.db.execute("SELECT queued_wall FROM jobs WHERE kind='discover' AND item='feed'").fetchone()[0] == first
+        with store.db:
+            store.db.execute("UPDATE jobs SET status='done',queued_wall=1 WHERE kind='discover' AND item='feed'")
+        with pytest.raises(RuntimeError, match='rollback'):
+            with transaction(store.db):
+                store.jobs.enqueue_discovery('feed')
+                assert store.db.execute("SELECT queued_wall FROM jobs WHERE kind='discover' AND item='feed'").fetchone()[0] > 1
+                raise RuntimeError('rollback')
+        assert store.db.execute("SELECT status,queued_wall FROM jobs WHERE kind='discover' AND item='feed'").fetchone() == ('done',1)
+        store.jobs.enqueue_discovery('feed')
+        assert store.db.execute("SELECT queued_wall FROM jobs WHERE kind='discover' AND item='feed'").fetchone()[0] > 1
+    finally:
+        store.db.close()
+
+
+def test_fetch_queue_time_survives_repeat_and_changes_after_retry(postgres_url, tmp_path):
+    from oko.collection.adapters import AdapterErrorKind, AdapterIssue
+    from oko.storage.job_types import Job
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=postgres_url)
+    try:
+        with store.db:
+            store.jobs.enqueue_fetch('item')
+        first = store.db.execute("SELECT id,generation,queued_wall FROM jobs WHERE kind='fetch' AND item='item'").fetchone()
+        assert first['queued_wall'] is not None
+        with store.db:
+            store.jobs.enqueue_fetch('item')
+        assert store.db.execute("SELECT queued_wall FROM jobs WHERE id=%s", (first['id'],)).fetchone()[0] == first['queued_wall']
+        with store.db:
+            store.db.execute("UPDATE jobs SET status='running',queued_wall=1 WHERE id=%s", (first['id'],))
+            current = store.db.execute('SELECT generation FROM jobs WHERE id=%s', (first['id'],)).fetchone()[0]
+            store.jobs.retry(Job(first['id'],'fetch','item',current),0,'temporary',issue=AdapterIssue('test','temporary',AdapterErrorKind.temporary))
+        queued = store.db.execute("SELECT status,queued_wall FROM jobs WHERE id=%s", (first['id'],)).fetchone()
+        assert queued['status'] == 'pending' and queued['queued_wall'] > 1
+    finally:
+        store.db.close()

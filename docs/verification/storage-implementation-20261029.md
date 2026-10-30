@@ -511,3 +511,11 @@
   after correction the repeat passed 193 tests and types. A targeted legacy NULL
   migration check and three Playwright scenarios also passed; the viewed shared
   publication screenshot was inspected. The flag itself remains transitional.
+- Migration 044 removes two queue-time triggers. Collection Job owners now set
+  queue time on creation or a transition back to pending, retaining it on repeated
+  admission; existing timestamps survive migration. Affected recovery, collection,
+  shared-publication and migration suites passed 194 tests; targeted enqueue,
+  retry and rollback checks passed after removing unrelated SQL changes. Types and
+  eight Playwright scenarios passed; a source-collection screenshot was inspected.
+  A fresh schema has 23 tables and 12 non-internal triggers. The remaining status
+  owners, transitional tables, final schema and full review remain open.

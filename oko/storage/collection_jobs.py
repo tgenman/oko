@@ -23,7 +23,7 @@ def interrupt(store: 'Store', feeds: set[str] | None = None, *, backoff: bool = 
             continue
         until = (max(row['retry_at'] or 0, store.wall_clock()+max(initial,row['retry_delay'])) if backoff
             else row['retry_at'] if row['wait_scope'] else None)
-        store.db.execute("UPDATE jobs SET status='pending', generation=generation+1, retry_at=%s, next=%s WHERE id=%s",
+        store.db.execute("UPDATE jobs SET queued_wall=CASE WHEN kind IN ('discover','fetch','download_media') AND status!='pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END, status='pending', generation=generation+1, retry_at=%s, next=%s WHERE id=%s",
             (until,store.clock()+max(0,until-store.wall_clock()) if until else 0,row['id']))
 
 
@@ -48,5 +48,5 @@ def fail(store: 'Store', job: 'Job', issue: AdapterIssue, *, cancelled: bool = F
     delay = min(settings['max_seconds'],max(settings['initial_seconds'],row['retry_delay']*2))
     status = 'cancelled' if cancelled else failure_status(issue)
     until = max(store.wall_clock()+delay,issue.retry_at.timestamp() if issue.retry_at else 0) if status=='pending' else None
-    store.db.execute('UPDATE jobs SET status = %s , next = %s , retry_at = %s , retry_delay = %s , wait_scope = %s , error = %s , problem_code = %s WHERE id = %s AND generation = %s',(status,store.clock()+max(0,until-store.wall_clock()) if until else 0,
+    store.db.execute("UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' AND %s = 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = %s , next = %s , retry_at = %s , retry_delay = %s , wait_scope = %s , error = %s , problem_code = %s WHERE id = %s AND generation = %s",(status,status,store.clock()+max(0,until-store.wall_clock()) if until else 0,
         until,delay,issue.scope if issue.kind==AdapterErrorKind.source_wait else None,None if cancelled else issue.message,None if cancelled else issue.code,job.id,job.generation))

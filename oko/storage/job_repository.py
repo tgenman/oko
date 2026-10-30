@@ -157,7 +157,7 @@ class JobRepository:
 
     def enqueue_discovery(self, feed: str = 'demo', next_at: float = 0) -> None:
         with self.store.db:
-            self.store.db.execute("INSERT INTO jobs ( kind , item , next ) VALUES ( 'discover' , %s , %s ) ON CONFLICT ( kind , item ) DO UPDATE SET status = 'pending' , next = excluded . next , error = NULL WHERE jobs . status = 'done'", ('' if feed == 'demo' else feed, next_at))
+            self.store.db.execute("INSERT INTO jobs ( kind , item , next , queued_wall ) VALUES ( 'discover' , %s , %s , extract(epoch FROM clock_timestamp()) ) ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , next = excluded . next , error = NULL WHERE jobs . status = 'done'", ('' if feed == 'demo' else feed, next_at))
 
 
     def refresh_feed(self, feed: str) -> None:
@@ -173,7 +173,7 @@ class JobRepository:
                 self.store.subscriptions.history.pause(feed, False)
             if not active:
                 self.enqueue_discovery(feed)
-                self.store.db.execute("UPDATE jobs SET status = 'pending' , next = CASE WHEN problem_code LIKE '%%FloodWaitError' OR problem_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'discover' AND item = %s AND status != 'running'", (self.store.wall_clock(),self.store.wall_clock(),discovery))
+                self.store.db.execute("UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , next = CASE WHEN problem_code LIKE '%%FloodWaitError' OR problem_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'discover' AND item = %s AND status != 'running'", (self.store.wall_clock(),self.store.wall_clock(),discovery))
             for row in self.store.db.execute("SELECT i . id , i . members , i . source_deleted , j . error , j . status FROM unviewed_items_by_feed i JOIN jobs j ON j . item = i . id AND j . kind = 'fetch' WHERE i . feed_id = %s AND i . viewed = 0 AND j . status != 'running'", (feed,)).fetchall():
                 material = self.store.material(row['id'])
                 unavailable = row['source_deleted']
@@ -183,7 +183,7 @@ class JobRepository:
                 if row['members'] != '[]' and material and material.get('full',False):
                     continue
                 if row['error'] or unavailable or not material or not material.get('full',False):
-                    self.store.db.execute("UPDATE jobs SET manual_once = CASE WHEN ( status = 'done' AND error IS NOT NULL ) OR EXISTS ( SELECT 1 FROM items i WHERE i.id=jobs.item AND i.source_deleted ) THEN 1 ELSE manual_once END , status = 'pending' , next = CASE WHEN problem_code LIKE '%%FloodWaitError' OR problem_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'fetch' AND item = %s", (self.store.wall_clock(),self.store.wall_clock(),row['id']))
+                    self.store.db.execute("UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , manual_once = CASE WHEN ( status = 'done' AND error IS NOT NULL ) OR EXISTS ( SELECT 1 FROM items i WHERE i.id=jobs.item AND i.source_deleted ) THEN 1 ELSE manual_once END , status = 'pending' , next = CASE WHEN problem_code LIKE '%%FloodWaitError' OR problem_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'fetch' AND item = %s", (self.store.wall_clock(),self.store.wall_clock(),row['id']))
             for kind in ('filter','theses'):
                 for row in self.store.db.execute('SELECT j . item FROM jobs j JOIN items_by_feed i ON i . id = j . item WHERE i . feed_id = %s AND j . kind = %s AND j . error IS NOT NULL',(feed,kind)).fetchall():
                     self.retry_processing(row[0],kind)
@@ -202,7 +202,7 @@ class JobRepository:
 
 
     def enqueue_fetch(self, item: str) -> None:
-        self.store.db.execute("INSERT INTO jobs ( kind , item ) VALUES ( 'fetch' , %s ) ON CONFLICT ( kind , item ) DO UPDATE SET status = 'pending' , manual_once = 0 , next = CASE WHEN jobs . problem_code LIKE '%%FloodWaitError' OR ( jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s ) THEN jobs . next ELSE 0 END , error = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . error ELSE NULL END , retry_at = CASE WHEN jobs . problem_code LIKE '%%FloodWaitError' OR ( jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s ) THEN jobs . retry_at ELSE NULL END , generation = jobs . generation + 1", (item,self.store.wall_clock(),self.store.wall_clock(),self.store.wall_clock()))
+        self.store.db.execute("INSERT INTO jobs ( kind , item , queued_wall ) VALUES ( 'fetch' , %s , extract(epoch FROM clock_timestamp()) ) ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , manual_once = 0 , next = CASE WHEN jobs . problem_code LIKE '%%FloodWaitError' OR ( jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s ) THEN jobs . next ELSE 0 END , error = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . error ELSE NULL END , retry_at = CASE WHEN jobs . problem_code LIKE '%%FloodWaitError' OR ( jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s ) THEN jobs . retry_at ELSE NULL END , generation = jobs . generation + 1", (item,self.store.wall_clock(),self.store.wall_clock(),self.store.wall_clock()))
 
 
     def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False, include_deletions: bool = True, media_only: bool = False, captions_only: bool = False, dependency_feeds: list[str] | None = None, processing_kind: str | None = None) -> Job | None:
@@ -397,9 +397,9 @@ class JobRepository:
             params = (*feeds, *feeds, *feeds)
         with self.store.db:
             # A configuration cancellation is not a failed discovery request.
-            self.store.db.execute(f"UPDATE jobs SET status = 'pending' , generation = generation + 1 , next = CASE WHEN wait_scope IS NULL THEN 0 ELSE next END , retry_at = CASE WHEN wait_scope IS NULL THEN NULL ELSE retry_at END WHERE kind = 'discover' AND {selection}",params)
+            self.store.db.execute(f"UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , generation = generation + 1 , next = CASE WHEN wait_scope IS NULL THEN 0 ELSE next END , retry_at = CASE WHEN wait_scope IS NULL THEN NULL ELSE retry_at END WHERE kind = 'discover' AND {selection}",params)
             collection_jobs.interrupt(self.store,feeds,backoff=False)
-            changed=self.store.db.execute(f"UPDATE jobs SET status='pending', generation=generation+1 WHERE {selection} RETURNING kind,item", params).fetchall()
+            changed=self.store.db.execute(f"UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status='pending', generation=generation+1 WHERE {selection} RETURNING kind,item", params).fetchall()
             for row in changed:
                 if row['kind']=='filter':self.store.processing.filter_changed(row['item'])
 
@@ -531,7 +531,7 @@ class JobRepository:
 
     def finish_read(self, job: Job, waiting: str, now: float) -> None:
         if waiting:
-            self.store.db.execute("UPDATE jobs SET status = 'pending' , next = %s , error = %s , problem_code = NULL WHERE id = %s AND generation = %s AND status = 'running'",(now+(.1 if waiting=='Продолжение проверки истории Telegram' else 30),waiting,job.id,job.generation))
+            self.store.db.execute("UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , next = %s , error = %s , problem_code = NULL WHERE id = %s AND generation = %s AND status = 'running'",(now+(.1 if waiting=='Продолжение проверки истории Telegram' else 30),waiting,job.id,job.generation))
         else:self.finish(job)
 
     def account_wait(self, user: int, until: float, job: Job | None = None) -> None:
@@ -542,7 +542,7 @@ class JobRepository:
         collection_jobs.fail(self.store,job,issue,cancelled=issue.kind==AdapterErrorKind.media_changed)
 
     def defer_captions(self, job: Job, now: float, delay: float, reason: str) -> None:
-        self.store.db.execute("UPDATE jobs SET status = 'pending' , next = %s , error = %s , problem_code = NULL WHERE id = %s AND generation = %s AND status = 'running'",(now+max(.05,delay),reason,job.id,job.generation))
+        self.store.db.execute("UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , next = %s , error = %s , problem_code = NULL WHERE id = %s AND generation = %s AND status = 'running'",(now+max(.05,delay),reason,job.id,job.generation))
 
     def source_http_until(self, scope: str) -> float:
         return self.store.source_http_until(scope)
@@ -586,9 +586,9 @@ class JobRepository:
             if changed:
                 self.enqueue_fetch(item)
             else:
-                db.execute("INSERT INTO jobs ( kind , item ) VALUES ( 'fetch' , %s ) ON CONFLICT ( kind , item ) DO UPDATE SET status = 'pending' , next = 0 , error = NULL , generation = jobs . generation + 1 WHERE jobs . status = 'done' AND ( jobs . error IS NULL OR jobs . problem_code IS NULL )",(item,))
+                db.execute("INSERT INTO jobs ( kind , item , queued_wall ) VALUES ( 'fetch' , %s , extract(epoch FROM clock_timestamp()) ) ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , next = 0 , error = NULL , generation = jobs . generation + 1 WHERE jobs . status = 'done' AND ( jobs . error IS NULL OR jobs . problem_code IS NULL )",(item,))
         for item in effects.refresh_links:
-            db.execute("UPDATE jobs SET status = 'pending' , next = 0 , generation = generation + 1 WHERE kind = 'fetch' AND item = %s AND status = 'done' AND error IS NULL",(item,))
+            db.execute("UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , next = 0 , generation = generation + 1 WHERE kind = 'fetch' AND item = %s AND status = 'done' AND error IS NULL",(item,))
         for item in effects.media:self.schedule_media(item)
         for identity,manual in effects.revalidate.items():self.revalidate_media(identity,manual=manual)
         self.reconcile_cleanup()
@@ -603,17 +603,17 @@ class JobRepository:
     def change_adapter(self, feed: str) -> None:
         db=self.store.db
         db.execute("UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL , retry_at = NULL , retry_delay = 0 , wait_scope = NULL , next = 0 WHERE kind = 'download_media' AND item IN ( SELECT m . id FROM media_files m JOIN items_by_feed i ON i . id = m . publication_id WHERE i . feed_id = %s )",(feed,))
-        db.execute("INSERT INTO jobs ( kind , item ) SELECT 'fetch' , id FROM unviewed_items_by_feed WHERE feed_id = %s AND viewed = 0 ON CONFLICT ( kind , item ) DO UPDATE SET status = 'pending' , generation = jobs . generation + 1 , next = 0 , retry_at = NULL , retry_delay = 0 , wait_scope = NULL , error = NULL , problem_code = NULL",(feed,))
+        db.execute("INSERT INTO jobs ( kind , item , queued_wall ) SELECT 'fetch' , id , extract(epoch FROM clock_timestamp()) FROM unviewed_items_by_feed WHERE feed_id = %s AND viewed = 0 ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , generation = jobs . generation + 1 , next = 0 , retry_at = NULL , retry_delay = 0 , wait_scope = NULL , error = NULL , problem_code = NULL",(feed,))
         db.execute("UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL WHERE kind = 'read' AND item = %s",(feed,))
         self.enqueue_discovery(feed)
 
     def remove_feed(self, feed: str, members: set[str]) -> None:
         db=self.store.db
         for item in members:
-            db.execute("UPDATE jobs SET status = CASE WHEN status = 'running' THEN 'pending' ELSE status END , generation = generation + 1 WHERE item = %s AND kind = 'fetch'",(item,))
+            db.execute("UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status='running' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = CASE WHEN status = 'running' THEN 'pending' ELSE status END , generation = generation + 1 WHERE item = %s AND kind = 'fetch'",(item,))
             db.execute("""UPDATE jobs SET status = CASE WHEN status = 'running' THEN 'pending' ELSE status END , generation = generation + 1
                 WHERE item = %s AND kind IN ('filter','theses') AND NOT EXISTS (SELECT 1 FROM feed_publications WHERE publication_id=%s)""",(item,item))
-            db.execute("UPDATE jobs SET status = 'pending' , generation = generation + 1 WHERE kind = 'download_media' AND status = 'running' AND item IN ( SELECT id FROM media_files WHERE publication_id = %s )",(item,))
+            db.execute("UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , generation = generation + 1 WHERE kind = 'download_media' AND status = 'running' AND item IN ( SELECT id FROM media_files WHERE publication_id = %s )",(item,))
         db.execute("UPDATE jobs SET status = 'cancelled' , generation = generation + 1 WHERE item = %s AND kind NOT IN ( 'delete' , 'feed-delete' )",(feed,))
         self.reconcile_cleanup()
         # Retain cleanup ownership independently of reading membership. A
@@ -625,7 +625,7 @@ class JobRepository:
         db.execute("UPDATE jobs SET status = 'cancelled' , generation = generation + 1 WHERE kind = 'download_media' AND status IN ( 'pending' , 'running' ) AND item IN ( SELECT id FROM media_files WHERE publication_id = %s AND status = 'unavailable' )",(item,))
         for row in db.execute("SELECT id FROM media_files WHERE publication_id = %s AND status = 'pending_download'", (item,)).fetchall():
             now,wall=self.store.clock(),self.store.wall_clock()
-            db.execute("INSERT INTO jobs ( kind , item ) VALUES ( 'download_media' , %s ) ON CONFLICT ( kind , item ) DO UPDATE SET status = 'pending' , generation = jobs . generation + 1 , error = NULL , problem_code = NULL , next = %s + oko_max ( jobs . retry_delay , coalesce ( jobs . retry_at , 0 ) - %s , 0 ) , retry_at = oko_max ( coalesce ( jobs . retry_at , 0 ) , %s + jobs . retry_delay ) , wait_scope = CASE WHEN jobs . retry_at > %s THEN jobs . wait_scope ELSE NULL END WHERE jobs . status IN ( 'cancelled' , 'done' )",(row['id'],now,wall,wall,wall))
+            db.execute("INSERT INTO jobs ( kind , item , queued_wall ) VALUES ( 'download_media' , %s , extract(epoch FROM clock_timestamp()) ) ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , generation = jobs . generation + 1 , error = NULL , problem_code = NULL , next = %s + oko_max ( jobs . retry_delay , coalesce ( jobs . retry_at , 0 ) - %s , 0 ) , retry_at = oko_max ( coalesce ( jobs . retry_at , 0 ) , %s + jobs . retry_delay ) , wait_scope = CASE WHEN jobs . retry_at > %s THEN jobs . wait_scope ELSE NULL END WHERE jobs . status IN ( 'cancelled' , 'done' )",(row['id'],now,wall,wall,wall))
 
 
     def retry_media(self, item: str, *, revalidate_ready: bool = True) -> None:
@@ -638,7 +638,7 @@ class JobRepository:
             if row['media_status']=='ready' and not revalidate_ready or row['resource_key']=='youtube:subtitles' and not captions_allowed:
                 continue
             waiting = bool(row['wait_scope'] and row['retry_at'] and row['retry_at']>store.wall_clock())
-            store.db.execute("UPDATE jobs SET status = 'pending' , generation = generation + 1 , next = %s , retry_at = %s , error = %s , problem_code = %s WHERE id = %s", (row['next'] if waiting else 0, row['retry_at'] if waiting else None,
+            store.db.execute("UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , generation = generation + 1 , next = %s , retry_at = %s , error = %s , problem_code = %s WHERE id = %s", (row['next'] if waiting else 0, row['retry_at'] if waiting else None,
                 row['error'] if waiting else None,row['problem_code'] if waiting else None,row['id']))
             if not waiting:
                 store.db.execute("UPDATE media_files SET status = 'pending_download' , reason = '' WHERE id = %s AND status != 'ready'", (row['item'],))
@@ -654,7 +654,7 @@ class JobRepository:
                     content['extra']['youtube']['captions']='pending'
                     store.db.execute('UPDATE items SET content = %s WHERE id = %s',(json.dumps(content,ensure_ascii=False),item))
                     store.db.execute('INSERT INTO processing_dirty VALUES ( %s ) ON CONFLICT DO NOTHING',(item,))
-                    store.db.execute("INSERT INTO jobs ( kind , item ) VALUES ( 'download_media' , %s ) ON CONFLICT ( kind , item ) DO UPDATE SET status = 'pending' , generation = jobs . generation + 1 , next = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . next ELSE 0 END , retry_at = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . retry_at ELSE NULL END WHERE jobs . status != 'running'",(subtitles,store.wall_clock(),store.wall_clock()))
+                    store.db.execute("INSERT INTO jobs ( kind , item , queued_wall ) VALUES ( 'download_media' , %s , extract(epoch FROM clock_timestamp()) ) ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , generation = jobs . generation + 1 , next = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . next ELSE 0 END , retry_at = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . retry_at ELSE NULL END WHERE jobs . status != 'running'",(subtitles,store.wall_clock(),store.wall_clock()))
 
         if revalidate_ready:
             for resource in store.db.execute("SELECT id FROM media_files WHERE publication_id = %s AND status = 'ready'",(item,)).fetchall():
@@ -666,7 +666,7 @@ class JobRepository:
         row=store.db.execute("SELECT m . resource_key , i . platform , i . feed_id FROM media_files m JOIN items_read i ON i . id = m . publication_id WHERE m . id = %s AND m . status = 'ready' AND i . viewed = 0",(identity,)).fetchone()
         if row is None or row['resource_key']=='youtube:subtitles' and not store.subscriptions.youtube_theses(row['feed_id']):
             return
-        store.db.execute("INSERT INTO jobs ( kind , item , manual_once ) VALUES ( 'download_media' , %s , 1 ) ON CONFLICT ( kind , item ) DO UPDATE SET status = 'pending' , manual_once = 1 , generation = jobs . generation + 1 , next = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . next ELSE 0 END , retry_at = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . retry_at ELSE NULL END WHERE jobs . status IN ( 'done' , 'cancelled' ) OR ( %s = 1 AND jobs . status IN ( 'failed' , 'unavailable' ) )",
+        store.db.execute("INSERT INTO jobs ( kind , item , manual_once , queued_wall ) VALUES ( 'download_media' , %s , 1 , extract(epoch FROM clock_timestamp()) ) ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , manual_once = 1 , generation = jobs . generation + 1 , next = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . next ELSE 0 END , retry_at = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . retry_at ELSE NULL END WHERE jobs . status IN ( 'done' , 'cancelled' ) OR ( %s = 1 AND jobs . status IN ( 'failed' , 'unavailable' ) )",
             (identity,store.wall_clock(),store.wall_clock(),manual))
 
 
@@ -738,10 +738,10 @@ class JobRepository:
                 yield
 
     def replace_media_input(self, job: Job) -> None:
-        self.store.db.execute("UPDATE jobs SET status = 'pending' , generation = generation + 1 , next = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN next ELSE 0 END , error = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN error ELSE NULL END WHERE id = %s AND generation = %s AND status = 'running'",(self.store.wall_clock(),self.store.wall_clock(),job.id,job.generation))
+        self.store.db.execute("UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , generation = generation + 1 , next = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN next ELSE 0 END , error = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN error ELSE NULL END WHERE id = %s AND generation = %s AND status = 'running'",(self.store.wall_clock(),self.store.wall_clock(),job.id,job.generation))
 
     def invalidate_processing(self) -> None:
-        changed=self.store.db.execute("UPDATE jobs SET status = CASE WHEN status = 'running' THEN 'pending' ELSE status END , generation = generation + 1 , error = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN error ELSE NULL END , problem_code = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN problem_code ELSE NULL END , next = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END WHERE kind IN ( 'filter' , 'theses' ) AND oko_json_extract ( payload , '$.input_revision' ) IS DISTINCT FROM ( SELECT oko_json_extract ( i . processing_metadata , '$._revision' ) FROM items_read i WHERE i . id = jobs . item ) RETURNING kind,item",
+        changed=self.store.db.execute("UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status='running' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = CASE WHEN status = 'running' THEN 'pending' ELSE status END , generation = generation + 1 , error = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN error ELSE NULL END , problem_code = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN problem_code ELSE NULL END , next = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END WHERE kind IN ( 'filter' , 'theses' ) AND oko_json_extract ( payload , '$.input_revision' ) IS DISTINCT FROM ( SELECT oko_json_extract ( i . processing_metadata , '$._revision' ) FROM items_read i WHERE i . id = jobs . item ) RETURNING kind,item",
             (self.store.wall_clock(),)*4).fetchall()
         for row in changed:
             if row['kind']=='filter':self.store.processing.filter_changed(row['item'])
