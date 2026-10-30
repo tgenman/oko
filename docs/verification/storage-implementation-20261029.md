@@ -1297,3 +1297,12 @@ explicit and empty codes, both stages at once, rollback and 10,000 unrelated
 Jobs. The integrated suite passed 174 PostgreSQL/HTTP tests, mypy for the
 changed module and six Playwright status scenarios; a screenshot was inspected.
 One Starlette/httpx warning was emitted. No working database was changed.
+
+
+Status ETag now includes the effective YouTube next-at boundary as well as
+blocked-until, so a conditional request after the deadline can return updated
+state without waiting for a host tick. Synthetic HTTP checks cover 304 before
+and after, equality at the boundary, the maximum of the two deadlines and
+rollback. The integrated suite passed 135 PostgreSQL tests, mypy on 161 files
+and 16 Playwright status scenarios with a screenshot inspected. One
+Starlette/httpx warning was emitted. No working database was changed.
