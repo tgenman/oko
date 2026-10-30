@@ -808,3 +808,16 @@ files, not evidence of deployment or a passing full suite:
 The full run started on commit `9594f1c9` separately; its final result is not
 included here until the run completes. Queue cutover, source identity cutover,
 review and publication remain unresolved as described above.
+
+The full run at `9594f1c9` ended unsuccessfully: HTTP/build/types, 116 Node
+and 315 tooling tests passed; Playwright reported 215 passed, 3 skipped and 35
+failures after an HTTP fixture preparation timed out. The first timed-out browser
+case passed in an isolated repeat (20.27 seconds); this does not establish the
+cause of the timeout under parallel load. Python reported 943 passed, 2 skipped
+and two failures in tests that incorrectly used a media ID as a filename; those
+files were corrected and their complete targeted suites passed (15 and 11).
+The remaining Python shard was terminated after identifying its indefinite
+wait: a power test expected processor configuration to close Telegram, which
+is no longer its behavior. The test now uses a real cancellation action and a
+bounded wait; all six power tests passed. The full run did not verify the newer
+fixes and must be repeated.

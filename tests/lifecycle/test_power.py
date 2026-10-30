@@ -205,10 +205,8 @@ def test_queued_web_connection_cannot_start_preview_after_power_off(tmp_path):
     with TestClient(app, headers=HEADERS) as client:
         async def queued_actions():
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://testserver', headers=HEADERS) as http:
-                configuration = asyncio.create_task(http.put('/api/v3/processors/llamacpp', json={
-                    'endpoint': 'http://127.0.0.1:8080', 'model': 'fixture', 'local_execution': True,
-                }))
-                await entered.wait()
+                configuration = asyncio.create_task(http.patch('/api/v3/youtube', json={'mode': 'direct'}))
+                await asyncio.wait_for(entered.wait(), timeout=5)
                 connect = asyncio.create_task(http.post('/api/v3/telegram/connect', json={
                     'source_locator': '@fixture', 'folder': 'News', 'access': {'kind': 'web'},
                 }))
