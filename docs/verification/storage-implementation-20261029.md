@@ -634,3 +634,11 @@
 - Removed the now-unused option that enqueued membership changes. Three targeted
   discovery, shared-owner removal and linked-content rollback checks passed;
   all membership callers now reconcile their own consequences directly.
+- Startup recovery now walks unviewed publication IDs directly in bounded
+  transactions rather than seeding `processing_dirty`. Migration 055 adds a
+  partial ID index; the tested plan on 20,000 viewed and 400 unviewed synthetic
+  rows uses it. A first run failed because PostgreSQL could not infer the type
+  of a null cursor; the corrected keyset query passed 10 focused recovery cases,
+  then 207 recovery, background-cost, processing and migration tests plus types.
+  Seven Playwright scenarios passed and the mobile status screenshot was inspected.
+  Settings invalidation and the transitional repair path still use the queue.

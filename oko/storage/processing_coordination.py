@@ -50,9 +50,17 @@ class ProcessingState:
         """Commit one publication at a time; callers may yield only between steps."""
         self.recovering = True
         if seed:
-            with self.store.db:
-                self.store.db.execute('INSERT INTO processing_dirty SELECT id FROM items_read WHERE viewed = 0 ON CONFLICT DO NOTHING')
-            yield
+            # Startup recovery walks the existing library in bounded transactions;
+            # it does not materialize another persistent queue for every item.
+            after: str | None = None
+            while True:
+                query = 'SELECT id FROM items WHERE viewed=0' + (' AND id>%s' if after is not None else '') + ' ORDER BY id LIMIT 1'
+                row = self.store.db.execute(query, (after,) if after is not None else ()).fetchone()
+                if row is None:
+                    break
+                after = row[0]
+                self.reconcile_item(after)
+                yield
         while True:
             self._queue_repairs()
             row = self.store.db.execute('SELECT item FROM processing_dirty ORDER BY item LIMIT 1').fetchone()

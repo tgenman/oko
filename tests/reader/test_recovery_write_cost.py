@@ -97,3 +97,14 @@ def test_recovery_reuses_material_reads_within_each_read_phase(postgres_url, tmp
         wait_for(client, lambda: bool(requests))
         assert reads, 'The database observer must see the material reads'
         assert len(reads) <= 12, f'{len(reads)} repeated point reads for one recovered material'
+
+
+def test_startup_recovery_keyset_uses_unviewed_id_index(postgres_url):
+    import psycopg
+    with psycopg.connect(postgres_url, autocommit=True) as db:
+        db.execute("INSERT INTO items(id,viewed) SELECT 'archive-' || lpad(n::text,6,'0'),1 FROM generate_series(1,20000) n")
+        db.execute("INSERT INTO items(id,viewed) SELECT 'live-' || lpad(n::text,6,'0'),0 FROM generate_series(1,400) n")
+        db.execute('ANALYZE items')
+        plan = '\n'.join(row[0] for row in db.execute("EXPLAIN SELECT id FROM items WHERE viewed=0 AND id>'live-000200' ORDER BY id LIMIT 1"))
+        assert 'items_unviewed_id' in plan, plan
+        assert db.execute("SELECT id FROM items WHERE viewed=0 AND id>'live-000200' ORDER BY id LIMIT 1").fetchone() == ('live-000201',)

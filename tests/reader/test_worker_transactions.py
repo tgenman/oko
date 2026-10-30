@@ -1031,3 +1031,20 @@ def test_viewed_publication_kept_as_link_revokes_own_processing_atomically(tmp_p
             view()
     finally:
         store.db.close()
+
+
+def test_startup_reconciles_publications_without_seeding_dirty_queue(tmp_path):
+    store, item, _, _ = worker_library(tmp_path)
+    statements = []
+    try:
+        with store.db:
+            store.db.execute("DELETE FROM jobs WHERE kind='filter' AND item=%s", (item,))
+            store.db.execute('DELETE FROM processing_dirty')
+        store.db.set_trace_callback(statements.append)
+        for _ in store.processing.recovery_steps(seed=True):
+            pass
+        assert store.db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()[0] == 'pending'
+        assert not any('INSERT INTO processing_dirty' in statement for statement in statements)
+    finally:
+        store.db.set_trace_callback(None)
+        store.db.close()

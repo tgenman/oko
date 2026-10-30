@@ -59,4 +59,5 @@ MIGRATIONS = (
     Migration(52, 'owned-settings', (Path(__file__).parent / 'postgres' / '052-owned-settings.sql').read_text()),
     Migration(53, 'feed-processing-copies', (Path(__file__).parent / 'postgres' / '053-feed-processing-copies.sql').read_text()),
     Migration(54, 'remove-stage-queue', (Path(__file__).parent / 'postgres' / '054-remove-stage-queue.sql').read_text()),
+    Migration(55, 'recovery-index', (Path(__file__).parent / 'postgres' / '055-recovery-index.sql').read_text()),
 )
