@@ -38,3 +38,17 @@ of different work shapes, not an equivalent latency comparison: the candidate
 is one SELECT and does not include all dispatch kinds, priority, locking and
 claim behavior of `next_job`. Both runs used synthetic data and EXPLAIN ANALYZE;
 they do not prove a production improvement or justify migration yet.
+
+## Attempted change to full dispatch
+
+A subsequent implementation of the pending-first idea changed the complete
+`next_job` query and was tested with 10,000 viewed memberships in the selected
+feed, 10,000 earlier pending fetch Jobs in a different feed, and one eligible
+fetch. It returned the correct Job in this scenario. The old query's EXPLAIN
+instrumentation reported 50,011 scanned relation rows and 643 shared buffer
+accesses; a correlated form reported 30,010 rows but 20,282 buffer accesses.
+These are single synthetic plan measurements, not timing or complete semantic
+proof. The change was rejected on this evidence and reverted; its patch and
+regression scenario remain in `.scratch/storage-redesign/` as a local draft.
+Any replacement must address both workload shapes and verify all dispatch kinds,
+linked ownership, history waits, priority, concurrent claims and cancellation.
