@@ -44,4 +44,6 @@ MIGRATIONS = (
     Migration(37, 'folder-versions', (Path(__file__).parent / 'postgres' / '037-folder-versions.sql').read_text()),
     Migration(38, 'feed-versions', (Path(__file__).parent / 'postgres' / '038-feed-versions.sql').read_text()),
     Migration(39, 'youtube-status', (Path(__file__).parent / 'postgres' / '039-youtube-status.sql').read_text()),
+    Migration(40, 'profile-message', (Path(__file__).parent / 'postgres' / '040-profile-message.sql').read_text()),
+    Migration(41, 'state-status', (Path(__file__).parent / 'postgres' / '041-state-status.sql').read_text()),
 )

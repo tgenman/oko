@@ -6,6 +6,7 @@ admission. No network, credentials, SDK or file deletion belongs here.
 from oko.storage.database import expect_row, Database
 from oko.storage.reading import reading_value
 from oko.storage.source_configuration import changed as source_changed
+from oko.storage.reader_status import changed as status_changed
 import json
 import base64
 import hashlib
@@ -59,9 +60,12 @@ class TelegramAccess:
         with db:
             begin_write(db)
             changed = db.execute("SELECT 1 FROM telegram_profiles WHERE state IS DISTINCT FROM 'unavailable' LIMIT 1").fetchone() is not None
+            message_changed = db.execute("SELECT 1 FROM telegram_profiles WHERE message IS DISTINCT FROM 'Требуется проверка сессии после запуска' LIMIT 1").fetchone() is not None
             db.execute("UPDATE telegram_profiles SET state = 'unavailable' , message = 'Требуется проверка сессии после запуска'")
             if changed:
                 source_changed(db)
+            if message_changed:
+                status_changed(db)
 
     def bindings(self, feeds: list[str] | None = None) -> dict[str, dict[str, Any]]:
         return self._bindings(tuple(sorted(set(feeds))) if feeds is not None else None)
@@ -111,6 +115,8 @@ class TelegramAccess:
             self.db.execute('INSERT INTO telegram_profiles VALUES ( %s , %s , %s , %s , %s , %s , %s ) ON CONFLICT ( role ) DO UPDATE SET account = excluded . account , user_id = excluded . user_id , generation = excluded . generation , state = excluded . state , checked = excluded . checked , message = NULL',
                 (role, account, user_id, generation + 1, 'ready', checked, None))
             source_changed(self.db)
+            if old and old['message'] is not None:
+                status_changed(self.db)
         return self.profile(role) or {}
 
     def checked(self, role: str, generation: int, user_id: int | None, checked: float) -> bool:
@@ -118,11 +124,14 @@ class TelegramAccess:
         if not row or row['generation'] != generation:
             return False
         state = 'ready' if user_id == row['user_id'] else 'unavailable' if user_id is None else 'identity_mismatch'
+        message = None if state == 'ready' else 'Личность Telegram-аккаунта не подтверждена'
         with self.db:
             self.db.execute('UPDATE telegram_profiles SET state = %s , checked = %s , message = %s WHERE role = %s',
-                (state, checked, None if state == 'ready' else 'Личность Telegram-аккаунта не подтверждена', role))
+                (state, checked, message, role))
             if row['state'] != state:
                 source_changed(self.db)
+            if row['message'] != message:
+                status_changed(self.db)
         return state == 'ready'
 
     def claims(self, info: dict[str, Any]) -> list[tuple[str, str]]:

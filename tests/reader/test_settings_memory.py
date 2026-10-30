@@ -231,6 +231,24 @@ def test_telegram_profile_restart_marks_source_revision_once(tmp_path, settings_
         store.db.close()
 
 
+def test_telegram_profile_message_changes_status_without_source_revision(tmp_path, settings_database):
+    from tests.support.storage import Store
+    from oko.storage.transaction import transaction
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    with transaction(store.db):
+        store.subscriptions.telegram.save_profile('personal','synthetic',123,0,1.0)
+        assert not store.subscriptions.telegram.checked('personal',1,None,2.0)
+    revision = store.subscriptions.source_revision()
+    status = store.read_versions.version('status','runtime')['version']
+    store.db.close()
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        assert store.subscriptions.source_revision() == revision
+        assert store.read_versions.version('status','runtime')['version'] > status
+    finally:
+        store.db.close()
+
+
 def test_history_source_revision_ignores_progress_but_tracks_selection(tmp_path, settings_database):
     from tests.support.storage import Store
     from oko.storage.transaction import transaction

@@ -190,6 +190,21 @@ def test_feed_rename_updates_status_without_source_revision_change(tmp_path):
         assert client.get('/api/v3/status/details',headers={'If-None-Match':first.headers['ETag']}).status_code==200
 
 
+def test_status_etag_tracks_saved_runtime_facts_without_status_trigger(tmp_path):
+    library(tmp_path,[1])
+    app=traced_app(tmp_path)
+    with TestClient(app,headers=HEADERS) as client:
+        wait_for_recovery(app)
+        first=client.get('/api/v3/status/details')
+        def change():
+            store=app.state.host.require_store()
+            with store.db:
+                store.db.execute("INSERT INTO state(key,value) VALUES ('feed-status:synthetic','{\"error\":\"temporary\"}')")
+        client.portal.call(change)
+        changed=client.get('/api/v3/status/details',headers={'If-None-Match':first.headers['ETag']})
+        assert changed.status_code==200 and changed.headers['ETag']!=first.headers['ETag']
+
+
 def test_due_fetch_changes_publication_etag_without_dispatch(tmp_path):
     _,items=library(tmp_path,[1])
     clock=[0.0]

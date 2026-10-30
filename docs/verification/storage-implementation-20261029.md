@@ -487,3 +487,10 @@
   types and seven Playwright scenarios passed, and a YouTube settings screenshot
   was inspected. Version 39 has 23 tables and 21 triggers; dirty queues and status
   GET reconciliation remain unfinished.
+- Migrations 040–041 move Telegram profile-message freshness to its Python owner
+  and derive status freshness from saved work-enabled, source-status and Codex
+  state. Four triggers/functions were removed; message changes do not alter the
+  source revision. The affected status, settings, Telegram and recovery suites
+  passed 228 tests; types and 11 Playwright scenarios passed, with a model-settings
+  screenshot inspected. Version 41 has 23 tables and 17 triggers. The remaining
+  Job, item, journal and membership triggers and both dirty queues remain open.

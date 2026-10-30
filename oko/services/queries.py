@@ -49,9 +49,11 @@ class VersionQueries:
             (SELECT next FROM jobs WHERE status='pending' AND kind IN ('fetch','filter','theses') AND next>%s ORDER BY next LIMIT 1),
             (SELECT blocked_until FROM youtube_access WHERE id=1 AND blocked_until>%s),
             (SELECT finished FROM reader_problems WHERE finished>%s ORDER BY finished LIMIT 1),
-            (SELECT jsonb_build_array(next_at,blocked_until,strikes) FROM youtube_access WHERE id=1)""",
+            (SELECT jsonb_build_array(next_at,blocked_until,strikes) FROM youtube_access WHERE id=1),
+            (SELECT coalesce(jsonb_agg(jsonb_build_array(key,value) ORDER BY key),'[]'::jsonb)
+             FROM state WHERE key='work-enabled' OR key='processor:codex' OR key LIKE 'feed-status:%%')""",
             (reader_now(store.clock()), wall, wall-86400)).fetchone()
-        return (row[0], row[1], row[2], row[3]) if row else (None, None, None, None)
+        return (row[0], row[1], row[2], row[3], row[4]) if row else (None, None, None, None, None)
 
     @repository_access
     def advance(self) -> None:
