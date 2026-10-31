@@ -10,6 +10,7 @@ import hashlib
 from typing import Any
 
 import psycopg
+from psycopg import sql
 from psycopg.pq import TransactionStatus
 
 
@@ -71,6 +72,14 @@ def migrate(db: psycopg.Connection[Any], migrations: Sequence[Migration]) -> Non
                 applied_at timestamptz NOT NULL DEFAULT clock_timestamp())''')
             installed = _installed(db, migrations)
             for migration in migrations[installed:]:
+                if (migration.version, migration.name) == (89, 'feeds-config-jsonb'):
+                    # Its preflight and ALTER must see the same feed values, even
+                    # when an external writer does not use our advisory lease.
+                    target=db.execute("SELECT current_schema(),to_regclass(format('%I.%I',current_schema(),'feeds'))").fetchone()
+                    if not target or target[0] is None or target[1] is None:
+                        raise SchemaMismatch('Migration 89 requires feeds in the current schema')
+                    db.execute(sql.SQL('LOCK TABLE {}.{} IN ACCESS EXCLUSIVE MODE').format(
+                        sql.Identifier(target[0]),sql.Identifier('feeds')))
                 db.execute(migration.sql, prepare=False)
                 db.execute('INSERT INTO oko_schema_migrations(version,name,checksum) VALUES (%s,%s,%s)',
                            (migration.version, migration.name, migration.checksum))

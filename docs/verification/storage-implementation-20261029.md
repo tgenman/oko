@@ -1624,3 +1624,14 @@ passed 199 PostgreSQL functional tests, mypy for six modules and six Playwright
 status cases with a screenshot inspected; independent review covered graph,
 colliding identities and rollback. One Starlette/httpx warning was emitted.
 No working database was changed.
+
+
+The migration runner now locks the current schema feeds table before pending
+migration 089 preflight, holding it through the release transaction. This closes
+a reproduced race with an external SQL writer without changing 089 or its
+checksum. A missing feeds table in current_schema fails closed instead of using
+a later search_path schema. Synthetic checks cover two connections, quoted
+schema names, insufficient lock permission, rollback and already-applied 089.
+The integrated migration/CLI suite passed 184 PostgreSQL tests, mypy and six
+Playwright status scenarios with a screenshot inspected. No working database
+was changed; release still needs the documented writer and backup procedure.
