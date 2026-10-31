@@ -1657,3 +1657,14 @@ and one Playwright processing scenario with screenshot inspection. Independent
 checks covered roles, external views, concurrent writes, quoted schemas and
 true 089-to-090 migration. SQL budgets were not acceptance criteria by user
 decision. No working database was migrated.
+
+
+Profile-related subtitle errors now use event-owned updates and recovery
+through migration 091. Graph reconciliation preserves confirmed owner IDs and
+retains protected or ambiguous legacy records rather than overwriting them.
+Synthetic checks cover profile suppression, timer boundaries, shared and foreign
+roots, rollback and restart. The integrated suite passed 359 PostgreSQL tests,
+mypy for six modules and a persisted subtitle-profile card via real HTTP in
+Playwright; desktop/mobile screenshots were inspected. One Starlette/httpx
+warning was emitted. SQL budgets were not acceptance criteria by user decision.
+No working database was migrated.

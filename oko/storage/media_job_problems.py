@@ -41,7 +41,7 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
                 objects=[],action=None,operation='producer:download_media',media_owner=feed,_code_present=row['problem_code'] is not None or (row['error'] is not None and row['resource_key']!='youtube:subtitles'),_subtitle=row['resource_key']=='youtube:subtitles',media_file_id=item,media_orphan=row['publication_id'] is None,created_at=now,state='retrying' if row['status']=='running' or not row['error'] else 'current',finished_at=None,outcome=None,next_at=None)
             if code=='work-download_media':body['media_implicit_code']=row['problem_code'] in (None,'')
             if row['problem_code'] is None and row['resource_key']!='youtube:subtitles':body['media_null_event']=True
-            if row['problem_code'] in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') and row['resource_key']!='youtube:subtitles':body['media_profile_event']=True
+            if row['problem_code'] in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'):body['media_profile_event']=True
             if row['resource_key']=='youtube:subtitles':body.update(subtitle_event=True,subtitle_wait_on_next=row['problem_code'] is None)
             if row['error']:body['reason']=row['error']
             if code=='source-reconnect':body.update(section='action',next_step='Проверьте привязку источника; доступ не изменяется автоматически.')
@@ -69,14 +69,14 @@ def managed_candidates(store: 'Store', job_id: int, now: float) -> list[dict[str
     excluded={'codex-choice','ai-permission','youtube-admission','processor-config'}
     profiles={'identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'}
     return [dict({k:v for k,v in row.items() if k not in ('_code_present','_subtitle')},media_job_id=str(job_id)) for row in rows
-            if (row['_code_present'] or row['_subtitle']) and row['code'] and row['code'] not in excluded and (row['code'] not in profiles or row.get('media_profile_event')) and not row['code'].startswith('source-')]
+            if (row['_code_present'] or row['_subtitle']) and row['code'] and row['code'] not in excluded and (row['code'] not in profiles or row.get('media_profile_event') or row.get('subtitle_event')) and not row['code'].startswith('source-')]
 
 
 def managed_candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_subtitles: bool = False, include_suppressed: bool = False) -> dict[int,list[dict[str, Any]]]:
     excluded={'codex-choice','ai-permission','youtube-admission','processor-config'}
     profiles={'identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'}
     groups=candidates_many(store,job_ids,now,include_subtitles=include_subtitles,include_suppressed=include_suppressed)
-    return {job_id:[dict({k:v for k,v in row.items() if k not in ('_code_present','_subtitle')},media_job_id=str(job_id)) for row in rows if (row['_code_present'] or row['_subtitle']) and row['code'] and row['code'] not in excluded and (row['code'] not in profiles or row.get('media_profile_event')) and not row['code'].startswith('source-')] for job_id,rows in groups.items()}
+    return {job_id:[dict({k:v for k,v in row.items() if k not in ('_code_present','_subtitle')},media_job_id=str(job_id)) for row in rows if (row['_code_present'] or row['_subtitle']) and row['code'] and row['code'] not in excluded and (row['code'] not in profiles or row.get('media_profile_event') or row.get('subtitle_event')) and not row['code'].startswith('source-')] for job_id,rows in groups.items()}
 
 
 def previous_candidates(store: 'Store', job_id: int, now: float) -> list[dict[str, Any]]:

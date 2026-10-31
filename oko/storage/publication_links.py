@@ -151,16 +151,16 @@ def capture_media_problems(store: 'Store', effects: CollectionEffects, items: se
     from oko.storage.media_job_problems import previous_candidates
     ordered=sorted(items)
     for start in range(0,len(ordered),400):
-        for row in store.db.execute("""SELECT j.id,j.identity_event_owned,j.media_null_owned FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id
+        for row in store.db.execute("""SELECT j.id,j.identity_event_owned,j.media_null_owned,j.subtitle_event_owned FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id
             WHERE m.publication_id=ANY(%s) AND (
             (m.resource_key IS DISTINCT FROM 'youtube:subtitles' AND ((j.problem_code IS NULL AND j.error IS NOT NULL AND j.media_null_owned) OR (j.problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') AND j.identity_event_owned))) OR
-            (m.resource_key='youtube:subtitles' AND ((j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'))))
+            (m.resource_key='youtube:subtitles' AND ((j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config'))))
             OR ((((m.resource_key='youtube:subtitles' OR j.media_null_owned) AND j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%'))
             AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','work-download_media')))""",(ordered[start:start+400],)):
             if row['id'] in effects.media_problems_checked:continue
             effects.media_problems_checked.add(row['id'])
             previous=previous_candidates(store,row['id'],store.wall_clock())
-            if previous or row['identity_event_owned'] or row['media_null_owned']:effects.media_problems_before[row['id']]=previous
+            if previous or row['identity_event_owned'] or row['media_null_owned'] or row['subtitle_event_owned']:effects.media_problems_before[row['id']]=previous
         for row in store.db.execute("SELECT id,identity_event_owned,media_null_owned FROM jobs WHERE kind='download_media' AND item=ANY(%s) AND ((media_null_owned AND problem_code IS NULL AND error IS NOT NULL) OR (identity_event_owned AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')))",(ordered[start:start+400],)):
             if row['id'] in effects.media_problems_checked:continue
             effects.media_problems_checked.add(row['id'])

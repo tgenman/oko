@@ -170,6 +170,7 @@ class Store:
             self.problems.recover_media_null_problems()
             self.problems.recover_media_profile_problems()
             self.problems.recover_subtitles()
+            self.problems.recover_subtitles(profile_only=True)
             with self.db:
                 self.problems.recover_processor_duplicates(self.wall_clock())
                 self.problems.finish_processor_change([],None,self.wall_clock())

@@ -1279,69 +1279,104 @@ class Problems:
             status_changed(self.db)
         return [row for row in rows if row['id'] in complex_ids]
 
-    def recover_subtitles(self) -> None:
-        if self.db.execute("SELECT 1 FROM state WHERE key='subtitle-problems-recovered-v1'").fetchone():return
-        cursor: str | None=None
+    def recover_subtitles(self, *, profile_only: bool = False) -> None:
+        marker='subtitle-profile-problems-recovered-v1' if profile_only else 'subtitle-problems-recovered-v1'
+        if self.db.execute('SELECT 1 FROM state WHERE key=%s',(marker,)).fetchone():return
+        cursor: str | int | None=None
         while True:
             query="""SELECT m.id AS file_id,j.id,j.subtitle_event_owned FROM media_files m JOIN jobs j ON j.item=m.id AND j.kind='download_media'
-                WHERE m.resource_key='youtube:subtitles' AND j.status IN ('pending','running','failed','unavailable','blocked')
-                AND ((j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%'
+                WHERE m.resource_key='youtube:subtitles' AND j.status IN ('pending','running','failed','unavailable','blocked')"""
+            if profile_only:
+                query+=" AND j.problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')"
+            else:
+                query+=""" AND ((j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%'
                     AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')))"""
-            if cursor is not None:query+=' AND m.id COLLATE "C">%s'
-            rows=self.db.execute(query+' ORDER BY m.id COLLATE "C" LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
+            if cursor is not None:query+=' AND '+('j.id>%s' if profile_only else 'm.id COLLATE "C">%s')
+            order='j.id' if profile_only else 'm.id COLLATE "C"'
+            rows=self.db.execute(query+' ORDER BY '+order+' LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
             if not rows:break
             with self.db:
                 from oko.storage import memberships
                 memberships.lock_graph(self.db)
                 now=self.store.wall_clock()
                 from oko.storage.media_job_problems import managed_candidates_many
-                legacy_rows=self.db.execute("""SELECT t.item,r.id FROM unnest(%s::text[]) t(item) CROSS JOIN LATERAL (
-                    SELECT id FROM reader_problems WHERE finished IS NULL AND identity LIKE 'job:%%' AND body::jsonb->>'code'='work-download_media'
-                    AND body::jsonb->>'operation' IN ('producer:download_media','producer:status')
-                    AND md5(substring(coalesce(body::jsonb->>'media_job_identity',body::jsonb->>'status_job_identity',identity) FROM ':download_media:(.*)$'))=md5(t.item)
-                    AND substring(coalesce(body::jsonb->>'media_job_identity',body::jsonb->>'status_job_identity',identity) FROM ':download_media:(.*)$')=t.item LIMIT 101) r""",([row['file_id'] for row in rows if not row['subtitle_event_owned']],)).fetchall()
-                legacy_counts: dict[str,int]={}
-                for legacy in legacy_rows:legacy_counts[legacy['item']]=legacy_counts.get(legacy['item'],0)+1
-                legacy_items=set(legacy_counts)
-                overflow_items={item for item,count in legacy_counts.items() if count>100}
-                if legacy_items:
-                    from oko.storage.subtitle_problems import protect_legacy
-                    for item in legacy_items:protect_legacy(self.store,item)
-                if overflow_items:self.db.execute("UPDATE jobs SET subtitle_event_owned=false WHERE id=ANY(%s)",([row['id'] for row in rows if row['file_id'] in overflow_items],))
-                direct_rows=[row for row in rows if row['file_id'] in legacy_items and row['file_id'] not in overflow_items]
-                bounded=[row for row in rows if row['file_id'] not in legacy_items]
-                for row in direct_rows:self.sync_media_problem(row['id'],[],now)
-                projected=managed_candidates_many(self.store,[row['id'] for row in bounded],now,include_subtitles=True) if bounded else {}
-                key_jobs: dict[str,set[int]]={}
-                for job_id,parts in projected.items():
-                    for candidate in parts:key_jobs.setdefault(candidate['id'],set()).add(job_id)
-                conflicting_jobs: set[int]=set()
-                from oko.storage.subtitle_problems import protect_isolated
-                for field in ('media_job_identity','status_job_identity'):
-                    query=f"""SELECT t.canonical FROM unnest(%s::text[]) t(canonical) CROSS JOIN LATERAL (
-                        SELECT id FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:download_media'
-                        AND body::jsonb->>'{field}'=t.canonical LIMIT 101) r GROUP BY t.canonical HAVING count(*)>100"""
-                    conflicts=self.db.execute(query,(sorted(key_jobs),)).fetchall() if key_jobs else []
-                    for conflict in conflicts:
-                        canonical=conflict['canonical'];protect_isolated(self.store,field,canonical)
-                        conflicting_jobs.update(key_jobs[canonical])
-                if conflicting_jobs:
-                    self.db.execute('UPDATE jobs SET subtitle_event_owned=false WHERE id=ANY(%s)',(sorted(conflicting_jobs),))
-                    bounded=[row for row in bounded if row['id'] not in conflicting_jobs]
-                    projected={job:parts for job,parts in projected.items() if job not in conflicting_jobs}
-                new_ids: set[str]=set()
-                complex_rows=self.recover_media_batch(bounded,now,include_subtitles=True,new_ids_out=new_ids) if bounded else []
-                complex_ids={row['id'] for row in complex_rows}
-                for row in complex_rows:self.sync_media_problem(row['id'],[],now)
-                owned=[job for job,candidates in projected.items() if candidates and job not in complex_ids]
-                if owned:
-                    self.db.execute("UPDATE jobs SET subtitle_event_owned=true WHERE id=ANY(%s)",(owned,))
-                    if self.store.youtube.status(now)['next_at']>now:
-                        from oko.storage.subtitle_problems import sync_timer
-                        sync_timer(self.store,now,owned,new_ids=new_ids)
-            cursor=rows[-1]['file_id']
+                if profile_only:
+                    ids=[row['id'] for row in rows]
+                    previous=managed_candidates_many(self.store,ids,now,include_subtitles=True,include_suppressed=True)
+                    visible=managed_candidates_many(self.store,ids,now,include_subtitles=True)
+                    for row in rows:
+                        old=previous.get(row['id'],[]);current=visible.get(row['id'],[])
+                        suppressed=bool({part['id'] for part in old}-{part['id'] for part in current})
+                        self.sync_media_problem(row['id'],old,now,allow_rekey=not suppressed)
+                else:
+                    legacy_rows=self.db.execute("""SELECT t.item,r.id FROM unnest(%s::text[]) t(item) CROSS JOIN LATERAL (
+                        SELECT id FROM reader_problems WHERE finished IS NULL AND identity LIKE 'job:%%' AND body::jsonb->>'code'='work-download_media'
+                        AND body::jsonb->>'operation' IN ('producer:download_media','producer:status')
+                        AND md5(substring(coalesce(body::jsonb->>'media_job_identity',body::jsonb->>'status_job_identity',identity) FROM ':download_media:(.*)$'))=md5(t.item)
+                        AND substring(coalesce(body::jsonb->>'media_job_identity',body::jsonb->>'status_job_identity',identity) FROM ':download_media:(.*)$')=t.item LIMIT 101) r""",([row['file_id'] for row in rows if not row['subtitle_event_owned']],)).fetchall()
+                    legacy_counts: dict[str,int]={}
+                    for legacy in legacy_rows:legacy_counts[legacy['item']]=legacy_counts.get(legacy['item'],0)+1
+                    legacy_items=set(legacy_counts)
+                    overflow_items={item for item,count in legacy_counts.items() if count>100}
+                    if legacy_items:
+                        from oko.storage.subtitle_problems import protect_legacy
+                        for item in legacy_items:protect_legacy(self.store,item)
+                    if overflow_items:self.db.execute("UPDATE jobs SET subtitle_event_owned=false WHERE id=ANY(%s)",([row['id'] for row in rows if row['file_id'] in overflow_items],))
+                    direct_rows=[row for row in rows if row['file_id'] in legacy_items and row['file_id'] not in overflow_items]
+                    bounded=[row for row in rows if row['file_id'] not in legacy_items]
+                    for row in direct_rows:self.sync_media_problem(row['id'],[],now)
+                    projected=managed_candidates_many(self.store,[row['id'] for row in bounded],now,include_subtitles=True) if bounded else {}
+                    key_jobs: dict[str,set[int]]={}
+                    for job_id,parts in projected.items():
+                        for candidate in parts:key_jobs.setdefault(candidate['id'],set()).add(job_id)
+                    conflicting_jobs: set[int]=set()
+                    from oko.storage.subtitle_problems import protect_isolated
+                    for field in ('media_job_identity','status_job_identity'):
+                        query=f"""SELECT t.canonical FROM unnest(%s::text[]) t(canonical) CROSS JOIN LATERAL (
+                            SELECT id FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:download_media'
+                            AND body::jsonb->>'{field}'=t.canonical LIMIT 101) r GROUP BY t.canonical HAVING count(*)>100"""
+                        conflicts=self.db.execute(query,(sorted(key_jobs),)).fetchall() if key_jobs else []
+                        for conflict in conflicts:
+                            canonical=conflict['canonical'];protect_isolated(self.store,field,canonical)
+                            conflicting_jobs.update(key_jobs[canonical])
+                    if conflicting_jobs:
+                        self.db.execute('UPDATE jobs SET subtitle_event_owned=false WHERE id=ANY(%s)',(sorted(conflicting_jobs),))
+                        bounded=[row for row in bounded if row['id'] not in conflicting_jobs]
+                        projected={job:parts for job,parts in projected.items() if job not in conflicting_jobs}
+                    new_ids: set[str]=set()
+                    complex_rows=self.recover_media_batch(bounded,now,include_subtitles=True,new_ids_out=new_ids) if bounded else []
+                    complex_ids={row['id'] for row in complex_rows}
+                    for row in complex_rows:self.sync_media_problem(row['id'],[],now)
+                    owned=[job for job,candidates in projected.items() if candidates and job not in complex_ids]
+                    if owned:
+                        self.db.execute("UPDATE jobs SET subtitle_event_owned=true WHERE id=ANY(%s)",(owned,))
+                        if self.store.youtube.status(now)['next_at']>now:
+                            from oko.storage.subtitle_problems import sync_timer
+                            sync_timer(self.store,now,owned,new_ids=new_ids)
+            cursor=rows[-1]['id' if profile_only else 'file_id']
             self.store.fault('subtitle_problem_recovery_batch')
-        with self.db:self.db.execute("INSERT INTO state(key,value) VALUES ('subtitle-problems-recovered-v1','true') ON CONFLICT DO NOTHING")
+        if profile_only:
+            from oko.storage.subtitle_problems import protect_rows
+            legacy_cursor: str | None=None
+            while True:
+                with self.db:
+                    from oko.storage import memberships
+                    memberships.lock_graph(self.db)
+                    query="""SELECT p.id,p.identity FROM reader_problems p WHERE p.finished IS NULL AND p.identity LIKE 'job:%%'
+                        AND p.body::jsonb->>'code' IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')
+                        AND (p.body::jsonb->>'operation' IS NULL OR p.body::jsonb->>'operation' IN ('producer:status','producer:download_media'))
+                        AND (p.body::jsonb->>'media_job_id' IS NULL OR p.body::jsonb->>'media_profile_event' IS DISTINCT FROM 'true')
+                        AND coalesce(p.body::jsonb->>'status_job_identity',p.body::jsonb->>'media_job_identity',p.identity) LIKE '%%:download_media:%%'
+                        AND NOT EXISTS (SELECT 1 FROM media_files m WHERE m.resource_key IS DISTINCT FROM 'youtube:subtitles'
+                            AND m.id=substring(coalesce(p.body::jsonb->>'status_job_identity',p.body::jsonb->>'media_job_identity',p.identity) FROM ':download_media:(.*)$'))"""
+                    if legacy_cursor is not None:query+=' AND p.id COLLATE "C">%s'
+                    else:query=query.replace('%%','%')
+                    legacy_records=self.db.execute(query+' ORDER BY p.id COLLATE "C" LIMIT 100',(legacy_cursor,) if legacy_cursor is not None else ()).fetchall()
+                    if not legacy_records:break
+                    protect_rows(self.store,list(legacy_records))
+                    legacy_cursor=legacy_records[-1]['id']
+                self.store.fault('subtitle_profile_legacy_protection_batch')
+        with self.db:self.db.execute("INSERT INTO state(key,value) VALUES (%s,'true') ON CONFLICT DO NOTHING",(marker,))
 
     def recover_media_profile_problems(self) -> None:
         """Recover profile-coded non-caption file errors by their Job owner."""
@@ -1645,8 +1680,10 @@ class Problems:
                 return
         current_subtitle_ids={candidate['id'] for candidate in candidates if candidate.get('subtitle_event')}
         desired_subtitle=[dict(candidate) for candidate in candidates if candidate.get('subtitle_event')]
-        ownership_changed=self.db.execute("UPDATE jobs SET subtitle_event_owned=(%s=1) WHERE id=%s AND kind='download_media' AND EXISTS (SELECT 1 FROM media_files WHERE id=jobs.item AND resource_key='youtube:subtitles') AND subtitle_event_owned IS DISTINCT FROM (%s=1)",(bool(candidates),job_id,bool(candidates))).rowcount
-        if previous_subtitle and not desired_subtitle:
+        profile_subtitle=self.db.execute("SELECT 1 FROM jobs j JOIN media_files m ON m.id=j.item WHERE j.id=%s AND j.kind='download_media' AND m.resource_key='youtube:subtitles' AND j.status IN ('pending','running','failed','unavailable','blocked') AND j.problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')",(job_id,)).fetchone() is not None
+        owned_subtitle=bool(candidates) or profile_subtitle
+        ownership_changed=self.db.execute("UPDATE jobs SET subtitle_event_owned=(%s=1) WHERE id=%s AND kind='download_media' AND EXISTS (SELECT 1 FROM media_files WHERE id=jobs.item AND resource_key='youtube:subtitles') AND subtitle_event_owned IS DISTINCT FROM (%s=1)",(owned_subtitle,job_id,owned_subtitle)).rowcount
+        if previous_subtitle and not desired_subtitle and not profile_subtitle:
             ownership_changed+=self.db.execute("UPDATE jobs SET subtitle_event_owned=false WHERE id=%s AND kind='download_media' AND subtitle_event_owned",(job_id,)).rowcount
         if ownership_changed:status_changed(self.db)
         if previous and not candidates and not successful:
@@ -1680,27 +1717,6 @@ class Problems:
                     isolated.setdefault(row['canonical'],[]).append(row)
                 for row in self.db.execute("SELECT *,body::jsonb->>'status_job_identity' AS canonical FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:download_media' AND body::jsonb->>'status_job_identity'=ANY(%s)",(sorted(keys),)):
                     isolated.setdefault(row['canonical'],[]).append(row)
-        # Multiple exact-looking historical rows cannot be safely assigned to
-        # this Job; keep every byte and leave the old GET fallback active.
-        ambiguous_null: dict[str,Any]={}
-        for candidate in candidates:
-            if not (candidate.get('media_null_event') or candidate.get('media_profile_event')):continue
-            possible=([by_identity[candidate['id']]] if candidate['id'] in by_identity else [])+isolated.get(candidate['id'],[])
-            matches={row['id']:row for row in possible if self.media_record_matches(row,candidate)}
-            if len(matches)>1:ambiguous_null.update(matches)
-        if ambiguous_null:
-            from oko.storage.subtitle_problems import protect_rows
-            protect_rows(self.store,list(ambiguous_null.values()))
-            self.db.execute('UPDATE jobs SET media_null_owned=false,identity_event_owned=false WHERE id=%s',(job_id,))
-            return
-        subtitle_foreign: dict[str,Any]={}
-        for candidate in candidates:
-            if not (candidate.get('subtitle_event') or candidate.get('media_null_event') or candidate.get('media_profile_event')):continue
-            for saved in ([by_identity[candidate['id']]] if candidate['id'] in by_identity else [])+isolated.get(candidate['id'],[]):
-                if not self.media_record_matches(saved,candidate):subtitle_foreign[saved['id']]=saved
-        if subtitle_foreign:
-            from oko.storage.subtitle_problems import protect_rows
-            protect_rows(self.store,list(subtitle_foreign.values()))
         protected_ids: set[str]=set()
         if any(candidate.get('media_null_event') or candidate.get('media_profile_event') for candidate in previous+candidates):
             protection_candidates={row['id'] for row in by_identity.values()}
@@ -1710,10 +1726,42 @@ class Problems:
                 marker_ids={'fetch-null-protected:'+hashlib.sha256(identity.encode()).hexdigest():identity for identity in ordered_protection[start:start+400]}
                 for row in self.db.execute('SELECT key FROM state WHERE key=ANY(%s)',(list(marker_ids),)):
                     protected_ids.add(marker_ids[row['key']])
+        # Only a unique, unprotected previous snapshot proves that a saved
+        # occurrence belongs to this Job when its set of roots changes.
+        trusted_previous: dict[str,str]={}
+        for old_candidate in previous:
+            if not (old_candidate.get('media_profile_event') or old_candidate.get('media_null_event')):continue
+            possible=([by_identity[old_candidate['id']]] if old_candidate['id'] in by_identity else [])+isolated.get(old_candidate['id'],[])
+            matches={row['id']:row for row in possible if row['id'] not in protected_ids and self.media_record_matches(row,old_candidate)}
+            if len(matches)==1:trusted_previous[old_candidate['id']]=next(iter(matches))
+        def proven(saved: Any, candidate: dict[str,Any]) -> bool:
+            return bool(any(candidate is part for part in candidates) and (candidate.get('media_profile_event') or candidate.get('media_null_event')) and trusted_previous.get(candidate['id'])==saved['id'])
+        ambiguous_null: dict[str,Any]={}
+        for candidate in candidates:
+            if not (candidate.get('media_null_event') or candidate.get('media_profile_event')):continue
+            possible=([by_identity[candidate['id']]] if candidate['id'] in by_identity else [])+isolated.get(candidate['id'],[])
+            matches={row['id']:row for row in possible if self.media_record_matches(row,candidate) or proven(row,candidate)}
+            if len(matches)>1:ambiguous_null.update(matches)
+        if ambiguous_null:
+            from oko.storage.subtitle_problems import protect_rows
+            protect_rows(self.store,list(ambiguous_null.values()))
+            self.db.execute('UPDATE jobs SET media_null_owned=false,identity_event_owned=false WHERE id=%s',(job_id,))
+            return
+        subtitle_foreign: dict[str,Any]={}
+        for candidate in previous+candidates:
+            is_previous=any(candidate is part for part in previous)
+            if is_previous and not (candidate.get('media_null_event') or candidate.get('media_profile_event')):continue
+            if not (candidate.get('subtitle_event') or candidate.get('media_null_event') or candidate.get('media_profile_event')):continue
+            for saved in ([by_identity[candidate['id']]] if candidate['id'] in by_identity else [])+isolated.get(candidate['id'],[]):
+                if not self.media_record_matches(saved,candidate) and not proven(saved,candidate):subtitle_foreign[saved['id']]=saved
+        if subtitle_foreign:
+            from oko.storage.subtitle_problems import protect_rows
+            protect_rows(self.store,list(subtitle_foreign.values()))
+            protected_ids.update(subtitle_foreign)
         def record(candidate: dict[str,Any]) -> Any:
             def matches(saved: Any) -> bool:
                 if saved['id'] in protected_ids:return False
-                return self.media_record_matches(saved,candidate)
+                return self.media_record_matches(saved,candidate) or proven(saved,candidate)
             for saved in isolated.get(candidate['id'],[]):
                 if matches(saved):return saved
             saved=by_identity.get(candidate['id'])
@@ -1725,6 +1773,7 @@ class Problems:
                 if len(matches)>1:
                     from oko.storage.subtitle_problems import protect_rows
                     protect_rows(self.store,list(matches.values()))
+                    protected_ids.update(matches)
                     candidate['id']=''
                     continue
             matched=record(candidate)
@@ -3233,14 +3282,14 @@ class Problems:
                 batch=feeds_changed[start:start+100]
                 query="""SELECT j.id FROM jobs j LEFT JOIN media_files m ON m.id=j.item
                     WHERE j.kind='download_media' AND j.problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')
-                      AND m.resource_key IS DISTINCT FROM 'youtube:subtitles' AND (
+                      AND (
                         j.feed_id=ANY(%s) OR m.publication_id IN (SELECT publication_id FROM feed_publications WHERE is_primary AND feed_id=ANY(%s))
                         OR j.item IN (SELECT publication_id FROM feed_publications WHERE is_primary AND feed_id=ANY(%s))
                         OR m.publication_id IN (SELECT l.target_publication_id FROM feed_publications f JOIN publication_links l ON l.source_publication_id=f.publication_id WHERE f.is_primary AND f.feed_id=ANY(%s))
                         OR j.item IN (SELECT l.target_publication_id FROM feed_publications f JOIN publication_links l ON l.source_publication_id=f.publication_id WHERE f.is_primary AND f.feed_id=ANY(%s)))"""
                 for jobs in self.db.incomplete_row_pages(query,(batch,batch,batch,batch,batch)):
                     media_ids=[int(row['id']) for row in jobs]
-                    old_media=managed_media_candidates(self.store,media_ids,now)
+                    old_media=managed_media_candidates(self.store,media_ids,now,include_subtitles=True)
                     self.db.execute("""INSERT INTO oko_identity_profile_work(job_id,previous)
                         SELECT item.id,item.previous::jsonb FROM unnest(%s::bigint[],%s::text[]) AS item(id,previous)
                         ON CONFLICT (job_id) DO NOTHING""",(media_ids,[json.dumps(old_media.get(job_id,[])) for job_id in media_ids]))

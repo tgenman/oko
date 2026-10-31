@@ -965,7 +965,7 @@ class JobRepository:
             job_write(db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , next = 0 , generation = generation + 1 WHERE kind = 'fetch' AND item = %s AND status = 'done' AND error IS NULL",(item,))
         for item in effects.media:self.schedule_media(item,skip_problem_jobs=set(effects.media_problems_before),skip_source_jobs=set(effects.source_groups_before),sync_processor=False)
         for identity,manual in effects.revalidate.items():self.revalidate_media(identity,manual=manual,sync_processor=False)
-        self.reconcile_cleanup(sync_processor=False,skip_source_jobs=set(effects.source_groups_before))
+        self.reconcile_cleanup(sync_processor=False,skip_source_jobs=set(effects.source_groups_before),skip_media_jobs=set(effects.media_problems_before))
         for job_id,previous in effects.fetch_problems_before.items():
             self.store.problems.sync_fetch(job_id,previous,self.store.wall_clock())
         if processor_jobs:self.store.problems.finish_processor_change(processor_jobs,processor_previous,self.store.wall_clock())
@@ -978,9 +978,10 @@ class JobRepository:
     def processor_cleanup_jobs(self) -> list[int]:
         db=self.store.db
         return [row['id'] for row in db.execute("SELECT j.id FROM jobs j WHERE (j.processor_visible OR j.problem_code='processor-config') AND ((j.kind='download_media' AND j.status IN ('pending','running','failed','unavailable') AND NOT EXISTS (SELECT 1 FROM media_files m WHERE m.id=j.item)) OR (j.status!='cancelled' AND ((j.kind NOT IN ('delete','discover','read','feed-delete','download_media') AND EXISTS (SELECT 1 FROM publications p WHERE p.id=j.item AND p.viewed=1)) OR (j.kind='download_media' AND EXISTS (SELECT 1 FROM media_files m JOIN publications p ON p.id=m.publication_id WHERE m.id=j.item AND p.viewed=1)))) OR (j.kind='delete' AND j.status='cancelled' AND EXISTS (SELECT 1 FROM publications p WHERE p.id=j.item AND p.viewed=1)))")]
-    def reconcile_cleanup(self, *, sync_processor: bool = True, skip_source_jobs: set[int] | None = None) -> None:
+    def reconcile_cleanup(self, *, sync_processor: bool = True, skip_source_jobs: set[int] | None = None, skip_media_jobs: set[int] | None = None) -> None:
         db=self.store.db
         skipped_source=skip_source_jobs or set()
+        skipped_media=skip_media_jobs or set()
         from oko.storage import memberships,source_groups
         memberships.lock_graph(db)
         affected=self.processor_cleanup_jobs() if sync_processor else []
@@ -989,14 +990,14 @@ class JobRepository:
         ids=[row['id'] for row in orphaned]
         source_groups.sync_changed_rows(self.store,[row for row in orphaned if row['id'] not in skipped_source],self.store.wall_clock())
         for start in range(0,len(ids),400):
-            for job_id,previous in self.store.problems.saved_media_candidates(ids[start:start+400]).items():
+            for job_id,previous in self.store.problems.saved_media_candidates([job for job in ids[start:start+400] if job not in skipped_media]).items():
                 self.store.problems.sync_media_problem(job_id,previous,self.store.wall_clock())
         viewed_cancelled=job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL WHERE status != 'cancelled' AND ((kind NOT IN ('delete','discover','read','feed-delete','download_media') AND item IN (SELECT id FROM publications WHERE viewed=1)) OR (kind='download_media' AND item IN (SELECT m.id FROM media_files m JOIN publications p ON p.id=m.publication_id WHERE p.viewed=1))) RETURNING id,kind,item,OLD.problem_code AS previous_code").fetchall()
         source_groups.sync_changed_rows(self.store,[row for row in viewed_cancelled if row['id'] not in skipped_source],self.store.wall_clock())
         self.store.incomplete_draft.mark_jobs([('download_media',row['item']) for row in orphaned]+[(row['kind'],row['item']) for row in viewed_cancelled])
         viewed_media=[row['id'] for row in viewed_cancelled if row['kind']=='download_media']
         for start in range(0,len(viewed_media),400):
-            for job_id,previous in self.store.problems.saved_media_candidates(viewed_media[start:start+400]).items():
+            for job_id,previous in self.store.problems.saved_media_candidates([job for job in viewed_media[start:start+400] if job not in skipped_media]).items():
                 self.store.problems.sync_media_problem(job_id,previous,self.store.wall_clock())
         stage_ids=[row['id'] for row in viewed_cancelled if row['kind'] in ('filter','theses')]
         for start in range(0,len(stage_ids),400):
