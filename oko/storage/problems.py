@@ -747,6 +747,65 @@ class Problems:
                 cursor=ids[-1]
             self.store.fault('fetch_identity_unconfirmed_recovery_batch')
 
+    def recover_finished_foreign_fetch_deletions(self) -> None:
+        """Resolve only legacy records with one provably finished fetch owner."""
+        from oko.storage import memberships
+        cursor: tuple[float,str] | None = None
+        while True:
+            with self.db:
+                memberships.lock_graph(self.db)
+                marker = 'fetch-delete-legacy-finished-v1'
+                if self.db.execute('SELECT 1 FROM state WHERE key=%s',(marker,)).fetchone():
+                    return
+                sql = """SELECT id,identity,body,created FROM reader_problems
+                    WHERE %s=1 AND finished IS NULL AND identity LIKE 'job:%%'
+                    AND coalesce(body::jsonb->>'fetch_job_identity',identity) LIKE 'job:%%:fetch:%%'
+                    AND body::jsonb->>'operation' IN ('producer:fetch','producer:status')
+                    AND body::jsonb->>'code' IS NOT NULL AND body::jsonb->>'code'<>''
+                    AND body::jsonb->>'code' NOT LIKE 'source-%%'
+                    AND body::jsonb->>'code' NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','work-fetch')
+                    AND body::jsonb->>'operation'='producer:status'
+                    AND body::jsonb->>'code' IN ('delete','feed-delete','work-delete','work-feed-delete')
+                    AND identity LIKE '%%:fetch:%%' AND identity LIKE '%%:delete:%%'"""
+                if cursor is not None:
+                    sql += ' AND (created,id COLLATE "C")>(%s,%s)'
+                rows=self.db.execute(sql+' ORDER BY created,id COLLATE "C" LIMIT 100',(1,*cursor) if cursor is not None else (1,)).fetchall()
+                if not rows:
+                    self.db.execute('INSERT INTO state(key,value) VALUES (%s,%s) ON CONFLICT DO NOTHING',(marker,'true'))
+                    return
+                records: dict[str,dict[str,Any]]={}
+                saved_rows: dict[str,Any]={}
+                for row in rows:
+                    try: body=json.loads(row['body'])
+                    except (TypeError,ValueError):continue
+                    if not isinstance(body,dict) or any(body.get(key) is not None for key in ('fetch_job_identity','fetch_job_id','status_job_identity','status_job_target','media_job_identity','processing_job_identity','read_job_identity','delete_job_identity','source_group_identity')):continue
+                    code=body.get('code'); identity=row['identity']
+                    if not isinstance(code,str) or not identity.startswith('job:'+code+':'):continue
+                    tail=identity[len('job:'+code+':'):]
+                    kinds=('fetch','discover','download_media','filter','theses','read','delete','feed-delete')
+                    found=[kind for kind in kinds if ':'+kind+':' in tail]
+                    if found!=['fetch','delete'] or tail.count(':fetch:')!=1 or tail.count(':delete:')!=1:continue
+                    objects=body.get('objects')
+                    if not isinstance(objects,list) or len(objects)!=1 or not isinstance(objects[0],dict) or objects[0].get('kind')!='material' or not isinstance(objects[0].get('id'),str) or not objects[0]['id']:continue
+                    records[identity]=body;saved_rows[identity]=row
+                proven=self._finished_foreign_legacy_jobs(records)
+                if proven:
+                    selected=[saved_rows[identity] for identity in sorted(proven)]
+                    # Take row locks before evaluating markers: after waiting for a
+                    # concurrent owner, the following UPDATE gets a fresh snapshot.
+                    self.db.execute('SELECT id FROM reader_problems WHERE id=ANY(%s) ORDER BY id FOR UPDATE',([row['id'] for row in selected],)).fetchall()
+                    changed=self.db.execute("""UPDATE reader_problems p SET finished=%s,outcome='resolved'
+                        FROM unnest(%s::text[],%s::text[],%s::text[],%s::text[]) AS expected(id,identity,body,marker)
+                        WHERE p.id=expected.id AND p.identity COLLATE "C"=expected.identity COLLATE "C"
+                        AND p.body COLLATE "C"=expected.body COLLATE "C" AND p.finished IS NULL
+                        AND NOT EXISTS (SELECT 1 FROM state WHERE key=expected.marker)""",
+                        (self.store.wall_clock(),[row['id'] for row in selected],
+                         [row['identity'] for row in selected],[row['body'] for row in selected],
+                         ['fetch-null-protected:'+hashlib.sha256(row['id'].encode()).hexdigest() for row in selected])).rowcount
+                    if changed:status_changed(self.db)
+                cursor=(rows[-1]['created'],rows[-1]['id'])
+            self.store.fault('fetch_delete_finished_legacy_recovery_batch')
+
     def recover_fetch_problems(self) -> None:
         if self.db.execute("SELECT 1 FROM state WHERE key='fetch-problems-recovered-v2'").fetchone():
             self.recover_fetch_isolated_work()

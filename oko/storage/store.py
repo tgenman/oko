@@ -160,6 +160,7 @@ class Store:
             collection_jobs.recover(self)
             self.problems.recover_discover_problems()
             self.problems.recover_fetch_problems()
+            self.problems.recover_finished_foreign_fetch_deletions()
             self.problems.recover_fetch_null()
             self.problems.recover_fetch_identity_unconfirmed()
             self.problems.recover_media_problems()

@@ -1492,3 +1492,14 @@ passed 278 and failed two performance budgets (completion 865 vs 350 SQL;
 global rules 107 vs 100); those failures remain under investigation. The
 ambiguous foreign-delete recovery test was excluded from that run and remains
 unresolved. No real database was used.
+
+
+Startup recovery now closes a legacy fetch/delete identity only when the
+finished foreign owner is proven under the graph lock; protected, ambiguous or
+changed records remain untouched. Synthetic tests cover CAS, a waiting marker
+writer, concurrent delete, rollback, restart and 10,000 unrelated records.
+The integrated recovery suite passed 72 PostgreSQL tests, mypy on two modules
+and 16 Playwright status scenarios with a screenshot inspected. The reviewed
+marker writers take the graph lock, but an exhaustive audit of every marker
+writer was not completed; arbitrary external SQL without that protocol remains
+outside the proven concurrency guarantee. No working database was migrated.
