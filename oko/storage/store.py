@@ -174,6 +174,7 @@ class Store:
                 self.problems.recover_processor_duplicates(self.wall_clock())
                 self.problems.finish_processor_change([],None,self.wall_clock())
             self.problems.recover_processing_problems()
+            self.problems.recover_filter_profile_problems()
             from oko.storage.source_groups import recover as recover_source_groups
             recover_source_groups(self)
             if self.db.execute("SELECT 1 FROM state WHERE key LIKE 'source-youtube-timed:%%' LIMIT 1").fetchone():

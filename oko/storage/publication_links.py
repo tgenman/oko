@@ -134,14 +134,17 @@ def capture_processing_problems(store: 'Store', effects: CollectionEffects, item
     from oko.storage.processing_job_problems import managed_candidates_many
     ordered=sorted(items)
     for start in range(0,len(ordered),400):
-        rows=store.db.execute("""SELECT id FROM jobs j WHERE kind=ANY(%s) AND item=ANY(%s)
-            AND (((j.problem_code='' OR (j.problem_code IS NULL AND j.error IS NOT NULL))) OR (j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%'
-            AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')))""",(list(kinds),ordered[start:start+400])).fetchall()
+        rows=store.db.execute("""SELECT id,kind,identity_event_owned FROM jobs j WHERE kind=ANY(%s) AND item=ANY(%s)
+            AND ((j.kind='filter' AND j.identity_event_owned AND j.problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'))
+              OR j.problem_code='' OR (j.problem_code IS NULL AND j.error IS NOT NULL)
+              OR (j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%'
+                  AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')))""",(list(kinds),ordered[start:start+400])).fetchall()
         ids=[row['id'] for row in rows if row['id'] not in effects.processing_problems_checked]
         effects.processing_problems_checked.update(ids)
         if ids:
             groups=managed_candidates_many(store,ids,store.wall_clock())
-            effects.processing_problems_before.update({job_id:previous for job_id,previous in groups.items() if previous})
+            marked={row['id'] for row in rows if row['kind']=='filter' and row['identity_event_owned']}
+            effects.processing_problems_before.update({job_id:groups.get(job_id,[]) for job_id in ids if groups.get(job_id) or job_id in marked})
 
 
 def capture_media_problems(store: 'Store', effects: CollectionEffects, items: set[str]) -> None:

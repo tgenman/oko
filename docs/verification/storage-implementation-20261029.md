@@ -1595,3 +1595,12 @@ modules and a persisted status browser check with desktop/mobile screenshots.
 The full Python run on an earlier base had 2683 passed, 15 failed, 2 skipped;
 it is not a full pass on this commit. SQL-budget failures are deferred by user
 decision. No working database was migrated.
+
+
+The four profile-related codes on filter Jobs now use event updates and
+restart recovery, respecting profile suppression and preserving separate
+occurrences for linked roots. Ambiguous legacy rows remain protected; theses
+and subtitle profile codes are not covered by this slice. The integrated
+synthetic suite passed 179 PostgreSQL tests, mypy for four modules and six
+Playwright status cases with a screenshot inspected. Independent review covered
+foreign markers, same-feed unlink and concurrency. No working database changed.

@@ -6,7 +6,7 @@ if TYPE_CHECKING:
     from oko.storage.store import Store
 
 
-def candidates_many(store: 'Store', job_ids: list[int], now: float) -> dict[int,list[dict[str, Any]]]:
+def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_suppressed: bool = False) -> dict[int,list[dict[str, Any]]]:
     rows=store.db.execute(f"""SELECT j.id,j.kind,j.item,j.status,j.error,j.problem_code,j.feed_id,
         coalesce({owner_expr('p')},{owner_expr('root')},j.feed_id) AS owner,
         p.viewed,coalesce(root.id,j.item) AS affected, f.kind AS feed_kind
@@ -25,7 +25,7 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float) -> dict[int,
         if code in ('codex-choice','ai-permission','youtube-admission','processor-config') or row['viewed']:continue
         code=code or 'work-'+row['kind']
         feed=row['owner'] or row['item'] or 'demo'
-        if code in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'):
+        if not include_suppressed and code in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'):
             needle=store.db.execute("SELECT 1 FROM reader_problems WHERE identity LIKE 'profile:%%' AND finished IS NULL AND (body::jsonb->'objects') @> jsonb_build_array(jsonb_build_object('kind','feed','id',%s::text)) LIMIT 1",(feed,)).fetchone()
             if needle:continue
         item=row['item'] or ''
@@ -36,6 +36,7 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float) -> dict[int,
             body: dict[str,Any]=dict(id=identity,code=code,section='object',title='Не удалось обработать материал',
                 consequence='Сохранённое содержимое остаётся доступным.',next_step='Включите обработку, чтобы повторить попытку.' if row['status']=='blocked' else 'Повторите загрузку вручную.' if row['status'] in ('done','failed') else 'Проверьте доступность источника.' if row['status']=='unavailable' else 'Око повторит попытку автоматически.',
                 objects=[],action=None,operation='producer:'+row['kind'],processing_kind=row['kind'],processing_owner=feed,_explicit_code=explicit_code,created_at=now,state='retrying' if row['status']=='running' or not row['error'] else 'current',finished_at=None,outcome=None,next_at=None)
+            if row['kind']=='filter' and row['problem_code'] in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'):body['filter_profile_event']=True
             if row['error']:body['reason']=row['error']
             if code=='source-reconnect':body.update(section='action',next_step='Проверьте привязку источника; доступ не изменяется автоматически.')
             results[group]=body
@@ -56,12 +57,14 @@ def candidates(store: 'Store', job_id: int, now: float) -> list[dict[str, Any]]:
 def managed_candidates(store: 'Store', job_id: int, now: float) -> list[dict[str, Any]]:
     """Only per-publication failures with non-shared codes."""
     rows=candidates(store,job_id,now)
-    excluded={'codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'}
+    excluded={'codex-choice','ai-permission','youtube-admission','processor-config'}
+    profiles={'identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'}
     return [dict({k:v for k,v in row.items() if k!='_explicit_code'},processing_job_id=str(job_id)) for row in rows
-            if row['code'] not in excluded and not row['code'].startswith('source-')]
+            if row['code'] not in excluded and (row['code'] not in profiles or row.get('filter_profile_event')) and not row['code'].startswith('source-')]
 
 
-def managed_candidates_many(store: 'Store', job_ids: list[int], now: float) -> dict[int,list[dict[str, Any]]]:
-    excluded={'codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'}
-    groups=candidates_many(store,job_ids,now)
-    return {job_id:[dict({k:v for k,v in row.items() if k!='_explicit_code'},processing_job_id=str(job_id)) for row in rows if row['code'] not in excluded and not row['code'].startswith('source-')] for job_id,rows in groups.items()}
+def managed_candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_suppressed: bool = False) -> dict[int,list[dict[str, Any]]]:
+    excluded={'codex-choice','ai-permission','youtube-admission','processor-config'}
+    profiles={'identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'}
+    groups=candidates_many(store,job_ids,now,include_suppressed=include_suppressed)
+    return {job_id:[dict({k:v for k,v in row.items() if k!='_explicit_code'},processing_job_id=str(job_id)) for row in rows if row['code'] not in excluded and (row['code'] not in profiles or row.get('filter_profile_event')) and not row['code'].startswith('source-')] for job_id,rows in groups.items()}
