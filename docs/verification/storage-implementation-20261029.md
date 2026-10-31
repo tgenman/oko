@@ -1432,3 +1432,17 @@ desktop/mobile screenshots inspected. On the task checkout itself 23 tests
 passed and three infrastructure checks could not use its stale frontend build
 or write the protected scratch cache; those failures were not represented as
 passes. No working database or real YouTube account was used.
+
+
+Subtitle Job problems now use event-owned updates and recover on startup;
+timed visibility is projected without a GET write and materialized by host
+tick, with stable IDs and ETags across the boundary. Synthetic coverage includes
+the real defer/finish paths, unknown deadlines, admission interaction, graph
+owners, legacy conflicts, CAS rollback and restart. The task checkout run
+passed 177 PostgreSQL tests before stopping on a stale frontend contract build;
+the equivalent source in a temporary copy with a fresh frontend passed 334
+tests. Mypy passed for nine modules; 16 Playwright status scenarios and one
+persisted subtitle card through a synthetic backend passed, with screenshots
+inspected. For one Job linked to many roots, each due page may reproject its
+related roots; 250 roots required three projections, and large fan-out cost
+remains to be improved. One warning was emitted. No working database migrated.

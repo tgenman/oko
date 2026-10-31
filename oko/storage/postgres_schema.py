@@ -86,4 +86,5 @@ MIGRATIONS = (
     Migration(79, 'incomplete-groups', (Path(__file__).parent / 'postgres' / '079-incomplete-groups.sql').read_text()),
     Migration(80, 'fetch-null-non-youtube', (Path(__file__).parent / 'postgres' / '080-fetch-null-non-youtube.sql').read_text()),
     Migration(81, 'youtube-admission', (Path(__file__).parent / 'postgres' / '081-youtube-admission.sql').read_text()),
+    Migration(82, 'subtitle-problems', (Path(__file__).parent / 'postgres' / '082-subtitle-problems.sql').read_text()),
 )

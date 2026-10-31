@@ -50,11 +50,11 @@ def test_youtube_subtitle_keeps_existing_pause_dependent_status(tmp_path,postgre
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('caption','video','youtube:subtitles','https://example.test/sub','sub','pending_download')")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('download_media','caption','running',1) RETURNING id").fetchone()[0]
             store.jobs.fail_media(Job(job,'download_media','caption',1),AdapterIssue('media-unavailable','failure',AdapterErrorKind.temporary))
-            assert not store.db.execute("SELECT 1 FROM reader_problems WHERE body::jsonb->>'media_job_id'=%s",(str(job),)).fetchone()
-        visible=store.problems.candidates(2)
+            assert store.db.execute("SELECT 1 FROM reader_problems WHERE body::jsonb->>'media_job_id'=%s",(str(job),)).fetchone()
+        visible=store.problems.snapshot(2)['current']
         assert any(p['code']=='media-unavailable' for p in visible)
         store.youtube.blocked(2,900)
-        assert not any(p['code']=='media-unavailable' for p in store.problems.candidates(3))
+        assert not any(p['code']=='media-unavailable' for p in store.problems.snapshot(3)['current'])
     finally:store.db.close()
 
 

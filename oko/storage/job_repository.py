@@ -878,10 +878,13 @@ class JobRepository:
     def defer_captions(self, job: Job, now: float, delay: float, reason: str) -> None:
         memberships.lock_graph(self.store.db)
         processor_previous=self.store.problems.prepare_processor_change([job.id],self.store.wall_clock())
+        from oko.storage.media_job_problems import previous_candidates
+        subtitle_previous=previous_candidates(self.store,job.id,self.store.wall_clock())
         changed=job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , next = %s , error = %s , problem_code = NULL WHERE id = %s AND generation = %s AND status = 'running' AND CASE WHEN kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING id,OLD.problem_code AS previous_code",(now+max(.05,delay),reason,job.id,job.generation)).fetchone()
         if changed and (changed['previous_code'] or '').startswith('source-'):
             from oko.storage import source_groups
             source_groups.sync_changed_rows(self.store,[changed],self.store.wall_clock())
+        if changed:self.store.problems.sync_media_problem(job.id,subtitle_previous,self.store.wall_clock())
         if changed:self.store.problems.finish_processor_change([job.id],processor_previous,self.store.wall_clock())
         if changed:self.store.incomplete_draft.mark_job(job.kind,job.item,job.id)
 
@@ -1048,7 +1051,7 @@ class JobRepository:
         effects=CollectionEffects()
         affected={row['item'] for row in db.execute(f"SELECT j.item FROM jobs j JOIN ({owned_ids('= %s')}) owner ON owner.id=j.item WHERE j.kind='fetch' AND ((j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%'))",(feed,feed))}
         publication_links.capture_fetch_problems(self.store,effects,affected)
-        media_affected={row['publication_id'] for row in db.execute(f"SELECT DISTINCT m.publication_id FROM media_files m JOIN ({owned_ids('= %s')}) owner ON owner.id=m.publication_id JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.resource_key IS DISTINCT FROM 'youtube:subtitles' AND j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%'",(feed,feed))}
+        media_affected={row['publication_id'] for row in db.execute(f"SELECT DISTINCT m.publication_id FROM media_files m JOIN ({owned_ids('= %s')}) owner ON owner.id=m.publication_id JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE ((m.resource_key='youtube:subtitles' AND j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%'))",(feed,feed))}
         publication_links.capture_media_problems(self.store,effects,media_affected)
         owned=[row[0] for row in db.execute(owned_ids('= %s'),(feed,feed))]
         from oko.storage import memberships

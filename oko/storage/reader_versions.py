@@ -22,6 +22,9 @@ class ReaderVersions:
         self._next_fetch_null_gc = float('-inf')
         self._processor_youtube_paused = store.problems.processor_youtube_paused(store.wall_clock())
         self._incomplete_due_cursor: tuple[float,str] | None = None
+        self._subtitle_due_cursor: tuple[float,str] | None = None
+        self._subtitle_pointer_gc_cursor: str | None = None
+        self._next_subtitle_pointer_gc = float('-inf')
         with self.db:
             self.db.execute("INSERT INTO state(key,value) VALUES ('storage-id',%s) ON CONFLICT DO NOTHING", (json.dumps(str(uuid.uuid4())),))
         identity = json.loads(expect_row(self.db.execute("SELECT value FROM state WHERE key='storage-id'").fetchone())[0])
@@ -77,6 +80,13 @@ class ReaderVersions:
                 memberships.lock_graph(self.db)
                 from oko.storage.youtube_admission import finish_due
                 finish_due(self.store,wall)
+            if self.db.execute('SELECT 1 FROM reader_problems WHERE subtitle_due IS NOT NULL AND subtitle_reserved_owned AND subtitle_due<=%s LIMIT 1',(wall,)).fetchone():
+                from oko.storage import memberships
+                from oko.storage.subtitle_problems import activate_due
+                memberships.lock_graph(self.db)
+                old_subtitle_cursor=self._subtitle_due_cursor
+                self._subtitle_due_cursor=activate_due(self.store,wall,cursor=old_subtitle_cursor)
+                self.db.after_rollback(lambda: setattr(self,'_subtitle_due_cursor',old_subtitle_cursor))
             paused=self.store.problems.processor_youtube_paused(wall)
             if paused!=self._processor_youtube_paused:
                 from oko.storage import memberships,source_groups
@@ -97,6 +107,17 @@ class ReaderVersions:
                 self.db.after_rollback(restore_source_legacy_gc)
                 self.db.after_commit(lambda: setattr(self,'_source_legacy_gc_cursor',cursor))
                 if done:self.db.after_commit(lambda: setattr(self,'_next_source_legacy_gc',now+60))
+            if now>=self._next_subtitle_pointer_gc:
+                from oko.storage.subtitle_problems import cleanup_pointers
+                pointer_cursor,pointer_done=cleanup_pointers(self.store,self._subtitle_pointer_gc_cursor)
+                old_pointer_cursor=self._subtitle_pointer_gc_cursor
+                old_pointer_next=self._next_subtitle_pointer_gc
+                def restore_subtitle_pointer_gc() -> None:
+                    self._subtitle_pointer_gc_cursor=old_pointer_cursor
+                    self._next_subtitle_pointer_gc=old_pointer_next
+                self.db.after_rollback(restore_subtitle_pointer_gc)
+                self.db.after_commit(lambda: setattr(self,'_subtitle_pointer_gc_cursor',pointer_cursor))
+                if pointer_done:self.db.after_commit(lambda: setattr(self,'_next_subtitle_pointer_gc',now+60))
             if now>=self._next_fetch_null_gc:
                 from oko.storage.fetch_job_problems import cleanup_null_protection
                 cursor,done=cleanup_null_protection(self.store,self._fetch_null_gc_cursor)
@@ -129,8 +150,8 @@ class ReaderVersions:
             cutoff = wall-86400
             reservation=self.store.problems.processor_reservation()
             reserved_id=reservation['id'] if reservation else None
-            expired = [row['id'] for row in self.db.execute('SELECT id FROM reader_problems WHERE finished <= %s AND id IS DISTINCT FROM %s AND incomplete_due IS NULL ORDER BY finished,id LIMIT 200',(cutoff,reserved_id))]
-            removed = self.db.execute('DELETE FROM reader_problems WHERE id=ANY(%s) AND finished <= %s AND incomplete_due IS NULL',(expired,cutoff)).rowcount if expired else 0
+            expired = [row['id'] for row in self.db.execute('SELECT id FROM reader_problems WHERE finished <= %s AND id IS DISTINCT FROM %s AND incomplete_due IS NULL AND subtitle_due IS NULL ORDER BY finished,id LIMIT 200',(cutoff,reserved_id))]
+            removed = self.db.execute('DELETE FROM reader_problems WHERE id=ANY(%s) AND finished <= %s AND incomplete_due IS NULL AND subtitle_due IS NULL',(expired,cutoff)).rowcount if expired else 0
             if removed:
                 from oko.storage.reader_status import changed as status_changed
                 status_changed(self.db)

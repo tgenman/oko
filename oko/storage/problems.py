@@ -993,10 +993,10 @@ class Problems:
                    OR EXISTS (SELECT 1 FROM publication_links l JOIN media_files m ON m.publication_id=l.target_publication_id JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE l.source_publication_id=target.root AND j.status IN ('pending','running','failed','unavailable','blocked') AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL))""",(ordered[start:start+400],)))
         return result
 
-    def recover_media_batch(self, rows: list[Any], now: float) -> list[Any]:
+    def recover_media_batch(self, rows: list[Any], now: float, *, include_subtitles: bool = False, new_ids_out: set[str] | None = None) -> list[Any]:
         """Persist independent first occurrences; address legacy collisions separately."""
         from oko.storage.media_job_problems import managed_candidates_many
-        projected=managed_candidates_many(self.store,[row['id'] for row in rows],now)
+        projected=managed_candidates_many(self.store,[row['id'] for row in rows],now,include_subtitles=include_subtitles)
         counts: dict[str,int]={};legacy_keys: set[str]=set()
         for candidates in projected.values():
             for candidate in candidates:
@@ -1095,10 +1095,75 @@ class Problems:
             body={key:value for key,value in candidate.items() if key not in ('id','created_at','finished_at','outcome','_legacy_id')}
             added.append((uuid.uuid4().hex,candidate['id'],'background',json.dumps(body),now))
         if added:
+            if new_ids_out is not None:new_ids_out.update(row[0] for row in added)
             self.db.execute("""INSERT INTO reader_problems(id,identity,origin,body,created,finished,outcome)
                 SELECT id,identity,origin,body,created,NULL,NULL FROM unnest(%s::text[],%s::text[],%s::text[],%s::text[],%s::double precision[]) AS p(id,identity,origin,body,created)""",tuple([row[i] for row in added] for i in range(5)))
             status_changed(self.db)
         return [row for row in rows if row['id'] in complex_ids]
+
+    def recover_subtitles(self) -> None:
+        if self.db.execute("SELECT 1 FROM state WHERE key='subtitle-problems-recovered-v1'").fetchone():return
+        cursor: str | None=None
+        while True:
+            query="""SELECT m.id AS file_id,j.id,j.subtitle_event_owned FROM media_files m JOIN jobs j ON j.item=m.id AND j.kind='download_media'
+                WHERE m.resource_key='youtube:subtitles' AND j.status IN ('pending','running','failed','unavailable','blocked')
+                AND ((j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%'
+                    AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')))"""
+            if cursor is not None:query+=' AND m.id COLLATE "C">%s'
+            rows=self.db.execute(query+' ORDER BY m.id COLLATE "C" LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
+            if not rows:break
+            with self.db:
+                from oko.storage import memberships
+                memberships.lock_graph(self.db)
+                now=self.store.wall_clock()
+                from oko.storage.media_job_problems import managed_candidates_many
+                legacy_rows=self.db.execute("""SELECT t.item,r.id FROM unnest(%s::text[]) t(item) CROSS JOIN LATERAL (
+                    SELECT id FROM reader_problems WHERE finished IS NULL AND identity LIKE 'job:%%' AND body::jsonb->>'code'='work-download_media'
+                    AND body::jsonb->>'operation' IN ('producer:download_media','producer:status')
+                    AND md5(substring(coalesce(body::jsonb->>'media_job_identity',body::jsonb->>'status_job_identity',identity) FROM ':download_media:(.*)$'))=md5(t.item)
+                    AND substring(coalesce(body::jsonb->>'media_job_identity',body::jsonb->>'status_job_identity',identity) FROM ':download_media:(.*)$')=t.item LIMIT 101) r""",([row['file_id'] for row in rows if not row['subtitle_event_owned']],)).fetchall()
+                legacy_counts: dict[str,int]={}
+                for legacy in legacy_rows:legacy_counts[legacy['item']]=legacy_counts.get(legacy['item'],0)+1
+                legacy_items=set(legacy_counts)
+                overflow_items={item for item,count in legacy_counts.items() if count>100}
+                if legacy_items:
+                    from oko.storage.subtitle_problems import protect_legacy
+                    for item in legacy_items:protect_legacy(self.store,item)
+                if overflow_items:self.db.execute("UPDATE jobs SET subtitle_event_owned=false WHERE id=ANY(%s)",([row['id'] for row in rows if row['file_id'] in overflow_items],))
+                direct_rows=[row for row in rows if row['file_id'] in legacy_items and row['file_id'] not in overflow_items]
+                bounded=[row for row in rows if row['file_id'] not in legacy_items]
+                for row in direct_rows:self.sync_media_problem(row['id'],[],now)
+                projected=managed_candidates_many(self.store,[row['id'] for row in bounded],now,include_subtitles=True) if bounded else {}
+                key_jobs: dict[str,set[int]]={}
+                for job_id,parts in projected.items():
+                    for candidate in parts:key_jobs.setdefault(candidate['id'],set()).add(job_id)
+                conflicting_jobs: set[int]=set()
+                from oko.storage.subtitle_problems import protect_isolated
+                for field in ('media_job_identity','status_job_identity'):
+                    query=f"""SELECT t.canonical FROM unnest(%s::text[]) t(canonical) CROSS JOIN LATERAL (
+                        SELECT id FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:download_media'
+                        AND body::jsonb->>'{field}'=t.canonical LIMIT 101) r GROUP BY t.canonical HAVING count(*)>100"""
+                    conflicts=self.db.execute(query,(sorted(key_jobs),)).fetchall() if key_jobs else []
+                    for conflict in conflicts:
+                        canonical=conflict['canonical'];protect_isolated(self.store,field,canonical)
+                        conflicting_jobs.update(key_jobs[canonical])
+                if conflicting_jobs:
+                    self.db.execute('UPDATE jobs SET subtitle_event_owned=false WHERE id=ANY(%s)',(sorted(conflicting_jobs),))
+                    bounded=[row for row in bounded if row['id'] not in conflicting_jobs]
+                    projected={job:parts for job,parts in projected.items() if job not in conflicting_jobs}
+                new_ids: set[str]=set()
+                complex_rows=self.recover_media_batch(bounded,now,include_subtitles=True,new_ids_out=new_ids) if bounded else []
+                complex_ids={row['id'] for row in complex_rows}
+                for row in complex_rows:self.sync_media_problem(row['id'],[],now)
+                owned=[job for job,candidates in projected.items() if candidates and job not in complex_ids]
+                if owned:
+                    self.db.execute("UPDATE jobs SET subtitle_event_owned=true WHERE id=ANY(%s)",(owned,))
+                    if self.store.youtube.status(now)['next_at']>now:
+                        from oko.storage.subtitle_problems import sync_timer
+                        sync_timer(self.store,now,owned,new_ids=new_ids)
+            cursor=rows[-1]['file_id']
+            self.store.fault('subtitle_problem_recovery_batch')
+        with self.db:self.db.execute("INSERT INTO state(key,value) VALUES ('subtitle-problems-recovered-v1','true') ON CONFLICT DO NOTHING")
 
     def recover_media_problems(self) -> None:
         if self.db.execute("SELECT 1 FROM state WHERE key='media-problems-recovered-v2'").fetchone():return
@@ -1205,6 +1270,11 @@ class Problems:
         except (TypeError,ValueError):return False
         if not isinstance(body,dict) or body.get('code')!=candidate['code']:
             return False
+        if candidate.get('subtitle_event'):
+            allowed_fields={'code','section','title','consequence','next_step','objects','action','operation','state','next_at','reason',
+                'media_owner','media_file_id','media_orphan','media_job_id','media_job_identity','media_implicit_code',
+                'status_job_identity','status_job_target','subtitle_event','subtitle_wait_on_next','subtitle_reservation','subtitle_canonical'}
+            if set(body)-allowed_fields:return False
         operation=body.get('operation')
         objects=body.get('objects')
         if not isinstance(objects,list) or not objects or any(not isinstance(obj,dict) or obj.get('kind')!='material' or not isinstance(obj.get('id'),str) for obj in objects):return False
@@ -1249,24 +1319,62 @@ class Problems:
 
     def sync_media_problem(self, job_id: int, previous: list[dict[str,Any]], now: float, *, successful: bool = False) -> None:
         from oko.storage.media_job_problems import managed_candidates
+        previous_subtitle=[dict(candidate) for candidate in previous if candidate.get('subtitle_event')]
         candidates=[] if successful else managed_candidates(self.store,job_id,now)
+        subtitle_items={candidate['media_file_id'] for candidate in previous_subtitle+candidates if candidate.get('subtitle_event')}
+        for item in subtitle_items:
+            legacy=self.db.execute("""SELECT id FROM reader_problems WHERE finished IS NULL AND identity LIKE 'job:%%' AND body::jsonb->>'code'='work-download_media'
+                AND body::jsonb->>'operation' IN ('producer:download_media','producer:status')
+                AND md5(substring(coalesce(body::jsonb->>'media_job_identity',body::jsonb->>'status_job_identity',identity) FROM ':download_media:(.*)$'))=md5(%s)
+                AND substring(coalesce(body::jsonb->>'media_job_identity',body::jsonb->>'status_job_identity',identity) FROM ':download_media:(.*)$')=%s LIMIT 101""",(item,item)).fetchall()
+            if len(legacy)>100:
+                from oko.storage.subtitle_problems import protect_legacy
+                protect_legacy(self.store,item)
+                if self.db.execute('UPDATE jobs SET subtitle_event_owned=false WHERE id=%s AND subtitle_event_owned',(job_id,)).rowcount:status_changed(self.db)
+                return
+        current_subtitle_ids={candidate['id'] for candidate in candidates if candidate.get('subtitle_event')}
+        desired_subtitle=[dict(candidate) for candidate in candidates if candidate.get('subtitle_event')]
+        ownership_changed=self.db.execute("UPDATE jobs SET subtitle_event_owned=(%s=1) WHERE id=%s AND kind='download_media' AND EXISTS (SELECT 1 FROM media_files WHERE id=jobs.item AND resource_key='youtube:subtitles') AND subtitle_event_owned IS DISTINCT FROM (%s=1)",(bool(candidates),job_id,bool(candidates))).rowcount
+        if ownership_changed:status_changed(self.db)
         if previous and not candidates and not successful:
             subtitle=self.db.execute("SELECT 1 FROM jobs j JOIN media_files m ON m.id=j.item WHERE j.id=%s AND j.kind='download_media' AND m.resource_key='youtube:subtitles'",(job_id,)).fetchone()
             if not subtitle or not self.store.youtube.status(now)['paused']:
                 from oko.storage.media_job_problems import candidates_many
                 handoff=candidates_many(self.store,[job_id],now,include_subtitles=bool(subtitle)).get(job_id,[])
                 candidates=[dict({k:v for k,v in candidate.items() if k not in ('_code_present','_subtitle')},media_job_id=str(job_id),_handoff_to_get=True)
-                    for candidate in handoff if (subtitle or not candidate['_code_present']) and not (subtitle and not candidate['_code_present'] and self.store.youtube.ready_at()>now) and candidate['code'] not in ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') and not candidate['code'].startswith('source-')]
+                    for candidate in handoff if (subtitle or not candidate['_code_present']) and not (subtitle and not candidate['_code_present'] and self.store.youtube.status(now)['next_at']>now) and candidate['code'] not in ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') and not candidate['code'].startswith('source-')]
         keys={candidate['id'] for candidate in previous+candidates}
         keys.update(candidate['_legacy_id'] for candidate in candidates if candidate.get('_legacy_id'))
         rows=self.db.execute('SELECT * FROM reader_problems WHERE finished IS NULL AND identity=ANY(%s)',(sorted(keys),)).fetchall() if keys else []
         by_identity={row['identity']:row for row in rows}
         isolated: dict[str,list[Any]]={}
         if keys:
-            for row in self.db.execute("SELECT *,body::jsonb->>'media_job_identity' AS canonical FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:download_media' AND body::jsonb->>'media_job_identity'=ANY(%s)",(sorted(keys),)):
-                isolated.setdefault(row['canonical'],[]).append(row)
-            for row in self.db.execute("SELECT *,body::jsonb->>'status_job_identity' AS canonical FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:download_media' AND body::jsonb->>'status_job_identity'=ANY(%s)",(sorted(keys),)):
-                isolated.setdefault(row['canonical'],[]).append(row)
+            if previous_subtitle or any(candidate.get('subtitle_event') for candidate in candidates):
+                for field in ('media_job_identity','status_job_identity'):
+                    query=f"""SELECT r.*,t.canonical FROM unnest(%s::text[]) t(canonical) CROSS JOIN LATERAL (
+                        SELECT * FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:download_media'
+                        AND body::jsonb->>'{field}'=t.canonical LIMIT 101) r"""
+                    for row in self.db.execute(query,(sorted(keys),)):isolated.setdefault(row['canonical'],[]).append(row)
+                overflow_keys=[key for key,rows in isolated.items() if len(rows)>100]
+                if overflow_keys:
+                    from oko.storage.subtitle_problems import protect_isolated
+                    for key in overflow_keys:
+                        for field in ('media_job_identity','status_job_identity'):protect_isolated(self.store,field,key)
+                    if self.db.execute('UPDATE jobs SET subtitle_event_owned=false WHERE id=%s AND subtitle_event_owned',(job_id,)).rowcount:status_changed(self.db)
+                    return
+            else:
+                for row in self.db.execute("SELECT *,body::jsonb->>'media_job_identity' AS canonical FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:download_media' AND body::jsonb->>'media_job_identity'=ANY(%s)",(sorted(keys),)):
+                    isolated.setdefault(row['canonical'],[]).append(row)
+                for row in self.db.execute("SELECT *,body::jsonb->>'status_job_identity' AS canonical FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:download_media' AND body::jsonb->>'status_job_identity'=ANY(%s)",(sorted(keys),)):
+                    isolated.setdefault(row['canonical'],[]).append(row)
+        subtitle_foreign: dict[str,Any]={}
+        for candidate in candidates:
+            if not candidate.get('subtitle_event'):continue
+            for saved in ([by_identity[candidate['id']]] if candidate['id'] in by_identity else [])+isolated.get(candidate['id'],[]):
+                if not self.media_record_matches(saved,candidate):subtitle_foreign[saved['id']]=saved
+        if subtitle_foreign:
+            from oko.storage.subtitle_problems import protect_rows
+            protect_rows(self.store,list(subtitle_foreign.values()))
         def record(candidate: dict[str,Any]) -> Any:
             for saved in isolated.get(candidate['id'],[]):
                 if self.media_record_matches(saved,candidate):return saved
@@ -1365,6 +1473,15 @@ class Problems:
             self.db.execute("""INSERT INTO reader_problems(id,identity,origin,body,created,finished,outcome)
                 SELECT id,identity,origin,body,created,NULL,NULL FROM unnest(%s::text[],%s::text[],%s::text[],%s::text[],%s::double precision[]) AS p(id,identity,origin,body,created)""",tuple([row[i] for row in added] for i in range(5)))
         if updates or added:status_changed(self.db)
+        from oko.storage.subtitle_problems import transfer_reservation
+        transferred=transfer_reservation(self.store,job_id,previous_subtitle,desired_subtitle,{row[0] for row in added}) if previous_subtitle and desired_subtitle else set()
+        removed_subtitle=[candidate for candidate in previous_subtitle if candidate['id'] not in current_subtitle_ids and candidate['id'] not in transferred]
+        if removed_subtitle:
+            from oko.storage.subtitle_problems import cancel_reservations
+            cancel_reservations(self.store,job_id,removed_subtitle)
+        if any(candidate.get('subtitle_event') for candidate in candidates):
+            from oko.storage.subtitle_problems import sync_timer
+            sync_timer(self.store,now,[job_id],new_ids={row[0] for row in added},previous=previous_subtitle)
 
     def active_processing_roots(self, items: set[str]) -> set[str]:
         result: set[str]=set()
@@ -2813,9 +2930,10 @@ class Problems:
                              for obj in json.loads(row['body'])['objects'] if obj['kind'] == 'feed'}
         groups: dict[str | tuple[str,str] | tuple[str,str,str], dict[str, Any]] = {}
         youtube = self.store.youtube.status(now)
-        source_owned_filter="AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND problem_code IS NULL AND error IS NOT NULL AND fetch_null_owned) AND NOT (kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code IS NOT NULL AND problem_code LIKE 'source-%' AND source_event_owned)" if scope_items is None else ''
+        source_owned_filter="AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND subtitle_event_owned) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND problem_code IS NULL AND error IS NOT NULL AND fetch_null_owned) AND NOT (kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code IS NOT NULL AND problem_code LIKE 'source-%' AND source_event_owned)" if scope_items is None else ''
         admission_filter="AND problem_code IS DISTINCT FROM 'youtube-admission'" if scope_items is None and getattr(self.store,'youtube_admission_ready',False) else ''
-        jobs = self.db.execute(f"SELECT jobs . * , coalesce ( {owner_expr('items')} , {owner_expr('media_owner')} , {owner_expr('linked_root')} ) AS resolved_feed_id , coalesce ( items . viewed , media_owner . viewed ) AS viewed , m . resource_key AS resource_key , coalesce ( linked_root . id , m . publication_id , jobs . item ) AS affected_item FROM (SELECT * FROM (SELECT * FROM jobs WHERE {direct_scope}kind IS DISTINCT FROM 'read' AND kind IS DISTINCT FROM 'discover' AND problem_code IS DISTINCT FROM 'processor-config' AND NOT ((kind IS NOT DISTINCT FROM 'filter' OR kind IS NOT DISTINCT FROM 'theses') AND item IS NOT NULL AND item<>'' AND (((problem_code='' OR (problem_code IS NULL AND error IS NOT NULL))) OR (problem_code IS NOT NULL AND problem_code<>'' AND problem_code NOT LIKE '{source_like}' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')))) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL AND problem_code NOT LIKE '{source_like}' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') AND NOT fetch_null_ambiguous) AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')) AND (problem_code IS NOT NULL OR error IS NOT NULL) {source_owned_filter} {admission_filter} AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL AND problem_code NOT LIKE '{source_like}' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) UNION ALL SELECT j.* FROM media_files subtitle JOIN jobs j ON j.kind='download_media' AND j.item=subtitle.id WHERE {media_scope}subtitle.resource_key='youtube:subtitles' AND j.kind='download_media' AND j.item IS NOT NULL AND j.item<>'' AND j.problem_code IS NOT NULL AND j.problem_code NOT LIKE '{source_like}' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) status_jobs ORDER BY kind,item OFFSET 0) jobs LEFT JOIN publications items ON items . id = jobs . item LEFT JOIN media_files m ON jobs . kind = 'download_media' AND m . id = jobs . item LEFT JOIN publications media_owner ON media_owner . id = m . publication_id LEFT JOIN publication_links link ON link . target_publication_id = coalesce ( items . id , media_owner . id ) LEFT JOIN publications linked_root ON linked_root . id = link . source_publication_id AND linked_root . viewed = 0 WHERE ( jobs . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' , 'blocked' ) OR ( jobs . status = 'done' AND jobs . kind = 'fetch' AND jobs . problem_code IS NOT NULL AND jobs . error IS NOT NULL ) ) AND ( jobs . problem_code IS NOT NULL OR jobs . error IS NOT NULL ) AND jobs.kind IS DISTINCT FROM 'read' AND jobs.problem_code IS DISTINCT FROM 'processor-config' AND NOT (jobs.kind IN ('delete','feed-delete') AND coalesce(nullif(jobs.problem_code,''),'work-'||jobs.kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))",parameters).fetchall()
+        subtitle_owned_filter='AND NOT j.subtitle_event_owned' if scope_items is None else ''
+        jobs = self.db.execute(f"SELECT jobs . * , coalesce ( {owner_expr('items')} , {owner_expr('media_owner')} , {owner_expr('linked_root')} ) AS resolved_feed_id , coalesce ( items . viewed , media_owner . viewed ) AS viewed , m . resource_key AS resource_key , coalesce ( linked_root . id , m . publication_id , jobs . item ) AS affected_item FROM (SELECT * FROM (SELECT * FROM jobs WHERE {direct_scope}kind IS DISTINCT FROM 'read' AND kind IS DISTINCT FROM 'discover' AND problem_code IS DISTINCT FROM 'processor-config' AND NOT ((kind IS NOT DISTINCT FROM 'filter' OR kind IS NOT DISTINCT FROM 'theses') AND item IS NOT NULL AND item<>'' AND (((problem_code='' OR (problem_code IS NULL AND error IS NOT NULL))) OR (problem_code IS NOT NULL AND problem_code<>'' AND problem_code NOT LIKE '{source_like}' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')))) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL AND problem_code NOT LIKE '{source_like}' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') AND NOT fetch_null_ambiguous) AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')) AND (problem_code IS NOT NULL OR error IS NOT NULL) {source_owned_filter} {admission_filter} AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL AND problem_code NOT LIKE '{source_like}' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) UNION ALL SELECT j.* FROM media_files subtitle JOIN jobs j ON j.kind='download_media' AND j.item=subtitle.id WHERE {media_scope}subtitle.resource_key='youtube:subtitles' AND j.kind='download_media' {subtitle_owned_filter} AND j.item IS NOT NULL AND j.item<>'' AND j.problem_code IS NOT NULL AND j.problem_code NOT LIKE '{source_like}' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) status_jobs ORDER BY kind,item OFFSET 0) jobs LEFT JOIN publications items ON items . id = jobs . item LEFT JOIN media_files m ON jobs . kind = 'download_media' AND m . id = jobs . item LEFT JOIN publications media_owner ON media_owner . id = m . publication_id LEFT JOIN publication_links link ON link . target_publication_id = coalesce ( items . id , media_owner . id ) LEFT JOIN publications linked_root ON linked_root . id = link . source_publication_id AND linked_root . viewed = 0 WHERE ( jobs . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' , 'blocked' ) OR ( jobs . status = 'done' AND jobs . kind = 'fetch' AND jobs . problem_code IS NOT NULL AND jobs . error IS NOT NULL ) ) AND ( jobs . problem_code IS NOT NULL OR jobs . error IS NOT NULL ) AND jobs.kind IS DISTINCT FROM 'read' AND jobs.problem_code IS DISTINCT FROM 'processor-config' AND NOT (jobs.kind IN ('delete','feed-delete') AND coalesce(nullif(jobs.problem_code,''),'work-'||jobs.kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))",parameters).fetchall()
         if scope_items is not None:
             source_ids=sorted({job['resolved_feed_id'] or job['feed_id'] for job in jobs if job['resolved_feed_id'] or job['feed_id']})
             for start in range(0,len(source_ids),400):
@@ -3063,7 +3181,16 @@ class Problems:
 
     def forget_materials(self, members: set[str], now: float) -> None:
         """Deletion wins over keeping an expanded/history row; retain only service facts."""
-        for row in problem_links.material_records(self.db, 'problem', members):
+        records=problem_links.material_records(self.db, 'problem', members)
+        from oko.storage.subtitle_problems import valid as valid_subtitle_reservation
+        reserved_rows={row['identity']:valid_subtitle_reservation(row) for row in records if row['subtitle_due'] is not None}
+        reserved_keys=list(reserved_rows)
+        pointers={}
+        for start in range(0,len(reserved_keys),400):
+            pointers.update({row['key']:row['value'] for row in self.db.execute('SELECT key,value FROM state WHERE key=ANY(%s)',(reserved_keys[start:start+400],))})
+        for row in records:
+            reserved=reserved_rows.get(row['identity'])
+            if reserved and pointers.get(row['identity'])==json.dumps(['oko-subtitle-v1',reserved['media_job_id'],reserved['subtitle_canonical']]):continue
             if row['identity']=='processor:configuration':
                 continue
             if row['origin']=='action' or row['identity'].startswith('action:'):
@@ -3176,10 +3303,7 @@ class Problems:
         saved_fetch_rows=[]
         for row in existing.values():
             if not row['has_fetch_null_protection']:continue
-            if not row['identity'].startswith('job:'):continue
-            try:fetch_body=json.loads(row['body'])
-            except (TypeError,ValueError):continue
-            if isinstance(fetch_body,dict) and fetch_body.get('code')=='work-fetch':saved_fetch_rows.append(row)
+            if row['identity'].startswith('job:'):saved_fetch_rows.append(row)
         for offset in range(0,len(saved_fetch_rows),400):
             batch_fetch_rows=saved_fetch_rows[offset:offset+400]
             keys={'fetch-null-protected:'+hashlib.sha256(row['id'].encode()).hexdigest():(row['id'],row['identity']) for row in batch_fetch_rows}
@@ -3197,6 +3321,11 @@ class Problems:
         if getattr(self.store,'youtube_admission_ready',False):
             from oko.storage.youtube_admission import current as current_admission
             admission_current=current_admission(self.store)
+        from oko.storage.subtitle_problems import valid as valid_subtitle_reservation
+        for future in self.db.execute('SELECT * FROM reader_problems WHERE subtitle_due IS NOT NULL AND subtitle_reserved_owned AND subtitle_due<=%s',(now,)):
+            body=valid_subtitle_reservation(future)
+            occupied=existing.get(body['subtitle_canonical']) if body else None
+            if occupied is not None:protected_fetch_null.add(occupied['id'])
         owned_source_identities: set[str]=set()
         source_legacy: dict[str,str]={}
         for row in existing.values():
@@ -3486,7 +3615,7 @@ class Problems:
                 status_changed(self.db)
         current: list[dict[str, Any]] = []
         recent: list[dict[str, Any]] = []
-        rows = self.db.execute('SELECT * FROM reader_problems WHERE finished IS NULL OR finished > %s ORDER BY created DESC', (now - 86400,)).fetchall()
+        rows = self.db.execute('SELECT * FROM reader_problems WHERE finished IS NULL OR finished > %s OR (subtitle_due IS NOT NULL AND subtitle_reserved_owned AND subtitle_due<=%s) ORDER BY created DESC', (now - 86400,now)).fetchall()
         reservation=self.processor_reservation()
         processor_current=self.processor_current()
         action_identities=sorted({row['identity'][7:] for row in rows if row['identity'].startswith('action:')})
@@ -3496,7 +3625,14 @@ class Problems:
                 receipts[saved_receipt['identity']]=saved_receipt
         from oko.storage.incomplete_group_draft import verified_reservation_rows
         incomplete_reservations=verified_reservation_rows(self.store,[row for row in rows if row['incomplete_due'] is not None])
+        from oko.storage.subtitle_problems import verified as verified_subtitles
+        subtitle_reservations=verified_subtitles(self.store,[row for row in rows if row['subtitle_due'] is not None],now)
         for row in rows:
+            virtual_subtitle=subtitle_reservations.get(row['id'])
+            if virtual_subtitle is not None and row['subtitle_due']>now:continue
+            damaged_subtitle=(row['subtitle_due'] is not None and virtual_subtitle is None and row['subtitle_reserved_owned']
+                and row['finished'] is not None and row['finished']<=now-86400)
+            if row['subtitle_due'] is not None and virtual_subtitle is None and not damaged_subtitle and row['finished'] is not None and row['finished']<=now-86400:continue
             if row['id'] in incomplete_reservations:
                 continue
             if reservation and row['id']==reservation['id'] and row['identity']=='processor:reservation:'+reservation['id']:
@@ -3559,6 +3695,13 @@ class Problems:
                     problem=dict(code='material-incomplete',section='object',title='Сведения о неполном материале недоступны',
                         consequence='Исходная запись сохранена.',next_step='Проверьте журнал диагностики.',objects=[],action=None,
                         operation='producer:incomplete-legacy',state='current',next_at=None)
+            if virtual_subtitle is not None:
+                problem=dict(virtual_subtitle)
+                problem.pop('subtitle_reservation',None);problem.pop('subtitle_canonical',None)
+            elif damaged_subtitle:
+                problem=dict(code='work-download_media',section='object',title='Состояние субтитров требует проверки',
+                    consequence='Исходная запись сохранена.',next_step='Проверьте журнал диагностики.',objects=[],action=None,
+                    operation='producer:subtitle-legacy',state='current',next_at=None)
             if row['finished'] is None and processor_current and row['id']==processor_current['id']:
                 projected=self.processor_configuration_candidate(now)
                 if projected is not None:
@@ -3573,9 +3716,11 @@ class Problems:
             if not visible_id:
                 visible_id = _legacy_problem_id(row['identity'])
             finished = None if (generic or processor_legacy or incomplete_legacy or youtube_legacy) and (bad_finished or bad_outcome) else row['finished']
+            if virtual_subtitle is not None or damaged_subtitle:finished=None
             if virtual_finished is not None:finished=virtual_finished
             if virtual_finished is not None and virtual_finished<=now-86400:continue
             created = now if (generic or processor_legacy or incomplete_legacy or youtube_legacy) and bad_created else row['created']
+            if virtual_subtitle is not None or damaged_subtitle:created=row['subtitle_due']
             problem.update(id=visible_id, created_at=created, finished_at=finished,
                            outcome=None if finished is None else 'resolved' if virtual_finished is not None else row['outcome'], state='finished' if finished is not None else problem['state'])
             (recent if finished is not None else current).append(problem)

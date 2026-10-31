@@ -160,6 +160,7 @@ class Store:
             self.problems.recover_fetch_problems()
             self.problems.recover_fetch_null()
             self.problems.recover_media_problems()
+            self.problems.recover_subtitles()
             with self.db:
                 self.problems.recover_processor_duplicates(self.wall_clock())
                 self.problems.finish_processor_change([],None,self.wall_clock())
