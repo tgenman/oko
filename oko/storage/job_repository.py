@@ -78,7 +78,7 @@ class JobRepository:
         if job.kind=='filter':
             self.store.processing.filter_changed(job.item)
 
-    def reconcile(self, kind: Kind, candidates: list[tuple[str, str | None, bool, str]]) -> None:
+    def reconcile(self, kind: Kind, candidates: list[tuple[str, str | None, bool, str]], *, preserve_cancelled: bool = False) -> None:
         memberships.lock_graph(self.store.db)
         db=self.store.db
         def sync_source_after(row: Any) -> None:
@@ -100,6 +100,8 @@ class JobRepository:
                 return processing_candidates(self.store,job['id'],self.store.wall_clock()) if job and job['problem_code'] not in (None,'','processor-config','ai-permission','codex-choice','youtube-admission') and not job['problem_code'].startswith('source-') else []
             previous_problem: list[dict[str,Any]]=[]
             enabled = processing_input.stage_enabled(self.store, item, kind) if signature is not None else False
+            if preserve_cancelled and job and job['status']=='cancelled' and (previous is None or previous==signature):
+                continue
             if job and job['status']=='done' and previous is not None and previous==signature:
                 if json.loads(job['payload']).get('input_revision') != revision:
                     job_write(db, "UPDATE jobs SET payload=jsonb_set(payload::jsonb,'{input_revision}',to_jsonb(%s::text))::text WHERE kind=%s AND item=%s", (revision,kind,item))
@@ -197,15 +199,19 @@ class JobRepository:
             if row['signature'] is None or signature(self.store,row['item'],row['kind']) != row['signature']:
                 self._revoke_running_input(row)
 
-    def invalidate_source_url_inputs(self, item: str) -> None:
-        """Retain results but invalidate attempts and provenance involving a changed source URL."""
+    def invalidate_source_metadata_inputs(self, item: str, *, title: bool = False, preserve_cancelled: bool = False) -> None:
+        """Retain results but invalidate work involving changed source metadata."""
         memberships.lock_graph(self.store.db)
-        target_query="""SELECT id,processing_metadata FROM publications WHERE id=%s
-            UNION SELECT p.id,p.processing_metadata FROM publication_links l
+        target_query="""SELECT p.id,p.processing_metadata FROM publication_links l
             JOIN publications p ON p.id=l.source_publication_id WHERE l.target_publication_id=%s"""
-        for targets in self.store.db.incomplete_row_pages(target_query,(item,item)):
+        params: tuple[str,...]=(item,)
+        if not title:
+            target_query="SELECT id,processing_metadata FROM publications WHERE id=%s UNION "+target_query
+            params=(item,item)
+        stale_key='source_title_stale' if title else 'source_url_stale'
+        for targets in self.store.db.incomplete_row_pages(target_query,params):
             ids=[row['id'] for row in targets]
-            rows=self.store.db.execute("""SELECT id,kind,item,generation,error,problem_code,status,input_snapshot
+            rows=self.store.db.execute("""SELECT id,kind,item,generation,error,problem_code,status,input_snapshot,payload
                 FROM jobs WHERE kind IN ('filter','theses') AND item=ANY(%s)""",(ids,)).fetchall()
             def affected(row: Any) -> bool:
                 if row is None or row['item']==item:return True
@@ -214,6 +220,7 @@ class JobRepository:
                 return (not isinstance(sources,list) or any(not isinstance(source,dict) or not isinstance(source.get('id'),str) for source in sources)
                         or any(source['id']==item for source in sources))
             saved_targets: set[tuple[str,str]]=set()
+            metadata_updates: list[tuple[str,str]]=[]
             for target in targets:
                 metadata=json.loads(target['processing_metadata'])
                 updated=False
@@ -221,17 +228,22 @@ class JobRepository:
                     saved=metadata.get(key)
                     if isinstance(saved,dict) and saved.get('reason')!='no_input':
                         saved_targets.add((target['id'],kind))
-                        if not saved.get('source_url_stale'):
-                            saved['source_url_stale']=True;updated=True
-                if updated:
-                    self.store.db.execute('UPDATE publications SET processing_metadata=%s WHERE id=%s',(json.dumps(metadata,ensure_ascii=False),target['id']))
+                        if not saved.get(stale_key):
+                            saved[stale_key]=True;updated=True
+                if updated:metadata_updates.append((target['id'],json.dumps(metadata,ensure_ascii=False)))
+            if metadata_updates:
+                self.store.db.execute('UPDATE publications p SET processing_metadata=v.body FROM unnest(%s::text[],%s::text[]) AS v(id,body) WHERE p.id=v.id',([row[0] for row in metadata_updates],[row[1] for row in metadata_updates]))
             for row in rows:
                 if row['status']=='cancelled':continue
                 if row['status']=='running':
                     if affected(row):self._revoke_running_input(row)
                 elif affected(row) or (row['item'],row['kind']) in saved_targets:
                     self.store.db.execute('UPDATE jobs SET input_snapshot=NULL WHERE id=%s AND input_snapshot IS NOT NULL',(row['id'],))
-            for target in targets:self.store.processing.reconcile_accepted_item(target['id'])
+            if title:
+                from oko.storage.processing_batch import reconcile_settings
+                reconcile_settings(self.store,ids,preserve_cancelled=preserve_cancelled)
+            else:
+                for target in targets:self.store.processing.reconcile_accepted_item(target['id'])
 
     def retry_processing(self, item: str, kind: Kind) -> bool:
         db=self.store.db

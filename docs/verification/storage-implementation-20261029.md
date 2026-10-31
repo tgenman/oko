@@ -1393,3 +1393,15 @@ not cover the provenance defect subsequently fixed in v6. The integrated v6
 passed 17 targeted tests, mypy on 163 files and one Playwright processing
 scenario with screenshot inspection. No real model or working database was used.
 Persisted input_revision remains; its removal is not established.
+
+
+Changing the title of a linked publication now invalidates affected parent
+processing attempts and retained result provenance. A title-only event preserves
+legacy cancelled Jobs with unknown snapshots; explicit re-enable and changed
+content still follow their normal scheduling path. Synthetic checks cover the
+real collection writer, HTTP title-only A-to-B-to-A, late results, rollback,
+linked parents and settings transitions. The integrated suite passed 236 tests
+with two Linux-only skips; mypy passed on 163 files and one Playwright processing
+scenario passed with a screenshot inspected. A synthetic 100-parent benchmark
+remains expensive due mostly to the existing graph path; contention and real
+production latency were not measured. No real model or database was used.

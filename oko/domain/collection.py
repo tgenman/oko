@@ -4,6 +4,7 @@ from typing import Any
 
 @dataclass
 class CollectionEffects:
+    title_only_changes: set[str] = field(default_factory=set)
     fetch: dict[str,bool] = field(default_factory=dict)
     refresh_links: set[str] = field(default_factory=set)
     media: set[str] = field(default_factory=set)

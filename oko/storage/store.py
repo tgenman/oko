@@ -550,7 +550,7 @@ class Store:
                 status_changed(self.db)
             self.read_sync.mark_item(item)
             self.read_sync.saved_publication(item)
-            publication_links.notify_parents(self,item)
+            publication_links.notify_parents(self,item,preserve_cancelled=item in effects.title_only_changes)
             for row in prepared[1]:
                 old=old_media.get(row['id'])
                 if row['status']=='ready' and old and not (row['resource_identity'] is not None and old['source_locator']!=row['source_locator']):

@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from oko.storage.store import Store
 
 
-def reconcile_settings(store: 'Store', identities: list[str]) -> None:
+def reconcile_settings(store: 'Store', identities: list[str], *, preserve_cancelled: bool = False) -> None:
     """Update stage Jobs and publication statuses in the settings transaction."""
     if not store.db.in_transaction:
         raise RuntimeError('Settings reconciliation requires an owned transaction')
@@ -26,7 +26,7 @@ def reconcile_settings(store: 'Store', identities: list[str]) -> None:
     for start in range(0,len(ordered),400):
         batch = ordered[start:start+400]
         for kind in ('filter','theses'):
-            _stage(store,batch,kind)
+            _stage(store,batch,kind,preserve_cancelled=preserve_cancelled)
         with material_read.material_inputs(store.db,set(batch)), reading_snapshot():
             changes = [(item,status) for item in batch if (status := store.publications._status_change(item)) is not None]
         if changes:
@@ -36,7 +36,7 @@ def reconcile_settings(store: 'Store', identities: list[str]) -> None:
         store.problems.finish_processor_change(affected,processor_previous,store.wall_clock())
 
 
-def _stage(store: 'Store', batch: list[str], kind: Kind) -> None:
+def _stage(store: 'Store', batch: list[str], kind: Kind, *, preserve_cancelled: bool = False) -> None:
     repository = ProcessingRepository(store)
     unblock: list[str] = []
     block: list[str] = []
@@ -55,6 +55,8 @@ def _stage(store: 'Store', batch: list[str], kind: Kind) -> None:
             snapshot = job['input_snapshot'] if job else None
             previous = snapshot.get('signature') if isinstance(snapshot,dict) else None
             enabled = processing_input.stage_enabled(store,item,kind) if signature is not None else False
+            if preserve_cancelled and job and job['status']=='cancelled' and (previous is None or previous==signature):
+                continue
             if job and job['status']=='done' and previous is not None and previous==signature:
                 continue
             if previous is not None and previous==signature and job and (job['status']=='running' or json.loads(job['payload']).get('input_revision')==revision):

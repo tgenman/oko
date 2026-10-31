@@ -135,7 +135,7 @@ class Publications:
             (ref.key.platform.value, ref.key.external_id, ref.url, row['published'] if row['published_known'] else None,
              self.store.wall_clock(), item))
         if row['url'] != ref.url:
-            self.store.jobs.invalidate_source_url_inputs(item)
+            self.store.jobs.invalidate_source_metadata_inputs(item)
 
     def changed_adapter(self, feed: str) -> None:
         """Invalidate old opaque descriptions atomically with a binding change."""
@@ -313,7 +313,7 @@ class Publications:
         """Called in the accepting transaction, after durable media preparation."""
         content, media = prepared
         store = self.store
-        old = expect_row(store.db.execute("""SELECT p.content,p.platform,
+        old = expect_row(store.db.execute("""SELECT p.content,p.platform,p.title,
             EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=p.id AND j.problem_code LIKE 'source-%%') AS source_media_exists,
             ARRAY(SELECT j.id FROM jobs j WHERE j.kind='download_media' AND j.item=ANY(%s) AND j.problem_code LIKE 'source-%%' AND NOT EXISTS (SELECT 1 FROM media_files m WHERE m.id=j.item)) AS source_orphan_jobs,
             EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id
@@ -383,6 +383,13 @@ class Publications:
         store.db.execute('UPDATE publications SET content = %s , media_ids = %s , title = %s , status = %s WHERE id = %s',
             (json.dumps(content, ensure_ascii=False), json.dumps([r['id'] for r in media]),
              content['extra']['_reader']['title'], 'pending_filtering', item))
+        if old['title']!=content['extra']['_reader']['title']:
+            before_youtube=previous.get('extra',{}).get('youtube',{})
+            after_youtube=content.get('extra',{}).get('youtube',{})
+            title_only=(not links_changed and publication_input.blocks(previous)==publication_input.blocks(content)
+                and all(before_youtube.get(key)==after_youtube.get(key) for key in ('captions','captions_digest')))
+            if title_only:effects.title_only_changes.add(item)
+            store.jobs.invalidate_source_metadata_inputs(item,title=True,preserve_cancelled=title_only)
         from oko.storage.incomplete_index import save_class
         save_class(store.db,item,content)
         if previous and old['platform'] != 'youtube' and old_header.get('title') != content['extra']['_reader']['title']:
@@ -401,7 +408,7 @@ class Publications:
                 refreshed=publication_input.filtered(publication_input.content(store,item),item,result)
                 store.db.execute('UPDATE publications SET filtered_content = %s WHERE id = %s',(json.dumps(refreshed,ensure_ascii=False),item))
         self.reconcile(item)
-        publication_links.notify_parents(store,item)
+        publication_links.notify_parents(store,item,preserve_cancelled=item in effects.title_only_changes)
 
     def original(self, item: str) -> tuple[dict[str,Any],str]:
         row=material_read.item(self.store.db,item)

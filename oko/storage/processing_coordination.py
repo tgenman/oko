@@ -183,7 +183,7 @@ class ProcessingState:
             begin_write(self.store.db)
             self.reconcile_accepted_item(item)
 
-    def reconcile_accepted_item(self, item: str) -> None:
+    def reconcile_accepted_item(self, item: str, *, preserve_cancelled: bool = False) -> None:
         """Update both processing Jobs inside the owner's acceptance transaction."""
         from oko.storage.processing_state import ProcessingRepository
         from oko.storage.reading import reading_snapshot
@@ -195,5 +195,5 @@ class ProcessingState:
             with reading_snapshot():
                 candidates = [(identity, signature, repository.satisfied(identity,kind), repository.revision(identity))
                               for identity,signature in repository.candidates(kind,item=item)]
-            self.store.jobs.reconcile(kind,candidates)
+            self.store.jobs.reconcile(kind,candidates,preserve_cancelled=preserve_cancelled)
         self.store.publications.status(item)

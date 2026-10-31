@@ -113,11 +113,11 @@ def text(store: 'Store', item: str) -> str:
     return '\n\n'.join(sections)
 
 
-def notify_parents(store: 'Store', item: str) -> None:
-    notify_parents_many(store, {item})
+def notify_parents(store: 'Store', item: str, *, preserve_cancelled: bool = False) -> None:
+    notify_parents_many(store, {item}, preserve_cancelled=preserve_cancelled)
 
 
-def notify_parents_many(store: 'Store', items: set[str]) -> None:
+def notify_parents_many(store: 'Store', items: set[str], *, preserve_cancelled: bool = False) -> None:
     if not items:
         return
     memberships.lock_graph(store.db)
@@ -125,7 +125,7 @@ def notify_parents_many(store: 'Store', items: set[str]) -> None:
     for row in rows:
         store.read_sync.mark_item(row[0])
         store.read_sync.saved_publication(row[0])
-        store.processing.reconcile_accepted_item(row[0])
+        store.processing.reconcile_accepted_item(row[0],preserve_cancelled=preserve_cancelled)
 
 
 def capture_processing_problems(store: 'Store', effects: CollectionEffects, items: set[str], *, kinds: tuple[str,...] = ('filter','theses')) -> None:
