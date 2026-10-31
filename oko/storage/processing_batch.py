@@ -59,9 +59,9 @@ def _stage(store: 'Store', batch: list[str], kind: Kind, *, preserve_cancelled: 
                 continue
             if job and job['status']=='done' and previous is not None and previous==signature:
                 continue
-            if previous is not None and previous==signature and job and (job['status']=='running' or json.loads(job['payload']).get('input_revision')==revision):
+            if previous is not None and previous==signature and job and (job['status']=='running' or job['payload'].get('input_revision')==revision):
                 if job['status']=='blocked' and enabled:
-                    if json.loads(job['payload']).get('preclaim_blocked') and not processing_input.can_start(
+                    if job['payload'].get('preclaim_blocked') and not processing_input.can_start(
                             store,item,processing_input.processing_feed(store,item,kind)):
                         continue
                     unblock.append(item)
@@ -89,7 +89,7 @@ def _stage(store: 'Store', batch: list[str], kind: Kind, *, preserve_cancelled: 
         job_write(store.db, """UPDATE jobs SET status='pending',
             error=CASE WHEN payload::jsonb->>'preclaim_blocked'='true' THEN NULL ELSE error END,
             problem_code=CASE WHEN payload::jsonb->>'preclaim_blocked'='true' THEN NULL ELSE problem_code END,
-            payload=(payload::jsonb-'preclaim_blocked')::text WHERE kind=%s AND item=ANY(%s) AND status='blocked'""", (kind,unblock))
+            payload=(payload-'preclaim_blocked') WHERE kind=%s AND item=ANY(%s) AND status='blocked'""", (kind,unblock))
     if block:
         job_write(store.db,"UPDATE jobs SET status='blocked' WHERE kind=%s AND item=ANY(%s) AND status='pending'", (kind,block))
     if cancel:
@@ -97,7 +97,7 @@ def _stage(store: 'Store', batch: list[str], kind: Kind, *, preserve_cancelled: 
     if upsert:
         wall = store.wall_clock()
         job_write(store.db,"""INSERT INTO jobs(kind,item,status,payload,input_snapshot)
-            SELECT %s,v.item,v.status,v.payload,v.snapshot::jsonb
+            SELECT %s,v.item,v.status,v.payload::jsonb,v.snapshot::jsonb
             FROM unnest(%s::text[],%s::text[],%s::text[],%s::text[]) AS v(item,status,payload,snapshot)
             ON CONFLICT(kind,item) DO UPDATE SET status=excluded.status,payload=excluded.payload,input_snapshot=excluded.input_snapshot,
                 generation=jobs.generation+1,

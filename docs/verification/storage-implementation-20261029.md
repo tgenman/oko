@@ -1645,3 +1645,15 @@ ledger and the subsequent 090 candidate. Independent review passed 36 tests;
 combined checking with candidate 090 passed 54 tests after fixing a test-only
 synthetic version collision. No existing migration checksum was modified. No
 working database was changed.
+
+
+Migration 090 converts jobs.payload to JSONB and adapts its readers and
+writers. It takes a qualified lock before validation, protects against search
+path shadowing, and restores the original path. The preflight rejects malformed
+or non-object JSON, duplicate keys and numeric transformations that would alter
+Python semantics; original bytes and ledger remain on failure. The integrated
+migration/processing scope passed 95 functional tests, mypy for four modules
+and one Playwright processing scenario with screenshot inspection. Independent
+checks covered roles, external views, concurrent writes, quoted schemas and
+true 089-to-090 migration. SQL budgets were not acceptance criteria by user
+decision. No working database was migrated.

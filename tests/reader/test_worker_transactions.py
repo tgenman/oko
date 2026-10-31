@@ -24,7 +24,7 @@ def test_rediscovery_clears_old_cleanup_owner_without_discarding_other_job_data(
             store.jobs.apply_collection(CollectionEffects(fetch={item:False}))
         row=store.db.execute("SELECT status,payload FROM jobs WHERE kind='delete' AND item=%s",(item,)).fetchone()
         assert row['status']=='cancelled'
-        assert json.loads(row['payload'])=={'other':'preserved'}
+        assert row['payload']=={'other':'preserved'}
     finally:
         store.db.close()
 

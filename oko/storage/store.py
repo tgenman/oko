@@ -737,8 +737,8 @@ class Store:
 
     def _remember_cleanup_owner(self, item: str, feed: str) -> None:
         job_write(self.db, """INSERT INTO jobs(kind,item,payload)
-            SELECT 'delete',id,jsonb_build_object('cleanup_feed',%s::text)::text FROM publications WHERE id=%s AND viewed=1
-            ON CONFLICT(kind,item) DO UPDATE SET payload=jsonb_set(jobs.payload::jsonb,'{cleanup_feed}',to_jsonb(%s::text))::text""", (feed,item,feed))
+            SELECT 'delete',id,jsonb_build_object('cleanup_feed',%s::text) FROM publications WHERE id=%s AND viewed=1
+            ON CONFLICT(kind,item) DO UPDATE SET payload=jsonb_set(jobs.payload,'{cleanup_feed}',to_jsonb(%s::text))""", (feed,item,feed))
 
 
     @reading_value
@@ -874,7 +874,7 @@ class Store:
             ids=[row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE status='pending' AND problem_code='processor-config' AND payload::jsonb->>'preclaim_blocked'='true'")]
             processor_previous=self.problems.prepare_processor_change(ids,self.wall_clock())
             job_write(self.db, """UPDATE jobs SET status='pending',next=0,error=NULL,problem_code=NULL,
-                payload=(payload::jsonb-'preclaim_blocked')::text
+                payload=(payload-'preclaim_blocked')
                 WHERE status='pending' AND problem_code='processor-config' AND payload::jsonb->>'preclaim_blocked'='true'""")
             self.problems.finish_processor_change(ids,processor_previous,self.wall_clock())
             self.problems.sync_codex_choice(self.wall_clock())

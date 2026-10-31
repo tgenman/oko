@@ -103,21 +103,21 @@ class JobRepository:
             if preserve_cancelled and job and job['status']=='cancelled' and (previous is None or previous==signature):
                 continue
             if job and job['status']=='done' and previous is not None and previous==signature:
-                if json.loads(job['payload']).get('input_revision') != revision:
-                    job_write(db, "UPDATE jobs SET payload=jsonb_set(payload::jsonb,'{input_revision}',to_jsonb(%s::text))::text WHERE kind=%s AND item=%s", (revision,kind,item))
+                if job['payload'].get('input_revision') != revision:
+                    job_write(db, "UPDATE jobs SET payload=jsonb_set(payload,'{input_revision}',to_jsonb(%s::text)) WHERE kind=%s AND item=%s", (revision,kind,item))
                 continue
-            if previous is not None and previous==signature and job and (job['status']=='running' or json.loads(job['payload']).get('input_revision')==revision):
+            if previous is not None and previous==signature and job and (job['status']=='running' or job['payload'].get('input_revision')==revision):
                 # Reconsider blocked work only on an input/settings event. Running
                 # attempts are allowed to finish when the switch is turned off.
                 if job['status'] == 'blocked' and enabled:
-                    if json.loads(job['payload']).get('preclaim_blocked') and not processing_input.can_start(
+                    if job['payload'].get('preclaim_blocked') and not processing_input.can_start(
                             self.store,item,processing_input.processing_feed(self.store,item,kind)):
                         continue
                     previous_problem=capture_problem()
                     source_changed=job_write(db, """UPDATE jobs SET status='pending',
                         error=CASE WHEN payload::jsonb->>'preclaim_blocked'='true' THEN NULL ELSE error END,
                         problem_code=CASE WHEN payload::jsonb->>'preclaim_blocked'='true' THEN NULL ELSE problem_code END,
-                        payload=(payload::jsonb-'preclaim_blocked')::text
+                        payload=(payload-'preclaim_blocked')
                         WHERE kind=%s AND item=%s AND status='blocked' AND CASE WHEN problem_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING id,OLD.problem_code AS previous_code""", (kind, item)).fetchone()
                     sync_source_after(source_changed)
                     if kind=='filter':self.store.processing.filter_changed(item)
@@ -144,7 +144,7 @@ class JobRepository:
                 if kind=='filter' and job:self.store.processing.filter_changed(item)
             else:
                 previous_problem=capture_problem()
-                source_changed=job_write(db, "INSERT INTO jobs (kind,item,status,payload,input_snapshot) VALUES (%s,%s,%s,%s,%s::jsonb) ON CONFLICT (kind,item) DO UPDATE SET status=excluded.status,payload=excluded.payload,input_snapshot=excluded.input_snapshot,generation=jobs.generation+1,next=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.next ELSE 0 END,error=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.error ELSE NULL END,problem_code=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.problem_code ELSE NULL END WHERE CASE WHEN jobs.problem_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING id,OLD.problem_code AS previous_code",
+                source_changed=job_write(db, "INSERT INTO jobs (kind,item,status,payload,input_snapshot) VALUES (%s,%s,%s,%s::jsonb,%s::jsonb) ON CONFLICT (kind,item) DO UPDATE SET status=excluded.status,payload=excluded.payload,input_snapshot=excluded.input_snapshot,generation=jobs.generation+1,next=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.next ELSE 0 END,error=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.error ELSE NULL END,problem_code=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.problem_code ELSE NULL END WHERE CASE WHEN jobs.problem_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING id,OLD.problem_code AS previous_code",
                     (kind,item,'done' if satisfied else 'pending' if enabled else 'blocked',json.dumps(dict(input_revision=revision)),json.dumps(dict(signature=signature)),self.store.wall_clock(),self.store.wall_clock(),self.store.wall_clock())).fetchone()
                 sync_source_after(source_changed)
                 if kind=='filter' and job:self.store.processing.filter_changed(item)
@@ -526,7 +526,7 @@ class JobRepository:
                 previous=self.store.problems.saved_processing_candidates([current['id']]).get(current['id'],[]) if current['error'] is not None or current['problem_code'] is not None else []
                 processor_previous=self.store.problems.prepare_processor_change([job['id']],self.store.wall_clock())
                 source_changed=job_write(db, """UPDATE jobs SET status='pending',next=%s,error=%s,problem_code=%s,
-                    payload=jsonb_set(payload::jsonb,'{preclaim_blocked}','true'::jsonb)::text
+                    payload=jsonb_set(payload,'{preclaim_blocked}','true'::jsonb)
                     WHERE id=%s AND status='pending' RETURNING id,OLD.problem_code AS previous_code""", (0 if denied else self.store.clock()+30,message,code,job['id'])).fetchone()
                 if source_changed and (source_changed['previous_code'] or '').startswith('source-'):
                     from oko.storage import source_groups
@@ -950,7 +950,7 @@ class JobRepository:
                 if candidates:
                     previous_deletions[row['item']] = (row['id'],candidates)
         for item,changed in effects.fetch.items():
-            cancelled = job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , payload = (payload::jsonb - 'cleanup_feed')::text WHERE kind = 'delete' AND item = %s",(item,)).rowcount
+            cancelled = job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , payload = (payload - 'cleanup_feed') WHERE kind = 'delete' AND item = %s",(item,)).rowcount
             if cancelled and item in previous_deletions:
                 deletion_job_id,previous = previous_deletions[item]
                 self.store.problems.sync_deletion(deletion_job_id,previous,self.store.wall_clock())
@@ -1326,7 +1326,7 @@ class JobRepository:
                     row = self.store.db.execute("SELECT id,item,input_snapshot->>'signature' AS signature FROM jobs WHERE id=%s AND kind=%s AND input_snapshot IS NOT NULL AND (payload::jsonb->>'input_revision') IS NULL", (identity,kind)).fetchone()
                     if row is not None and row['signature']==processing_input.signature(self.store,row['item'],kind):
                         revision = processing_input.revision(self.store,row['item'])
-                        self.store.db.execute("UPDATE jobs SET payload=jsonb_set(payload::jsonb,'{input_revision}',to_jsonb(%s::text))::text WHERE id=%s", (revision,row['id']))
+                        self.store.db.execute("UPDATE jobs SET payload=jsonb_set(payload,'{input_revision}',to_jsonb(%s::text)) WHERE id=%s", (revision,row['id']))
                 yield
 
     def replace_media_input(self, job: Job) -> None:

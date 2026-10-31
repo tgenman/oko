@@ -94,4 +94,5 @@ MIGRATIONS = (
     Migration(87, 'delete-extra-problems', (Path(__file__).parent / 'postgres' / '087-delete-extra-problems.sql').read_text()),
     Migration(88, 'original-urls-array', (Path(__file__).parent / 'postgres' / '088-original-urls-array.sql').read_text()),
     Migration(89, 'feeds-config-jsonb', (Path(__file__).parent / 'postgres' / '089-feed-config-jsonb.sql').read_text()),
+    Migration(90, 'jobs-payload-jsonb', (Path(__file__).parent / 'postgres' / '090-jobs-payload-jsonb.sql').read_text()),
 )
