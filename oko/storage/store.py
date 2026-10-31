@@ -162,6 +162,7 @@ class Store:
             self.problems.recover_fetch_problems()
             self.problems.recover_finished_foreign_fetch_deletions()
             self.problems.recover_fetch_null()
+            self.problems.recover_youtube_null_fetch()
             self.problems.recover_fetch_identity_unconfirmed()
             self.problems.recover_media_problems()
             self.problems.recover_subtitles()
@@ -340,9 +341,11 @@ class Store:
                 if plan.delete_problem_children:
                     publication_links.capture_deletion_problems(self,effects,set(plan.delete_problem_children))
                 if plan.fetch_problem_job is not None and plan.fetch_problem_job not in effects.fetch_problems_checked:
-                    from oko.storage.fetch_job_problems import managed_candidates
+                    from oko.storage.fetch_job_problems import managed_candidates,previous_candidates
                     effects.fetch_problems_checked.add(plan.fetch_problem_job)
                     previous_fetch=managed_candidates(self,plan.fetch_problem_job,self.wall_clock())
+                    if any(candidate.get('fetch_youtube_event') for candidate in previous_fetch):
+                        previous_fetch=previous_candidates(self,plan.fetch_problem_job,self.wall_clock())
                     if previous_fetch:effects.fetch_problems_before[plan.fetch_problem_job]=previous_fetch
                 if plan.fetch_problem_children:
                     publication_links.capture_fetch_problems(self,effects,set(plan.fetch_problem_children))
@@ -690,6 +693,15 @@ class Store:
             for row in self.db.execute("SELECT id FROM jobs WHERE kind='discover' AND (item=%s OR feed_id=%s) AND (error IS NOT NULL OR problem_code IS NOT NULL)",(feed,feed)):
                 self.problems.sync_discover(row['id'],self.wall_clock())
             shared=[r[0] for r in self.db.execute(f'SELECT p.id FROM ({owned_ids("= %s")}) owner JOIN publications p ON p.id=owner.id WHERE p.platform IS NOT NULL',(feed,feed))]
+            # NULL-platform legacy roots can also own a timed fetch projection.
+            # Capture only dependent timed jobs while the old graph still exists.
+            timed_fetch_items={row['item'] for row in self.db.execute("""SELECT DISTINCT j.item FROM feed_publications m
+                JOIN publication_links l ON l.source_publication_id=m.publication_id
+                JOIN jobs j ON md5(j.item)=md5(l.target_publication_id) AND j.item=l.target_publication_id AND j.kind='fetch' AND j.fetch_youtube_sensitive
+                WHERE m.feed_id=%s AND m.is_primary
+                UNION SELECT j.item FROM feed_publications m JOIN jobs j ON md5(j.item)=md5(m.publication_id) AND j.item=m.publication_id AND j.kind='fetch' AND j.fetch_youtube_sensitive
+                WHERE m.feed_id=%s AND m.is_primary""",(feed,feed))}
+            if timed_fetch_items:publication_links.capture_fetch_problems(self,effects,timed_fetch_items)
             self.incomplete_draft.mark_materials(sorted(set(shared) | set(selected)))
             publication_links.capture_root_deletion_problems(self,effects,set(shared))
             removed = membership_graph.remove(self.db,feed=feed)

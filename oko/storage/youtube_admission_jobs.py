@@ -21,7 +21,7 @@ def contributions(store: Any, ids: list[int]) -> dict[int,set[str | None]]:
         AND NOT (j.kind='fetch' AND item.id IS NULL AND j.youtube_admission_forgotten_item IS NOT NULL AND j.youtube_admission_forgotten_item=j.item)
         AND j.problem_code IS DISTINCT FROM 'processor-config'
         AND NOT (j.problem_code IS NOT NULL AND j.problem_code LIKE 'source-%%' AND j.source_event_owned)
-        AND NOT (j.kind='fetch' AND j.problem_code IS NULL AND j.error IS NOT NULL AND j.fetch_null_owned)
+        AND NOT (j.kind='fetch' AND j.problem_code IS NULL AND j.error IS NOT NULL AND j.fetch_null_owned AND NOT j.fetch_youtube_sensitive)
         AND ((j.kind='fetch' AND (
               j.problem_code IN ('','work-fetch') OR
               ((j.problem_code IS NOT NULL OR j.error IS NOT NULL)

@@ -353,10 +353,10 @@ class Problems:
                        WHERE link.source_publication_id=target.root AND ((j.status IN ('pending','running','failed','unavailable','blocked') AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)) OR (j.status='done' AND j.error IS NOT NULL AND j.problem_code IS NOT NULL)))""",(ordered[start:start+400],)))
         return result
 
-    def recover_fetch_batch(self, rows: list[Any], now: float) -> list[Any]:
+    def recover_fetch_batch(self, rows: list[Any], now: float, *, include_youtube: bool = True, new_ids_out: set[str] | None = None) -> list[Any]:
         """Persist independent first occurrences; address legacy collisions separately."""
         from oko.storage.fetch_job_problems import managed_candidates_many
-        projected=managed_candidates_many(self.store,[row['id'] for row in rows],now)
+        projected=managed_candidates_many(self.store,[row['id'] for row in rows],now,include_youtube=include_youtube)
         counts: dict[str,int]={};legacy_keys: set[str]=set()
         for candidates in projected.values():
             for candidate in candidates:
@@ -377,7 +377,7 @@ class Problems:
             if record['marker'] in markers:marked.setdefault(markers[record['marker']],[]).append(record)
         items_by_id={row['id']:row['item'] for row in self.db.execute('SELECT id,item FROM jobs WHERE id=ANY(%s)',(list(marked),))} if marked else {}
         allowed_body_fields={'code','section','title','consequence','next_step','objects','action','operation',
-            'fetch_owner','fetch_implicit_code','state','next_at','reason','fetch_job_id','fetch_job_identity',
+            'fetch_owner','fetch_implicit_code','fetch_youtube_event','state','next_at','reason','fetch_job_id','fetch_job_identity',
             'status_job_identity','status_job_target'}
         overflow={job_id for job_id,records_for_job in marked.items() if len(records_for_job)>100}
         # Large groups are streamed in SQL: ambiguous bodies stay untouched, and
@@ -607,6 +607,7 @@ class Problems:
             body={key:value for key,value in candidate.items() if key not in ('id','created_at','finished_at','outcome','_legacy_id')}
             added.append((uuid.uuid4().hex,candidate['id'],'background',json.dumps(body),now))
         if added:
+            if new_ids_out is not None:new_ids_out.update(row[0] for row in added)
             self.db.execute("""INSERT INTO reader_problems(id,identity,origin,body,created,finished,outcome)
                 SELECT id,identity,origin,body,created,NULL,NULL FROM unnest(%s::text[],%s::text[],%s::text[],%s::text[],%s::double precision[]) AS p(id,identity,origin,body,created)""",tuple([row[i] for row in added] for i in range(5)))
             status_changed(self.db)
@@ -700,16 +701,75 @@ class Problems:
                     self.protect_fetch_null_legacy(list(overflow_ids))
                     self.db.execute('UPDATE jobs SET fetch_null_owned=false,fetch_null_ambiguous=true WHERE id=ANY(%s)',(list(overflow_ids),))
                 bounded_rows=[row for row in rows if row['id'] not in overflow_ids]
-                complex_rows=self.recover_fetch_batch(bounded_rows,self.store.wall_clock()) if bounded_rows else []
+                complex_rows=self.recover_fetch_batch(bounded_rows,self.store.wall_clock(),include_youtube=False) if bounded_rows else []
                 for row in complex_rows:self.sync_fetch(row['id'],[],self.store.wall_clock())
                 from oko.storage.fetch_job_problems import managed_candidates_many
-                eligible=managed_candidates_many(self.store,[row['id'] for row in rows],self.store.wall_clock())
+                eligible=managed_candidates_many(self.store,[row['id'] for row in rows],self.store.wall_clock(),include_youtube=False)
                 complex_ids={row['id'] for row in complex_rows} | overflow_ids
                 owned=[job for job,candidates in eligible.items() if candidates and job not in complex_ids]
                 if owned:self.db.execute('UPDATE jobs SET fetch_null_owned=true,fetch_null_ambiguous=false WHERE id=ANY(%s) AND problem_code IS NULL AND error IS NOT NULL',(owned,))
             cursor=rows[-1]['id']
             self.store.fault('fetch_null_recovery_batch')
         with self.db:self.db.execute("INSERT INTO state(key,value) VALUES ('fetch-null-recovered-v1','true') ON CONFLICT DO NOTHING")
+
+    def recover_youtube_null_fetch(self) -> None:
+        """Restartable recovery; subsequent writes update projections transactionally."""
+        if self.db.execute("SELECT 1 FROM state WHERE key='youtube-null-fetch-recovered-v1'").fetchone():return
+        cursor: int | None=None
+        many_youtube_members=bool(self.db.execute('''SELECT 1 FROM feeds f JOIN feed_publications m ON m.feed_id=f.id AND m.is_primary
+            WHERE f.kind='youtube' OFFSET 100 LIMIT 1''').fetchone())
+        many_jobs=bool(self.db.execute("""SELECT 1 FROM jobs WHERE kind='fetch' AND item IS NOT NULL AND item<>''
+            AND problem_code IS NULL AND error IS NOT NULL OFFSET 100 LIMIT 1""").fetchone()) if many_youtube_members else False
+        bounded_job_walk=many_youtube_members and many_jobs
+        while True:
+            sql="""WITH youtube_feeds AS MATERIALIZED (SELECT id FROM feeds WHERE kind='youtube'),
+                candidates AS (
+                    SELECT j.id FROM youtube_feeds f JOIN feed_publications m ON m.feed_id=f.id AND m.is_primary
+                    JOIN jobs j ON md5(j.item)=md5(m.publication_id) AND j.item=m.publication_id
+                    WHERE j.kind='fetch' AND j.item IS NOT NULL AND j.item<>'' AND j.status IN ('pending','running','failed','unavailable','blocked') AND j.problem_code IS NULL AND j.error IS NOT NULL
+                    UNION
+                    SELECT j.id FROM youtube_feeds f JOIN feed_publications m ON m.feed_id=f.id AND m.is_primary
+                    JOIN publication_links l ON l.source_publication_id=m.publication_id
+                    JOIN jobs j ON md5(j.item)=md5(l.target_publication_id) AND j.item=l.target_publication_id
+                    WHERE j.kind='fetch' AND j.item IS NOT NULL AND j.item<>'' AND j.status IN ('pending','running','failed','unavailable','blocked') AND j.problem_code IS NULL AND j.error IS NOT NULL
+                    UNION
+                    SELECT j.id FROM youtube_feeds f JOIN jobs j ON md5(j.feed_id)=md5(f.id) AND j.feed_id=f.id
+                    WHERE j.kind='fetch' AND j.item IS NOT NULL AND j.item<>'' AND j.feed_id IS NOT NULL AND j.status IN ('pending','running','failed','unavailable','blocked') AND j.problem_code IS NULL AND j.error IS NOT NULL
+                ) SELECT id FROM candidates"""
+            if bounded_job_walk:
+                sql="SELECT id FROM jobs WHERE kind='fetch' AND item IS NOT NULL AND item<>'' AND problem_code IS NULL AND error IS NOT NULL"
+                if cursor is not None:sql+=' AND id>%s'
+            elif cursor is not None:sql+=' WHERE id>%s'
+            rows=self.db.execute(sql+' ORDER BY id LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
+            if not rows:break
+            with self.db:
+                from oko.storage.transaction import begin_write
+                begin_write(self.db)
+                self.db.execute('SELECT pg_advisory_xact_lock(hashtextextended(current_schema(),%s))',(746582096,))
+                if self.db.execute("SELECT 1 FROM state WHERE key='youtube-null-fetch-recovered-v1'").fetchone():return
+                from oko.storage import memberships
+                from oko.storage.fetch_job_problems import managed_candidates_many
+                from oko.storage.youtube_fetch_problems import sync_timer
+                memberships.lock_graph(self.db)
+                now=self.store.wall_clock()
+                projected=managed_candidates_many(self.store,[row['id'] for row in rows],now)
+                selected=[row for row in rows if any(c.get('fetch_youtube_event') for c in projected.get(row['id'],[]))]
+                if selected:
+                    added: set[str]=set()
+                    complex_rows=self.recover_fetch_batch(selected,now,new_ids_out=added)
+                    complex_ids={row['id'] for row in complex_rows}
+                    for row in complex_rows:self.sync_fetch(row['id'],[],now)
+                    owned=[row['id'] for row in selected if row['id'] not in complex_ids]
+                    if owned:
+                        self.db.execute('UPDATE jobs SET fetch_null_owned=true,fetch_youtube_sensitive=true WHERE id=ANY(%s)',(owned,))
+                        sync_timer(self.store,now,owned,new_ids=added)
+            cursor=rows[-1]['id']
+            self.store.fault('youtube_null_fetch_recovery_batch')
+        with self.db:
+            from oko.storage.transaction import begin_write
+            begin_write(self.db)
+            self.db.execute('SELECT pg_advisory_xact_lock(hashtextextended(current_schema(),%s))',(746582096,))
+            self.db.execute("INSERT INTO state(key,value) VALUES ('youtube-null-fetch-recovered-v1','true') ON CONFLICT DO NOTHING")
 
     def recover_fetch_identity_unconfirmed(self) -> None:
         from oko.storage.transaction import begin_write
@@ -947,6 +1007,7 @@ class Problems:
         if not saved or saved['value']!=value:raise RuntimeError('Conflicting fetch protection marker')
 
     def sync_fetch(self, job_id: int, previous: list[dict[str,Any]], now: float, *, allow_rekey: bool = True) -> None:
+        previous_youtube=[dict(candidate) for candidate in previous if candidate.get('fetch_youtube_event')]
         if getattr(self.store,'youtube_admission_ready',False):
             from oko.storage import memberships
             from oko.storage.youtube_admission_jobs import capture_fetch_flag_changes
@@ -954,6 +1015,9 @@ class Problems:
             capture_fetch_flag_changes(self.store,[job_id])
         from oko.storage.fetch_job_problems import managed_candidates
         candidates=managed_candidates(self.store,job_id,now)
+        desired_youtube=[dict(candidate) for candidate in candidates if candidate.get('fetch_youtube_event')]
+        if previous_youtube or desired_youtube:
+            self.db.execute("UPDATE jobs SET fetch_youtube_sensitive=(%s=1) WHERE id=%s AND kind='fetch' AND fetch_youtube_sensitive IS DISTINCT FROM (%s=1)",(bool(desired_youtube),job_id,bool(desired_youtube)))
         self.db.execute('UPDATE jobs SET fetch_null_owned=(%s=1) WHERE id=%s AND problem_code IS NULL AND error IS NOT NULL AND fetch_null_owned IS DISTINCT FROM (%s=1)',(bool(candidates),job_id,bool(candidates)))
         legacy=self.db.execute("""SELECT r.id FROM jobs j CROSS JOIN LATERAL (
             SELECT id FROM reader_problems WHERE finished IS NULL AND identity LIKE 'job:%%' AND body::jsonb->>'code'='work-fetch'
@@ -962,7 +1026,7 @@ class Problems:
             WHERE j.id=%s AND j.kind='fetch' AND (j.fetch_null_ambiguous OR (j.problem_code IS NULL AND j.error IS NOT NULL))""",(job_id,)).fetchall()
         if len(legacy)>=101:
             self.protect_fetch_null_legacy([job_id])
-            self.db.execute('UPDATE jobs SET fetch_null_owned=false,fetch_null_ambiguous=true,identity_event_owned=false WHERE id=%s',(job_id,))
+            self.db.execute('UPDATE jobs SET fetch_null_owned=false,fetch_null_ambiguous=true,identity_event_owned=false,fetch_youtube_sensitive=false WHERE id=%s',(job_id,))
             return
         if previous and not candidates:
             from oko.storage.fetch_job_problems import candidates as all_candidates
@@ -984,7 +1048,7 @@ class Problems:
                     isolated.setdefault(row['canonical'],[]).append(row)
             if any(len(rows)>=101 for rows in isolated.values()):
                 self.protect_fetch_null_legacy([job_id])
-                self.db.execute('UPDATE jobs SET fetch_null_owned=false,fetch_null_ambiguous=true,identity_event_owned=false WHERE id=%s',(job_id,))
+                self.db.execute('UPDATE jobs SET fetch_null_owned=false,fetch_null_ambiguous=true,identity_event_owned=false,fetch_youtube_sensitive=false WHERE id=%s',(job_id,))
                 return  # Preserve ambiguous records and keep NULL failures visible through GET.
 
         self.db.execute('UPDATE jobs SET fetch_null_ambiguous=false WHERE id=%s AND fetch_null_ambiguous',(job_id,))
@@ -1013,7 +1077,7 @@ class Problems:
             kinds=('fetch','discover','download_media','filter','theses','read','delete','feed-delete')
             found=[kind for kind in kinds if ':'+kind+':' in tail]
             if not matched and (occupied or found!=['fetch'] or tail.count(':fetch:')!=1):
-                if occupied and candidate['code']=='identity-unconfirmed':self.protect_foreign_identity_fetch(occupied)
+                if occupied and (candidate['code']=='identity-unconfirmed' or candidate.get('fetch_youtube_event')):self.protect_foreign_identity_fetch(occupied)
                 digest=hashlib.sha256(canonical.encode('utf-8')).hexdigest()
                 for _ in range(3):
                     alternate='job:fetch-isolated:'+digest+':'+new_read_problem_token()
@@ -1087,6 +1151,13 @@ class Problems:
                 SELECT id,identity,origin,body,created,NULL,NULL FROM unnest(%s::text[],%s::text[],%s::text[],%s::text[],%s::double precision[]) AS p(id,identity,origin,body,created)""",tuple([row[i] for row in added] for i in range(5)))
         if updates or added:status_changed(self.db)
         self.db.execute("UPDATE jobs SET identity_event_owned=(problem_code IS NOT DISTINCT FROM 'identity-unconfirmed' AND item IS NOT NULL AND item<>'' AND NOT fetch_null_ambiguous) WHERE id=%s AND identity_event_owned IS DISTINCT FROM (problem_code IS NOT DISTINCT FROM 'identity-unconfirmed' AND item IS NOT NULL AND item<>'' AND NOT fetch_null_ambiguous)",(job_id,))
+        if previous_youtube or desired_youtube:
+            from oko.storage.youtube_fetch_problems import transfer_reservation,cancel_reservations,sync_timer
+            transferred=transfer_reservation(self.store,job_id,previous_youtube,desired_youtube,{row[0] for row in added}) if previous_youtube and desired_youtube else set()
+            current_ids={candidate['id'] for candidate in desired_youtube}
+            removed_youtube=[candidate for candidate in previous_youtube if candidate['id'] not in current_ids and candidate['id'] not in transferred]
+            if removed_youtube:cancel_reservations(self.store,job_id,removed_youtube)
+            if desired_youtube:sync_timer(self.store,now,[job_id],new_ids={row[0] for row in added},previous=previous_youtube)
 
     def active_media_roots(self, items: set[str]) -> set[str]:
         result: set[str]=set()
@@ -3359,13 +3430,17 @@ class Problems:
         records=problem_links.material_records(self.db, 'problem', members)
         from oko.storage.subtitle_problems import valid as valid_subtitle_reservation
         reserved_rows={row['identity']:valid_subtitle_reservation(row) for row in records if row['subtitle_due'] is not None}
-        reserved_keys=list(reserved_rows)
+        from oko.storage.youtube_fetch_problems import valid as valid_youtube_fetch_reservation
+        fetch_reserved_rows={row['identity']:valid_youtube_fetch_reservation(row) for row in records if row['youtube_fetch_due'] is not None}
+        reserved_keys=list(set(reserved_rows)|set(fetch_reserved_rows))
         pointers={}
         for start in range(0,len(reserved_keys),400):
             pointers.update({row['key']:row['value'] for row in self.db.execute('SELECT key,value FROM state WHERE key=ANY(%s)',(reserved_keys[start:start+400],))})
         for row in records:
             reserved=reserved_rows.get(row['identity'])
             if reserved and pointers.get(row['identity'])==json.dumps(['oko-subtitle-v1',reserved['media_job_id'],reserved['subtitle_canonical']]):continue
+            fetch_reserved=fetch_reserved_rows.get(row['identity'])
+            if fetch_reserved and pointers.get(row['identity'])==json.dumps(['oko-youtube-fetch-v1',fetch_reserved['fetch_job_id'],fetch_reserved['fetch_youtube_canonical']]):continue
             if row['identity']=='processor:configuration':
                 continue
             if row['origin']=='action' or row['identity'].startswith('action:'):
@@ -3500,6 +3575,13 @@ class Problems:
         for future in self.db.execute('SELECT * FROM reader_problems WHERE subtitle_due IS NOT NULL AND subtitle_reserved_owned AND subtitle_due<=%s',(now,)):
             body=valid_subtitle_reservation(future)
             occupied=existing.get(body['subtitle_canonical']) if body else None
+            if occupied is not None:protected_fetch_null.add(occupied['id'])
+        from oko.storage.youtube_fetch_problems import verified as verified_youtube_fetch_reservations
+        future_fetch=self.db.execute('SELECT * FROM reader_problems WHERE youtube_fetch_due IS NOT NULL AND youtube_fetch_reserved_owned AND youtube_fetch_due<=%s',(now,)).fetchall()
+        proven_fetch=verified_youtube_fetch_reservations(self.store,list(future_fetch),now)
+        for future in future_fetch:
+            body=proven_fetch.get(future['id'])
+            occupied=existing.get(body['fetch_youtube_canonical']) if body else None
             if occupied is not None:protected_fetch_null.add(occupied['id'])
         owned_source_identities: set[str]=set()
         source_legacy: dict[str,str]={}
@@ -3790,7 +3872,7 @@ class Problems:
                 status_changed(self.db)
         current: list[dict[str, Any]] = []
         recent: list[dict[str, Any]] = []
-        rows = self.db.execute('SELECT * FROM reader_problems WHERE finished IS NULL OR finished > %s OR (subtitle_due IS NOT NULL AND subtitle_reserved_owned AND subtitle_due<=%s) ORDER BY created DESC', (now - 86400,now)).fetchall()
+        rows = self.db.execute('SELECT * FROM reader_problems WHERE finished IS NULL OR finished > %s OR (subtitle_due IS NOT NULL AND subtitle_reserved_owned AND subtitle_due<=%s) OR (youtube_fetch_due IS NOT NULL AND youtube_fetch_reserved_owned AND youtube_fetch_due<=%s) ORDER BY created DESC', (now - 86400,now,now)).fetchall()
         reservation=self.processor_reservation()
         processor_current=self.processor_current()
         action_identities=sorted({row['identity'][7:] for row in rows if row['identity'].startswith('action:')})
@@ -3802,7 +3884,11 @@ class Problems:
         incomplete_reservations=verified_reservation_rows(self.store,[row for row in rows if row['incomplete_due'] is not None])
         from oko.storage.subtitle_problems import verified as verified_subtitles
         subtitle_reservations=verified_subtitles(self.store,[row for row in rows if row['subtitle_due'] is not None],now)
+        youtube_fetch_reservations=proven_fetch
         for row in rows:
+            virtual_fetch=youtube_fetch_reservations.get(row['id'])
+            damaged_fetch=(row['youtube_fetch_due'] is not None and virtual_fetch is None and row['youtube_fetch_reserved_owned'] and row['finished'] is not None and row['finished']<=now-86400)
+            if row['youtube_fetch_due'] is not None and virtual_fetch is None and not damaged_fetch and row['finished'] is not None and row['finished']<=now-86400:continue
             virtual_subtitle=subtitle_reservations.get(row['id'])
             if virtual_subtitle is not None and row['subtitle_due']>now:continue
             damaged_subtitle=(row['subtitle_due'] is not None and virtual_subtitle is None and row['subtitle_reserved_owned']
@@ -3877,6 +3963,11 @@ class Problems:
                 problem=dict(code='work-download_media',section='object',title='Состояние субтитров требует проверки',
                     consequence='Исходная запись сохранена.',next_step='Проверьте журнал диагностики.',objects=[],action=None,
                     operation='producer:subtitle-legacy',state='current',next_at=None)
+            if virtual_fetch is not None:
+                problem=dict(virtual_fetch)
+                problem.pop('fetch_youtube_reservation',None);problem.pop('fetch_youtube_canonical',None)
+            elif damaged_fetch:
+                problem=dict(code='work-fetch',section='object',title='Состояние загрузки требует проверки',consequence='Исходная запись сохранена.',next_step='Проверьте журнал диагностики.',objects=[],action=None,operation='producer:fetch-legacy',state='current',next_at=None)
             if row['finished'] is None and processor_current and row['id']==processor_current['id']:
                 projected=self.processor_configuration_candidate(now)
                 if projected is not None:
@@ -3891,11 +3982,12 @@ class Problems:
             if not visible_id:
                 visible_id = _legacy_problem_id(row['identity'])
             finished = None if (generic or processor_legacy or incomplete_legacy or youtube_legacy) and (bad_finished or bad_outcome) else row['finished']
-            if virtual_subtitle is not None or damaged_subtitle:finished=None
+            if virtual_subtitle is not None or damaged_subtitle or virtual_fetch is not None or damaged_fetch:finished=None
             if virtual_finished is not None:finished=virtual_finished
             if virtual_finished is not None and virtual_finished<=now-86400:continue
             created = now if (generic or processor_legacy or incomplete_legacy or youtube_legacy) and bad_created else row['created']
             if virtual_subtitle is not None or damaged_subtitle:created=row['subtitle_due']
+            if virtual_fetch is not None or damaged_fetch:created=row['youtube_fetch_due']
             problem.update(id=visible_id, created_at=created, finished_at=finished,
                            outcome=None if finished is None else 'resolved' if virtual_finished is not None else row['outcome'], state='finished' if finished is not None else problem['state'])
             (recent if finished is not None else current).append(problem)

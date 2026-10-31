@@ -42,7 +42,7 @@ def test_null_explicit_null_preserves_occurrence(tmp_path,postgres_url):
     finally:store.db.close()
 
 
-def test_youtube_null_remains_get_owned(tmp_path,postgres_url):
+def test_youtube_null_projects_for_event_ownership(tmp_path,postgres_url):
     from oko.storage.fetch_job_problems import managed_candidates
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
@@ -51,7 +51,7 @@ def test_youtube_null_remains_get_owned(tmp_path,postgres_url):
             store.db.execute("INSERT INTO publications(id) VALUES ('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('y','article',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','article','failed','failure',NULL) RETURNING id").fetchone()[0]
-        assert managed_candidates(store,job,1)==[]
+        assert [row['fetch_owner'] for row in managed_candidates(store,job,1)]==['y']
     finally:store.db.close()
 
 
@@ -64,8 +64,8 @@ def test_null_recovery_rolls_back_and_resumes(tmp_path,postgres_url,monkeypatch)
             store.db.execute("INSERT INTO publications(id) VALUES ('article')")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error) VALUES ('fetch','article','failed','failure') RETURNING id").fetchone()[0]
         original=store.problems.recover_fetch_batch
-        def fail(rows,now):
-            original(rows,now)
+        def fail(rows,now,**kwargs):
+            original(rows,now,**kwargs)
             raise RuntimeError('rollback')
         monkeypatch.setattr(store.problems,'recover_fetch_batch',fail)
         with pytest.raises(RuntimeError,match='rollback'):store.problems.recover_fetch_null()
@@ -77,7 +77,7 @@ def test_null_recovery_rolls_back_and_resumes(tmp_path,postgres_url,monkeypatch)
     finally:store.db.close()
 
 
-def test_mixed_youtube_roots_keep_whole_job_unmanaged(tmp_path,postgres_url):
+def test_mixed_youtube_roots_project_both_owners(tmp_path,postgres_url):
     from oko.storage.fetch_job_problems import managed_candidates
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
@@ -87,7 +87,7 @@ def test_mixed_youtube_roots_keep_whole_job_unmanaged(tmp_path,postgres_url):
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('r','a',true),('y','b',true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('a','article'),('b','article')")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error) VALUES ('fetch','article','failed','failure') RETURNING id").fetchone()[0]
-        assert managed_candidates(store,job,1)==[]
+        assert {row['fetch_owner'] for row in managed_candidates(store,job,1)}=={'r','y'}
     finally:store.db.close()
 
 
@@ -215,7 +215,7 @@ def test_removing_youtube_root_transfers_remaining_null_to_events(tmp_path,postg
     finally:store.db.close()
 
 
-def test_removing_rss_root_leaves_youtube_get_owned(tmp_path,postgres_url):
+def test_removing_rss_root_leaves_youtube_event_owned(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with transaction(store.db):
@@ -225,12 +225,12 @@ def test_removing_rss_root_leaves_youtube_get_owned(tmp_path,postgres_url):
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('a','article'),('b','article')")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error) VALUES ('fetch','article','failed','failure') RETURNING id").fetchone()[0]
         store.remove_feed('r')
-        assert not store.db.execute('SELECT fetch_null_owned FROM jobs WHERE id=%s',(job,)).fetchone()[0]
-        assert any(p['id']=='job:work-fetch:y:fetch:article' for p in store.problems.candidates(store.wall_clock()))
+        assert store.db.execute('SELECT fetch_null_owned FROM jobs WHERE id=%s',(job,)).fetchone()[0]
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='job:work-fetch:y:fetch:article' AND finished IS NULL").fetchone()
     finally:store.db.close()
 
 
-def test_adding_youtube_root_releases_event_ownership_atomically(tmp_path,postgres_url):
+def test_adding_youtube_root_preserves_event_ownership_atomically(tmp_path,postgres_url):
     from oko.collection.adapters import ExternalKey,ExternalReference,Platform
     from oko.domain.collection import CollectionEffects
     from oko.storage import publication_links
@@ -247,9 +247,8 @@ def test_adding_youtube_root_releases_event_ownership_atomically(tmp_path,postgr
             effects=CollectionEffects()
             assert publication_links.sync(store,'root',(ExternalReference(ExternalKey(Platform.telegraph,'article'),'https://example.test/article'),),effects)
             store.jobs.apply_collection(effects)
-            assert not store.db.execute('SELECT fetch_null_owned FROM jobs WHERE id=%s',(job,)).fetchone()[0]
-        rows=store.problems.candidates(store.wall_clock())
-        assert any(p['id']=='job:work-fetch:r:fetch:article' for p in rows)
+            assert store.db.execute('SELECT fetch_null_owned FROM jobs WHERE id=%s',(job,)).fetchone()[0]
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='job:work-fetch:r:fetch:article' AND finished IS NULL").fetchone()
         assert store.db.execute('SELECT id FROM reader_problems WHERE id=%s AND finished IS NULL',(old,)).fetchone()
     finally:store.db.close()
 

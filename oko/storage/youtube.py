@@ -73,9 +73,13 @@ class YouTubeAccess:
             memberships.lock_graph(self.db)
             from oko.storage.subtitle_problems import drain_due
             drain_due(self.store,wall)
+            from oko.storage.youtube_fetch_problems import drain_due as drain_fetch_due
+            drain_fetch_due(self.store,wall)
             self.db.execute('UPDATE youtube_access SET next_at = %s WHERE id = 1', (wall + self.interval,))
             from oko.storage.subtitle_problems import sync_timer
             sync_timer(self.store,wall)
+            from oko.storage.youtube_fetch_problems import sync_timer as sync_fetch_timer
+            sync_fetch_timer(self.store,wall)
             manager=getattr(self.store,'incomplete_draft',None)
             if manager is not None:manager.mark_youtube_groups(pause=False)
 
@@ -85,6 +89,8 @@ class YouTubeAccess:
             memberships.lock_graph(self.db)
             from oko.storage.subtitle_problems import drain_due
             drain_due(self.store,wall)
+            from oko.storage.youtube_fetch_problems import drain_due as drain_fetch_due
+            drain_fetch_due(self.store,wall)
             if self.store.problems.processor_resume_candidate(wall):
                 self.store.problems.finish_processor_change([],None,wall)
             previous=self.store.problems.prepare_processor_pause(wall)
@@ -101,6 +107,8 @@ class YouTubeAccess:
             self.db.execute('UPDATE youtube_access SET strikes = %s , blocked_until = %s WHERE id = 1', (strikes, until))
             from oko.storage.subtitle_problems import sync_timer
             sync_timer(self.store,wall)
+            from oko.storage.youtube_fetch_problems import sync_timer as sync_fetch_timer
+            sync_fetch_timer(self.store,wall)
             source_groups.sync_youtube_timer(self.store,wall)
             manager=getattr(self.store,'incomplete_draft',None)
             if manager is not None:manager.mark_youtube_groups(pause=True)
@@ -115,6 +123,8 @@ class YouTubeAccess:
             memberships.lock_graph(self.db)
             from oko.storage.subtitle_problems import drain_due
             drain_due(self.store,self.store.wall_clock())
+            from oko.storage.youtube_fetch_problems import drain_due as drain_fetch_due
+            drain_fetch_due(self.store,self.store.wall_clock())
             pointer=self.db.execute("""SELECT processor_reservation_id,blocked_until,
                 EXISTS(SELECT 1 FROM state WHERE key LIKE 'source-youtube-timed:%%' LIMIT 1) AS source_timed
                 FROM youtube_access WHERE id=1""").fetchone()
@@ -126,6 +136,8 @@ class YouTubeAccess:
             self.db.execute('UPDATE youtube_access SET strikes = 0 , blocked_until = 0 WHERE id = 1')
             from oko.storage.subtitle_problems import sync_timer
             sync_timer(self.store,self.store.wall_clock())
+            from oko.storage.youtube_fetch_problems import sync_timer as sync_fetch_timer
+            sync_fetch_timer(self.store,self.store.wall_clock())
             if source_timed:
                 from oko.storage import source_groups
                 source_groups.sync_youtube_timer(self.store,self.store.wall_clock())

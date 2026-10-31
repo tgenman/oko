@@ -1503,3 +1503,15 @@ and 16 Playwright status scenarios with a screenshot inspected. The reviewed
 marker writers take the graph lock, but an exhaustive audit of every marker
 writer was not completed; arbitrary external SQL without that protocol remains
 outside the proven concurrency guarantee. No working database was migrated.
+
+
+NULL-code YouTube fetch problems now use event updates and timed recovery
+while retaining separate RSS and YouTube owners for a shared Job. Synthetic
+checks cover deadline/ETag, legacy ambiguity, rollback, graph changes and
+084-to-085 migration. Initial recovery may make one paginated pass over all
+NULL-fetch Jobs; unusually large groups may be reprojected for each due page.
+The integrated scope passed 203 PostgreSQL tests, mypy on 167 files, 16
+Playwright status scenarios and one persisted YouTube fetch card through a
+synthetic backend; desktop/mobile screenshots were inspected. The first two
+persisted-card browser attempts failed due to incorrect temporary fixture
+expectations and passed after fixture correction. No working database migrated.

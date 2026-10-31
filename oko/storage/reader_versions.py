@@ -22,6 +22,9 @@ class ReaderVersions:
         self._next_fetch_null_gc = float('-inf')
         self._processor_youtube_paused = store.problems.processor_youtube_paused(store.wall_clock())
         self._incomplete_due_cursor: tuple[float,str] | None = None
+        self._youtube_fetch_due_cursor: tuple[float,str] | None = None
+        self._youtube_fetch_pointer_gc_cursor: str | None = None
+        self._next_youtube_fetch_pointer_gc = float('-inf')
         self._subtitle_due_cursor: tuple[float,str] | None = None
         self._subtitle_pointer_gc_cursor: str | None = None
         self._next_subtitle_pointer_gc = float('-inf')
@@ -87,6 +90,24 @@ class ReaderVersions:
                 old_subtitle_cursor=self._subtitle_due_cursor
                 self._subtitle_due_cursor=activate_due(self.store,wall,cursor=old_subtitle_cursor)
                 self.db.after_rollback(lambda: setattr(self,'_subtitle_due_cursor',old_subtitle_cursor))
+            if self.db.execute('SELECT 1 FROM reader_problems WHERE youtube_fetch_due IS NOT NULL AND youtube_fetch_reserved_owned AND youtube_fetch_due<=%s LIMIT 1',(wall,)).fetchone():
+                from oko.storage import memberships
+                from oko.storage.youtube_fetch_problems import activate_due
+                memberships.lock_graph(self.db)
+                old_fetch_due_cursor=self._youtube_fetch_due_cursor
+                self._youtube_fetch_due_cursor=activate_due(self.store,wall,cursor=old_fetch_due_cursor)
+                self.db.after_rollback(lambda: setattr(self,'_youtube_fetch_due_cursor',old_fetch_due_cursor))
+            if now>=self._next_youtube_fetch_pointer_gc:
+                from oko.storage.youtube_fetch_problems import cleanup_pointers
+                pointer_cursor,pointer_done=cleanup_pointers(self.store,self._youtube_fetch_pointer_gc_cursor)
+                old_pointer_cursor=self._youtube_fetch_pointer_gc_cursor
+                old_pointer_next=self._next_youtube_fetch_pointer_gc
+                def restore_youtube_fetch_pointer_gc() -> None:
+                    self._youtube_fetch_pointer_gc_cursor=old_pointer_cursor
+                    self._next_youtube_fetch_pointer_gc=old_pointer_next
+                self.db.after_rollback(restore_youtube_fetch_pointer_gc)
+                self.db.after_commit(lambda: setattr(self,'_youtube_fetch_pointer_gc_cursor',pointer_cursor))
+                if pointer_done:self.db.after_commit(lambda: setattr(self,'_next_youtube_fetch_pointer_gc',now+60))
             paused=self.store.problems.processor_youtube_paused(wall)
             if paused!=self._processor_youtube_paused:
                 from oko.storage import memberships,source_groups
@@ -150,8 +171,8 @@ class ReaderVersions:
             cutoff = wall-86400
             reservation=self.store.problems.processor_reservation()
             reserved_id=reservation['id'] if reservation else None
-            expired = [row['id'] for row in self.db.execute('SELECT id FROM reader_problems WHERE finished <= %s AND id IS DISTINCT FROM %s AND incomplete_due IS NULL AND subtitle_due IS NULL ORDER BY finished,id LIMIT 200',(cutoff,reserved_id))]
-            removed = self.db.execute('DELETE FROM reader_problems WHERE id=ANY(%s) AND finished <= %s AND incomplete_due IS NULL AND subtitle_due IS NULL',(expired,cutoff)).rowcount if expired else 0
+            expired = [row['id'] for row in self.db.execute('SELECT id FROM reader_problems WHERE finished <= %s AND id IS DISTINCT FROM %s AND incomplete_due IS NULL AND subtitle_due IS NULL AND youtube_fetch_due IS NULL ORDER BY finished,id LIMIT 200',(cutoff,reserved_id))]
+            removed = self.db.execute('DELETE FROM reader_problems WHERE id=ANY(%s) AND finished <= %s AND incomplete_due IS NULL AND subtitle_due IS NULL AND youtube_fetch_due IS NULL',(expired,cutoff)).rowcount if expired else 0
             if removed:
                 from oko.storage.reader_status import changed as status_changed
                 status_changed(self.db)

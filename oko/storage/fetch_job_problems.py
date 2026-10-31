@@ -6,7 +6,7 @@ if TYPE_CHECKING:
     from oko.storage.store import Store
 
 
-def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_suppressed: bool = False) -> dict[int,list[dict[str, Any]]]:
+def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_suppressed: bool = False, include_youtube: bool = True) -> dict[int,list[dict[str, Any]]]:
     rows=store.db.execute(f"""SELECT j.id,j.kind,j.item,j.status,j.error,j.problem_code,j.feed_id,
         coalesce({owner_expr('p')},{owner_expr('root')},j.feed_id) AS owner,
         p.viewed,coalesce(root.id,j.item) AS affected, f.kind AS feed_kind
@@ -32,7 +32,7 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
         code=row['problem_code']
         if row['status'] not in ('pending','running','failed','unavailable','blocked') and not (row['status']=='done' and code and row['error']):continue
         if code in ('codex-choice','ai-permission','youtube-admission','processor-config') or row['viewed']:continue
-        if code is None and row['feed_kind']=='youtube' and store.youtube.ready_at()>now:continue
+        if not include_youtube and code is None and row['feed_kind']=='youtube' and store.youtube.ready_at()>now:continue
         code=code or 'work-fetch'
         feed=row['owner'] or row['item'] or 'demo'
         if code in profile_codes and feed in suppressed:continue
@@ -43,8 +43,9 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
         if group not in results:
             body: dict[str,Any]=dict(id=identity,code=code,section='object',title='Не удалось загрузить материал',
                 consequence='Сохранённое содержимое остаётся доступным.',next_step='Включите обработку, чтобы повторить попытку.' if row['status']=='blocked' else 'Повторите загрузку вручную.' if row['status'] in ('done','failed') else 'Проверьте доступность источника.' if row['status']=='unavailable' else 'Око повторит попытку автоматически.',
-                objects=[],action=None,operation='producer:fetch',fetch_owner=feed,_code_present=row['problem_code'] is not None or (row['error'] is not None and row['id'] not in youtube_jobs),created_at=now,state='retrying' if row['status']=='running' or not row['error'] else 'current',finished_at=None,outcome=None,next_at=None)
+                objects=[],action=None,operation='producer:fetch',fetch_owner=feed,_code_present=row['problem_code'] is not None or (row['error'] is not None and (include_youtube or row['id'] not in youtube_jobs)),created_at=now,state='retrying' if row['status']=='running' or not row['error'] else 'current',finished_at=None,outcome=None,next_at=None)
             if code=='work-fetch':body['fetch_implicit_code']=row['problem_code'] in (None,'')
+            if row['problem_code'] is None and row['feed_kind']=='youtube':body['fetch_youtube_event']=True
             if row['error']:body['reason']=row['error']
             if code=='source-reconnect':body.update(section='action',next_step='Проверьте привязку источника; доступ не изменяется автоматически.')
             results[group]=body
@@ -70,15 +71,32 @@ def managed_candidates(store: 'Store', job_id: int, now: float) -> list[dict[str
             if row['_code_present'] and row['code'] and row['code'] not in excluded and not row['code'].startswith('source-')]
 
 
-def managed_candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_suppressed: bool = False) -> dict[int,list[dict[str, Any]]]:
+def managed_candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_suppressed: bool = False, include_youtube: bool = True) -> dict[int,list[dict[str, Any]]]:
     excluded={'codex-choice','ai-permission','youtube-admission','processor-config','profile_not_configured','profile_unavailable','account_identity_mismatch'}
-    groups=candidates_many(store,job_ids,now,include_suppressed=include_suppressed)
+    groups=candidates_many(store,job_ids,now,include_suppressed=include_suppressed,include_youtube=include_youtube)
     return {job_id:[dict({k:v for k,v in row.items() if k!='_code_present'},fetch_job_id=str(job_id)) for row in rows if row['_code_present'] and row['code'] and row['code'] not in excluded and not row['code'].startswith('source-')] for job_id,rows in groups.items()}
 
 
 def previous_candidates(store: 'Store', job_id: int, now: float) -> list[dict[str, Any]]:
     """Capture the prior GET-owned NULL error when an event changes its code."""
     rows=candidates(store,job_id,now)
+    flag=store.db.execute("SELECT fetch_youtube_sensitive FROM jobs WHERE id=%s AND kind='fetch'",(job_id,)).fetchone() if any(row.get('fetch_youtube_event') for row in rows) else None
+    if flag and flag['fetch_youtube_sensitive']:
+        from oko.storage import memberships
+        from oko.storage.youtube_fetch_problems import activate_due
+        memberships.lock_graph(store.db)
+        # Both the graph and ownership can change while the lock is awaited.
+        locked_flag=store.db.execute("SELECT fetch_youtube_sensitive FROM jobs WHERE id=%s AND kind='fetch'",(job_id,)).fetchone()
+        if locked_flag and locked_flag['fetch_youtube_sensitive']:
+            cursor: tuple[float,str] | None=None
+            while True:
+                cursor=activate_due(store,now,job_id,cursor)
+                if cursor is None:break
+            rows=candidates(store,job_id,now)
+        else:
+            rows=candidates_many(store,[job_id],now,include_youtube=False).get(job_id,[])
+    elif flag:
+        rows=candidates_many(store,[job_id],now,include_youtube=False).get(job_id,[])
     excluded={'codex-choice','ai-permission','youtube-admission','processor-config','profile_not_configured','profile_unavailable','account_identity_mismatch'}
     eligible=[dict({k:v for k,v in row.items() if k!='_code_present'},fetch_job_id=str(job_id)) for row in rows
               if row['code'] not in excluded and not row['code'].startswith('source-')]

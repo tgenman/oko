@@ -72,9 +72,11 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
             if row['media_problem_exists']:
                 capture_media_problems(store,effects,{identity})
             if row['fetch_problem_job'] is not None and row['fetch_problem_job'] not in effects.fetch_problems_checked:
-                from oko.storage.fetch_job_problems import managed_candidates
+                from oko.storage.fetch_job_problems import managed_candidates,previous_candidates
                 effects.fetch_problems_checked.add(row['fetch_problem_job'])
                 prior=managed_candidates(store,row['fetch_problem_job'],store.wall_clock())
+                if any(candidate.get('fetch_youtube_event') for candidate in prior):
+                    prior=previous_candidates(store,row['fetch_problem_job'],store.wall_clock())
                 if prior:effects.fetch_problems_before[row['fetch_problem_job']]=prior
             if identity not in effects.delete_problems_checked:
                 if row['delete_problem_job'] is not None:
@@ -158,13 +160,15 @@ def capture_media_problems(store: 'Store', effects: CollectionEffects, items: se
 
 
 def capture_fetch_problems(store: 'Store', effects: CollectionEffects, items: set[str]) -> None:
-    from oko.storage.fetch_job_problems import managed_candidates
+    from oko.storage.fetch_job_problems import managed_candidates,previous_candidates
     for start in range(0,len(items),400):
         batch=sorted(items)[start:start+400]
         for row in store.db.execute("SELECT id,j.problem_code,j.error FROM jobs j WHERE kind='fetch' AND item=ANY(%s) AND ((j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','profile_not_configured','profile_unavailable','account_identity_mismatch')))",(batch,)):
             if row['id'] in effects.fetch_problems_checked:continue
             effects.fetch_problems_checked.add(row['id'])
             candidates=managed_candidates(store,row['id'],store.wall_clock())
+            if any(candidate.get('fetch_youtube_event') for candidate in candidates):
+                candidates=previous_candidates(store,row['id'],store.wall_clock())
             if candidates or (row['problem_code'] is None and row['error'] is not None):effects.fetch_problems_before[row['id']]=candidates
 
 

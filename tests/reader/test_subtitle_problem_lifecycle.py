@@ -514,7 +514,7 @@ def test_status_does_not_scan_ten_thousand_future_reservations(tmp_path,postgres
         try:store.problems.snapshot(100)
         finally:store.db.set_trace_callback(None)
         query=next(q for q in trace if q.startswith('SELECT * FROM reader_problems WHERE finished IS NULL OR finished >'))
-        plan=store.db._db.execute('EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) '+query,(100-86400,100)).fetchone()[0][0]['Plan']
+        plan=store.db._db.execute('EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) '+query,(100-86400,100,100)).fetchone()[0][0]['Plan']
         assert scan_rows(plan)<1000
     finally:store.db.close()
 
