@@ -1653,6 +1653,14 @@ class Problems:
             saved=by_identity.get(candidate['id'])
             return saved if saved and self.media_record_matches(saved,candidate) else None
         for candidate in previous:
+            if candidate.get('media_null_event'):
+                possible=([by_identity[candidate['id']]] if candidate['id'] in by_identity else [])+isolated.get(candidate['id'],[])
+                matches={row['id']:row for row in possible if self.media_record_matches(row,candidate)}
+                if len(matches)>1:
+                    from oko.storage.subtitle_problems import protect_rows
+                    protect_rows(self.store,list(matches.values()))
+                    candidate['id']=''
+                    continue
             matched=record(candidate)
             candidate['id']=matched['identity'] if matched else ''
         for candidate in candidates:

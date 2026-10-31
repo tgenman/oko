@@ -1554,3 +1554,12 @@ tests with assertions intact, mypy on 167 files, 16 Playwright status cases
 and one persisted deletion-error card; desktop/mobile screenshots were inspected.
 Independent checks included two-connection graph lock and duplicate preservation.
 No working database or real source was used.
+
+
+A follow-up fixes NULL-code media ownership when a root is added or a
+previously orphaned file appears, and preserves both records when legacy
+occurrences cannot be distinguished at finish. The integrated synthetic
+snapshot passed 174 PostgreSQL tests, mypy on 167 files, 16 Playwright status
+scenarios and a persisted media-card browser check; desktop/mobile screenshots
+were inspected. Independent review also covered graph locking, rollback and
+restart. No working database was changed.

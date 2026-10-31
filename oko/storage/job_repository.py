@@ -1049,12 +1049,15 @@ class JobRepository:
 
     def change_adapter(self, feed: str) -> None:
         db=self.store.db
+        from oko.storage import memberships
+        memberships.lock_graph(db)
         effects=CollectionEffects()
         affected={row['item'] for row in db.execute(f"SELECT j.item FROM jobs j JOIN ({owned_ids('= %s')}) owner ON owner.id=j.item WHERE j.kind='fetch' AND ((j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%'))",(feed,feed))}
         publication_links.capture_fetch_problems(self.store,effects,affected)
-        media_affected={row['publication_id'] for row in db.execute(f"SELECT DISTINCT m.publication_id FROM media_files m JOIN ({owned_ids('= %s')}) owner ON owner.id=m.publication_id JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE ((m.resource_key='youtube:subtitles' AND j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%'))",(feed,feed))}
+        media_affected={row['publication_id'] for row in db.execute(f"SELECT DISTINCT m.publication_id FROM media_files m JOIN ({owned_ids('= %s')}) owner ON owner.id=m.publication_id JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE (((m.resource_key='youtube:subtitles' OR j.media_null_owned) AND j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%'))",(feed,feed))}
         publication_links.capture_media_problems(self.store,effects,media_affected)
         owned=[row[0] for row in db.execute(owned_ids('= %s'),(feed,feed))]
+        publication_links.capture_media_problems(self.store,effects,set(owned))
         from oko.storage import memberships
         memberships.lock_graph(db)
         publication_links.capture_source_groups(self.store,effects,set(owned))
