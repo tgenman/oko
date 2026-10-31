@@ -1563,3 +1563,12 @@ snapshot passed 174 PostgreSQL tests, mypy on 167 files, 16 Playwright status
 scenarios and a persisted media-card browser check; desktop/mobile screenshots
 were inspected. Independent review also covered graph locking, rollback and
 restart. No working database was changed.
+
+
+A media recovery follow-up now respects protected legacy occurrence markers
+for both NULL-to-explicit and explicit-to-NULL transitions. Synthetic tests
+cover recovery, finish, graph changes, corrupt markers and a concurrent marker
+writer. The integrated snapshot passed 182 PostgreSQL tests, mypy on 167 files,
+16 Playwright status scenarios and a persisted synthetic media card; desktop
+and mobile screenshots were inspected. The first temporary build attempt failed
+during typecheck, and a repeated build succeeded. No working database changed.

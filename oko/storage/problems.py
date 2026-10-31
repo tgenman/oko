@@ -1647,11 +1647,23 @@ class Problems:
         if subtitle_foreign:
             from oko.storage.subtitle_problems import protect_rows
             protect_rows(self.store,list(subtitle_foreign.values()))
+        protected_ids: set[str]=set()
+        if any(candidate.get('media_null_event') for candidate in previous+candidates):
+            protection_candidates={row['id'] for row in by_identity.values()}
+            protection_candidates.update(row['id'] for group in isolated.values() for row in group)
+            ordered_protection=sorted(protection_candidates)
+            for start in range(0,len(ordered_protection),400):
+                marker_ids={'fetch-null-protected:'+hashlib.sha256(identity.encode()).hexdigest():identity for identity in ordered_protection[start:start+400]}
+                for row in self.db.execute('SELECT key FROM state WHERE key=ANY(%s)',(list(marker_ids),)):
+                    protected_ids.add(marker_ids[row['key']])
         def record(candidate: dict[str,Any]) -> Any:
+            def matches(saved: Any) -> bool:
+                if saved['id'] in protected_ids:return False
+                return self.media_record_matches(saved,candidate)
             for saved in isolated.get(candidate['id'],[]):
-                if self.media_record_matches(saved,candidate):return saved
+                if matches(saved):return saved
             saved=by_identity.get(candidate['id'])
-            return saved if saved and self.media_record_matches(saved,candidate) else None
+            return saved if saved and matches(saved) else None
         for candidate in previous:
             if candidate.get('media_null_event'):
                 possible=([by_identity[candidate['id']]] if candidate['id'] in by_identity else [])+isolated.get(candidate['id'],[])
