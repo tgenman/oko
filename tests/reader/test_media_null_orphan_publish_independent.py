@@ -8,7 +8,7 @@ def test_orphan_media_null_when_file_appears_moves_or_finishes_old_occurrence(tm
  s=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
  try:
   with transaction(s.db):
-   s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+   s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
    s.db.execute("INSERT INTO publications(id,platform,external_id,content) VALUES ('p','rss','p',%s)",(json.dumps({'blocks':[],'extra':{'_reader':{'title':'P'}}}),))
    s.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
    job=s.db.execute("INSERT INTO jobs(kind,item,status,error) VALUES ('download_media','m','failed','old failure') RETURNING id").fetchone()[0]

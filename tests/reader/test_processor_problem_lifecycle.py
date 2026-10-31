@@ -148,7 +148,7 @@ def test_mark_viewed_through_store_closes_processor_without_status_get(tmp_path,
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,members) VALUES ('item','rss','item',0,'[]')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','item',true,true)")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('filter','item','running',1) RETURNING id").fetchone()[0]
@@ -433,7 +433,7 @@ def test_adapter_change_closes_read_processor_problem_without_get(tmp_path,postg
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('read','feed','running',1) RETURNING id").fetchone()[0]
         store.jobs.retry(Job(job,'read','feed',1),1,'missing',code='processor-config')
         saved=store.problems.processor_current()
@@ -472,7 +472,7 @@ def test_cancel_history_clears_done_without_error_but_keeps_other_issue(tmp_path
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','item','pending',NULL,'processor-config') RETURNING id").fetchone()[0]
             store.db.execute("INSERT INTO history_members(feed,item) VALUES ('feed','item')")
             store.problems.finish_processor_change([job],None,1)
@@ -486,7 +486,7 @@ def test_finish_feed_deletion_closes_processor_group(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','deleting','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','deleting',ARRAY[]::text[])")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('feed-delete','feed','running',1) RETURNING id").fetchone()[0]
         store.jobs.retry(Job(job,'feed-delete','feed',1),1,'missing',code='processor-config')
         saved=store.problems.processor_current()
@@ -500,7 +500,7 @@ def test_feed_remove_cancels_read_processor_without_status_get(tmp_path,postgres
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('read','feed','running',1) RETURNING id").fetchone()[0]
         store.jobs.retry(Job(job,'read','feed',1),1,'missing',code='processor-config')
         saved=store.problems.processor_current()
@@ -587,7 +587,7 @@ def test_link_change_invalidates_processor_status_revision_without_get(tmp_path,
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,url,viewed) VALUES ('root','rss','root','https://root.test',0),('child','other_web','https://child.test','https://child.test',0)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','root',true,true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','child','running',1) RETURNING id").fetchone()[0]
@@ -619,7 +619,7 @@ def test_remove_feed_closes_selected_filter_processor_without_status_get(tmp_pat
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,processing_metadata) VALUES ('item','rss','item',0,%s)",(json.dumps({'_pass':{'feed_id':'feed'}}),))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','item',true,true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('filter','item','running',1) RETURNING id").fetchone()[0]
@@ -731,7 +731,7 @@ def test_refresh_feed_reactivates_done_fetch_processor_without_get(tmp_path,post
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete) VALUES ('item','rss','item',0,0)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','item',true,true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','item','done',NULL,'processor-config') RETURNING id").fetchone()[0]
@@ -851,7 +851,7 @@ def test_link_change_invalidates_conditional_http_status(tmp_path,postgres_url):
         def seed():
             store=app.state.host.require_store()
             with store.db:
-                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
                 store.db.execute("INSERT INTO publications(id,platform,external_id,url,viewed) VALUES ('root','rss','root','https://root.test',0),('child','other_web','https://child.test','https://child.test',0)")
                 store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','root',true,true)")
                 job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','child','running',1) RETURNING id").fetchone()[0]

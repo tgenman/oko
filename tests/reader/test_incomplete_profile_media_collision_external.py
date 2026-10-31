@@ -20,7 +20,7 @@ def test_subtitle_admission_collision_matches_actual_admission_owner(tmp_path,po
  s=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
  try:
   with transaction(s.db):
-   s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+   s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
    s.db.execute("INSERT INTO publications(id) VALUES ('root'),('p'),('owner')")
    s.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','root',true),('f','owner',true)")
    s.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root','p')")

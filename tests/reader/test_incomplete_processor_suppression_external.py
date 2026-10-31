@@ -10,7 +10,7 @@ def test_processor_failure_suppresses_then_restores_incomplete_atomically(tmp_pa
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             content=json.dumps({'extra':{'_reader':{'full':False,'reason':'partial'}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','rss','p',0,1,%s,0)",(content,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -41,7 +41,7 @@ def test_paused_youtube_caption_processor_does_not_hide_incomplete(tmp_path,post
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             content=json.dumps({'extra':{'_reader':{'full':False,'reason':'partial'}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','rss','p',0,1,%s,0)",(content,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")

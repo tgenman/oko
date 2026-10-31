@@ -10,7 +10,7 @@ def test_protected_escaped_json_is_not_rewritten(tmp_path,postgres_url):
         raw=json.dumps(body).replace('"work-fetch"','"work\\u002dfetch"')
         key='fetch-null-protected:'+hashlib.sha256(rid.encode()).hexdigest()
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','p','failed','new error',NULL)")

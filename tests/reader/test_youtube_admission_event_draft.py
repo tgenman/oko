@@ -11,7 +11,7 @@ def test_full_material_job_events_update_admission_without_get(tmp_path,postgres
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:clock[0])
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,'{}',1)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,problem_code,generation) VALUES ('fetch','p','pending','',1) RETURNING id").fetchone()[0]
@@ -53,7 +53,7 @@ def test_actual_job_writers_refresh_admission_without_status_read(tmp_path,postg
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,'{}',1)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','p',true)")
         store.youtube.blocked(100,900)
@@ -76,7 +76,7 @@ def test_detach_last_link_updates_admission_before_get(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('root','youtube','root',0,1,'{}',1),('child','rss','child',0,1,'{}',1)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','root',true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root','child')")
@@ -103,7 +103,7 @@ def test_restart_recovers_legacy_occurrence_and_active_job(tmp_path,postgres_url
         legacy=dict(code='youtube-admission',section='wait',title='YouTube ограничил запросы',consequence='Ожидают субтитров: 1.',next_step='Око повторит получение после паузы.',objects=[dict(kind='material',id='p')],action=None,operation='producer:status',state='retrying',next_at=200.)
         with transaction(store.db):
             store.db.execute("UPDATE youtube_access SET youtube_admission_recovered=false WHERE id=1")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','p',true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,problem_code) VALUES ('fetch','p','pending','')")
@@ -122,7 +122,7 @@ def test_source_ownership_change_updates_admission_without_get(tmp_path,postgres
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,'{}',1)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','p','pending','failure','source-network') RETURNING id").fetchone()[0]
@@ -142,7 +142,7 @@ def test_viewed_after_virtual_expiry_does_not_restore_removed_material(tmp_path,
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:clock[0])
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,'{}',1)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','p',true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,problem_code) VALUES ('fetch','p','pending','')")
@@ -177,7 +177,7 @@ def test_single_job_change_updates_only_delta_without_group_scan(tmp_path,postgr
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,complete,incomplete_class) SELECT 'p-'||n,1,1 FROM generate_series(1,1000)n")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'yt','p-'||n,true FROM generate_series(1,1000)n")
             ids=[row['id'] for row in store.db.execute("INSERT INTO jobs(kind,item,status,problem_code) SELECT 'fetch','p-'||n,'pending','' FROM generate_series(1,1000)n RETURNING id")]
@@ -201,7 +201,7 @@ def test_delta_preserves_object_until_last_contributor_finishes(tmp_path,postgre
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','p',true)")
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','youtube:subtitles','x','file','pending_download')")
@@ -226,7 +226,7 @@ def test_legacy_null_target_survives_recovery_and_stays_visible(tmp_path,postgre
     try:
         with transaction(store.db):
             store.db.execute("UPDATE youtube_access SET youtube_admission_recovered=false WHERE id=1")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) VALUES ('fetch',NULL,'yt','pending','paused','youtube-admission')")
             store.db.execute('UPDATE youtube_access SET blocked_until=200 WHERE id=1')
         store.db.close();store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:clock[0])
@@ -260,7 +260,7 @@ def test_viewed_during_pause_never_restores_forgotten_object(tmp_path,postgres_u
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,'{}',1)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','p',true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,problem_code) VALUES ('fetch','p','pending','')")
@@ -278,7 +278,7 @@ def test_null_target_feed_change_clears_unknown_without_waiting_for_get(tmp_path
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]'),('rss','rss','RSS','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[]),('rss','rss','RSS','default','rss','rss','connected',ARRAY[]::text[])")
             job=store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) VALUES ('fetch',NULL,'yt','pending','paused','youtube-admission') RETURNING id").fetchone()[0]
             store.incomplete_draft.mark_job('fetch',None,job)
         store.youtube.blocked(100,900)
@@ -294,7 +294,7 @@ def test_fetch_null_ownership_transition_refreshes_admission(tmp_path,postgres_u
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code,fetch_null_owned) VALUES ('fetch','p','pending','failure',NULL,true) RETURNING id").fetchone()[0]
@@ -312,7 +312,7 @@ def test_delta_moves_null_target_to_valid_material(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) VALUES ('fetch',NULL,'yt','pending','paused','youtube-admission') RETURNING id").fetchone()[0]
@@ -333,7 +333,7 @@ def test_feed_deletion_updates_orphan_job_owner_without_get(tmp_path,postgres_ur
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','deleting','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','deleting',ARRAY[]::text[])")
             job=store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) VALUES ('fetch','orphan','yt','pending','failure','youtube-admission') RETURNING id").fetchone()[0]
             delete=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('feed-delete','yt','running',1) RETURNING id").fetchone()[0]
             store.incomplete_draft.mark_job('fetch','orphan',job)
@@ -365,7 +365,7 @@ def test_deleted_viewed_publication_is_not_restored_by_orphan_job(tmp_path,postg
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,'{}',1)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,problem_code) VALUES ('fetch','p','yt','pending','') RETURNING id").fetchone()[0]
@@ -392,7 +392,7 @@ def test_legacy_null_viewed_is_reported_as_unknown_without_disclosure(tmp_path,p
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,viewed) VALUES ('p',NULL)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,problem_code) VALUES ('fetch','p','pending','') RETURNING id").fetchone()[0]
@@ -491,7 +491,7 @@ def test_restart_preserves_current_occurrence_and_does_not_rewrite_it(tmp_path,p
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,problem_code) VALUES ('fetch','p','pending','') RETURNING id").fetchone()[0]
@@ -508,7 +508,7 @@ def test_viewing_linked_roots_preserves_other_then_forgets_orphan(tmp_path,postg
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('a','youtube','a',0,1,'{}',1),('b','youtube','b',0,1,'{}',1),('child','rss','c',0,1,'{}',1)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','a',true),('yt','b',true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('a','child'),('b','child')")

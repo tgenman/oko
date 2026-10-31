@@ -14,7 +14,7 @@ def test_addressed_fetch_projection_matches_status(tmp_path,postgres_url,code,er
     with store.db:store.db.execute("UPDATE youtube_access SET youtube_admission_recovered=false WHERE id=1")
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code,source_event_owned) VALUES ('fetch','p','pending',%s,%s,%s::integer::boolean) RETURNING id",(error,code,owned)).fetchone()[0]
@@ -37,7 +37,7 @@ def test_addressed_subtitles_projection_matches_status(tmp_path,postgres_url,cod
     with store.db:store.db.execute("UPDATE youtube_access SET youtube_admission_recovered=false WHERE id=1")
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','p',true)")
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','youtube:subtitles','x','file','pending_download')")
@@ -56,7 +56,7 @@ def test_addressed_projection_preserves_multiple_linked_roots(tmp_path,postgres_
     with store.db:store.db.execute("UPDATE youtube_access SET youtube_admission_recovered=false WHERE id=1")
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('a'),('b'),('child')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','a',true),('yt','b',true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('a','child'),('b','child')")
@@ -74,7 +74,7 @@ def test_contributor_probe_ignores_ten_thousand_foreign_jobs(tmp_path,postgres_u
     with store.db:store.db.execute("UPDATE youtube_access SET youtube_admission_recovered=false WHERE id=1")
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','p','pending','failure','') RETURNING id").fetchone()[0]
@@ -101,7 +101,7 @@ def test_flags_recovery_is_restartable_and_ignores_foreign_history(tmp_path,post
     with store.db:store.db.execute("UPDATE youtube_access SET youtube_admission_recovered=false WHERE id=1")
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) SELECT 'p-'||n FROM generate_series(1,101)n")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'yt','p-'||n,true FROM generate_series(1,101)n")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) SELECT 'fetch','p-'||n,'pending','failure','' FROM generate_series(1,101)n")
@@ -129,7 +129,7 @@ def test_flag_updates_roll_back_with_job(tmp_path,postgres_url):
     with store.db:store.db.execute("UPDATE youtube_access SET youtube_admission_recovered=false WHERE id=1")
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,problem_code) VALUES ('fetch','p','pending','') RETURNING id").fetchone()[0]
@@ -151,7 +151,7 @@ def test_flags_recovery_includes_zero_and_negative_job_ids(tmp_path,postgres_url
     with store.db:store.db.execute("UPDATE youtube_access SET youtube_admission_recovered=false WHERE id=1")
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('a'),('b')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','a',true),('yt','b',true)")
             store.db.execute("INSERT INTO jobs(id,kind,item,status,problem_code) VALUES (-1,'fetch','a','pending',''),(0,'fetch','b','pending','')")
@@ -168,7 +168,7 @@ def test_indexed_group_projection_matches_status_without_foreign_jobs(tmp_path,p
     with store.db:store.db.execute("UPDATE youtube_access SET youtube_admission_recovered=false WHERE id=1")
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','p',true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,problem_code) VALUES ('fetch','p','pending','')")
@@ -190,7 +190,7 @@ def test_sync_changed_root_includes_complete_and_linked_material_jobs(tmp_path,p
     with store.db:store.db.execute("UPDATE youtube_access SET youtube_admission_recovered=false WHERE id=1")
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,complete,incomplete_class) VALUES ('root',1,1),('child',1,1)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','root',true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root','child')")
@@ -211,7 +211,7 @@ def test_capture_before_detach_clears_old_contribution_with_rollback(tmp_path,po
     with store.db:store.db.execute("UPDATE youtube_access SET youtube_admission_recovered=false WHERE id=1")
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('root'),('child')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','root',true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root','child')")
@@ -243,7 +243,7 @@ def test_capture_remembers_contributor_after_job_deletion(tmp_path,postgres_url)
     with store.db:store.db.execute("UPDATE youtube_access SET youtube_admission_recovered=false WHERE id=1")
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,problem_code) VALUES ('fetch','p','pending','') RETURNING id").fetchone()[0]
@@ -264,7 +264,7 @@ def test_capture_large_affected_graph_is_streamed(tmp_path,postgres_url,monkeypa
     with store.db:store.db.execute("UPDATE youtube_access SET youtube_admission_recovered=false WHERE id=1")
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('root')")
             store.db.execute("INSERT INTO publications(id) SELECT 'child-'||n FROM generate_series(1,10000)n")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) SELECT 'root','child-'||n FROM generate_series(1,10000)n")
@@ -289,7 +289,7 @@ def test_media_id_collision_uses_same_owner_precedence_as_status(tmp_path,postgr
     try:
         store.youtube_admission_ready=False
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]'),('rss','rss','RSS','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[]),('rss','rss','RSS','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('m'),('owner')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES (%s,'m',true),(%s,'owner',true)",('yt' if item_owner=='youtube' else 'rss','yt' if media_owner=='youtube' else 'rss'))
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','owner','youtube:subtitles','x','file','pending_download')")
@@ -354,7 +354,7 @@ def test_real_080_fetch_flags_match_status_membership(tmp_path,postgres_url,code
     store.youtube_admission_ready=False
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code,fetch_null_owned,fetch_null_ambiguous) VALUES ('fetch','p','pending','failure',%s,%s::int::boolean,%s::int::boolean) RETURNING id",(code,owned,ambiguous)).fetchone()[0]
@@ -371,7 +371,7 @@ def test_feed_digest_collision_keeps_exact_job_boundary(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','youtube','rss','connected','[]'),('b','b','B','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','youtube','rss','connected',ARRAY[]::text[]),('b','b','B','default','youtube','rss','connected',ARRAY[]::text[])")
             ids=[r['id'] for r in store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,problem_code) VALUES ('fetch','p-a','a','pending',''),('fetch','p-b','b','pending','') RETURNING id")]
         with transaction(store.db):
             schema=store.db._db.execute('SELECT current_schema()').fetchone()[0]
@@ -404,7 +404,7 @@ def test_capture_items_avoids_ten_thousand_foreign_jobs(tmp_path,postgres_url,mo
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','p',true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,problem_code) VALUES ('fetch','p','pending','')")

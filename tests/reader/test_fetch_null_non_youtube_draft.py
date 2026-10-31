@@ -7,7 +7,7 @@ def test_recover_non_youtube_null_without_get_writes(tmp_path,postgres_url):
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='fetch-null-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','article',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) VALUES ('fetch','article','f','failed','failure',NULL) RETURNING id").fetchone()[0]
@@ -47,7 +47,7 @@ def test_youtube_null_projects_for_event_ownership(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('y','y','Y','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('y','y','Y','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('y','article',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','article','failed','failure',NULL) RETURNING id").fetchone()[0]
@@ -82,7 +82,7 @@ def test_mixed_youtube_roots_project_both_owners(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('r','r','R','default','rss','rss','connected','[]'),('y','y','Y','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('r','r','R','default','rss','rss','connected',ARRAY[]::text[]),('y','y','Y','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('a'),('b'),('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('r','a',true),('y','b',true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('a','article'),('b','article')")
@@ -143,7 +143,7 @@ def test_remove_one_root_preserves_other_occurrence(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected','[]'),('y','y','Y','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected',ARRAY[]::text[]),('y','y','Y','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('root-x','rss','x'),('root-y','rss','y'),('article','telegraph','article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('x','root-x',true),('y','root-y',true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root-x','article'),('root-y','article')")
@@ -178,7 +178,7 @@ def test_root_removal_rolls_back_null_problem_and_graph(tmp_path,postgres_url,mo
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('root','rss','root'),('article','telegraph','article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','root',true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root','article')")
@@ -200,7 +200,7 @@ def test_removing_youtube_root_transfers_remaining_null_to_events(tmp_path,postg
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('r','r','R','default','rss','rss','connected','[]'),('y','y','Y','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('r','r','R','default','rss','rss','connected',ARRAY[]::text[]),('y','y','Y','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('a','rss','a'),('b','youtube','b'),('article','telegraph','article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('r','a',true),('y','b',true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('a','article'),('b','article')")
@@ -219,7 +219,7 @@ def test_removing_rss_root_leaves_youtube_event_owned(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('r','r','R','default','rss','rss','connected','[]'),('y','y','Y','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('r','r','R','default','rss','rss','connected',ARRAY[]::text[]),('y','y','Y','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('a','rss','a'),('b','youtube','b'),('article','telegraph','article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('r','a',true),('y','b',true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('a','article'),('b','article')")
@@ -237,7 +237,7 @@ def test_adding_youtube_root_preserves_event_ownership_atomically(tmp_path,postg
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('r','r','R','default','rss','rss','connected','[]'),('y','y','Y','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('r','r','R','default','rss','rss','connected',ARRAY[]::text[]),('y','y','Y','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,url) VALUES ('article','telegraph','article','https://example.test/article'),('root','youtube','root','https://example.test/root'),('rssroot','rss','rssroot','https://example.test/rssroot')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('r','rssroot',true),('y','root',true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('rssroot','article')")
@@ -417,7 +417,7 @@ def test_occurrence_protection_does_not_hide_new_youtube_error(tmp_path,postgres
     try:
         body=json.dumps(dict(code='work-fetch',section='object',title='old',consequence='old',next_step='old',objects=[dict(kind='material',id='p')],action=None,operation='producer:status',state='current',next_at=None,reason='old error'))
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error) VALUES ('fetch','p','failed','old error') RETURNING id").fetchone()[0]

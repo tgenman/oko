@@ -81,7 +81,7 @@ def test_legacy_read_problems_recover_without_get_and_resume_after_fault(tmp_pat
     try:
         with store.db:
             store.db.execute("DELETE FROM state WHERE key='read-problems-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) SELECT 'f-'||n,'f-'||n,'Feed','default','rss','rss','connected','[]' FROM generate_series(1,101) n")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) SELECT 'f-'||n,'f-'||n,'Feed','default','rss','rss','connected',ARRAY[]::text[] FROM generate_series(1,101) n")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) SELECT 'read','f-'||n,'failed','failure','source-connection' FROM generate_series(1,101) n")
         store.db.close()
         def fault(point):
@@ -133,7 +133,7 @@ def test_legacy_read_problem_keeps_identity_on_recovery(tmp_path,postgres_url):
     try:
         setup(store)
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('other','other','Other','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('other','other','Other','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code,feed_id) VALUES ('read','feed','failed','failure','source-connection','other')")
             old=dict(id='job:source-connection:other:read',code='source-connection',section='object',title='Ошибка',consequence='Доступно',next_step='Повторите',objects=[dict(kind='feed',id='other')],action=None,operation='producer:read',created_at=1,state='current',finished_at=None,outcome=None,next_at=None)
             store.problems.sync_candidate(old['id'],old,1)
@@ -247,7 +247,7 @@ def test_rekey_keeps_legacy_group_still_needed_by_other_feed(tmp_path,postgres_u
     try:
         setup(store)
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('other','other','Other','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('other','other','Other','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code,feed_id) VALUES ('read','feed','failed','failure','source-connection','other'),('read','other','failed','failure','source-connection','other')")
             old=dict(id='job:source-connection:other:read',code='source-connection',section='object',title='Ошибка',consequence='Доступно',next_step='Повторите',objects=[dict(kind='feed',id='other')],action=None,operation='producer:read',created_at=1,state='current',finished_at=None,outcome=None,next_at=None)
             store.problems.sync_candidate(old['id'],old,1)
@@ -318,7 +318,7 @@ def test_read_job_feed_wins_over_same_id_publication_in_status(tmp_path,postgres
     try:
         setup(store)
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('other','other','Other','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('other','other','Other','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('feed','rss','same-id',0)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('other','feed',true,true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('read','feed','failed','failure','source-connection')")
@@ -499,7 +499,7 @@ def test_profile_switch_selects_only_affected_bindings(tmp_path,postgres_url):
     try:
         setup(store)
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) SELECT 'foreign-'||n,'foreign-'||n,'Feed','default','telegram','telegram','connected','[]' FROM generate_series(1,10000) n")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) SELECT 'foreign-'||n,'foreign-'||n,'Feed','default','telegram','telegram','connected',ARRAY[]::text[] FROM generate_series(1,10000) n")
             store.db.execute("INSERT INTO telegram_bindings(feed,binding,indexed_role) SELECT 'foreign-'||n,'{\"kind\":\"client\",\"role\":\"collection\"}','collection' FROM generate_series(1,10000) n")
             store.db._db.execute('ANALYZE telegram_bindings')
         sql="SELECT feed FROM telegram_bindings WHERE indexed_role=ANY(%s) OR (indexed_role IS NULL AND feed=ANY(%s))"

@@ -7,7 +7,7 @@ from oko.storage.postgres_schema import MIGRATIONS
 def test_feed_sort_order_migration_preserves_values_and_sequence(postgres_database_url):
     with psycopg.connect(postgres_database_url,autocommit=True) as db:
         migrate(db,MIGRATIONS[:67])
-        db.execute("INSERT INTO feeds(id,identity,title,rowid) OVERRIDING SYSTEM VALUE VALUES ('b','b','B',-4),('a','a','A',123)")
+        db.execute("INSERT INTO feeds(id,identity,title,rowid,original_urls) OVERRIDING SYSTEM VALUE VALUES ('b','b','B',-4,'[]'),('a','a','A',123,'[]')")
         before=db.execute('SELECT id,rowid FROM feeds ORDER BY rowid').fetchall()
         sequence=db.execute("SELECT pg_get_serial_sequence('feeds','rowid')").fetchone()[0]
         migrate(db,MIGRATIONS)

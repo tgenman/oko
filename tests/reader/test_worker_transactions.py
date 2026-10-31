@@ -1581,7 +1581,7 @@ def test_failed_feed_delete_problem_finishes_with_feed_removal(tmp_path, postgre
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','deleting','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','deleting',ARRAY[]::text[])")
             row=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('feed-delete','feed','running',1) RETURNING id").fetchone()
         job=Job(row['id'],'feed-delete','feed',1)
         store.jobs.retry(job,1,'Ошибка удаления',code='delete')
@@ -1656,7 +1656,7 @@ def test_status_groups_source_failures_by_publication_owner_without_job_feed(tmp
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('one','rss','one',0),('two','rss','two',0)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','one',true,true),('feed','two',true,true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','one','failed','failure','source-connection'),('fetch','two','failed','failure','source-connection')")
@@ -1674,7 +1674,7 @@ def test_status_groups_media_failures_by_publication_owner_without_job_feed(tmp_
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('one','rss','one',0),('two','rss','two',0)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','one',true,true),('feed','two',true,true)")
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m1','one','m1','https://a.test','one','pending_download'),('m2','two','m2','https://b.test','two','pending_download')")
@@ -1691,7 +1691,7 @@ def test_status_uses_root_owner_for_linked_publication_failure(tmp_path, postgre
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('root','rss','root',0),('linked','other_web','linked',0)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','root',true,true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root','linked')")
@@ -1711,7 +1711,7 @@ def test_profile_problem_suppresses_publication_job_without_saved_job_feed(tmp_p
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','telegram','telegram','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','telegram','telegram','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'ready',1)")
             store.subscriptions.telegram.put_binding('feed',dict(kind='client',role='personal',account_user_id='101',peer_id='123'))
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('item','telegram','item',0)")
@@ -1729,7 +1729,7 @@ def test_youtube_pause_counts_publication_when_job_feed_is_missing(tmp_path, pos
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:1)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','youtube','youtube','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','youtube','youtube','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('item','youtube','item',0)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','item',true,true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','item','pending','paused','youtube-admission')")
@@ -1765,7 +1765,7 @@ def test_delete_problem_tracks_all_linked_root_owners_and_cancellation(tmp_path,
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),('b','b','B','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected',ARRAY[]::text[]),('b','b','B','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('r1','rss','r1',0),('r2','rss','r2',0),('item','other_web','item',1)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('a','r1',true,true),('b','r2',true,true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('r1','item'),('r2','item')")
@@ -1801,7 +1801,7 @@ def test_grouping_correction_preserves_an_existing_problem_occurrence(tmp_path, 
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('item','rss','item',0)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','item',true,true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','item','failed','failure','source-connection')")
@@ -1822,7 +1822,7 @@ def test_grouping_correction_merges_old_problems_without_losing_history(tmp_path
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('one','rss','one',0),('two','rss','two',0)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','one',true,true),('feed','two',true,true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','one','failed','failure','source-connection'),('fetch','two','failed','failure','source-connection')")
@@ -1936,7 +1936,7 @@ def test_grouping_correction_preserves_legacy_problem_without_operation(tmp_path
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('item','rss','item',0)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','item',true,true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','item','failed','failure','source-connection')")
@@ -1980,7 +1980,7 @@ def test_review_real_discovery_captures_cleanup_problem_before_new_owner(tmp_pat
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('old','old','Old','default','rss','rss','connected','[]'),('new','new','New','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('old','old','Old','default','rss','rss','connected',ARRAY[]::text[]),('new','new','New','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,source_id,url,platform,external_id,viewed) VALUES ('item','old:one','https://example.test/item','other_web','https://example.test/item',1)")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation,payload) VALUES ('delete','item','running',1,%s) RETURNING id",(json.dumps({'cleanup_feed':'old'}),)).fetchone()[0]
         store.jobs.retry(Job(job_id,'delete','item',1),1,'failed',code='delete')
@@ -2009,7 +2009,7 @@ def test_review_discovery_captures_multiple_prior_root_problems(tmp_path, postgr
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),('b','b','B','default','rss','rss','connected','[]'),('new','new','New','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected',ARRAY[]::text[]),('b','b','B','default','rss','rss','connected',ARRAY[]::text[]),('new','new','New','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,source_id,url,platform,external_id,viewed) VALUES ('r1','a:r1','https://example.test/r1','other_web','https://example.test/r1',0),('r2','b:r2','https://example.test/r2','other_web','https://example.test/r2',0),('item','old:one','https://example.test/item','other_web','https://example.test/item',1)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('a','r1',true,true),('b','r2',true,true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('r1','item'),('r2','item')")
@@ -2033,7 +2033,7 @@ def test_review_link_removal_keeps_delete_problem_occurrence(tmp_path, postgres_
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,url,viewed) VALUES ('root','rss','root','https://example.test/root',0),('item','other_web','item','https://example.test/item',1)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','root',true,true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root','item')")
@@ -2065,7 +2065,7 @@ def test_review_discovery_closes_legacy_problem_before_status(tmp_path, postgres
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('old','old','Old','default','rss','rss','connected','[]'),('new','new','New','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('old','old','Old','default','rss','rss','connected',ARRAY[]::text[]),('new','new','New','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,source_id,url,platform,external_id,viewed) VALUES ('item','old:one','https://example.test/item','other_web','https://example.test/item',1)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code,payload) VALUES ('delete','item','pending','failure','delete',%s)",(json.dumps({'cleanup_feed':'old'}),))
             old=dict(id='job:delete:item:delete:item',code='delete',section='object',title='Ошибка',consequence='Сохранено',next_step='Повторите',objects=[],action=None,operation='producer:delete',created_at=1,state='current',finished_at=None,outcome=None,next_at=None)
@@ -2088,7 +2088,7 @@ def test_review_removing_one_root_keeps_other_root_problem(tmp_path, postgres_ur
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),('b','b','B','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected',ARRAY[]::text[]),('b','b','B','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,url,viewed) VALUES ('r1','rss','r1','https://example.test/r1',0),('r2','rss','r2','https://example.test/r2',0),('item','other_web','item','https://example.test/item',1)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('a','r1',true,true),('b','r2',true,true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('r1','item'),('r2','item')")
@@ -2119,7 +2119,7 @@ def test_review_new_owner_rekeys_delete_problem_of_linked_child(tmp_path, postgr
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('new','new','New','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('new','new','New','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,source_id,url,platform,external_id,viewed) VALUES ('root','linked:root','https://example.test/root','other_web','https://example.test/root',0),('child','linked:child','https://example.test/child','other_web','https://example.test/child',1)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root','child')")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('delete','child','running',1) RETURNING id").fetchone()[0]
@@ -2140,7 +2140,7 @@ def test_review_removing_primary_feed_rekeys_child_delete_problem(tmp_path, post
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),('b','b','B','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected',ARRAY[]::text[]),('b','b','B','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('root','rss','root',0),('child','other_web','child',1)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('a','root',true,true),('b','root',false,true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root','child')")
@@ -2166,7 +2166,7 @@ def test_review_viewed_root_rekeys_child_delete_problem_atomically(tmp_path, pos
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('root','rss','root',0),('child','other_web','child',1)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','root',true,true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root','child')")
@@ -2190,7 +2190,7 @@ def test_review_primary_change_preserves_both_delete_occurrences(tmp_path, postg
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),('b','b','B','default','rss','rss','connected','[]'),('c','c','C','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected',ARRAY[]::text[]),('b','b','B','default','rss','rss','connected',ARRAY[]::text[]),('c','c','C','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('r1','rss','r1',0),('r2','rss','r2',0),('item','other_web','item',1)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('a','r1',true,true),('c','r1',false,true),('b','r2',true,true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('r1','item'),('r2','item')")
@@ -2213,7 +2213,7 @@ def test_review_two_owner_changes_preserve_both_occurrence_ids(tmp_path, postgre
     try:
         with store.db:
             for feed in ('a','b','c','d'):
-                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES (%s,%s,%s,'default','rss','rss','connected','[]')",(feed,feed,feed))
+                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES (%s,%s,%s,'default','rss','rss','connected',ARRAY[]::text[])",(feed,feed,feed))
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('r1','rss','r1',0),('r2','rss','r2',0),('item','other_web','item',1)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('a','r1',true,true),('b','r2',true,true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('r1','item'),('r2','item')")

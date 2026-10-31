@@ -6,7 +6,7 @@ from oko.storage.transaction import transaction
 
 def seed(store,status):
     with store.db:
-        store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+        store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
         content=json.dumps({'extra':{'_reader':{'full':False,'reason':'partial'}}})
         store.db.execute("INSERT INTO publications(id,platform,external_id,url,published,viewed,complete,content,incomplete_class) VALUES ('p','rss','p','https://p.test',1,0,1,%s,0)",(content,))
         store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -110,7 +110,7 @@ def test_removing_primary_feed_moves_group_without_status_get(tmp_path,postgres_
     try:
         seed(store,'done')
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('g','g','G','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('g','g','G','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('g','p',false)")
         store.problems.snapshot(1)
         old=current(store)['id']
@@ -191,7 +191,7 @@ def test_forgetting_root_rechecks_surviving_child_before_get(tmp_path,postgres_u
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]'),('g','g','G','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[]),('g','g','G','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('root','rss','root',0,1,'{}',1),('child','rss','child',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','root',true),('g','child',true)")
@@ -227,7 +227,7 @@ def test_primary_feed_change_preserves_sticky_wait_across_group_rekey(tmp_path,p
     try:
         job=seed(store,'failed')
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('g','g','G','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('g','g','G','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('g','p',false)")
             store.db.execute("UPDATE jobs SET status='pending' WHERE id=%s",(job,))
         assert current(store)
@@ -242,7 +242,7 @@ def test_bulk_primary_feed_change_keeps_sticky_across_batch_boundary(tmp_path,po
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]'),('g','g','G','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[]),('g','g','G','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) SELECT 'p-'||n,'rss','p-'||n,0,1,%s,0 FROM generate_series(1,101)n",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT feed,'p-'||n,feed='f' FROM generate_series(1,101)n CROSS JOIN (VALUES ('f'),('g')) v(feed)")
@@ -275,7 +275,7 @@ def test_deleting_feed_rechecks_unrelated_publication_with_same_id(tmp_path,post
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]'),('g','g','G','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[]),('g','g','G','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('f','rss','same-id',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('g','f',true)")
@@ -297,7 +297,7 @@ def test_orphan_media_cleanup_rechecks_colliding_publication_id(tmp_path,postgre
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('m','rss','m',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','m',true)")
@@ -317,7 +317,7 @@ def test_time_sensitive_fetch_flag_tracks_link_and_owner_changes(tmp_path,postgr
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','Y','default','youtube','rss','connected','[]'),('rss','rss','R','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','Y','default','youtube','rss','connected',ARRAY[]::text[]),('rss','rss','R','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,url,viewed,complete,content,incomplete_class) VALUES ('root','youtube','root','https://root',0,1,%s,0),('child','rss','child','https://child',0,0,'{}',1)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','root',true)")
@@ -338,7 +338,7 @@ def test_media_schedule_rechecks_colliding_publication_parent(tmp_path,postgres_
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('root','rss','root',0,1,%s,0),('m','rss','m',0,1,'{}',1),('owner','rss','owner',0,1,'{}',1)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','root',true)")
@@ -357,7 +357,7 @@ def test_media_retry_rechecks_colliding_publication_parent(tmp_path,postgres_url
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('root','rss','root',0,1,%s,0),('m','rss','m',0,1,'{}',1),('owner','rss','owner',0,1,'{}',1)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','root',true)")
@@ -395,7 +395,7 @@ def test_identify_platform_change_resynchronizes_caption_wait(tmp_path,postgres_
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','rss','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")

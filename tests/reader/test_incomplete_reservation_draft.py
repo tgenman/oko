@@ -10,7 +10,7 @@ def test_pause_reservation_stable_through_deadline_tick_and_restart(tmp_path,pos
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:clock[0])
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             content=json.dumps({'extra':{'_reader':{'full':False,'reason':'partial'}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(content,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -40,7 +40,7 @@ def test_multiple_groups_keep_distinct_reserved_ids_and_virtual_reads_are_pure(t
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:clock[0])
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False,'reason':'partial'}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('a','youtube','a',0,1,%s,0),('b','youtube','b',0,1,%s,0)",(raw,raw))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','a',true),('f','b',true)")
@@ -69,7 +69,7 @@ def test_pause_extension_and_early_release_keep_reserved_identity(tmp_path,postg
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -95,7 +95,7 @@ def test_real_youtube_block_and_release_drive_group_reservation(tmp_path,postgre
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:clock[0])
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -115,7 +115,7 @@ def test_unowned_legacy_reservation_body_is_not_adopted_or_mutated(tmp_path,post
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -137,7 +137,7 @@ def test_foreign_group_pointer_is_preserved_and_another_slot_is_used(tmp_path,po
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -156,7 +156,7 @@ def test_thousand_youtube_groups_reserve_in_batches(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class,incomplete_group_key,incomplete_group_owner,incomplete_group_ready) SELECT 'p-'||n,'youtube','p-'||n,0,1,%s,0,'incomplete:f:p-'||n,'f',true FROM generate_series(1,1000)n",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'f','p-'||n,true FROM generate_series(1,1000)n")
@@ -193,7 +193,7 @@ def test_thousand_due_reservations_virtual_projection_is_batched_and_read_only(t
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class,incomplete_group_key,incomplete_group_owner,incomplete_group_ready) SELECT 'p-'||n,'youtube','p-'||n,0,1,%s,0,'incomplete:f:p-'||n,'f',true FROM generate_series(1,1000)n",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'f','p-'||n,true FROM generate_series(1,1000)n")
@@ -237,7 +237,7 @@ def test_long_youtube_pause_reservation_survives_problem_gc(tmp_path,postgres_ur
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:clock[0])
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -256,7 +256,7 @@ def test_all_reservation_pointer_slots_occupied_are_reported_without_overwrite(t
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -277,7 +277,7 @@ def test_tick_page_ignores_ten_thousand_unrelated_state_rows(tmp_path,postgres_u
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:clock[0])
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class,incomplete_group_key,incomplete_group_owner,incomplete_group_ready) SELECT 'p-'||n,'youtube','p-'||n,0,1,%s,0,'incomplete:f:p-'||n,'f',true FROM generate_series(1,1000)n",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'f','p-'||n,true FROM generate_series(1,1000)n")
@@ -302,7 +302,7 @@ def test_invalid_due_rows_do_not_starve_legitimate_reservation(tmp_path,postgres
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:clock[0])
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -327,7 +327,7 @@ def test_tick_page_failure_rolls_back_activation_and_cursor(tmp_path,postgres_ur
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:clock[0])
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class,incomplete_group_key,incomplete_group_owner,incomplete_group_ready) SELECT 'p-'||n,'youtube','p-'||n,0,1,%s,0,'incomplete:f:p-'||n,'f',true FROM generate_series(1,101)n",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'f','p-'||n,true FROM generate_series(1,101)n")
@@ -356,7 +356,7 @@ def test_restart_after_deadline_before_tick_keeps_virtual_id(tmp_path,postgres_u
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:clock[0])
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -396,7 +396,7 @@ def test_after_deadline_before_tick_source_delete_keeps_seen_occurrence_history(
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:clock[0])
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False,'reason':'partial'}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -418,7 +418,7 @@ def test_view_after_deadline_scrubs_virtual_occurrence_material(tmp_path,postgre
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:clock[0])
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'blocks':[],'extra':{'_reader':{'full':False,'reason':'partial'}}})
             store.db.execute("INSERT INTO publications(id,source_id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube:p','youtube','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -438,7 +438,7 @@ def test_due_virtual_sticky_survives_bulk_owner_rekey_before_tick(tmp_path,postg
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:clock[0])
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]'),('g','g','G','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[]),('g','g','G','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) SELECT 'p-'||n,'youtube','p-'||n,0,1,%s,0 FROM generate_series(1,101)n",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT feed,'p-'||n,feed='f' FROM generate_series(1,101)n CROSS JOIN (VALUES ('f'),('g')) v(feed)")
@@ -459,7 +459,7 @@ def test_new_pause_after_deadline_archives_seen_occurrence_and_reserves_new(tmp_
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:clock[0])
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False,'reason':'partial'}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -480,7 +480,7 @@ def test_time_sensitive_fetch_suppressor_opens_and_then_closes_group(tmp_path,po
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:clock[0])
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False,'reason':'partial'}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -503,7 +503,7 @@ def test_late_event_after_virtual_group_update_preserves_seen_history_and_privac
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:clock[0])
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'blocks':[],'extra':{'_reader':{'full':False,'captions':'missing'}}})
             store.db.execute("INSERT INTO publications(id,source_id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('a','youtube:a','youtube','a',0,1,%s,0),('b','youtube:b','youtube','b',0,1,%s,0)",(raw,raw))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','a',true),('f','b',true)")
@@ -530,7 +530,7 @@ def test_thousand_timed_closures_are_scheduled_in_batches_without_rss_scan(tmp_p
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','Y','default','youtube','rss','connected','[]'),('rss','rss','R','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','Y','default','youtube','rss','connected',ARRAY[]::text[]),('rss','rss','R','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class,incomplete_group_key,incomplete_group_owner,incomplete_group_ready) SELECT 'y-'||n,'youtube','y-'||n,0,1,%s,0,'incomplete:yt:y-'||n,'yt',true FROM generate_series(1,1000)n",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'yt','y-'||n,true FROM generate_series(1,1000)n")
@@ -556,7 +556,7 @@ def test_invalid_due_schedule_is_visible_as_safe_problem_without_mutation(tmp_pa
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -596,7 +596,7 @@ def test_future_snapshot_updates_before_deadline_without_changing_reserved_id(tm
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:clock[0])
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             initial={'extra':{'_reader':{'full':False,'reason':'old'}}}
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(json.dumps(initial),))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -621,7 +621,7 @@ def test_feed_removal_after_deadline_does_not_restore_forgotten_material(tmp_pat
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:clock[0])
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'blocks':[],'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,source_id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube:p','youtube','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -640,7 +640,7 @@ def test_interrupted_recovery_applies_seen_timed_close_before_reconciliation(tmp
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:clock[0])
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False,'reason':'partial'}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")

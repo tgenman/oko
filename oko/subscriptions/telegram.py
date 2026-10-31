@@ -167,7 +167,7 @@ class TelegramAccess:
             folder_id = subscriptions.ensure_folder(folder)
             profile = self.profile(binding['role']) if binding['kind'] == 'client' else None
             self.db.execute("INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport , telegram_peer , telegram_account , telegram_username , auto_read ) VALUES ( %s , %s , %s , 'telegram' , %s , %s , 'connected' , %s , %s , %s , %s , %s )",
-                (identity, 'telegram-instance:' + identity, info['title'], folder_id, json.dumps([source]),
+                (identity, 'telegram-instance:' + identity, info['title'], folder_id, [source],
                  'telegram' if profile else None, info.get('peer'), profile['account'] if profile else None,
                  info.get('username'), auto_read if profile else None))
             source_changed(self.db)

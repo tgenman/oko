@@ -8,7 +8,7 @@ def test_restart_preserves_legacy_ids_after_group_page_interruption(tmp_path,pos
     try:
         with store.db:
             store.db.execute("DELETE FROM state WHERE key IN ('experimental-incomplete-groups-v1','experimental-incomplete-problems-v1')")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False,'reason':'partial'}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) SELECT 'p-'||n,'rss','p-'||n,0,1,%s,0 FROM generate_series(1,201)n",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'f','p-'||n,true FROM generate_series(1,201)n")
@@ -33,7 +33,7 @@ def test_recovery_1000_groups_batches_and_ignores_10000_foreign_problems(tmp_pat
     try:
         with store.db:
             store.db.execute("DELETE FROM state WHERE key='experimental-incomplete-problems-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class,incomplete_group_key,incomplete_group_owner,incomplete_group_ready) SELECT 'p-'||n,'rss','p-'||n,0,1,%s,0,'incomplete:f:p-'||n,'f',true FROM generate_series(1,1000)n",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'f','p-'||n,true FROM generate_series(1,1000)n")
@@ -58,7 +58,7 @@ def test_group_recovery_preserves_empty_id_and_ambiguous_legacy(tmp_path,postgre
     try:
         with store.db:
             store.db.execute("DELETE FROM state WHERE key IN ('experimental-incomplete-groups-v1','experimental-incomplete-problems-v1')")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','rss','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -92,7 +92,7 @@ def test_unknown_content_does_not_close_legacy_occurrence_during_recovery(tmp_pa
     try:
         with store.db:
             store.db.execute("DELETE FROM state WHERE key IN ('experimental-incomplete-groups-v1','experimental-incomplete-problems-v1')")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':{'unknown':True}}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','rss','p',0,1,%s,2)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -125,7 +125,7 @@ def test_valid_body_with_invalid_created_is_not_overwritten(tmp_path,postgres_ur
     try:
         with store.db:
             store.db.execute("DELETE FROM state WHERE key IN ('experimental-incomplete-groups-v1','experimental-incomplete-problems-v1')")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','rss','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")

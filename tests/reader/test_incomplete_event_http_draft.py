@@ -13,7 +13,7 @@ def test_status_deadline_virtual_and_tick_keep_ids_etag_and_body(tmp_path,postgr
         def setup():
             store=app.state.host.require_store()
             with transaction(store.db):
-                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
                 raw=json.dumps({'extra':{'_reader':{'full':False,'reason':'partial'}}})
                 store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('a','youtube','a',0,1,%s,0),('b','youtube','b',0,1,%s,0)",(raw,raw))
                 store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','a',true),('f','b',true)")
@@ -49,7 +49,7 @@ def test_multiple_tick_pages_keep_status_body_and_etag_stable(tmp_path,postgres_
         def setup():
             store=app.state.host.require_store()
             with transaction(store.db):
-                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
                 raw=json.dumps({'extra':{'_reader':{'full':False}}})
                 store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class,incomplete_group_key,incomplete_group_owner,incomplete_group_ready) SELECT 'p-'||n,'youtube','p-'||n,0,1,%s,0,'incomplete:f:p-'||n,'f',true FROM generate_series(1,120)n",(raw,))
                 store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'f','p-'||n,true FROM generate_series(1,120)n")
@@ -78,7 +78,7 @@ def test_due_group_update_keeps_id_and_etag_before_and_after_tick(tmp_path,postg
         def setup():
             store=app.state.host.require_store()
             with transaction(store.db):
-                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
                 raw=json.dumps({'extra':{'_reader':{'full':False,'captions':'missing'}}})
                 store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('a','youtube','a',0,1,%s,0),('b','youtube','b',0,1,%s,0)",(raw,raw))
                 store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','a',true),('f','b',true)")
@@ -108,7 +108,7 @@ def test_due_group_closure_keeps_id_and_etag_before_and_after_tick(tmp_path,post
         def setup():
             store=app.state.host.require_store()
             with transaction(store.db):
-                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
                 raw=json.dumps({'extra':{'_reader':{'full':False}}})
                 store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('a','youtube','a',0,1,%s,0)",(raw,))
                 store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','a',true)")
@@ -138,7 +138,7 @@ def test_unticked_virtual_closure_expires_consistently_after_24_hours(tmp_path,p
         def setup():
             store=app.state.host.require_store()
             with transaction(store.db):
-                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
                 raw=json.dumps({'extra':{'_reader':{'full':False}}})
                 store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('a','youtube','a',0,1,%s,0)",(raw,))
                 store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','a',true)")

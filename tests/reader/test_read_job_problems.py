@@ -43,7 +43,7 @@ def test_read_problem_uses_feed_even_if_publication_has_same_id(tmp_path,postgre
     try:
         setup(store)
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('owner','owner','Owner','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('owner','owner','Owner','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('feed','rss','item',0)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('owner','feed',true,true)")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('read','feed','failed','failure','source-connection') RETURNING id").fetchone()[0]

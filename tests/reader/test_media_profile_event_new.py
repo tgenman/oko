@@ -24,7 +24,7 @@ def test_profile_visibility_suppresses_and_restores_media_error(tmp_path,postgre
     s=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(s.db):
-            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','telegram','telegram','connected','[]')")
+            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','telegram','telegram','connected',ARRAY[]::text[])")
             s.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'ready',1)")
             s.subscriptions.telegram.put_binding('f',dict(kind='client',role='personal',account_user_id='101',peer_id='123'))
             s.db.execute("INSERT INTO publications(id) VALUES ('p')")
@@ -65,7 +65,7 @@ def test_recovery_closes_unambiguous_legacy_when_profile_already_suppresses(tmp_
     try:
         with transaction(s.db):
             s.db.execute("DELETE FROM state WHERE key='media-profile-problems-recovered-v1'")
-            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','telegram','telegram','connected','[]')")
+            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','telegram','telegram','connected',ARRAY[]::text[])")
             s.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'identity_mismatch',1)")
             s.subscriptions.telegram.put_binding('f',dict(kind='client',role='personal',account_user_id='101',peer_id='123'))
             s.problems.sync_profiles(100)
@@ -108,7 +108,7 @@ def test_profile_media_adds_shared_root_without_get(tmp_path,postgres_url):
     s=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(s.db):
-            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected','[]'),('y','y','Y','default','rss','rss','connected','[]')")
+            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected',ARRAY[]::text[]),('y','y','Y','default','rss','rss','connected',ARRAY[]::text[])")
             s.db.execute("INSERT INTO publications(id,platform,external_id,url) VALUES ('a','rss','a','https://example.test/a'),('b','rss','b','https://example.test/b'),('p','telegraph','p','https://example.test/p')")
             s.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('x','a',true),('y','b',true)")
             s.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('b','p')")
@@ -130,7 +130,7 @@ def test_hidden_profile_media_gains_unsuppressed_root_without_get(tmp_path,postg
     s=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(s.db):
-            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected','[]'),('y','y','Y','default','telegram','telegram','connected','[]')")
+            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected',ARRAY[]::text[]),('y','y','Y','default','telegram','telegram','connected',ARRAY[]::text[])")
             s.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'identity_mismatch',1)")
             s.subscriptions.telegram.put_binding('y',dict(kind='client',role='personal',account_user_id='101',peer_id='123'))
             s.problems.sync_profiles(100)
@@ -233,7 +233,7 @@ def test_profile_suppression_rolls_back_together_with_profile(tmp_path,postgres_
     s=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(s.db):
-            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','telegram','telegram','connected','[]')")
+            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','telegram','telegram','connected',ARRAY[]::text[])")
             s.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'ready',1)")
             s.subscriptions.telegram.put_binding('f',dict(kind='client',role='personal',account_user_id='101',peer_id='123'))
             s.db.execute("INSERT INTO publications(id) VALUES ('p')")
@@ -298,7 +298,7 @@ def test_profile_media_real_http_get_is_read_only_and_etag_stable(tmp_path,postg
         def setup():
             s=app.state.host.require_store();app.state.host.execution.reader_advance=None
             with transaction(s.db):
-                s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+                s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
                 s.db.execute("INSERT INTO publications(id,platform,external_id,url) VALUES ('p','rss','p','https://example.test/p')")
                 s.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
                 s.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','image','x','f','pending_download')")
@@ -318,7 +318,7 @@ def test_profile_orphan_to_file_publish_moves_or_finishes_old_occurrence(tmp_pat
     s=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(s.db):
-            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             s.db.execute("INSERT INTO publications(id,platform,external_id,content) VALUES ('p','rss','p',%s)",(__import__('json').dumps({'blocks':[],'extra':{'_reader':{'title':'P'}}}),))
             s.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             job=s.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('download_media','m','failed','failure','profile_unavailable') RETURNING id").fetchone()[0]
@@ -338,7 +338,7 @@ def test_profile_suppresses_one_shared_root_without_changing_other_id(tmp_path,p
     s=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(s.db):
-            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','telegram','telegram','connected','[]'),('y','y','Y','default','rss','rss','connected','[]')")
+            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','telegram','telegram','connected',ARRAY[]::text[]),('y','y','Y','default','rss','rss','connected',ARRAY[]::text[])")
             s.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'ready',1)")
             s.subscriptions.telegram.put_binding('x',dict(kind='client',role='personal',account_user_id='101',peer_id='123'))
             s.db.execute("INSERT INTO publications(id) VALUES ('a'),('b'),('p')")
@@ -361,7 +361,7 @@ def test_recovery_suppresses_one_legacy_root_without_changing_other_id(tmp_path,
     try:
         with transaction(s.db):
             s.db.execute("DELETE FROM state WHERE key='media-profile-problems-recovered-v1'")
-            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','telegram','telegram','connected','[]'),('y','y','Y','default','rss','rss','connected','[]')")
+            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','telegram','telegram','connected',ARRAY[]::text[]),('y','y','Y','default','rss','rss','connected',ARRAY[]::text[])")
             s.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'identity_mismatch',1)")
             s.subscriptions.telegram.put_binding('x',dict(kind='client',role='personal',account_user_id='101',peer_id='123'))
             s.problems.sync_profiles(100)

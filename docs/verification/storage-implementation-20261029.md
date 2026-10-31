@@ -1582,3 +1582,16 @@ media card; desktop/mobile screenshots were inspected. The first temporary
 browser build failed during fixture preparation; the repeat succeeded. The
 worker accepts these codes from AdapterIssue, although a built-in media adapter
 producing them was not identified. No working database was changed.
+
+
+Migration 088 converts feeds.original_urls from JSON text to text[] and
+updates application readers and writers. Synthetic tests preserve order,
+duplicates and Unicode, and cover rollback, permissions, old reader exclusion
+and migration from historical schemas. It deliberately refuses legacy SQL NULL,
+invalid JSON or non-string array elements rather than silently changing them;
+whether the working database contains such values has not been checked. The
+integrated migration/legacy/HTTP scope passed 221 PostgreSQL tests, mypy for four
+modules and a persisted status browser check with desktop/mobile screenshots.
+The full Python run on an earlier base had 2683 passed, 15 failed, 2 skipped;
+it is not a full pass on this commit. SQL-budget failures are deferred by user
+decision. No working database was migrated.

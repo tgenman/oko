@@ -12,7 +12,7 @@ def test_caption_next_at_boundary_invalidates_status_etag(tmp_path,postgres_url)
         def setup():
             store=app.state.host.require_store()
             with transaction(store.db):
-                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
                 raw=json.dumps({'extra':{'_reader':{'full':False,'reason':'partial'}}})
                 store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(raw,))
                 store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")

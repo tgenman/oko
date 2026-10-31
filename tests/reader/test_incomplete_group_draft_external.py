@@ -21,7 +21,7 @@ def test_index_accesses_only_selected_group(tmp_path,postgres_url):
     try:
         with store.db:
             store.db._db.execute('CREATE INDEX synthetic_incomplete_group ON publications(incomplete_group_key,id) WHERE incomplete_group_key IS NOT NULL')
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) SELECT 'p-'||n,'rss','p-'||n,0,1,%s,0 FROM generate_series(1,10000)n",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'f','p-'||n,true FROM generate_series(1,10000)n")
@@ -41,7 +41,7 @@ def test_group_recovery_batches_restart_and_preserves_unknown(tmp_path,postgres_
         with store.db:
             store.db.execute("DELETE FROM state WHERE key='experimental-incomplete-groups-v1'")
             store.db._db.execute('CREATE INDEX synthetic_incomplete_pending_group ON publications(id) WHERE viewed=0 AND complete=1 AND NOT source_deleted AND incomplete_class IS DISTINCT FROM 1 AND NOT incomplete_group_ready')
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) SELECT 'p-'||n,'rss','p-'||n,0,1,%s,0 FROM generate_series(1,201)n",(raw,))
             unknown=json.dumps({'extra':{'_reader':{'full':{'unexpected':True}}}})
@@ -69,7 +69,7 @@ def test_group_projection_matches_legacy_including_sticky_wait(tmp_path,postgres
         with store.db:store.db.execute("DELETE FROM state WHERE key='experimental-incomplete-problems-v1'")
         with store.db:
             store.db._db.execute('CREATE INDEX synthetic_incomplete_group ON publications(incomplete_group_key,id) WHERE incomplete_group_key IS NOT NULL')
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             for item in ['a','b']:
                 raw=json.dumps({'extra':{'_reader':{'full':False,'captions':'missing','reason':'partial'}}})
                 store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES (%s,'rss',%s,0,1,%s,0)",(item,item,raw))
@@ -97,14 +97,14 @@ def test_group_projection_matches_legacy_transitions(tmp_path,postgres_url,scena
             store.db._db.execute("CREATE INDEX synthetic_incomplete_objects ON reader_problems USING gin ((body::jsonb->'objects') jsonb_path_ops) WHERE finished IS NULL AND body::jsonb->>'code'='material-incomplete'")
             feed='f:x' if scenario=='collision' else 'f'
             kind='youtube' if scenario=='youtube_pause' else 'rss'
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES (%s,%s,'F','default',%s,'rss','connected','[]')",(feed,feed,kind))
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES (%s,%s,'F','default',%s,'rss','connected',ARRAY[]::text[])",(feed,feed,kind))
             raw=json.dumps({'extra':{'_reader':{'full':False,'captions':None if scenario=='collision' else 'missing','reason':'partial'}}})
             items=['item'] if scenario=='collision' else ['a','b']
             for item in items:
                 store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES (%s,%s,%s,0,1,%s,0)",(item,'youtube' if scenario=='caption_wait' else 'rss',item,raw))
                 store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES (%s,%s,true)",(feed,item))
             if scenario=='collision':
-                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
                 store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('x:item','rss','x:item',0,1,%s,0)",(raw,))
                 store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','x:item',true)")
                 items.append('x:item')
@@ -132,7 +132,7 @@ def test_group_event_owns_sticky_history_and_rollback(tmp_path,postgres_url):
         with store.db:
             store.db._db.execute('CREATE INDEX synthetic_incomplete_group ON publications(incomplete_group_key,id) WHERE incomplete_group_key IS NOT NULL')
             store.db._db.execute("CREATE INDEX synthetic_incomplete_isolated ON reader_problems ((body::jsonb->>'incomplete_group_identity')) WHERE finished IS NULL AND body::jsonb->>'operation'='producer:incomplete'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False,'reason':'partial'}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','rss','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -167,7 +167,7 @@ def test_group_event_preserves_foreign_occupied_identity(tmp_path,postgres_url):
         with store.db:
             store.db._db.execute('CREATE INDEX synthetic_incomplete_group ON publications(incomplete_group_key,id) WHERE incomplete_group_key IS NOT NULL')
             store.db._db.execute("CREATE INDEX synthetic_incomplete_isolated ON reader_problems ((body::jsonb->>'incomplete_group_identity')) WHERE finished IS NULL AND body::jsonb->>'operation'='producer:incomplete'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','rss','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -190,7 +190,7 @@ def test_group_1000_caption_waiters_has_bounded_queries_and_ignores_foreign_hist
         with store.db:
             store.db._db.execute('CREATE INDEX synthetic_incomplete_group ON publications(incomplete_group_key,id) WHERE incomplete_group_key IS NOT NULL')
             store.db._db.execute("CREATE INDEX synthetic_incomplete_objects ON reader_problems USING gin ((body::jsonb->'objects') jsonb_path_ops) WHERE finished IS NULL AND body::jsonb->>'code'='material-incomplete'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False,'captions':'missing'}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class,incomplete_group_key) SELECT 'p-'||n,'youtube','p-'||n,0,1,%s,0,'incomplete:f:missing' FROM generate_series(1,1000)n",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'f','p-'||n,true FROM generate_series(1,1000)n")
@@ -219,7 +219,7 @@ def test_thousand_independent_groups_project_in_bounded_batches(tmp_path,postgre
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class,incomplete_group_key,incomplete_group_owner,incomplete_group_ready) SELECT 'p-'||n,'rss','p-'||n,0,1,%s,0,'incomplete:f:p-'||n,'f',true FROM generate_series(1,1000)n",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'f','p-'||n,true FROM generate_series(1,1000)n")
@@ -248,7 +248,7 @@ def test_thousand_foreign_identity_collisions_allocate_in_batches(tmp_path,postg
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class,incomplete_group_key,incomplete_group_owner,incomplete_group_ready) SELECT 'p-'||n,'rss','p-'||n,0,1,%s,0,'incomplete:f:p-'||n,'f',true FROM generate_series(1,1000)n",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'f','p-'||n,true FROM generate_series(1,1000)n")
@@ -273,7 +273,7 @@ def test_batch_problem_id_collision_retries_then_rolls_back(tmp_path,postgres_ur
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class,incomplete_group_key,incomplete_group_owner,incomplete_group_ready) VALUES ('p','rss','p',0,1,%s,0,'incomplete:f:p','f',true)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")

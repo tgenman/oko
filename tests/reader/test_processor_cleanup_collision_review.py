@@ -8,7 +8,7 @@ def test_viewed_publication_does_not_cancel_feed_job_with_same_id(tmp_path,postg
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,kind,transport,connection,original_urls) VALUES ('same','same','same','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,kind,transport,connection,original_urls) VALUES ('same','same','same','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,viewed) VALUES ('same',1)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,problem_code,error) VALUES (%s,'same','failed','processor-config','failure') RETURNING id",(kind,)).fetchone()[0]
             store.problems.finish_processor_change([job],None,1)

@@ -10,7 +10,7 @@ def test_fuzz(tmp_path,postgres_url,seed):
  s.youtube_admission_ready=False
  try:
   with transaction(s.db):
-   s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','Y','default','youtube','rss','connected','[]'),('rss','rss','R','default','rss','rss','connected','[]')")
+   s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','Y','default','youtube','rss','connected',ARRAY[]::text[]),('rss','rss','R','default','rss','rss','connected',ARRAY[]::text[])")
    s.db.execute("INSERT INTO publications(id,viewed) SELECT 'p-'||n,0 FROM generate_series(0,29)n")
    for n in range(30):
     f=r.choice(['yt','rss',None])

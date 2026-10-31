@@ -99,7 +99,9 @@ class Publications:
         transport=row['transport'] or row['kind'] if row else None
         if row and transport in ('rss','youtube'):
             from oko.collection.rss import normalized
-            url=normalized(json.loads(row['original_urls'])[0])
+            urls=row['original_urls']
+            if isinstance(urls,str):urls=json.loads(urls)
+            url=normalized(urls[0])
             platform,external_id,adapter='rss',url,'rss_adapter'
             if transport=='youtube':
                 from oko.collection.youtube.adapter import feed_reference

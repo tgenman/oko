@@ -92,4 +92,5 @@ MIGRATIONS = (
     Migration(85, 'youtube-fetch-problems', (Path(__file__).parent / 'postgres' / '085-youtube-fetch-problems.sql').read_text()),
     Migration(86, 'media-null-problems', (Path(__file__).parent / 'postgres' / '086-media-null-problems.sql').read_text()),
     Migration(87, 'delete-extra-problems', (Path(__file__).parent / 'postgres' / '087-delete-extra-problems.sql').read_text()),
+    Migration(88, 'original-urls-array', (Path(__file__).parent / 'postgres' / '088-original-urls-array.sql').read_text()),
 )

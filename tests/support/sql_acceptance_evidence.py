@@ -82,7 +82,7 @@ def background_evidence():
        s.db.execute("INSERT INTO folders VALUES ('folder','Synthetic',0)")
        for i in range(count):
         feed=f'{i:032x}'
-        s.db.execute("INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport , telegram_peer , auto_read ) VALUES ( %s , %s , %s , 'telegram' , 'folder' , '[]' , 'connected' , 'telegram' , %s , 0 )",(feed,feed,feed,-1000000-i))
+        s.db.execute("INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport , telegram_peer , auto_read ) VALUES ( %s , %s , %s , 'telegram' , 'folder' , ARRAY[]::text[] , 'connected' , 'telegram' , %s , 0 )",(feed,feed,feed,-1000000-i))
         s.db.execute('INSERT INTO telegram_bindings VALUES ( %s , %s )',(feed,json.dumps(dict(kind='client',role='personal',peer_id=str(-1000000-i)))))
         s.db.execute('INSERT INTO telegram_read_state ( feed , since ) VALUES ( %s , 0 )',(feed,))
       q=[];s.db.set_trace_callback(q.append);s.jobs.sync_reads();s.db.set_trace_callback(None)

@@ -38,7 +38,7 @@ class SubscriptionRepository:
     def ensure_demo(self) -> None:
         with self.db:
             self.db.execute("INSERT INTO folders VALUES ( 'demo' , 'Тестовый источник' , - 1 ) ON CONFLICT DO NOTHING")
-            inserted = self.db.execute("INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport ) VALUES ( 'demo' , 'demo' , 'Тестовый источник' , 'demo' , 'demo' , '[]' , 'connected' , 'demo' ) ON CONFLICT DO NOTHING")
+            inserted = self.db.execute("INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport ) VALUES ( 'demo' , 'demo' , 'Тестовый источник' , 'demo' , 'demo' , ARRAY[]::text[] , 'connected' , 'demo' ) ON CONFLICT DO NOTHING")
             if inserted.rowcount:
                 source_changed(self.db)
                 self.details.created('demo')
@@ -164,7 +164,7 @@ class SubscriptionRepository:
             memberships.lock_graph(self.db)
             folder = self.ensure_folder(body.folder)
             self.db.execute('INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport , public_ai ) VALUES ( %s , %s , %s , %s , %s , %s , %s , %s , %s )',
-                            (identity_id, identity, title, kind, folder, json.dumps([body.url]), connection, kind, kind == 'youtube'))
+                            (identity_id, identity, title, kind, folder, [body.url], connection, kind, kind == 'youtube'))
             marker=getattr(self.db,'youtube_admission_feed_mark',None)
             if marker is not None and kind=='youtube':marker(identity_id)
             source_changed(self.db)

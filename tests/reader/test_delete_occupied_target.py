@@ -30,7 +30,7 @@ def test_real_jobs_with_same_key_preserve_both_producers(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a:fetch:b','yt','Y','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a:fetch:b','yt','Y','default','rss','rss','connected',ARRAY[]::text[])")
             discover=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('discover','a:fetch:b','failed','failure','delete') RETURNING id").fetchone()[0]
             fetch=store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) VALUES ('fetch','b','a:fetch:b:discover:a','failed','failure','delete') RETURNING id").fetchone()[0]
             store.problems.sync_discover(discover,2)

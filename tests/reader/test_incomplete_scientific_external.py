@@ -6,7 +6,7 @@ def test_numeric_scientific_zero_remains_visible(tmp_path,postgres_url):
     try:
         raw='{"blocks":[],"extra":{"_reader":{"title":"T","full":0e0,"reason":"partial"}}}'
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,viewed,complete,platform,external_id,content) VALUES ('p',0,1,'rss','p',%s)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             try:
@@ -26,7 +26,7 @@ def test_scientific_zero_http(tmp_path,postgres_url):
     try:
         raw='{"blocks":[],"extra":{"_reader":{"title":"T","full":0e0,"reason":"partial"}}}'
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,viewed,complete,platform,external_id,content) VALUES ('p',0,1,'rss','p',%s)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             try:from oko.storage.incomplete_index import save_class

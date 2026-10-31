@@ -10,7 +10,7 @@ def test_removing_selected_feed_closes_cancelled_stage_problem(tmp_path,postgres
     try:
         with store.db:
             store.db.execute("INSERT INTO folders(id,title) VALUES ('folder','Folder') ON CONFLICT DO NOTHING")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','folder','rss','rss','connected','[]'),('b','b','B','folder','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','folder','rss','rss','connected',ARRAY[]::text[]),('b','b','B','folder','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,viewed,platform,external_id,processing_metadata) VALUES ('p',0,'rss','p',%s)",(json.dumps({'_pass':{'feed_id':'a'}}),))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('a','p',true),('b','p',false)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,problem_code,error) VALUES (%s,'p','pending',%s,'failure') RETURNING id",(kind,code)).fetchone()[0]
@@ -30,7 +30,7 @@ def test_removing_selected_feed_rolls_back_stage_capture(tmp_path,postgres_url,m
     try:
         with store.db:
             store.db.execute("INSERT INTO folders(id,title) VALUES ('folder','Folder') ON CONFLICT DO NOTHING")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','folder','rss','rss','connected','[]'),('b','b','B','folder','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','folder','rss','rss','connected',ARRAY[]::text[]),('b','b','B','folder','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,viewed,platform,external_id,processing_metadata) VALUES ('p',0,'rss','p',%s)",(json.dumps({'_pass':{'feed_id':'a'}}),))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('a','p',true),('b','p',false)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation,problem_code,error) VALUES ('filter','p','pending',2,'filter-error','failure') RETURNING id").fetchone()[0]
@@ -56,7 +56,7 @@ def test_selected_feed_stage_capture_ignores_foreign_jobs(tmp_path,postgres_url)
     try:
         with store.db:
             store.db.execute("INSERT INTO folders(id,title) VALUES ('folder','Folder') ON CONFLICT DO NOTHING")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','folder','rss','rss','connected','[]'),('b','b','B','folder','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','folder','rss','rss','connected',ARRAY[]::text[]),('b','b','B','folder','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,viewed,platform,external_id,processing_metadata) VALUES ('p',0,'rss','p',%s)",(json.dumps({'_pass':{'feed_id':'a'}}),))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('a','p',true),('b','p',false)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,problem_code,error) VALUES ('filter','p','pending','filter-error','failure') RETURNING id").fetchone()[0]

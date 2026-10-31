@@ -14,7 +14,7 @@ def test_null_next_at_real_caption_attempt_defers_without_network(tmp_path,postg
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100,clock=lambda:10)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'blocks':[],'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
@@ -83,7 +83,7 @@ def test_unknown_next_at_does_not_hide_known_pause_expiry(tmp_path,postgres_url)
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'blocks':[],'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','p',true)")
@@ -99,7 +99,7 @@ def test_restart_unknown_next_recovers_known_pause_boundary(tmp_path,postgres_ur
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'blocks':[],'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','p',true)")
@@ -153,7 +153,7 @@ def test_unknown_deadline_startup_does_not_scan_foreign_history(tmp_path,postgre
     from tests.support.postgres_work import scan_rows
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     with transaction(store.db):
-        store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('rss','rss','R','default','rss','rss','connected','[]')")
+        store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('rss','rss','R','default','rss','rss','connected',ARRAY[]::text[])")
         store.db.execute("INSERT INTO publications(id,viewed,complete,incomplete_class) SELECT 'p-'||n,0,1,1 FROM generate_series(1,10000)n")
         store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'rss','p-'||n,true FROM generate_series(1,10000)n")
         store.db.execute("INSERT INTO jobs(kind,item,status) SELECT 'fetch','p-'||n,'done' FROM generate_series(1,10000)n")

@@ -9,7 +9,7 @@ def test_youtube_null_fetch_timer_suppresses_incomplete_only_when_visible(tmp_pa
  s=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:clock[0])
  try:
   with transaction(s.db):
-   s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+   s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
    content=json.dumps({'extra':{'_reader':{'full':False,'reason':'partial'}}})
    s.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(content,))
    s.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")

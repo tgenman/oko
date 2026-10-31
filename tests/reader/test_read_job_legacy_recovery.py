@@ -7,8 +7,9 @@ from oko.storage.postgres_schema import MIGRATIONS
 from tests.support.storage import Store
 
 
-def feed(db, identity='feed'):
-    db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES (%s,%s,%s,'default','rss','rss','connected','[]')", (identity,identity,identity))
+def feed(db, identity='feed', *, current=False):
+    urls=[] if current else '[]'
+    db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES (%s,%s,%s,'default','rss','rss','connected',%s)", (identity,identity,identity,urls))
 
 
 def problem_body(code='source-connection',operation='producer:read',objects=None):
@@ -81,7 +82,7 @@ def test_multi_object_legacy_group_keeps_other_feed(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            feed(store.db,'feed');feed(store.db,'other')
+            feed(store.db,'feed',current=True);feed(store.db,'other',current=True)
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code,feed_id) VALUES ('read','feed','failed','failure','source-connection','other'),('read','other','failed','failure','source-connection','other')")
             old=dict(id='job:source-connection:other:read',created_at=1,finished_at=None,outcome=None,**problem_body(objects=[dict(kind='feed',id='feed'),dict(kind='feed',id='other')]))
             store.problems.sync_candidate(old['id'],old,1)
@@ -165,7 +166,7 @@ def test_legacy_discover_with_read_in_code_is_not_closed(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            feed(store.db)
+            feed(store.db,current=True)
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('discover','feed','failed','failure','source-read:read:foo')")
             body=problem_body(code='source-read:read:foo',operation='producer:status',objects=[dict(kind='feed',id='feed')])
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('old','job:source-read:read:foo:feed:discover','background',%s,1)",(json.dumps(body),))
@@ -179,7 +180,7 @@ def test_multi_object_legacy_splits_when_legacy_owner_is_third_feed(tmp_path,pos
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            for identity in ('a','b','c'):feed(store.db,identity)
+            for identity in ('a','b','c'):feed(store.db,identity,current=True)
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code,feed_id) VALUES ('read','a','failed','failure','source-connection','c'),('read','b','failed','failure','source-connection','c')")
             old=dict(id='job:source-connection:c:read',created_at=1,finished_at=None,outcome=None,**problem_body(objects=[dict(kind='feed',id='a'),dict(kind='feed',id='b')]))
             store.problems.sync_candidate(old['id'],old,1)

@@ -24,7 +24,7 @@ def test_unrelated_legacy_without_job_survives_get(tmp_path,postgres_url):
     try:
         with store.db:
             store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('unrelated')")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('old','job:article-limit:feed:fetch:ghost','background',%s,1)",(json.dumps(body),))
         store.problems.recover_fetch_problems()
@@ -40,7 +40,7 @@ def test_legacy_invalid_object_is_not_silently_finished(tmp_path,postgres_url):
     try:
         with store.db:
             store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('target')")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('old','job:article-limit:feed:fetch:target','background',%s,1)",(json.dumps(body),))
         store.problems.recover_fetch_problems()
@@ -56,7 +56,7 @@ def test_proven_legacy_link_without_job_can_finish(tmp_path,postgres_url):
     try:
         with store.db:
             store.db.execute("DELETE FROM state WHERE key='fetch-problems-recovered-v2'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('root'),('target')")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root','target')")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('old','job:article-limit:feed:fetch:target','background',%s,1)",(json.dumps(body),))

@@ -114,7 +114,7 @@ def test_profile_event_does_not_scan_ten_thousand_full_same_feed(tmp_path,postgr
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             full=json.dumps({'extra':{'_reader':{'full':True}}});partial=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) SELECT 'p-'||n,'rss','p-'||n,0,1,%s,1 FROM generate_series(1,10000)n",(full,))
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class,incomplete_group_key,incomplete_group_owner,incomplete_group_ready) VALUES ('partial','rss','partial',0,1,%s,0,'incomplete:f:partial','f',true)",(partial,))
@@ -140,7 +140,7 @@ def test_youtube_time_event_ignores_ten_thousand_rss_fetch_failures(tmp_path,pos
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('rss','rss','R','default','rss','rss','connected','[]'),('yt','yt','Y','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('rss','rss','R','default','rss','rss','connected',ARRAY[]::text[]),('yt','yt','Y','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'extra':{'_reader':{'full':False}}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) SELECT 'rss-'||n,'rss','rss-'||n,0,1,%s,0 FROM generate_series(1,10000)n",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'rss','rss-'||n,true FROM generate_series(1,10000)n")

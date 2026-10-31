@@ -17,7 +17,7 @@ def test_read_failure_not_silenced_by_existing_discover_identity(tmp_path,postgr
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),('a:discover:b','x','X','default','rss','rss','connected','[]'),('b:read:a:discover:b','y','Y','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected',ARRAY[]::text[]),('a:discover:b','x','X','default','rss','rss','connected',ARRAY[]::text[]),('b:read:a:discover:b','y','Y','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code,feed_id) VALUES ('discover','b:read:a:discover:b','failed','failure','custom','a')")
         seed_legacy_discover_collision(store)
         old=store.db.execute("SELECT id,identity FROM reader_problems WHERE body::jsonb->>'operation'='producer:discover' AND finished IS NULL").fetchone()
@@ -34,7 +34,7 @@ def test_read_collision_identity_stays_stable_after_foreign_problem_closes(tmp_p
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),('a:discover:b','x','X','default','rss','rss','connected','[]'),('b:read:a:discover:b','y','Y','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected',ARRAY[]::text[]),('a:discover:b','x','X','default','rss','rss','connected',ARRAY[]::text[]),('b:read:a:discover:b','y','Y','default','rss','rss','connected',ARRAY[]::text[])")
             discover=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code,feed_id) VALUES ('discover','b:read:a:discover:b','failed','failure','custom','a') RETURNING id").fetchone()[0]
         seed_legacy_discover_collision(store)
         with store.db:
@@ -57,7 +57,7 @@ def test_distinct_read_jobs_with_ambiguous_colon_keys_remain_visible(tmp_path,po
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a:b','one','One','default','rss','rss','connected','[]'),('b','two','Two','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a:b','one','One','default','rss','rss','connected',ARRAY[]::text[]),('b','two','Two','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('read','a:b','failed','one','source-x'),('read','b','failed','two','source-x:a')")
             store.problems.sync_read_feed('a:b',1)
             store.problems.sync_read_feed('b',1)
@@ -84,7 +84,7 @@ def test_read_fallback_avoids_preexisting_foreign_reserved_identity(tmp_path,pos
         tokens=iter(('0','1'))
         monkeypatch.setattr('oko.storage.problems.new_read_problem_token',lambda:next(tokens))
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),(%s,'x','X','default','rss','rss','connected','[]'),('b:read:a:discover:b','y','Y','default','rss','rss','connected','[]')",(feed,))
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected',ARRAY[]::text[]),(%s,'x','X','default','rss','rss','connected',ARRAY[]::text[]),('b:read:a:discover:b','y','Y','default','rss','rss','connected',ARRAY[]::text[])",(feed,))
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code,feed_id) VALUES ('discover','b:read:a:discover:b','failed','failure','custom','a')")
         seed_legacy_discover_collision(store)
         with store.db:

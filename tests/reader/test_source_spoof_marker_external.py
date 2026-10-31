@@ -26,7 +26,7 @@ def test_spoofed_possible_but_inactive_code_is_preserved(tmp_path,postgres_url):
         identity='job:source-a:b:c:fetch'
         foreign=dict(code='source-a:b',operation='producer:fetch',source_group_identity=identity,objects=[dict(kind='material',id='p')],section='object',title='foreign',consequence='saved',next_step='retry',state='current',next_at=None,action=None)
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('b:c','b:c','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('b:c','b:c','F','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('b:c','p',true)")
             jid=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','p','running',1) RETURNING id").fetchone()[0]
@@ -45,7 +45,7 @@ def test_colliding_active_codes_stay_on_get_without_rewriting_marker(tmp_path,po
     try:
         identity='job:source-a:b:c:fetch'
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('b:c','b:c','F','default','rss','rss','connected','[]'),('c','c','G','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('b:c','b:c','F','default','rss','rss','connected',ARRAY[]::text[]),('c','c','G','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p'),('q')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('b:c','p',true),('c','q',true)")
             first=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','p','running',1) RETURNING id").fetchone()[0]

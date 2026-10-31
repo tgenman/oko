@@ -37,7 +37,7 @@ def test_read_sync_does_not_scan_same_feed_unrelated_command_problems(tmp_path,p
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             body=json.dumps(dict(code='action-failed',operation='POST:/x',objects=[dict(kind='feed',id='feed')]))
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) SELECT 'p'||n,'action:'||n,'action',%s,1 FROM generate_series(1,10000) n",(body,))
             store.db._db.execute('ANALYZE reader_problems')

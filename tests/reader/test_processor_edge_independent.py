@@ -6,7 +6,7 @@ def test_turning_off_captions_closes_processor_problem(tmp_path,postgres_url):
     try:
         with store.db:
             store.db.execute("INSERT INTO folders(id,title) VALUES ('folder','Folder') ON CONFLICT DO NOTHING")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','folder','youtube','youtube','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','folder','youtube','youtube','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,viewed) VALUES ('p',0)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','youtube:subtitles','x','captions','pending')")
@@ -28,7 +28,7 @@ def test_caption_repair_keeps_failure_in_history(tmp_path,postgres_url):
         content={'blocks':[{'type':'media','role':'subtitles','media_id':'m'}],'extra':{'youtube':{},'_reader':{}}}
         with store.db:
             store.db.execute("INSERT INTO folders(id,title) VALUES ('folder','Folder') ON CONFLICT DO NOTHING")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','folder','youtube','youtube','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','folder','youtube','youtube','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,viewed,platform,content) VALUES ('p',0,'youtube',%s)",(json.dumps(content),))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status,storage_key) VALUES ('m','p','youtube:subtitles','x','captions','ready',NULL)")
@@ -50,7 +50,7 @@ def test_removing_one_shared_feed_keeps_processor_failure_history(tmp_path,postg
     try:
         with store.db:
             store.db.execute("INSERT INTO folders(id,title) VALUES ('folder','Folder') ON CONFLICT DO NOTHING")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','folder','rss','rss','connected','[]'),('b','b','B','folder','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','folder','rss','rss','connected',ARRAY[]::text[]),('b','b','B','folder','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,viewed,platform,external_id,processing_metadata) VALUES ('p',0,'rss','p',%s)",(json.dumps({'_pass':{'feed_id':'a'}}),))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('a','p',true),('b','p',false)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,problem_code,error) VALUES ('filter','p','pending','processor-config','original failure') RETURNING id").fetchone()[0]
@@ -72,7 +72,7 @@ def test_removing_shared_feed_keeps_other_processor_occurrence(tmp_path,postgres
     try:
         with store.db:
             store.db.execute("INSERT INTO folders(id,title) VALUES ('folder','Folder') ON CONFLICT DO NOTHING")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','folder','rss','rss','connected','[]'),('b','b','B','folder','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','folder','rss','rss','connected',ARRAY[]::text[]),('b','b','B','folder','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,viewed,platform,external_id,processing_metadata) VALUES ('p',0,'rss','p',%s)",(json.dumps({'_pass':{'feed_id':'a'}}),))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('a','p',true),('b','p',false)")
             first=store.db.execute("INSERT INTO jobs(kind,item,status,problem_code,error) VALUES ('filter','p','pending','processor-config','failure') RETURNING id").fetchone()[0]
@@ -90,7 +90,7 @@ def test_discover_processor_problem_not_hidden_by_viewed_publication_with_same_i
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,kind,transport,connection,original_urls) VALUES ('same','same','feed','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,kind,transport,connection,original_urls) VALUES ('same','same','feed','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,viewed) VALUES ('same',1)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,problem_code,error) VALUES ('discover','same','failed','processor-config','failure') RETURNING id").fetchone()[0]
             store.problems.finish_processor_change([job],None,1)
@@ -104,7 +104,7 @@ def test_read_processor_problem_not_hidden_by_viewed_publication_with_same_id(tm
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,kind,transport,connection,original_urls) VALUES ('same','same','feed','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,kind,transport,connection,original_urls) VALUES ('same','same','feed','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,viewed) VALUES ('same',1)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,problem_code,error) VALUES ('read','same','failed','processor-config','failure') RETURNING id").fetchone()[0]
             store.problems.finish_processor_change([job],None,1)
@@ -123,7 +123,7 @@ def test_subtitle_notice_replacement_keeps_old_material_history(tmp_path,postgre
         content={'blocks':[{'type':'media','role':'subtitles','media_id':'m'}],'extra':{'youtube':{},'_reader':{}}}
         with store.db:
             store.db.execute("INSERT INTO folders(id,title) VALUES ('folder','Folder') ON CONFLICT DO NOTHING")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','folder','youtube','youtube','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','folder','youtube','youtube','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,viewed,platform,content) VALUES ('p',0,'youtube',%s)",(json.dumps(content),))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status,storage_key) VALUES ('m','p','youtube:subtitles','x','captions','ready','media/old')")
@@ -300,7 +300,7 @@ def test_real_subtitle_accept_reconciles_other_job_before_finish(tmp_path,postgr
     try:
         content={'blocks':[{'type':'media','role':'subtitles','media_id':old_media}],'extra':{'youtube':{},'_reader':{'full':True,'reason':'','attachments':[]}}}
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','Feed','default','youtube','youtube','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','Feed','default','youtube','youtube','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,viewed,platform,external_id,url,content,complete) VALUES ('p',0,'youtube','p','https://p.test',%s,1)",(json.dumps(content),))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('f','p',true,true)")
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status,storage_key) VALUES (%s,'p','youtube:subtitles','x','caption','ready','media/old')",(old_media,))

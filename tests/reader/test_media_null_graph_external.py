@@ -5,7 +5,7 @@ def test_existing_null_media_removing_root_closes_its_occurrence(tmp_path,postgr
  s=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
  try:
   with transaction(s.db):
-   s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected','[]'),('y','y','Y','default','rss','rss','connected','[]')")
+   s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected',ARRAY[]::text[]),('y','y','Y','default','rss','rss','connected',ARRAY[]::text[])")
    s.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('a','rss','a'),('b','rss','b'),('p','other_web','p')")
    s.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('x','a',true),('y','b',true)")
    s.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('a','p'),('b','p')")
@@ -26,7 +26,7 @@ def test_existing_null_media_adding_root_creates_new_owner(tmp_path,postgres_url
  s=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
  try:
   with transaction(s.db):
-   s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected','[]'),('y','y','Y','default','rss','rss','connected','[]')")
+   s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected',ARRAY[]::text[]),('y','y','Y','default','rss','rss','connected',ARRAY[]::text[])")
    s.db.execute("INSERT INTO publications(id,platform,external_id,url) VALUES ('a','rss','a','https://example.test/a'),('b','rss','b','https://example.test/b'),('p','telegraph','p','https://example.test/p')")
    s.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('x','a',true),('y','b',true)")
    s.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('b','p')")
@@ -48,7 +48,7 @@ def test_null_media_item_id_collision_adding_root_preserves_legacy_ownership(tmp
  s=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
  try:
   with transaction(s.db):
-   s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected','[]'),('y','y','Y','default','rss','rss','connected','[]')")
+   s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected',ARRAY[]::text[]),('y','y','Y','default','rss','rss','connected',ARRAY[]::text[])")
    s.db.execute("INSERT INTO publications(id,platform,external_id,url) VALUES ('a','rss','a','https://example.test/a'),('b','rss','b','https://example.test/b'),('m','telegraph','m','https://example.test/m'),('owner','other_web','owner','https://example.test/owner')")
    s.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('x','a',true),('y','b',true)")
    s.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('b','m')")
@@ -68,7 +68,7 @@ def test_null_media_item_collision_removal_rolls_back_graph_and_history(tmp_path
  s=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
  try:
   with transaction(s.db):
-   s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected','[]'),('y','y','Y','default','rss','rss','connected','[]')")
+   s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected',ARRAY[]::text[]),('y','y','Y','default','rss','rss','connected',ARRAY[]::text[])")
    s.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('a','rss','a'),('b','rss','b'),('m','telegraph','m'),('owner','other_web','owner')")
    s.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('x','a',true),('y','b',true)")
    s.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('a','m'),('b','m')")

@@ -1,5 +1,6 @@
 """Release migration failures and concurrency on an actual, isolated PostgreSQL."""
 from contextlib import contextmanager
+import json
 
 import psycopg
 import pytest
@@ -206,6 +207,8 @@ def test_avatar_migration_moves_bytes_and_removes_table_and_triggers(connections
         migrate(db, MIGRATIONS[:7])
         db.execute("INSERT INTO feeds(id,kind) VALUES ('feed','telegram')")
         db.execute('INSERT INTO telegram_avatars VALUES (%s,%s,%s,%s)', ('feed', image, 'image/png', digest))
+        # This historical fixture does not test URL data; supply an explicit empty list.
+        db.execute("UPDATE feeds SET original_urls='[]' WHERE original_urls IS NULL")
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT avatar_image, avatar_mime, avatar_digest FROM feeds WHERE id='feed'").fetchone() == (image, 'image/png', digest)
         assert db.execute("SELECT to_regclass('telegram_avatars')").fetchone() == (None,)
@@ -245,6 +248,8 @@ def test_collection_status_migration_preserves_attempts_and_feed_results(connect
         job = db.execute("INSERT INTO jobs(kind,item) VALUES ('discover','feed') RETURNING id").fetchone()[0]
         db.execute('INSERT INTO collection_attempts VALUES (%s,%s,%s)', (job, 'feed', json.dumps(attempt)))
         db.execute('INSERT INTO collection_results VALUES (%s,%s)', ('feed', json.dumps(result)))
+        # This historical fixture does not test URL data; supply an explicit empty list.
+        db.execute("UPDATE feeds SET original_urls='[]' WHERE original_urls IS NULL")
         migrate(db, MIGRATIONS)
         assert db.execute('SELECT feed_id, collection_attempt FROM jobs WHERE id=%s', (job,)).fetchone() == ('feed', attempt)
         assert db.execute("SELECT last_collection_result FROM feeds WHERE id='feed'").fetchone() == (result,)
@@ -283,6 +288,8 @@ def test_feed_details_migration_preserves_missing_empty_and_saved_values(connect
         migrate(db, MIGRATIONS[:9])
         db.execute("INSERT INTO feeds(id,description,created_at) VALUES ('missing','',NULL),('empty','',10),('saved','Saved',20),('detail-only','',NULL)")
         db.execute("INSERT INTO feed_details(feed,created,modified,updated,marked_read,description) VALUES ('missing',NULL,NULL,NULL,NULL,NULL),('empty',10,11,12,13,''),('saved',20,21,22,23,'Saved'),('detail-only',30,31,32,33,'Only in details')")
+        # This historical fixture does not test URL data; supply an explicit empty list.
+        db.execute("UPDATE feeds SET original_urls='[]' WHERE original_urls IS NULL")
         migrate(db, MIGRATIONS)
         rows = db.execute('SELECT id,description,created_at,modified_at,last_discovery_at,last_viewed_at FROM feeds ORDER BY id').fetchall()
         assert rows == [('detail-only','Only in details',30,31,32,33), ('empty','',10,11,12,13), ('missing',None,None,None,None,None), ('saved','Saved',20,21,22,23)]
@@ -522,6 +529,8 @@ def test_telegram_sync_migration_preserves_pending_feeds(connections):
         db.execute("INSERT INTO feeds(id,kind,transport,connection) VALUES ('ready','telegram','telegram','ready'),('new','telegram','telegram','ready'),('rss','rss','rss','ready')")
         db.execute("INSERT INTO telegram_read_state(feed,since,initial,confirmed) VALUES ('ready',100,5,7)")
         db.execute("INSERT INTO telegram_read_dirty(feed) VALUES ('new'),('rss') ON CONFLICT DO NOTHING")
+        # This historical fixture does not test URL data; supply an explicit empty list.
+        db.execute("UPDATE feeds SET original_urls='[]' WHERE original_urls IS NULL")
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT since,initial,confirmed,needs_sync FROM telegram_read_state WHERE feed='ready'").fetchone() == (100,5,7,True)
         assert db.execute("SELECT since,needs_sync FROM telegram_read_state WHERE feed='new'").fetchone() == (None,True)
@@ -560,6 +569,8 @@ def test_telegram_saved_backfill_is_scheduled_for_legacy_client_feeds(connection
         db.execute("INSERT INTO feeds(id,kind,transport,connection) VALUES ('client','telegram','telegram','connected'),('web','telegram',NULL,'connected')")
         db.execute("INSERT INTO telegram_bindings VALUES ('client','{\"kind\":\"client\",\"role\":\"personal\"}'),('web','{\"kind\":\"web\"}')")
         db.execute("INSERT INTO telegram_read_state(feed,since) VALUES ('client',123)")
+        # This historical fixture does not test URL data; supply an explicit empty list.
+        db.execute("UPDATE feeds SET original_urls='[]' WHERE original_urls IS NULL")
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT since,saved_backfill_after FROM telegram_read_state WHERE feed='client'").fetchone() == (123,'')
         assert db.execute("SELECT count(*) FROM telegram_read_state WHERE feed='web'").fetchone() == (0,)
@@ -572,6 +583,8 @@ def test_unused_reader_lists_and_originals_are_removed(connections):
         migrate(db, MIGRATIONS[:19])
         db.execute("INSERT INTO feeds(id) VALUES ('feed')")
         db.execute("INSERT INTO settings(scope,owner,field,value) VALUES ('feed','feed','originals','false')")
+        # This historical fixture does not test URL data; supply an explicit empty list.
+        db.execute("UPDATE feeds SET original_urls='[]' WHERE original_urls IS NULL")
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT to_regclass('reader_lists'),to_regclass('reader_originals')").fetchone() == (None,None)
         assert db.execute("SELECT value FROM settings WHERE feed_id='feed' AND field='originals'").fetchone() == (False,)
@@ -586,6 +599,8 @@ def test_reader_counts_are_derived_from_memberships(connections):
         db.execute("INSERT INTO feeds(id,folder_id) VALUES ('feed','folder')")
         db.execute("INSERT INTO items(id) VALUES ('item')")
         db.execute("INSERT INTO feed_publications(feed_id,publication_id) VALUES ('feed','item')")
+        # This historical fixture does not test URL data; supply an explicit empty list.
+        db.execute("UPDATE feeds SET original_urls='[]' WHERE original_urls IS NULL")
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT to_regclass('reader_feed_counts'),to_regclass('reader_folder_counts'),to_regclass('reader_membership_dirty')").fetchone() == (None,None,None)
         assert db.execute("SELECT feed_id,publication_id FROM feed_publications").fetchall() == [('feed','item')]
@@ -641,6 +656,8 @@ def test_membership_effect_triggers_are_removed(connections):
         db.execute("INSERT INTO feeds(id) VALUES ('feed')")
         db.execute("INSERT INTO items(id) VALUES ('item')")
         db.execute("INSERT INTO feed_publications(feed_id,publication_id) VALUES ('feed','item')")
+        # This historical fixture does not test URL data; supply an explicit empty list.
+        db.execute("UPDATE feeds SET original_urls='[]' WHERE original_urls IS NULL")
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname IN ('membership_owner_changed','reader_v_shared_insert','reader_v_shared_delete')").fetchone() == (0,)
         assert db.execute("SELECT feed_id,publication_id FROM feed_publications").fetchall() == [('feed','item')]
@@ -808,6 +825,8 @@ def test_primary_membership_triggers_are_removed(connections):
         db.execute("INSERT INTO feeds(id) VALUES ('feed')")
         db.execute("INSERT INTO items(id) VALUES ('item')")
         db.execute("INSERT INTO feed_publications(feed_id,publication_id) VALUES ('feed','item')")
+        # This historical fixture does not test URL data; supply an explicit empty list.
+        db.execute("UPDATE feeds SET original_urls='[]' WHERE original_urls IS NULL")
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname IN ('membership_primary_insert','membership_primary_delete')").fetchone() == (0,)
         assert db.execute("SELECT is_primary FROM feed_publications WHERE publication_id='item'").fetchone() == (True,)
@@ -837,6 +856,8 @@ def test_viewed_membership_trigger_is_removed(connections):
         db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','item',true)")
         db.execute("INSERT INTO items(id,viewed) VALUES ('unknown',NULL)")
         db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','unknown',true,true)")
+        # This historical fixture does not test URL data; supply an explicit empty list.
+        db.execute("UPDATE feeds SET original_urls='[]' WHERE original_urls IS NULL")
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT is_unviewed FROM feed_publications WHERE publication_id='unknown'").fetchone() == (False,)
         assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND t.tgname='membership_viewed_changed'").fetchone() == (0,)
@@ -931,6 +952,8 @@ def test_settings_migration_preserves_overrides_and_adds_foreign_keys(connection
         db.execute("INSERT INTO folders(id,title) VALUES ('folder','Folder')")
         db.execute("INSERT INTO feeds(id,folder_id) VALUES ('feed','folder')")
         db.execute("INSERT INTO settings(scope,owner,field,value) VALUES ('oko','global','theses','true'),('folder','folder','theses','false'),('feed','feed','prompt_filters','\"\"')")
+        # This historical fixture does not test URL data; supply an explicit empty list.
+        db.execute("UPDATE feeds SET original_urls='[]' WHERE original_urls IS NULL")
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT folder_id,feed_id,value FROM settings WHERE field='theses' ORDER BY folder_id NULLS FIRST").fetchall() == [(None,None,True),('folder',None,False)]
         assert db.execute("SELECT value FROM settings WHERE feed_id='feed'").fetchone() == ('',)
@@ -969,6 +992,8 @@ def test_empty_feed_processing_copies_are_removed(connections):
     with connections() as db:
         migrate(db, MIGRATIONS[:52])
         db.execute("INSERT INTO feeds(id) VALUES ('feed')")
+        # This historical fixture does not test URL data; supply an explicit empty list.
+        db.execute("UPDATE feeds SET original_urls='[]' WHERE original_urls IS NULL")
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='feeds' AND column_name IN ('filter_config','summary_config')").fetchone() == (0,)
         verify(db, MIGRATIONS)
@@ -1034,6 +1059,9 @@ def test_dirty_settings_work_is_reconciled_after_restart(postgres_database_url, 
             names = [names[i] for i in selected]
             types = [types[i] for i in selected]
             rows = [tuple(row[i] for i in selected) for row in rows]
+            if table=='feeds' and 'original_urls' in names:
+                url_index=names.index('original_urls')
+                rows=[tuple(json.dumps(value) if index==url_index and isinstance(value,list) else value for index,value in enumerate(row)) for row in rows]
             statement = sql.SQL('INSERT INTO {} ({}) VALUES ({}) ON CONFLICT DO NOTHING').format(
                 sql.Identifier(table),sql.SQL(',').join(map(sql.Identifier,names)),
                 sql.SQL(',').join(sql.Placeholder() for _ in names))
@@ -1041,6 +1069,8 @@ def test_dirty_settings_work_is_reconciled_after_restart(postgres_database_url, 
                 db.execute(statement,tuple(Jsonb(value) if kind=='jsonb' and value is not None else value for kind,value in zip(types,row)))
         db.execute("UPDATE settings SET value='\"Changed synthetic rules\"'::jsonb WHERE field='prompt_filters' AND folder_id IS NULL AND feed_id IS NULL")
         db.execute('INSERT INTO processing_dirty(item) VALUES (%s) ON CONFLICT DO NOTHING', (item,))
+        # This historical fixture does not test URL data; supply an explicit empty list.
+        db.execute("UPDATE feeds SET original_urls='[]' WHERE original_urls IS NULL")
         migrate(db,MIGRATIONS)
         assert db.execute("SELECT to_regclass('processing_dirty')").fetchone()[0] is None
     recovered = Store(root,lambda _:None,database_url=postgres_database_url)
@@ -1058,6 +1088,8 @@ def test_publication_table_rename_preserves_data_and_views(connections):
         db.execute("INSERT INTO feeds(id) VALUES ('feed')")
         db.execute("INSERT INTO items(id,url,content) VALUES ('item','https://example.test','{\"blocks\":[]}')")
         db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','item',true)")
+        # This historical fixture does not test URL data; supply an explicit empty list.
+        db.execute("UPDATE feeds SET original_urls='[]' WHERE original_urls IS NULL")
         migrate(db,MIGRATIONS)
         assert db.execute("SELECT to_regclass('items'),to_regclass('publications')").fetchone() == (None,'publications')
         assert db.execute("SELECT url,content FROM publications WHERE id='item'").fetchone() == ('https://example.test','{"blocks":[]}')
@@ -1164,6 +1196,8 @@ def test_removing_reading_memberships_view_preserves_memberships(connections):
         db.execute("INSERT INTO feed_publications(feed_id,publication_id) VALUES ('first','article'),('second','article')")
         before = db.execute("SELECT feed_id,publication_id,is_primary,is_unviewed FROM feed_publications ORDER BY feed_id").fetchall()
         assert db.execute("SELECT count(*) FROM reading_memberships WHERE publication_id='article'").fetchone()[0] == 2
+        # This historical fixture does not test URL data; supply an explicit empty list.
+        db.execute("UPDATE feeds SET original_urls='[]' WHERE original_urls IS NULL")
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT to_regclass('reading_memberships')").fetchone()[0] is None
         assert db.execute("SELECT feed_id,publication_id,is_primary,is_unviewed FROM feed_publications ORDER BY feed_id").fetchall() == before
@@ -1194,6 +1228,8 @@ def test_unviewed_view_removal_preserves_primary_membership_selection(connection
         db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('first','shared',true,true),('second','shared',false,true),('first','viewed',true,false),('first','flagged',true,false)")
         before=db.execute('SELECT id,feed_id FROM unviewed_items_by_feed ORDER BY id,feed_id').fetchall()
         assert before == [('shared','first')]
+        # This historical fixture does not test URL data; supply an explicit empty list.
+        db.execute("UPDATE feeds SET original_urls='[]' WHERE original_urls IS NULL")
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT to_regclass('unviewed_items_by_feed')").fetchone()[0] is None
         after=db.execute('SELECT p.id,m.feed_id FROM publications p JOIN feed_publications m ON m.publication_id=p.id WHERE m.is_primary AND m.is_unviewed AND p.viewed=0 ORDER BY p.id,m.feed_id').fetchall()
@@ -1248,6 +1284,8 @@ def test_feed_owner_view_removal_preserves_memberships_and_cleanup(connections):
         db.execute("INSERT INTO jobs(kind,item,payload,status) VALUES ('delete','primary-wins','{\"cleanup_feed\":\"first\"}','pending')")
         before=db.execute("SELECT id FROM items_by_feed WHERE feed_id='first' ORDER BY id").fetchall()
         assert before == [('cleanup',),('shared',)]
+        # This historical fixture does not test URL data; supply an explicit empty list.
+        db.execute("UPDATE feeds SET original_urls='[]' WHERE original_urls IS NULL")
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT to_regclass('items_by_feed')").fetchone()[0] is None
         assert sorted(db.execute(owned_ids("= 'first'")).fetchall()) == before
@@ -1297,6 +1335,8 @@ def test_last_read_view_removal_preserves_all_publication_owners(connections):
         db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('first','primary',true,true),('second','primary',false,true)")
         db.execute("INSERT INTO jobs(kind,item,payload,status) VALUES ('delete','cleanup','{\"cleanup_feed\":\"first\"}','pending')")
         before=db.execute('SELECT id,feed_id,viewed FROM items_read ORDER BY id').fetchall()
+        # This historical fixture does not test URL data; supply an explicit empty list.
+        db.execute("UPDATE feeds SET original_urls='[]' WHERE original_urls IS NULL")
         migrate(db,MIGRATIONS)
         assert db.execute("SELECT to_regclass('items_read')").fetchone()[0] is None
         assert db.execute('SELECT i.id,'+owner_expr('i')+' AS feed_id,i.viewed FROM publications i ORDER BY i.id').fetchall() == before

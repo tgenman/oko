@@ -7,7 +7,7 @@ def test_youtube_null_fetch_recovery_saves_before_get(tmp_path,postgres_url):
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','p','failed','waiting',NULL) RETURNING id").fetchone()[0]
@@ -24,7 +24,7 @@ def test_next_at_preserves_closed_history_and_reserves_next_id(tmp_path,postgres
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','p','failed','waiting',NULL)")
@@ -45,7 +45,7 @@ def test_mixed_rss_and_youtube_owner_hides_only_youtube(tmp_path,postgres_url):
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('r','r','R','default','rss','rss','connected','[]'),('y','y','Y','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('r','r','R','default','rss','rss','connected',ARRAY[]::text[]),('y','y','Y','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('a'),('b'),('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('r','a',true),('y','b',true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('a','article'),('b','article')")
@@ -69,7 +69,7 @@ def test_recovery_keeps_youtube_admission_contribution(tmp_path,postgres_url):
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','p','pending','waiting',NULL) RETURNING id").fetchone()[0]
@@ -89,7 +89,7 @@ def test_advance_materializes_reserved_id_and_rollback_restores_it(tmp_path,post
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','p','failed','waiting',NULL)")
@@ -116,7 +116,7 @@ def test_finish_after_virtual_deadline_preserves_seen_id(tmp_path,postgres_url):
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','p','pending','waiting',NULL) RETURNING id").fetchone()[0]
@@ -140,7 +140,7 @@ def test_recovery_avoids_ten_thousand_unrelated_rss_jobs(tmp_path,postgres_url):
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]'),('r','r','R','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[]),('r','r','R','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error) VALUES ('fetch','p','f','failed','waiting')")
@@ -161,7 +161,7 @@ def test_recovery_during_pause_does_not_invent_past_occurrence(tmp_path,postgres
         store.youtube.start(100)
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error) VALUES ('fetch','p','failed','waiting')")
@@ -179,7 +179,7 @@ def test_foreign_canonical_is_preserved_during_pause_and_resume(tmp_path,postgre
         foreign=json.dumps(dict(code='foreign',operation='producer:delete',objects=[dict(kind='material',id='other')],state='current'))
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error) VALUES ('fetch','p','failed','waiting')")
@@ -199,7 +199,7 @@ def test_removing_youtube_owner_while_waiting_cancels_only_its_future(tmp_path,p
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('r','r','R','default','rss','rss','connected','[]'),('y','y','Y','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('r','r','R','default','rss','rss','connected',ARRAY[]::text[]),('y','y','Y','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('a'),('b'),('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('r','a',true),('y','b',true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('a','article'),('b','article')")
@@ -222,7 +222,7 @@ def test_null_to_explicit_after_deadline_keeps_visible_occurrence(tmp_path,postg
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error) VALUES ('fetch','p','failed','waiting') RETURNING id").fetchone()[0]
@@ -245,7 +245,7 @@ def test_pause_rolls_back_timer_occurrence_and_flags_together(tmp_path,postgres_
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error) VALUES ('fetch','p','failed','waiting') RETURNING id").fetchone()[0]
@@ -268,7 +268,7 @@ def test_virtual_deadline_get_is_read_only_and_id_is_stable(tmp_path,postgres_ur
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error) VALUES ('fetch','p','failed','waiting')")
@@ -292,7 +292,7 @@ def test_admission_subtitle_and_fetch_share_pause_without_hiding_each_other(tmp_
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('p','youtube','p',0)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','youtube:subtitles','x','f','pending_download')")
@@ -318,7 +318,7 @@ def test_recovery_preserves_unambiguous_legacy_occurrence(tmp_path,postgres_url)
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error) VALUES ('fetch','p','failed','failure')")
@@ -342,7 +342,7 @@ def test_http_etag_stable_when_virtual_fetch_is_materialized(tmp_path,postgres_u
             store=app.state.host.require_store()
             with transaction(store.db):
                 store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
                 store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('p','youtube','p',0)")
                 store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
                 store.db.execute("INSERT INTO jobs(kind,item,status,error) VALUES ('fetch','p','failed','waiting')")
@@ -362,7 +362,7 @@ def test_ambiguous_ten_thousand_isolated_records_are_preserved(tmp_path,postgres
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error) VALUES ('fetch','p','failed','err') RETURNING id").fetchone()[0]
@@ -387,7 +387,7 @@ def test_unknown_deadline_keeps_youtube_fetch_reserved(tmp_path,postgres_url):
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error) VALUES ('fetch','p','failed','waiting')")
@@ -410,7 +410,7 @@ def test_timer_waits_for_graph_before_job_rows(tmp_path,postgres_url):
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error) VALUES ('fetch','p','pending','waiting') RETURNING id").fetchone()[0]
@@ -437,7 +437,7 @@ def test_remove_feed_during_pause_rolls_back_reservation(tmp_path,postgres_url):
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','youtube','p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error) VALUES ('fetch','p','failed','waiting')")
@@ -459,7 +459,7 @@ def test_recovery_resumes_batches_without_changing_reserved_ids(tmp_path,postgre
         store.youtube.start(100)
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) SELECT 'p-'||n FROM generate_series(1,101)n")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'f','p-'||n,true FROM generate_series(1,101)n")
             store.db.execute("INSERT INTO jobs(kind,item,status,error) SELECT 'fetch','p-'||n,'failed','waiting' FROM generate_series(1,101)n")
@@ -484,7 +484,7 @@ def test_first_start_runs_080_then_youtube_recovery_while_paused(tmp_path,postgr
         store.youtube.start(100)
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key IN ('fetch-null-recovered-v1','youtube-null-fetch-recovered-v1')")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('r','r','R','default','rss','rss','connected','[]'),('y','y','Y','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('r','r','R','default','rss','rss','connected',ARRAY[]::text[]),('y','y','Y','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('a'),('b'),('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('r','a',true),('y','b',true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('a','article'),('b','article')")
@@ -550,7 +550,7 @@ def test_owner_change_during_pause_preserves_reserved_occurrence(tmp_path,postgr
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','youtube','rss','connected','[]'),('b','b','B','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','youtube','rss','connected',ARRAY[]::text[]),('b','b','B','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','youtube','p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('a','p',true),('b','p',false)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error) VALUES ('fetch','p','failed','waiting')")
@@ -568,7 +568,7 @@ def test_many_youtube_roots_due_tick_has_bounded_queries(tmp_path,postgres_url):
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) SELECT 'f-'||n,'f-'||n,'F','default','youtube','rss','connected','[]' FROM generate_series(1,250)n")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) SELECT 'f-'||n,'f-'||n,'F','default','youtube','rss','connected',ARRAY[]::text[] FROM generate_series(1,250)n")
             store.db.execute("INSERT INTO publications(id) SELECT 'root-'||n FROM generate_series(1,250)n")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'f-'||n,'root-'||n,true FROM generate_series(1,250)n")
@@ -597,7 +597,7 @@ def test_preimage_is_refreshed_after_waiting_for_graph(tmp_path,postgres_url):
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error) VALUES ('fetch','p','pending','old') RETURNING id").fetchone()[0]
@@ -624,7 +624,7 @@ def test_recovery_avoids_ten_thousand_youtube_publications_without_jobs(tmp_path
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) SELECT 'p-'||n FROM generate_series(1,10000)n")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'f','p-'||n,true FROM generate_series(1,10000)n")
             store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error) VALUES ('fetch','p-1','f','failed','waiting')")
@@ -643,7 +643,7 @@ def test_recovery_finds_orphan_fetch_by_job_feed(tmp_path,postgres_url):
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             job=store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error) VALUES ('fetch','missing','f','failed','waiting') RETURNING id").fetchone()[0]
         store.problems.recover_youtube_null_fetch()
         assert store.db.execute("SELECT 1 FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'fetch_job_id'=%s",(str(job),)).fetchone()
@@ -655,7 +655,7 @@ def test_corrupt_one_reservation_does_not_duplicate_other_on_fallback(tmp_path,p
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','youtube','rss','connected','[]'),('y','y','Y','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','youtube','rss','connected',ARRAY[]::text[]),('y','y','Y','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('a'),('b'),('article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('x','a',true),('y','b',true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('a','article'),('b','article')")
@@ -686,7 +686,7 @@ def test_preimage_reloads_ownership_after_waiting_for_graph(tmp_path,postgres_ur
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error) VALUES ('fetch','p','pending','old') RETURNING id").fetchone()[0]
@@ -713,7 +713,7 @@ def test_repause_after_due_closes_reserved_episode_without_get(tmp_path,postgres
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error) VALUES ('fetch','p','failed','waiting')")
@@ -734,7 +734,7 @@ def test_recovery_cost_two_unrelated_ten_thousand_sides(tmp_path,postgres_url):
     try:
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]'),('r','r','R','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[]),('r','r','R','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) SELECT 'p-'||n FROM generate_series(1,10000)n")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'f','p-'||n,true FROM generate_series(1,10000)n")
             store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error) SELECT 'fetch','rss-'||n,'r','failed','waiting' FROM generate_series(1,10000)n")

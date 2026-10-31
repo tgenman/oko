@@ -103,7 +103,7 @@ def test_actual_get_uses_index_and_python_valid_non_jsonb_is_not_lost(tmp_path,p
         partial=json.dumps({'extra':{'_reader':{'full':False,'reason':'truncated'}},'payload':'\x00'})
         with store.db:
             store.db.execute("DELETE FROM state WHERE key='incomplete-class-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,source_deleted,content) SELECT 'p-'||n,'rss','p-'||n,0,1,false,%s FROM generate_series(1,10000)n",(full,))
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,source_deleted,content) VALUES ('partial','rss','partial',0,1,false,%s)",(partial,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','partial',true)")
@@ -141,7 +141,7 @@ def test_unknown_full_is_not_silently_discarded(tmp_path,postgres_url):
         raw=json.dumps({'extra':{'_reader':{'full':{'unexpected':'value'}}}})
         with store.db:
             store.db.execute("DELETE FROM state WHERE key='incomplete-class-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,source_deleted,content) VALUES ('p','rss','p',0,1,false,%s)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
         recover(store)
@@ -159,7 +159,7 @@ def test_http_status_displays_python_valid_jsonb_invalid_partial(tmp_path,postgr
     from tests.support.reader import HEADERS
     raw=json.dumps({'extra':{'_reader':{'full':False,'reason':'truncated'}},'payload':'\x00'})
     with psycopg.connect(postgres_url,autocommit=True) as db:
-        db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+        db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
         db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,source_deleted,content) VALUES ('p','rss','p',0,1,false,%s)",(raw,))
         db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
     with TestClient(create_app(tmp_path,token='test',database_url=postgres_url,api_only=True),headers=HEADERS) as client:

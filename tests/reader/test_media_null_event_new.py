@@ -112,7 +112,7 @@ def test_null_media_preserves_legacy_item_collision_projection(tmp_path,postgres
     s=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(s.db):
-            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             s.db.execute("INSERT INTO publications(id) VALUES ('root'),('m'),('owner')")
             s.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','root',true)")
             s.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root','m')")

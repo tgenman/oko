@@ -90,7 +90,7 @@ def test_shared_roots_removing_one_feed_closes_only_old_owner(tmp_path,postgres_
     s=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(s.db):
-            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected','[]'),('y','y','Y','default','rss','rss','connected','[]')")
+            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected',ARRAY[]::text[]),('y','y','Y','default','rss','rss','connected',ARRAY[]::text[])")
             s.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('a','rss','a'),('b','rss','b'),('p','other_web','p')")
             s.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('x','a',true),('y','b',true)")
             s.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('a','p'),('b','p')")
@@ -163,7 +163,7 @@ def test_feed_delete_extra_code_keeps_feed_owner_and_id(tmp_path,postgres_url):
     s=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(s.db):
-            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected','[]')")
+            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             job=s.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('feed-delete','f','running',1) RETURNING id").fetchone()[0]
             s.jobs.retry(Job(job,'feed-delete','f',1),100,'unexpected',code='feed-delete:RuntimeError')
         row=s.db.execute("SELECT id,body::jsonb->'objects' AS objects FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'deletion_job_id'=%s",(str(job),)).fetchone()
@@ -307,7 +307,7 @@ def test_graph_removal_closes_isolated_owned_occurrence(tmp_path,postgres_url):
     s=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(s.db):
-            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected','[]'),('y','y','Y','default','rss','rss','connected','[]')")
+            s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected',ARRAY[]::text[]),('y','y','Y','default','rss','rss','connected',ARRAY[]::text[])")
             s.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('a','rss','a'),('b','rss','b'),('p','other_web','p')")
             s.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('x','a',true),('y','b',true)")
             s.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('a','p'),('b','p')")

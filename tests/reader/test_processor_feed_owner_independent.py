@@ -7,7 +7,7 @@ def test_discover_processor_belongs_to_actual_feed_with_colliding_publication(tm
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,kind,transport,connection,original_urls) VALUES ('same','same','same','rss','rss','connected','[]'),('other','other','other','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,kind,transport,connection,original_urls) VALUES ('same','same','same','rss','rss','connected',ARRAY[]::text[]),('other','other','other','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,viewed) VALUES ('same',0)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('other','same',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,problem_code,error) VALUES (%s,'same','failed','processor-config','failure') RETURNING id",(kind,)).fetchone()[0]

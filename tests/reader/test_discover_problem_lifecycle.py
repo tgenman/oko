@@ -9,7 +9,7 @@ def test_discover_failure_and_completion_are_saved_without_status_read(tmp_path,
     store = Store(tmp_path, lambda _: None, database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             job_id = store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('discover','feed','running',1) RETURNING id").fetchone()[0]
         job=Job(job_id,'discover','feed',1)
         identity='job:source-connection:feed:discover'
@@ -38,7 +38,7 @@ def test_restart_recovers_existing_discover_failure_without_status_read(tmp_path
     try:
         with store.db:
             store.db.execute("DELETE FROM state WHERE key='discover-problems-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('old','old','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('old','old','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) VALUES ('discover','old','old','failed','failure','source-connection')")
         store.db.close()
         store=Store(tmp_path,lambda _:None,database_url=postgres_url)
@@ -69,7 +69,7 @@ def test_discover_does_not_overwrite_other_job_with_colliding_identity(tmp_path,
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,generation) VALUES ('discover','feed','feed','running',1) RETURNING id").fetchone()[0]
             body=dict(code='source-connection',operation='producer:fetch',objects=[dict(kind='feed',id='feed')],title='other')
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('other','job:source-connection:feed:discover','background',%s,1)",(json.dumps(body),))
@@ -83,7 +83,7 @@ def test_discover_event_preserves_other_source_problem(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]'),('first','first','First','default','rss','rss','connected','[]'),('second','second','Second','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[]),('first','first','First','default','rss','rss','connected',ARRAY[]::text[]),('second','second','Second','default','rss','rss','connected',ARRAY[]::text[])")
             first=store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,generation) VALUES ('discover','first','feed','running',1) RETURNING id").fetchone()[0]
             second=store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,generation) VALUES ('discover','second','feed','running',1) RETURNING id").fetchone()[0]
         store.jobs.retry(Job(first,'discover','first',1),1,'failure',code='custom')
@@ -97,7 +97,7 @@ def test_status_does_not_rewrite_discovery_problem(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,generation) VALUES ('discover','feed','feed','running',1) RETURNING id").fetchone()[0]
         store.jobs.retry(Job(job_id,'discover','feed',1),1,'failure',code='source-connection')
         before=store.db.execute("SELECT id,xmin::text,body,finished FROM reader_problems WHERE identity='job:source-connection:feed:discover' AND finished IS NULL").fetchone()
@@ -114,7 +114,7 @@ def test_restart_reuses_legacy_problem_identity_and_occurrence(tmp_path,postgres
     try:
         with store.db:
             store.db.execute("DELETE FROM state WHERE key='discover-problems-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) VALUES ('discover','feed','feed','failed','failure','source-connection')")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('old','job:source-connection:feed:discover','background',%s,1)",(json.dumps(body),))
         store.db.close()
@@ -129,7 +129,7 @@ def test_interrupt_updates_retry_state_without_status_read(tmp_path,postgres_url
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,generation,error,problem_code) VALUES ('discover','feed','feed','running',1,'failure','source-connection') RETURNING id").fetchone()[0]
             store.problems.sync_discover(job_id,1)
         store.jobs.interrupted({'feed'})
@@ -142,7 +142,7 @@ def test_deleting_feed_makes_discovery_problem_irrelevant_without_status_read(tm
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,generation) VALUES ('discover','feed','feed','running',1) RETURNING id").fetchone()[0]
         store.jobs.retry(Job(job_id,'discover','feed',1),1,'failure',code='source-connection')
         problem=store.db.execute("SELECT id FROM reader_problems WHERE identity='job:source-connection:feed:discover' AND finished IS NULL").fetchone()[0]
@@ -157,7 +157,7 @@ def test_restart_finishes_stale_legacy_discovery_problem(tmp_path,postgres_url):
     try:
         with store.db:
             store.db.execute("DELETE FROM state WHERE key='discover-problems-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('old','job:source-connection:feed:discover','background',%s,1)",(json.dumps(body),))
         store.db.close(); store=Store(tmp_path,lambda _:None,database_url=postgres_url)
         assert store.db.execute("SELECT outcome FROM reader_problems WHERE id='old'").fetchone()[0]=='resolved'
@@ -169,7 +169,7 @@ def test_discover_sync_ignores_unrelated_jobs_and_problems(tmp_path,postgres_url
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) VALUES ('discover','feed','feed','failed','failure','source-connection') RETURNING id").fetchone()[0]
             store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) SELECT 'discover','foreign-'||n,'foreign-'||n,'failed','failure','source-connection' FROM generate_series(1,10000) n")
             body=json.dumps(dict(code='other',operation='producer:fetch',objects=[dict(kind='feed',id='feed')]))
@@ -209,7 +209,7 @@ def test_recovery_resumes_after_batch_and_includes_nonpositive_job_ids(tmp_path,
     try:
         with store.db:
             store.db.execute("DELETE FROM state WHERE key='discover-problems-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) SELECT 'f-'||n,'f-'||n,'Feed','default','rss','rss','connected','[]' FROM generate_series(-1,100) n")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) SELECT 'f-'||n,'f-'||n,'Feed','default','rss','rss','connected',ARRAY[]::text[] FROM generate_series(-1,100) n")
             store.db.execute("INSERT INTO jobs(id,kind,item,feed_id,status,error,problem_code) SELECT n,'discover','f-'||n,'f-'||n,'failed','failure','source-connection' FROM generate_series(-1,100) n")
         store.db.close()
         def fault(point):
@@ -236,7 +236,7 @@ def test_discover_owner_is_feed_even_when_id_matches_other_publication(tmp_path,
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('same','same','Feed','default','rss','rss','connected','[]'),('other','other','Other','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('same','same','Feed','default','rss','rss','connected',ARRAY[]::text[]),('other','other','Other','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('same')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('other','same',true)")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,generation) VALUES ('discover','same','same','running',1) RETURNING id").fetchone()[0]
@@ -269,7 +269,7 @@ def test_recovery_reuses_problem_previously_attributed_to_publication_owner(tmp_
     try:
         with store.db:
             store.db.execute("DELETE FROM state WHERE key='discover-problems-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('same','same','Feed','default','rss','rss','connected','[]'),('other','other','Other','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('same','same','Feed','default','rss','rss','connected',ARRAY[]::text[]),('other','other','Other','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('same')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('other','same',true)")
             store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) VALUES ('discover','same','same','failed','failure','source-connection')")
@@ -284,7 +284,7 @@ def test_discover_owner_uses_source_item_instead_of_stale_attempt_feed(tmp_path,
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]'),('old','old','Old','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[]),('old','old','Old','default','rss','rss','connected',ARRAY[]::text[])")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,generation) VALUES ('discover','feed','old','running',1) RETURNING id").fetchone()[0]
         store.jobs.retry(Job(job_id,'discover','feed',1),1,'failure',code='source-connection')
         assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='job:source-connection:feed:discover' AND finished IS NULL").fetchone()
@@ -295,7 +295,7 @@ def test_discover_collision_with_another_discover_source_is_preserved(tmp_path,p
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('discover','feed','running',1) RETURNING id").fetchone()[0]
             body=dict(code='source-connection',operation='producer:discover',objects=[dict(kind='feed',id='other')],title='other')
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('other','job:source-connection:feed:discover','background',%s,1)",(json.dumps(body),))
@@ -322,7 +322,7 @@ def test_malformed_colliding_problem_does_not_block_source_failure(tmp_path,post
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('discover','feed','running',1) RETURNING id").fetchone()[0]
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('old','job:source-connection:feed:discover','background','[]',1)")
         store.jobs.retry(Job(job_id,'discover','feed',1),1,'failure',code='source-connection')
@@ -337,7 +337,7 @@ def test_http_reports_recovered_source_failure_without_get_writes(tmp_path,postg
     from tests.support.reader import HEADERS
     import psycopg
     with psycopg.connect(postgres_url,autocommit=True) as db:
-        db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+        db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
         db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('discover','feed','failed','failure','source-connection')")
     with TestClient(create_app(tmp_path,token='test',database_url=postgres_url,api_only=True),headers=HEADERS) as client:
         with psycopg.connect(postgres_url,autocommit=True) as db:
@@ -357,7 +357,7 @@ def test_recovery_closes_old_discovery_code_when_same_source_has_new_failure(tmp
     try:
         with store.db:
             store.db.execute("DELETE FROM state WHERE key='discover-problems-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('discover','feed','failed','other failure','other-code')")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('old','job:source-connection:feed:discover','background',%s,1)",(json.dumps(body),))
         store.db.close();store=Store(tmp_path,lambda _:None,database_url=postgres_url)
@@ -385,7 +385,7 @@ def test_discover_collision_fallback_stays_stable_after_restart_and_foreign_clos
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('discover','feed','running',1) RETURNING id").fetchone()[0]
             foreign=dict(code='source-connection',operation='producer:fetch',objects=[dict(kind='feed',id='feed')],title='other')
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('other','job:source-connection:feed:discover','background',%s,1)",(json.dumps(foreign),))
@@ -416,7 +416,7 @@ def test_review_recovery_preserves_legacy_status_occurrence(tmp_path,postgres_ur
     try:
         with store.db:
             store.db.execute("DELETE FROM state WHERE key='discover-problems-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('same','same','Feed','default','rss','rss','connected','[]'),('other','other','Other','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('same','same','Feed','default','rss','rss','connected',ARRAY[]::text[]),('other','other','Other','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id) VALUES ('same')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('other','same',true)")
             store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) VALUES ('discover','same','same','failed','failure','source-connection')")
@@ -431,7 +431,7 @@ def test_viewed_publication_id_does_not_cancel_discover_job(tmp_path,postgres_ur
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('same','same','Feed','default','rss','rss','connected','[]')")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('same','same','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,viewed) VALUES ('same',1)")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('discover','same','running',1) RETURNING id").fetchone()[0]
             store.jobs.reconcile_cleanup()
@@ -444,7 +444,7 @@ def test_review_shared_legacy_owner_not_stolen_by_first_discover(tmp_path,postgr
     body=dict(code='source-connection',section='object',title='legacy',consequence='saved',next_step='retry',objects=[dict(kind='feed',id='other')],action=None,operation='producer:discover',state='current',next_at=None)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) SELECT n,n,n,'default','rss','rss','connected','[]' FROM unnest(ARRAY['a','b','other']) n")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) SELECT n,n,n,'default','rss','rss','connected',ARRAY[]::text[] FROM unnest(ARRAY['a','b','other']) n")
             store.db.execute("INSERT INTO publications(id) VALUES ('a'),('b')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('other','a',true),('other','b',true)")
             jobs=store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) VALUES ('discover','a','a','failed','failure','source-connection'),('discover','b','b','failed','failure','source-connection') RETURNING id").fetchall()
@@ -476,7 +476,7 @@ def test_recovery_preserves_shared_legacy_occurrence_until_other_discover_resolv
     try:
         with store.db:
             store.db.execute("DELETE FROM state WHERE key='discover-problems-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) SELECT n,n,n,'default','rss','rss','connected','[]' FROM unnest(ARRAY['a','b','other']) n")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) SELECT n,n,n,'default','rss','rss','connected',ARRAY[]::text[] FROM unnest(ARRAY['a','b','other']) n")
             store.db.execute("INSERT INTO publications(id) VALUES ('a'),('b')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('other','a',true),('other','b',true)")
             store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) VALUES ('discover','a','a','failed','failure','source-connection'),('discover','b','b','failed','failure','source-connection')")
@@ -492,7 +492,7 @@ def test_shared_legacy_occurrence_closes_when_last_discover_finishes(tmp_path,po
     body=dict(code='source-connection',section='object',title='legacy',consequence='saved',next_step='retry',objects=[dict(kind='feed',id='other')],action=None,operation='producer:discover',state='current',next_at=None)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) SELECT n,n,n,'default','rss','rss','connected','[]' FROM unnest(ARRAY['a','b','other']) n")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) SELECT n,n,n,'default','rss','rss','connected',ARRAY[]::text[] FROM unnest(ARRAY['a','b','other']) n")
             store.db.execute("INSERT INTO publications(id) VALUES ('a'),('b')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('other','a',true),('other','b',true)")
             jobs=store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,generation,error,problem_code) VALUES ('discover','a','a','running',1,'failure','source-connection'),('discover','b','b','running',1,'failure','source-connection') RETURNING id,item").fetchall()
@@ -511,7 +511,7 @@ def test_shared_legacy_closes_after_suppressed_discover_jobs_finish(tmp_path,pos
     profile=dict(code='identity-unconfirmed',section='action',title='profile',consequence='saved',next_step='retry',objects=[dict(kind='feed',id='a'),dict(kind='feed',id='b')],action=None,operation='producer:profile',state='current',next_at=None)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) SELECT n,n,n,'default','telegram','telegram','connected','[]' FROM unnest(ARRAY['a','b','other']) n")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) SELECT n,n,n,'default','telegram','telegram','connected',ARRAY[]::text[] FROM unnest(ARRAY['a','b','other']) n")
             store.db.execute("INSERT INTO telegram_bindings(feed,binding,indexed_role) VALUES ('a','{\"kind\":\"client\",\"role\":\"personal\"}','personal'),('b','{\"kind\":\"client\",\"role\":\"personal\"}','personal')")
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('profile','profile:personal','background',%s,1)",(json.dumps(profile),))
             store.db.execute("INSERT INTO publications(id) VALUES ('a'),('b')")
@@ -529,7 +529,7 @@ def test_review_all_linked_legacy_owners_finish(tmp_path,postgres_url):
     try:
         with store.db:
             store.db.execute("DELETE FROM state WHERE key='discover-problems-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) SELECT n,n,n,'default','rss','rss','connected','[]' FROM unnest(ARRAY['a','x','y']) n")
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) SELECT n,n,n,'default','rss','rss','connected',ARRAY[]::text[] FROM unnest(ARRAY['a','x','y']) n")
             store.db.execute("INSERT INTO publications(id,viewed) VALUES ('a',0),('root-x',0),('root-y',0)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('x','root-x',true),('y','root-y',true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root-x','a'),('root-y','a')")

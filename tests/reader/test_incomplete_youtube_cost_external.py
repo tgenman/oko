@@ -7,7 +7,7 @@ def test_scoped_paused_youtube_does_not_scan_other_publications(tmp_path,postgre
  s=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
  try:
   with transaction(s.db):
-   s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+   s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
    s.db.execute("INSERT INTO publications(id) SELECT 'p-'||n FROM generate_series(1,10000)n")
    s.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'f','p-'||n,true FROM generate_series(1,10000)n")
    s.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','p-1','failed','e','media_unavailable')")
@@ -23,7 +23,7 @@ def test_scoped_paused_youtube_includes_targeted_pending_owner(tmp_path,postgres
  s=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
  try:
   with transaction(s.db):
-   s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected','[]')")
+   s.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
    s.db.execute("INSERT INTO publications(id) VALUES ('p')")
    s.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
    s.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) VALUES ('fetch','p','f','pending','e','')")
