@@ -2118,7 +2118,8 @@ class Problems:
         if row['item'] is None or (row['problem_code'] is None and row['error'] is None):
             return None
         code = row['problem_code'] or 'work-' + row['kind']
-        if code not in ('delete','feed-delete','work-delete','work-feed-delete'):
+        special={'codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'}
+        if not isinstance(code,str) or code.startswith('source-') or code in special:
             return None
         feed = row['feed_id'] or row['item'] or 'demo'
         return str('job:' + code + ':' + feed + ':' + row['kind'] + ':' + row['item'])
@@ -2178,8 +2179,22 @@ class Problems:
             return False
         if not isinstance(body,dict) or body.get('code')!=candidate['code']:
             return False
+        if candidate['code'] not in ('delete','feed-delete','work-delete','work-feed-delete'):
+            allowed={'code','section','title','consequence','next_step','objects','action','operation','state','next_at','reason','deletion_job_id','deletion_job_identity','status_job_identity','status_job_target'}
+            if set(body)-allowed or body.get('action') is not None:return False
+            objects=body.get('objects')
+            if not isinstance(objects,list) or objects!=candidate.get('objects'):return False
+            if candidate.get('operation')=='producer:delete' and objects:return False
+            if candidate.get('operation')=='producer:feed-delete' and (len(objects)!=1 or not isinstance(objects[0],dict) or objects[0].get('kind')!='feed' or not isinstance(objects[0].get('id'),str) or not objects[0]['id']):return False
         operation=body.get('operation')
         owner=body.get('deletion_job_id')
+        status_identity=body.get('status_job_identity')
+        if candidate['code'] not in ('delete','feed-delete','work-delete','work-feed-delete') and status_identity is not None:
+            kind=str(candidate.get('operation','')).removeprefix('producer:')
+            prefix='job:'+candidate['code']+':'
+            tail=candidate['id'][len(prefix):] if candidate['id'].startswith(prefix) else ''
+            delimiter=':'+kind+':'
+            return bool(operation in ('producer:status',candidate['operation']) and status_identity==candidate['id'] and tail.count(delimiter)==1 and body.get('status_job_target')==tail.split(delimiter,1)[1])
         if owner is not None:
             return bool(operation==candidate['operation'] and owner==candidate.get('deletion_job_id') and body.get('deletion_job_identity',candidate['id'])==candidate['id'])
         if operation not in (None,'producer:status',candidate['operation']):
@@ -2197,30 +2212,71 @@ class Problems:
 
     def deletion_record(self, candidate: dict[str, Any]) -> Any:
         canonical=candidate['id']
+        def usable(row: Any) -> bool:
+            if not self.deletion_record_matches(row,candidate):return False
+            if candidate['code'] not in ('delete','feed-delete','work-delete','work-feed-delete'):
+                marker='fetch-null-protected:'+hashlib.sha256(row['id'].encode()).hexdigest()
+                if self.db.execute('SELECT 1 FROM state WHERE key=%s',(marker,)).fetchone():return False
+            return True
         rows=self.db.execute("SELECT id,identity,body FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation' IN ('producer:delete','producer:feed-delete') AND body::jsonb->>'deletion_job_identity'=%s",(canonical,)).fetchall()
+        if candidate['code'] not in ('delete','feed-delete','work-delete','work-feed-delete'):
+            rows=list(rows)+list(self.db.execute("SELECT id,identity,body FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation' IN ('producer:delete','producer:feed-delete','producer:status') AND body::jsonb->>'status_job_identity'=%s",(canonical,)).fetchall())
         for row in rows:
-            if self.deletion_record_matches(row,candidate):
-                return row
+            if usable(row):return row
         canonical_row=self.db.execute('SELECT id,identity,body FROM reader_problems WHERE identity=%s AND finished IS NULL',(canonical,)).fetchone()
-        return canonical_row if canonical_row and self.deletion_record_matches(canonical_row,candidate) else None
+        return canonical_row if canonical_row and usable(canonical_row) else None
 
     def sync_deletion(self, job_id: int, previous: list[dict[str, Any]], now: float) -> None:
+        def matching_extra(candidate: dict[str,Any]) -> dict[str,Any]:
+            canonical=candidate['id']
+            rows=list(self.db.execute("SELECT id,identity,body FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation' IN ('producer:delete','producer:feed-delete') AND body::jsonb->>'deletion_job_identity'=%s",(canonical,)).fetchall())
+            rows+=list(self.db.execute("SELECT id,identity,body FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation' IN ('producer:delete','producer:feed-delete','producer:status') AND body::jsonb->>'status_job_identity'=%s",(canonical,)).fetchall())
+            direct=self.db.execute('SELECT id,identity,body FROM reader_problems WHERE identity=%s AND finished IS NULL',(canonical,)).fetchone()
+            return {row['id']:row for row in [*rows,*([direct] if direct else [])] if self.deletion_record_matches(row,candidate)}
         for candidate in previous:
             candidate['deletion_job_id']=str(job_id)
             if 'code' not in candidate or 'operation' not in candidate:
                 identity=candidate['id']
-                codes=[code for code in ('delete','feed-delete','work-delete','work-feed-delete') if identity.startswith('job:'+code+':')]
-                kinds=[kind for kind in ('fetch','discover','download_media','filter','theses','read','delete','feed-delete') if ':'+kind+':' in identity]
-                if len(codes)!=1 or len(kinds)!=1 or kinds[0] not in ('delete','feed-delete'):
+                saved=list(self.db.execute("SELECT body FROM reader_problems WHERE finished IS NULL AND (identity=%s OR body::jsonb->>'deletion_job_identity'=%s) AND body::jsonb->>'deletion_job_id'=%s",(identity,identity,str(job_id))).fetchall())
+                parsed=[]
+                for row in saved:
+                    try:body=json.loads(row['body'])
+                    except (TypeError,ValueError):continue
+                    if isinstance(body,dict) and body.get('deletion_job_id')==str(job_id) and body.get('operation') in ('producer:delete','producer:feed-delete') and isinstance(body.get('code'),str):parsed.append(body)
+                if len(parsed)==1:
+                    body=parsed[0]
+                    candidate.update(code=body['code'],operation=body['operation'],objects=body.get('objects'))
+                else:
+                    codes=[code for code in ('delete','feed-delete','work-delete','work-feed-delete') if identity.startswith('job:'+code+':')]
+                    kinds=[kind for kind in ('fetch','discover','download_media','filter','theses','read','delete','feed-delete') if ':'+kind+':' in identity]
+                    if len(codes)!=1 or len(kinds)!=1 or kinds[0] not in ('delete','feed-delete'):
+                        candidate['id']=''
+                        continue
+                    candidate.update(code=codes[0],operation='producer:'+kinds[0])
+            if candidate['code'] not in ('delete','feed-delete','work-delete','work-feed-delete'):
+                matches=matching_extra(candidate)
+                if len(matches)>1:
+                    from oko.storage.subtitle_problems import protect_rows
+                    protect_rows(self.store,list(matches.values()))
                     candidate['id']=''
                     continue
-                candidate.update(code=codes[0],operation='producer:'+kinds[0])
             matched=self.deletion_record(candidate)
             if matched:
                 candidate['id']=matched['identity']
             else:
                 candidate['id']=''  # Never close an unrelated occurrence sharing the legacy key.
         current_candidates=self.deletion_candidates(job_id,now)
+        # Preserve all exact-looking duplicates rather than choosing one Job
+        # occurrence arbitrarily during the ownership handoff.
+        for candidate in current_candidates:
+            if candidate['code'] in ('delete','feed-delete','work-delete','work-feed-delete'):continue
+            probe=dict(candidate,deletion_job_id=str(job_id))
+            matches=matching_extra(probe)
+            if len(matches)>1:
+                from oko.storage.subtitle_problems import protect_rows
+                protect_rows(self.store,list(matches.values()))
+                if self.db.execute('UPDATE jobs SET deletion_extra_owned=false WHERE id=%s AND deletion_extra_owned',(job_id,)).rowcount:status_changed(self.db)
+                return
         for candidate in current_candidates:
             candidate['deletion_job_id']=str(job_id)
             canonical=candidate['id']
@@ -2229,7 +2285,10 @@ class Problems:
                 candidate['id']=matched['identity']
                 candidate['deletion_job_identity']=canonical
                 continue
-            occupied=self.db.execute('SELECT id FROM reader_problems WHERE identity=%s AND finished IS NULL',(canonical,)).fetchone()
+            occupied=self.db.execute('SELECT id,identity,body FROM reader_problems WHERE identity=%s AND finished IS NULL',(canonical,)).fetchone()
+            if occupied and not matched and candidate['code'] not in ('delete','feed-delete','work-delete','work-feed-delete'):
+                from oko.storage.subtitle_problems import protect_rows
+                protect_rows(self.store,[occupied])
             tail=canonical[len('job:'+candidate['code']+':'):]
             kind_names=('fetch','discover','download_media','filter','theses','read','delete','feed-delete')
             tokens=[kind for kind in kind_names if ':'+kind+':' in tail]
@@ -2246,12 +2305,13 @@ class Problems:
                     raise RuntimeError('Unable to allocate deletion problem identity')
         current = {candidate['id']:candidate for candidate in current_candidates}
         if current:
-            row = self.db.execute("SELECT kind,item,error,problem_code,feed_id FROM jobs WHERE id=%s",(job_id,)).fetchone()
-            legacy = self.deletion_identity(row) if row else None
+            job_row = self.db.execute("SELECT kind,item,error,problem_code,feed_id FROM jobs WHERE id=%s",(job_id,)).fetchone()
+            legacy = self.deletion_identity(job_row) if job_row else None
             if legacy and legacy not in current:
                 old = self.db.execute('SELECT id,identity,body FROM reader_problems WHERE identity=%s AND finished IS NULL',(legacy,)).fetchone()
                 exemplar=next(iter(current.values()))
-                if old and self.deletion_record_matches(old,dict(exemplar,id=legacy)):
+                protected=bool(old and exemplar['code'] not in ('delete','feed-delete','work-delete','work-feed-delete') and self.db.execute('SELECT 1 FROM state WHERE key=%s',('fetch-null-protected:'+hashlib.sha256(old['id'].encode()).hexdigest(),)).fetchone())
+                if old and not protected and self.deletion_record_matches(old,dict(exemplar,id=legacy)):
                     vacant = next((identity for identity in sorted(current) if not self.db.execute(
                         'SELECT 1 FROM reader_problems WHERE identity=%s AND finished IS NULL',(identity,)).fetchone()),None)
                     if vacant:
@@ -2269,8 +2329,13 @@ class Problems:
                 prior = sorted((existing[identity] for identity in old_ids if identity in existing),
                                key=lambda row:(row['created'],row['id']))
                 assigned: dict[str,set[str]] = {}
+                previous_by_id={candidate['id']:candidate for candidate in previous if candidate['id']}
+                standard={'delete','feed-delete','work-delete','work-feed-delete'}
                 for index,row in enumerate(prior):
-                    target = destinations[min(index,len(destinations)-1)]
+                    old_code=previous_by_id[row['identity']].get('code')
+                    eligible=[identity for identity in destinations if current[identity]['code']==old_code or (old_code in standard and current[identity]['code'] in standard)]
+                    if not eligible:continue
+                    target = eligible[min(index,len(eligible)-1)]
                     assigned.setdefault(target,set()).add(row['identity'])
                 targets = [dict(current[identity],_legacy_ids=legacy) for identity,legacy in assigned.items()]
                 moved,merged = self._rekey_regrouped_jobs(existing,targets,now)
@@ -2281,6 +2346,8 @@ class Problems:
                 self.sync_candidate(candidate['id'],None,now)
         for candidate in current.values():
             self.sync_candidate(candidate['id'],candidate,now)
+        extra=bool(current) and any(candidate['code'] not in ('delete','feed-delete','work-delete','work-feed-delete') for candidate in current.values())
+        self.db.execute("UPDATE jobs SET deletion_extra_owned=(%s=1) WHERE id=%s AND kind IN ('delete','feed-delete') AND deletion_extra_owned IS DISTINCT FROM (%s=1)",(extra,job_id,extra))
 
     @staticmethod
     def valid_read_problem_body(raw: str) -> bool:
@@ -2714,6 +2781,53 @@ class Problems:
             self.store.fault('read_problem_record_recovery_batch')
         with self.db:
             self.db.execute("INSERT INTO state(key,value) VALUES ('read-problems-recovered-v1','true') ON CONFLICT DO NOTHING")
+
+    def recover_deletion_extra_problems(self) -> None:
+        """Recover non-special deletion problems without guessing old ownership."""
+        from oko.storage import memberships
+        cursor: int | None=None
+        while True:
+            with self.db:
+                memberships.lock_graph(self.db)
+                if self.db.execute("SELECT 1 FROM state WHERE key='deletion-extra-recovered-v1'").fetchone():return
+                query="""SELECT id FROM jobs WHERE kind IN ('delete','feed-delete') AND item IS NOT NULL
+                    AND status IN ('pending','running','failed','unavailable','blocked')
+                    AND problem_code IS NOT NULL AND problem_code<>'' AND problem_code NOT LIKE 'source-%%'
+                    AND problem_code NOT IN ('delete','feed-delete','work-delete','work-feed-delete',
+                        'codex-choice','ai-permission','youtube-admission','processor-config',
+                        'identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')"""
+                if cursor is not None:query+=' AND id>%s'
+                else:query=query.replace('%%','%')
+                rows=self.db.execute(query+' ORDER BY id LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
+                if not rows:break
+                for row in rows:self.sync_deletion(row['id'],[],self.store.wall_clock())
+                cursor=rows[-1]['id']
+            self.store.fault('deletion_extra_recovery_batch')
+        # Unclaimed untyped old records may belong to another producer whose
+        # identifiers contain delete delimiters. Preserve them rather than let
+        # GET infer completion from a missing current candidate.
+        record_cursor: str | None=None
+        while True:
+            with self.db:
+                memberships.lock_graph(self.db)
+                if self.db.execute("SELECT 1 FROM state WHERE key='deletion-extra-recovered-v1'").fetchone():return
+                query="""SELECT id,identity FROM reader_problems WHERE finished IS NULL AND identity LIKE 'job:%%'
+                    AND (identity LIKE '%%:delete:%%' OR identity LIKE '%%:feed-delete:%%')
+                    AND (body::jsonb->>'operation' IS NULL OR body::jsonb->>'operation'='producer:status') AND body::jsonb->>'code' IS NOT NULL
+                    AND body::jsonb->>'code'<>'' AND body::jsonb->>'code' NOT LIKE 'source-%%'
+                    AND body::jsonb->>'code' NOT IN ('delete','feed-delete','work-delete','work-feed-delete',
+                        'codex-choice','ai-permission','youtube-admission','processor-config',
+                        'identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')"""
+                if record_cursor is not None:query+=' AND id COLLATE "C">%s'
+                else:query=query.replace('%%','%')
+                records=self.db.execute(query+' ORDER BY id COLLATE "C" LIMIT 100',(record_cursor,) if record_cursor is not None else ()).fetchall()
+                if not records:
+                    self.db.execute("INSERT INTO state(key,value) VALUES ('deletion-extra-recovered-v1','true') ON CONFLICT DO NOTHING")
+                    return
+                from oko.storage.subtitle_problems import protect_rows
+                protect_rows(self.store,list(records))
+                record_cursor=records[-1]['id']
+            self.store.fault('deletion_extra_legacy_protection_batch')
 
     def recover_deletion_problems(self) -> None:
         if self.db.execute("SELECT 1 FROM state WHERE key='delete-problems-recovered-v1'").fetchone():
@@ -3264,7 +3378,7 @@ class Problems:
                              for obj in json.loads(row['body'])['objects'] if obj['kind'] == 'feed'}
         groups: dict[str | tuple[str,str] | tuple[str,str,str], dict[str, Any]] = {}
         youtube = self.store.youtube.status(now)
-        source_owned_filter="AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND problem_code IS NULL AND error IS NOT NULL AND media_null_owned) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') AND identity_event_owned) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND subtitle_event_owned) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND problem_code IS NULL AND error IS NOT NULL AND fetch_null_owned) AND NOT (kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code IS NOT NULL AND problem_code LIKE 'source-%' AND source_event_owned)" if scope_items is None else ''
+        source_owned_filter="AND NOT (kind IN ('delete','feed-delete') AND deletion_extra_owned) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND problem_code IS NULL AND error IS NOT NULL AND media_null_owned) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') AND identity_event_owned) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND subtitle_event_owned) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND problem_code IS NULL AND error IS NOT NULL AND fetch_null_owned) AND NOT (kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code IS NOT NULL AND problem_code LIKE 'source-%' AND source_event_owned)" if scope_items is None else ''
         admission_filter="AND problem_code IS DISTINCT FROM 'youtube-admission'" if scope_items is None and getattr(self.store,'youtube_admission_ready',False) else ''
         subtitle_owned_filter='AND NOT j.subtitle_event_owned' if scope_items is None else ''
         item_join_filter=("(jobs.kind IS DISTINCT FROM 'download_media' OR left(jobs.problem_code,7)='source-' "
@@ -3928,6 +4042,8 @@ class Problems:
                         found=[kind for kind in kinds if ':'+kind+':' in tail]
                         if 'fetch' in found and (len(found)!=1 or tail.count(':fetch:')!=1 or not body.get('objects') or row['id'] in unverified_fetch or row['id'] in invalid_fetch_objects or any(isinstance(obj,dict) and obj.get('id') in possible_active_fetch for obj in body.get('objects',[]))):continue
                     if legacy_discover_classification(row['identity'],body) in ('discover','ambiguous'):
+                        continue
+                    if body.get('operation') in ('producer:delete','producer:feed-delete') and isinstance(body.get('deletion_job_id'),str):
                         continue
                     if row['identity'].startswith('job:') and body.get('code') in ('delete','feed-delete','work-delete','work-feed-delete'):
                         operation=body.get('operation')

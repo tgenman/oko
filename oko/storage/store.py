@@ -142,7 +142,7 @@ class Store:
             with self.db:
                 collection_jobs.interrupt(self)
                 running_read = [row['item'] for row in self.db.execute("SELECT item FROM jobs WHERE kind='read' AND status='running' AND (error IS NOT NULL OR problem_code IS NOT NULL)")]
-                running_delete = [row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE kind IN ('delete','feed-delete') AND status='running' AND (error IS NOT NULL OR problem_code IS NOT NULL) AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')")]
+                running_delete = [row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE kind IN ('delete','feed-delete') AND status='running' AND (error IS NOT NULL OR problem_code IS NOT NULL) AND (deletion_extra_owned OR coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))")]
                 running_source=[row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE status='running' AND kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code LIKE 'source-%%'")]
                 job_write(self.db, "UPDATE jobs SET status='pending', generation=generation+1 WHERE status='running'")
                 if running_source:
@@ -157,6 +157,7 @@ class Store:
                         self.problems.sync_deletion(job_id,[],self.wall_clock())
             self.problems.recover_read_problems()
             self.problems.recover_deletion_problems()
+            self.problems.recover_deletion_extra_problems()
             collection_jobs.recover(self)
             self.problems.recover_discover_problems()
             self.problems.recover_fetch_problems()

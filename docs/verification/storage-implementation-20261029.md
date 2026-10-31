@@ -1544,3 +1544,13 @@ files, 16 Playwright status scenarios and one persisted synthetic media card
 with desktop/mobile screenshots. Independent review passed 91 tests including
 profile transitions, media replacement and marker concurrency. One
 Starlette/httpx warning was emitted. No working database was migrated.
+
+
+Additional non-special delete and feed-delete error codes, including errors
+from the worker outer exception path, now maintain problems on events and
+recover identifiable legacy occurrences on startup. Ambiguous/protected
+legacy rows are retained. The integrated synthetic suite passed 245 PostgreSQL
+tests with assertions intact, mypy on 167 files, 16 Playwright status cases
+and one persisted deletion-error card; desktop/mobile screenshots were inspected.
+Independent checks included two-connection graph lock and duplicate preservation.
+No working database or real source was used.
