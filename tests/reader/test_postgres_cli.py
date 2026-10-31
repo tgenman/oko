@@ -1,4 +1,5 @@
 """The real CLI consumes a private DSN file; migration is a separate operation."""
+from oko.storage.postgres_schema import MIGRATIONS
 from tests.support.cards import read_all_cards
 import os
 from pathlib import Path
@@ -16,7 +17,7 @@ def test_private_database_file_runs_cli_without_sqlite(postgres_url, tmp_path):
     check = subprocess.run([sys.executable, '-m', 'oko.storage.postgres_migrations', '--check',
                             '--database-url-file', str(credential)], cwd=root, capture_output=True, text=True, timeout=20)
     assert check.returncode == 0, check.stdout + check.stderr
-    assert 'version 71' in check.stdout
+    assert f'version {MIGRATIONS[-1].version}' in check.stdout
     assert postgres_url not in check.stdout + check.stderr
     data = tmp_path / 'reader'
     process = launch(data, api_only=True, database_url_file=credential)

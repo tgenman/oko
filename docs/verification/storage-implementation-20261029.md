@@ -1478,3 +1478,17 @@ PostgreSQL tests, mypy on 166 files and 16 Playwright status scenarios with
 desktop/mobile screenshots inspected. A broader run containing the 10,000
 group stress test was interrupted after five minutes and is not counted as
 passed. No working database was changed.
+
+
+A preliminary full runner on commit 33a6b759 did not pass: the report
+recorded Python 2484 passed / 48 failed / 2 skipped, tools 314 passed / 1
+failed, Node 116 passed, and browser 215 passed / 35 failed / 1 cancelled /
+3 skipped. Most browser failures cascaded from a shared fixture preparation
+timeout; an isolated 14-case cursor suite and one Telegram scenario passed,
+but the cause of the original delay was not established. Historical test
+fixtures were updated for changed columns, event ownership, command identity,
+manifest version and SQL parameter count. A targeted run of affected files
+passed 278 and failed two performance budgets (completion 865 vs 350 SQL;
+global rules 107 vs 100); those failures remain under investigation. The
+ambiguous foreign-delete recovery test was excluded from that run and remains
+unresolved. No real database was used.

@@ -1026,6 +1026,14 @@ def test_dirty_settings_work_is_reconciled_after_restart(postgres_database_url, 
         migrate(db,MIGRATIONS[:55])
         for table in tables:
             names,types,rows = copied[table]
+            # A current fixture may have acquired columns after the historical
+            # target schema. Copy only columns that existed at that version.
+            available = {row[0] for row in db.execute("""SELECT column_name FROM information_schema.columns
+                WHERE table_schema=current_schema() AND table_name=%s""", (table,))}
+            selected = [i for i, name in enumerate(names) if name in available]
+            names = [names[i] for i in selected]
+            types = [types[i] for i in selected]
+            rows = [tuple(row[i] for i in selected) for row in rows]
             statement = sql.SQL('INSERT INTO {} ({}) VALUES ({}) ON CONFLICT DO NOTHING').format(
                 sql.Identifier(table),sql.SQL(',').join(map(sql.Identifier,names)),
                 sql.SQL(',').join(sql.Placeholder() for _ in names))

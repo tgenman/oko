@@ -1,13 +1,25 @@
 from tests.support.storage import Store
 
 
+def seed_legacy_discover_collision(store):
+    # Legacy discover records could use feed_id as owner; preserve the exact
+    # old identity while current event ownership uses the discover item.
+    identity = 'job:custom:a:discover:b:read:a:discover:b'
+    body = dict(id=identity, code='custom', section='object', title='Legacy discovery',
+                consequence='Saved', next_step='Retry', objects=[dict(kind='feed', id='a')],
+                action=None, operation='producer:discover', state='current', next_at=None)
+    with store.db:
+        store.problems.sync_candidate(identity, body, 1)
+
+
+
 def test_read_failure_not_silenced_by_existing_discover_identity(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),('a:discover:b','x','X','default','rss','rss','connected','[]'),('b:read:a:discover:b','y','Y','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code,feed_id) VALUES ('discover','b:read:a:discover:b','failed','failure','custom','a')")
-        store.problems.snapshot(1)
+        seed_legacy_discover_collision(store)
         old=store.db.execute("SELECT id,identity FROM reader_problems WHERE body::jsonb->>'operation'='producer:discover' AND finished IS NULL").fetchone()
         assert old['identity']=='job:custom:a:discover:b:read:a:discover:b'
         with store.db:
@@ -24,7 +36,7 @@ def test_read_collision_identity_stays_stable_after_foreign_problem_closes(tmp_p
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),('a:discover:b','x','X','default','rss','rss','connected','[]'),('b:read:a:discover:b','y','Y','default','rss','rss','connected','[]')")
             discover=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code,feed_id) VALUES ('discover','b:read:a:discover:b','failed','failure','custom','a') RETURNING id").fetchone()[0]
-        store.problems.snapshot(1)
+        seed_legacy_discover_collision(store)
         with store.db:
             read=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('read','a:discover:b','failed','read failure','custom') RETURNING id").fetchone()[0]
             store.problems.sync_read_feed('a:discover:b',2)
@@ -74,7 +86,7 @@ def test_read_fallback_avoids_preexisting_foreign_reserved_identity(tmp_path,pos
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),(%s,'x','X','default','rss','rss','connected','[]'),('b:read:a:discover:b','y','Y','default','rss','rss','connected','[]')",(feed,))
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code,feed_id) VALUES ('discover','b:read:a:discover:b','failed','failure','custom','a')")
-        store.problems.snapshot(1)
+        seed_legacy_discover_collision(store)
         with store.db:
             body=dict(code='other',section='object',title='Other',consequence='Saved',next_step='Retry',objects=[dict(kind='feed',id=feed)],action=None,operation='producer:discover',state='current',next_at=None)
             store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('reserved',%s,'background',%s,1)",(fallback,json.dumps(body)))

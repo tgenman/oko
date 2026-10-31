@@ -11,10 +11,12 @@ def test_postgres_restart_preserves_latest_receipts(tmp_path):
     _, items = library(tmp_path, [1])
     store = Store(tmp_path, lambda _: None)
     context = dict(operation='retry_material', material_id=items[0])
-    body = json.dumps(dict(identity='fixture', title='Synthetic', objects=[dict(kind='material', id=items[0])],
-                           action=None, discardable=False, command_context=context))
+    other_context = dict(operation='power', enabled=False)
     with store.db:
-        for name, identity, completed in [('old', 'fixture', 1), ('latest', 'fixture', 2), ('other', 'other', 3)]:
+        for name, saved_context, completed in [('old', context, 1), ('latest', context, 2), ('other', other_context, 3)]:
+            identity = json.dumps(saved_context, sort_keys=True, separators=(',', ':'))
+            body = json.dumps(dict(identity=identity, title='Synthetic', objects=[dict(kind='material', id=items[0])],
+                                   action=None, discardable=False, command_context=saved_context))
             store.db.execute('INSERT INTO reader_action_results(id,identity,body,started,completed,result) VALUES (%s,%s,%s,%s,%s,%s)',
                              (name, identity, body, 0, completed, 'succeeded'))
     store.db.close()

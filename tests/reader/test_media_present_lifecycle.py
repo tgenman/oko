@@ -19,7 +19,7 @@ def test_present_work_media_is_persisted_and_status_is_read_only(tmp_path,postgr
     finally:store.db.close()
 
 @pytest.mark.parametrize('code',['','work-download_media'])
-def test_subtitles_work_remains_get_owned(tmp_path,postgres_url,code):
+def test_subtitles_work_is_event_owned_and_get_is_read_only(tmp_path,postgres_url,code):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with transaction(store.db):
@@ -27,8 +27,10 @@ def test_subtitles_work_remains_get_owned(tmp_path,postgres_url,code):
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('media','article','youtube:subtitles','x','file','unavailable')")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('download_media','media','pending','failure',%s) RETURNING id",(code,)).fetchone()[0]
             store.jobs._claim(store.db.execute('SELECT * FROM jobs WHERE id=%s',(job,)).fetchone())
-        assert not store.db.execute("SELECT 1 FROM reader_problems WHERE body::jsonb->>'media_job_id'=%s AND finished IS NULL",(str(job),)).fetchone()
-        assert any(p['code']=='work-download_media' for p in store.problems.snapshot(1)['current'])
+        row=store.db.execute("SELECT id,body,xmin::text FROM reader_problems WHERE body::jsonb->>'media_job_id'=%s AND finished IS NULL",(str(job),)).fetchone()
+        assert row is not None
+        assert any(p['id']==row['id'] and p['code']=='work-download_media' for p in store.problems.snapshot(1)['current'])
+        assert tuple(row)==tuple(store.db.execute('SELECT id,body,xmin::text FROM reader_problems WHERE id=%s',(row['id'],)).fetchone())
     finally:store.db.close()
 
 def test_empty_and_explicit_media_codes_preserve_occurrence(tmp_path,postgres_url):

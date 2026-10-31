@@ -201,7 +201,8 @@ def test_later_other_kind_collision_keeps_both_problems(tmp_path,postgres_url):
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('delete','a:delete:b:fetch:c','failed','error','delete') RETURNING id").fetchone()[0]
             store.problems.sync_deletion(job,[],1)
             deletion=store.db.execute("SELECT id,identity FROM reader_problems WHERE body::jsonb->>'operation'='producer:delete' AND finished IS NULL").fetchone()
-            store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) VALUES ('fetch','c:delete:a:delete:b:fetch:c','a:delete:b','failed','error','delete')")
+            fetch=store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) VALUES ('fetch','c:delete:a:delete:b:fetch:c','a:delete:b','failed','error','delete') RETURNING id").fetchone()[0]
+            store.problems.sync_fetch(fetch,[],1)
         store.problems.snapshot(2)
         assert store.db.execute('SELECT id,identity FROM reader_problems WHERE id=%s AND finished IS NULL',(deletion['id'],)).fetchone()==deletion
         assert store.db.execute("SELECT 1 FROM reader_problems WHERE body::jsonb->>'operation'='producer:fetch' AND finished IS NULL").fetchone()
