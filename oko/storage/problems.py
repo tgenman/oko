@@ -771,22 +771,24 @@ class Problems:
             self.db.execute('SELECT pg_advisory_xact_lock(hashtextextended(current_schema(),%s))',(746582096,))
             self.db.execute("INSERT INTO state(key,value) VALUES ('youtube-null-fetch-recovered-v1','true') ON CONFLICT DO NOTHING")
 
-    def recover_fetch_identity_unconfirmed(self) -> None:
+    def recover_fetch_identity_unconfirmed(self, *, additional: bool = False) -> None:
         from oko.storage.transaction import begin_write
         from oko.storage.fetch_job_problems import managed_candidates_many
         cursor: int | None=None
+        marker='fetch-profile-codes-recovered-v1' if additional else 'fetch-identity-unconfirmed-recovered-v1'
+        codes=['profile_not_configured','profile_unavailable','account_identity_mismatch'] if additional else ['identity-unconfirmed']
         while True:
             with self.db:
                 begin_write(self.db)
                 self.db.execute('SELECT pg_advisory_xact_lock(hashtextextended(current_schema(),%s))',(746582095,))
-                if self.db.execute("SELECT 1 FROM state WHERE key='fetch-identity-unconfirmed-recovered-v1'").fetchone():return
+                if self.db.execute('SELECT 1 FROM state WHERE key=%s',(marker,)).fetchone():return
                 from oko.storage import memberships
                 memberships.lock_graph(self.db)
-                sql="SELECT id FROM jobs WHERE kind='fetch' AND item IS NOT NULL AND item<>'' AND problem_code='identity-unconfirmed'"
+                sql="SELECT id FROM jobs WHERE kind='fetch' AND item IS NOT NULL AND item<>'' AND problem_code=ANY(%s)"
                 if cursor is not None:sql+=' AND id>%s'
-                jobs=self.db.execute(sql+' ORDER BY id LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
+                jobs=self.db.execute(sql+' ORDER BY id LIMIT 100',(codes,cursor) if cursor is not None else (codes,)).fetchall()
                 if not jobs:
-                    self.db.execute("INSERT INTO state(key,value) VALUES ('fetch-identity-unconfirmed-recovered-v1','true') ON CONFLICT DO NOTHING")
+                    self.db.execute("INSERT INTO state(key,value) VALUES (%s,'true') ON CONFLICT DO NOTHING",(marker,))
                     return
                 ids=[row['id'] for row in jobs]
                 now=self.store.wall_clock()
@@ -800,7 +802,7 @@ class Problems:
                     complex_rows=self.recover_fetch_batch(active,now)
                     complex_ids={row['id'] for row in complex_rows}
                     simple_ids=[row['id'] for row in active if row['id'] not in complex_ids]
-                    if simple_ids:self.db.execute("UPDATE jobs SET identity_event_owned=true WHERE id=ANY(%s) AND problem_code='identity-unconfirmed' AND NOT fetch_null_ambiguous",(simple_ids,))
+                    if simple_ids:self.db.execute("UPDATE jobs SET identity_event_owned=true WHERE id=ANY(%s) AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') AND NOT fetch_null_ambiguous",(simple_ids,))
                     for row in complex_rows:self.sync_fetch(row['id'],previous.get(row['id'],[]),now)
                 suppressed={job_id:previous.get(job_id,[]) for job_id in ids if not current.get(job_id)}
                 if suppressed:self.sync_identity_profile_transition(suppressed,now)
@@ -1077,7 +1079,7 @@ class Problems:
             kinds=('fetch','discover','download_media','filter','theses','read','delete','feed-delete')
             found=[kind for kind in kinds if ':'+kind+':' in tail]
             if not matched and (occupied or found!=['fetch'] or tail.count(':fetch:')!=1):
-                if occupied and (candidate['code']=='identity-unconfirmed' or candidate.get('fetch_youtube_event')):self.protect_foreign_identity_fetch(occupied)
+                if occupied and (candidate['code'] in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') or candidate.get('fetch_youtube_event')):self.protect_foreign_identity_fetch(occupied)
                 digest=hashlib.sha256(canonical.encode('utf-8')).hexdigest()
                 for _ in range(3):
                     alternate='job:fetch-isolated:'+digest+':'+new_read_problem_token()
@@ -1150,7 +1152,7 @@ class Problems:
             self.db.execute("""INSERT INTO reader_problems(id,identity,origin,body,created,finished,outcome)
                 SELECT id,identity,origin,body,created,NULL,NULL FROM unnest(%s::text[],%s::text[],%s::text[],%s::text[],%s::double precision[]) AS p(id,identity,origin,body,created)""",tuple([row[i] for row in added] for i in range(5)))
         if updates or added:status_changed(self.db)
-        self.db.execute("UPDATE jobs SET identity_event_owned=(problem_code IS NOT DISTINCT FROM 'identity-unconfirmed' AND item IS NOT NULL AND item<>'' AND NOT fetch_null_ambiguous) WHERE id=%s AND identity_event_owned IS DISTINCT FROM (problem_code IS NOT DISTINCT FROM 'identity-unconfirmed' AND item IS NOT NULL AND item<>'' AND NOT fetch_null_ambiguous)",(job_id,))
+        self.db.execute("UPDATE jobs SET identity_event_owned=(COALESCE(problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'),false) AND item IS NOT NULL AND item<>'' AND NOT fetch_null_ambiguous) WHERE id=%s AND identity_event_owned IS DISTINCT FROM (COALESCE(problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'),false) AND item IS NOT NULL AND item<>'' AND NOT fetch_null_ambiguous)",(job_id,))
         if previous_youtube or desired_youtube:
             from oko.storage.youtube_fetch_problems import transfer_reservation,cancel_reservations,sync_timer
             transferred=transfer_reservation(self.store,job_id,previous_youtube,desired_youtube,{row[0] for row in added}) if previous_youtube and desired_youtube else set()
@@ -2736,13 +2738,13 @@ class Problems:
             if closed:
                 changed=self.db.execute("UPDATE reader_problems SET finished=%s,outcome='resolved' WHERE id=ANY(%s) AND finished IS NULL",(now,closed)).rowcount
                 if changed:status_changed(self.db)
-                self.db.execute("UPDATE jobs SET identity_event_owned=true WHERE id=ANY(%s) AND problem_code='identity-unconfirmed'",(sorted(processed),))
+                self.db.execute("UPDATE jobs SET identity_event_owned=true WHERE id=ANY(%s) AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')",(sorted(processed),))
             opening=[{'id':job_id} for job_id in ids if not before[job_id] and after.get(job_id)]
             if opening:
                 complex_rows=self.recover_fetch_batch(opening,now)
                 complex_ids={row['id'] for row in complex_rows}
                 simple_ids=[row['id'] for row in opening if row['id'] not in complex_ids]
-                if simple_ids:self.db.execute("UPDATE jobs SET identity_event_owned=true WHERE id=ANY(%s) AND problem_code='identity-unconfirmed'",(simple_ids,))
+                if simple_ids:self.db.execute("UPDATE jobs SET identity_event_owned=true WHERE id=ANY(%s) AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')",(simple_ids,))
                 processed.update(simple_ids)
             for job_id in ids:
                 if job_id not in processed:self.sync_fetch(job_id,before[job_id],now,allow_rekey=False)
@@ -2788,8 +2790,8 @@ class Problems:
                 batch=feeds_changed[start:start+100]
                 for jobs in self.db.incomplete_row_pages("""SELECT * FROM (WITH roots AS MATERIALIZED (SELECT publication_id FROM feed_publications WHERE is_primary AND feed_id=ANY(%s)),
                     affected AS MATERIALIZED (SELECT publication_id AS item FROM roots UNION SELECT l.target_publication_id FROM roots r JOIN publication_links l ON l.source_publication_id=r.publication_id)
-                    SELECT j.id FROM affected a CROSS JOIN LATERAL (SELECT id FROM jobs WHERE kind='fetch' AND item=a.item AND problem_code='identity-unconfirmed' OFFSET 0) j
-                    UNION SELECT j.id FROM unnest(%s::text[]) AS f(feed) CROSS JOIN LATERAL (SELECT id FROM jobs WHERE kind='fetch' AND problem_code='identity-unconfirmed' AND feed_id IS NOT NULL AND md5(feed_id)=md5(f.feed) AND feed_id=f.feed OFFSET 0) j) AS matching_jobs""",(batch,batch)):
+                    SELECT j.id FROM affected a CROSS JOIN LATERAL (SELECT id FROM jobs WHERE kind='fetch' AND item=a.item AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') OFFSET 0) j
+                    UNION SELECT j.id FROM unnest(%s::text[]) AS f(feed) CROSS JOIN LATERAL (SELECT id FROM jobs WHERE kind='fetch' AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') AND feed_id IS NOT NULL AND md5(feed_id)=md5(f.feed) AND feed_id=f.feed OFFSET 0) j) AS matching_jobs""",(batch,batch)):
                     fetch_ids=[int(row['id']) for row in jobs]
                     previous_candidates=managed_candidates_many(self.store,fetch_ids,now)
                     self.db.execute("""INSERT INTO oko_identity_profile_work(job_id,previous)
@@ -3168,7 +3170,7 @@ class Problems:
                              for obj in json.loads(row['body'])['objects'] if obj['kind'] == 'feed'}
         groups: dict[str | tuple[str,str] | tuple[str,str,str], dict[str, Any]] = {}
         youtube = self.store.youtube.status(now)
-        source_owned_filter="AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND problem_code='identity-unconfirmed' AND identity_event_owned) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND subtitle_event_owned) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND problem_code IS NULL AND error IS NOT NULL AND fetch_null_owned) AND NOT (kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code IS NOT NULL AND problem_code LIKE 'source-%' AND source_event_owned)" if scope_items is None else ''
+        source_owned_filter="AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') AND identity_event_owned) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND subtitle_event_owned) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND problem_code IS NULL AND error IS NOT NULL AND fetch_null_owned) AND NOT (kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code IS NOT NULL AND problem_code LIKE 'source-%' AND source_event_owned)" if scope_items is None else ''
         admission_filter="AND problem_code IS DISTINCT FROM 'youtube-admission'" if scope_items is None and getattr(self.store,'youtube_admission_ready',False) else ''
         subtitle_owned_filter='AND NOT j.subtitle_event_owned' if scope_items is None else ''
         item_join_filter=("(jobs.kind IS DISTINCT FROM 'download_media' OR left(jobs.problem_code,7)='source-' "

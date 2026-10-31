@@ -164,6 +164,7 @@ class Store:
             self.problems.recover_fetch_null()
             self.problems.recover_youtube_null_fetch()
             self.problems.recover_fetch_identity_unconfirmed()
+            self.problems.recover_fetch_identity_unconfirmed(additional=True)
             self.problems.recover_media_problems()
             self.problems.recover_subtitles()
             with self.db:

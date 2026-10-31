@@ -1524,3 +1524,12 @@ rollback assertions. On commit 87b123f3 the repeated functional selection with
 these fixture changes passed 255 tests plus four separately repeated scenarios;
 nine SQL-budget cases were deselected at the user's direction. This is not a
 new full check-all pass. No working database was used.
+
+
+Fetch Jobs carrying profile_not_configured, profile_unavailable or
+account_identity_mismatch now update their problems on events and recover them
+on startup, preserving profile suppression and legacy records. Synthetic
+integration passed 89 functional tests and 16 Playwright status scenarios;
+mypy passed on five modules and a screenshot was inspected. Seven SQL-budget
+tests were excluded at the user's direction. Independent checks covered
+collisions, multiple roots, rollback and restart. No working database migrated.
