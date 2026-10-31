@@ -5,8 +5,8 @@ import pytest
 from oko.storage.postgres_migrations import Migration,migrate,verify,SchemaMismatch
 from oko.storage.postgres_schema import MIGRATIONS
 
-TARGET=MIGRATIONS
-BASE=MIGRATIONS[:-1]
+TARGET=MIGRATIONS[:88]
+BASE=MIGRATIONS[:87]
 
 def seed(db,values):
  for n,value in enumerate(values):
@@ -167,14 +167,14 @@ def test_column_grant_survives_original_urls_type_change(postgres_database_url):
  from psycopg import sql
  role='urls_column_'+uuid4().hex
  with psycopg.connect(postgres_database_url,autocommit=True) as db:
-  migrate(db,MIGRATIONS[:-1])
+  migrate(db,BASE)
   schema=db.execute('SELECT current_schema()').fetchone()[0]
   db.execute("INSERT INTO feeds(id,identity,title,original_urls) VALUES ('f','i','F','[\"url\"]')")
   db.execute(sql.SQL('CREATE ROLE {} NOLOGIN').format(sql.Identifier(role)))
   try:
    db.execute(sql.SQL('GRANT USAGE ON SCHEMA {} TO {}').format(sql.Identifier(schema),sql.Identifier(role)))
    db.execute(sql.SQL('GRANT SELECT(original_urls) ON feeds TO {}').format(sql.Identifier(role)))
-   migrate(db,MIGRATIONS)
+   migrate(db,TARGET)
    assert db.execute("SELECT has_column_privilege(%s,'feeds','original_urls','SELECT'),has_table_privilege(%s,'feeds','SELECT')",(role,role)).fetchone()==(True,False)
    db.execute(sql.SQL('SET ROLE {}').format(sql.Identifier(role)))
    try:assert db.execute('SELECT original_urls FROM feeds').fetchone()[0]==['url']

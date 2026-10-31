@@ -209,7 +209,7 @@ class TelegramAccess:
         account=profile['account'] if profile else row['telegram_account']
         automatic=(bool(row['auto_read']) if auto_read is None else auto_read) if profile else None
         self.put_binding(feed,binding)
-        self.db.execute("UPDATE feeds SET telegram_peer = %s , telegram_account = %s , telegram_username = %s , transport = %s , connection = 'connected' , auto_read = %s , config = %s , cursor = '' WHERE id = %s",
+        self.db.execute("UPDATE feeds SET telegram_peer = %s , telegram_account = %s , telegram_username = %s , transport = %s , connection = 'connected' , auto_read = %s , config = %s::jsonb , cursor = '' WHERE id = %s",
             (info.get('peer',known_peer),account,info.get('username'), 'telegram' if profile else None,automatic,
              json.dumps(dict(source_kind=info.get('kind','channel'))),feed))
         source_changed(self.db)
@@ -236,11 +236,11 @@ class TelegramAccess:
         if info.get('kind') in ('group','supergroup') or info.get('forum',False):
             raise TelegramConflict('source_connection_invalid',dict(reason='unsupported_group'),'Группы Telegram пока не поддерживаются; подключите канал',400)
         if info.get('kind')=='channel':
-            row=self.db.execute('SELECT config FROM feeds WHERE id = %s',(feed,)).fetchone()
+            row=self.db.execute('SELECT config::text AS config FROM feeds WHERE id = %s',(feed,)).fetchone()
             if row:
                 config=json.loads(row[0])
                 config['source_kind']=info['kind']
-                self.db.execute('UPDATE feeds SET config = %s WHERE id = %s',(json.dumps(config),feed))
+                self.db.execute('UPDATE feeds SET config = %s::jsonb WHERE id = %s',(json.dumps(config),feed))
         if 'avatar' not in info:
             return
         if info['avatar'] is None:

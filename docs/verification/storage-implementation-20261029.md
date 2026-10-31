@@ -1604,3 +1604,14 @@ and subtitle profile codes are not covered by this slice. The integrated
 synthetic suite passed 179 PostgreSQL tests, mypy for four modules and six
 Playwright status cases with a screenshot inspected. Independent review covered
 foreign markers, same-feed unlink and concurrency. No working database changed.
+
+
+Migration 089 converts feeds.config from JSON text to JSONB after a strict
+preflight. It refuses malformed/non-object JSON, duplicate keys and values
+whose decoded Python numeric type/value or signed zero would change, preserving
+the original data and ledger on refusal. These include some valid JSON such as
+1e3; the working database has not been checked for such values. The integrated
+migration and Telegram scope passed 201 synthetic functional tests, mypy for
+two files and one Playwright Telegram scenario with screenshot inspection.
+Independent tests covered nested values, long numeric values, permissions,
+foreign views and rollback. No working database was migrated.
