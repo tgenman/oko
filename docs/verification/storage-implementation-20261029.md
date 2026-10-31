@@ -1515,3 +1515,12 @@ Playwright status scenarios and one persisted YouTube fetch card through a
 synthetic backend; desktop/mobile screenshots were inspected. The first two
 persisted-card browser attempts failed due to incorrect temporary fixture
 expectations and passed after fixture correction. No working database migrated.
+
+
+Follow-up to the preliminary full runner: synthetic fixtures for copied
+boolean columns, hidden-page SQL trace and historical collision setup were
+updated to exercise the current event owners without dropping collision, ID or
+rollback assertions. On commit 87b123f3 the repeated functional selection with
+these fixture changes passed 255 tests plus four separately repeated scenarios;
+nine SQL-budget cases were deselected at the user's direction. This is not a
+new full check-all pass. No working database was used.

@@ -18,7 +18,8 @@ def test_card_and_opened_read_decode_each_saved_content_once(tmp_path, monkeypat
     store.processing.background = True
     with store.db:
         row = dict(store.db.execute('SELECT * FROM publications WHERE id = %s', (parent,)).fetchone())
-        row.pop('source_deleted')  # New synthetic publications start as present.
+        for derived in ('source_deleted','incomplete_group_ready','incomplete_group_unknown','incomplete_group_conflict'):
+            row.pop(derived)
         content = json.loads(row['content'])
         content['blocks'][0]['text'] = 'decoded-reading-linked'
         linked = dict(row, id='linked', source_id='linked', external_id='linked',
@@ -67,7 +68,8 @@ def test_derived_youtube_and_linked_content_does_not_mutate_saved_facts(tmp_path
     try:
         with store.db:
             row = dict(store.db.execute('SELECT * FROM publications WHERE id = %s', (parent,)).fetchone())
-            row.pop('source_deleted')  # New synthetic publications start as present.
+            for derived in ('source_deleted','incomplete_group_ready','incomplete_group_unknown','incomplete_group_conflict'):
+                row.pop(derived)
             content = json.loads(row['content'])
             content['extra']['youtube'] = dict(captions='available', captions_digest='synthetic')
             content['blocks'].append(dict(type='media', role='subtitles', media_id='captions'))

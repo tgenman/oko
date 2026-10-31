@@ -1,4 +1,5 @@
 from tests.support.storage import Store
+from tests.reader.test_read_job_identity_collision import seed_legacy_discover_collision
 
 
 def test_read_failure_not_silenced_by_existing_discover_identity(tmp_path,postgres_url):
@@ -7,7 +8,7 @@ def test_read_failure_not_silenced_by_existing_discover_identity(tmp_path,postgr
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),('a:discover:b','x','X','default','rss','rss','connected','[]'),('b:read:a:discover:b','y','Y','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code,feed_id) VALUES ('discover','b:read:a:discover:b','failed','failure','custom','a')")
-        store.problems.snapshot(1)
+        seed_legacy_discover_collision(store)
         old=store.db.execute("SELECT id,identity FROM reader_problems WHERE body::jsonb->>'operation'='producer:discover' AND finished IS NULL").fetchone()
         assert old['identity']=='job:custom:a:discover:b:read:a:discover:b'
         with store.db:
@@ -71,7 +72,7 @@ def test_collision_retries_are_bounded_and_transaction_rolls_back(tmp_path,postg
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected','[]'),('a:discover:b','x','X','default','rss','rss','connected','[]'),('b:read:a:discover:b','y','Y','default','rss','rss','connected','[]')")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code,feed_id) VALUES ('discover','b:read:a:discover:b','failed','failure','custom','a')")
-        store.problems.snapshot(1)
+        seed_legacy_discover_collision(store)
         canonical='job:custom:a:discover:b:read:a:discover:b'
         digest=hashlib.sha256(canonical.encode()).hexdigest()
         with store.db:
