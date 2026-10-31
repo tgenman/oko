@@ -90,4 +90,5 @@ MIGRATIONS = (
     Migration(83, 'fetch-identity-unconfirmed', (Path(__file__).parent / 'postgres' / '083-fetch-identity-unconfirmed.sql').read_text()),
     Migration(84, 'foreign-fetch-delete-recovery', (Path(__file__).parent / 'postgres' / '084-foreign-fetch-delete-recovery.sql').read_text()),
     Migration(85, 'youtube-fetch-problems', (Path(__file__).parent / 'postgres' / '085-youtube-fetch-problems.sql').read_text()),
+    Migration(86, 'media-null-problems', (Path(__file__).parent / 'postgres' / '086-media-null-problems.sql').read_text()),
 )

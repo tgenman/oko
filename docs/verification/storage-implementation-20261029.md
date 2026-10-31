@@ -1533,3 +1533,14 @@ integration passed 89 functional tests and 16 Playwright status scenarios;
 mypy passed on five modules and a screenshot was inspected. Seven SQL-budget
 tests were excluded at the user's direction. Independent checks covered
 collisions, multiple roots, rollback and restart. No working database migrated.
+
+
+Ordinary media Jobs with NULL error code now maintain problems on events and
+recover identifiable terminal legacy records on startup. Subtitle Jobs and
+profile/source codes retain their own owners; ambiguous or protected legacy
+records remain untouched. Integration passed 194 PostgreSQL tests plus all
+16 initially deselected cost/bounded cases on separate repeat, mypy on 167
+files, 16 Playwright status scenarios and one persisted synthetic media card
+with desktop/mobile screenshots. Independent review passed 91 tests including
+profile transitions, media replacement and marker concurrency. One
+Starlette/httpx warning was emitted. No working database was migrated.
