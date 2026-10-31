@@ -1680,3 +1680,17 @@ numeric semantics, ACL, concurrency and rollback. The integrated suite passed
 258 PostgreSQL tests, mypy and six Playwright status cases; a Telegram browser
 case timed out during parallel load and passed separately, with screenshot
 inspected. No working database was migrated.
+
+
+Unaddressable legacy Jobs with NULL or empty targets now have a read-only
+generic status representation rather than causing an HTTP 500. The public
+problem contract represents unknown creation time as required nullable and the
+UI labels it unknown; server and clients need a coordinated release. The
+fallback does not create its own durable history, and its virtual ID can change
+if deliberately colliding visible IDs change. Unconfirmed legacy source
+occurrences are conservatively retained and can remain current. The integrated
+synthetic scope passed 234 tests in a byte-matched copy with a fresh frontend,
+plus a restricted TEMP-role check, API generation/build/typecheck and a real
+HTTP Playwright card with desktop/mobile screenshots inspected. A direct
+checkout run stopped after 90 passes on a stale frontend contract manifest; it
+was not a functional pass. No working database was changed.

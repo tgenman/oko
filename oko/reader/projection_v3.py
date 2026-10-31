@@ -62,7 +62,7 @@ def command_recovery(context: wire.CommandContext) -> tuple[list[wire.AffectedRe
 
 
 def producer_code(raw: str, kind: str) -> str:
-    known = {'codex-choice':'processor_not_configured', 'processor-config':'processor_not_configured',
+    known = {'legacy-unaddressable':'job_target_unknown', 'codex-choice':'processor_not_configured', 'processor-config':'processor_not_configured',
         'ai-permission':'public_ai_not_allowed', 'material-read-failed':'material_read_failed', 'material-save-failed':'material_save_failed', 'source-reconnect':'source_reconnect_required',
         'material-incomplete':'material_incomplete', 'youtube-admission':'youtube_rate_limited',
         'storage-unavailable':'storage_unavailable', 'identity-unconfirmed':'profile_not_configured',
@@ -156,7 +156,7 @@ def problem(value: facts.Problem, bindings: dict[str, wire.TelegramAccess] | Non
         title='Результат старого действия требует проверки' if unreadable_action else value.title,
         message='Проверьте результат действия вручную.' if unreadable_action else error.message if error else value.reason if isinstance(value.reason,str) and value.reason else value.next_step,
         consequence=('Исходные сведения сохранены; время создания неизвестно, показано время проверки.' if value.consequence=='Исходные сведения сохранены; время создания неизвестно, показано время проверки.' else 'Исходные сведения сохранены.') if unreadable_action else value.consequence,affected=resources,recovery=[] if value.state=='finished' else recovery,
-        created_at=timestamp(value.created_at),state=value.state)
+        created_at=timestamp(value.created_at) if value.created_at is not None else None,state=value.state)
     if value.state=='finished':
         data.update(finished_at=timestamp(value.finished_at) if value.finished_at is not None else None,outcome=value.outcome)
     elif value.state=='retrying':

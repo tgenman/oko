@@ -885,7 +885,10 @@ export type CurrentProblem = {
      * Current domain consequence, preserved independently of diagnostic details. No page or navigation instruction.
      */
     consequence: string;
-    created_at: Timestamp;
+    /**
+     * Creation time, or null when the original time is unknown.
+     */
+    created_at: Timestamp | null;
     id: ProblemId;
     message: string;
     recovery: Array<RecoveryIntent>;
@@ -1319,7 +1322,10 @@ export type FinishedProblem = {
      * Current domain consequence, preserved independently of diagnostic details. No page or navigation instruction.
      */
     consequence: string;
-    created_at: Timestamp;
+    /**
+     * Creation time, or null when the original time is unknown.
+     */
+    created_at: Timestamp | null;
     finished_at: Timestamp;
     id: ProblemId;
     message: string;
@@ -1841,7 +1847,7 @@ export type PreviousVersion404Errors = ({
 
 export type Problem = CurrentProblem | RetryingProblem | FinishedProblem;
 
-export type ProblemCode = 'processor_not_configured' | 'processor_configuration_invalid' | 'public_ai_not_allowed' | 'source_reconnect_required' | 'source_unavailable' | 'material_incomplete' | 'processing_failed' | 'youtube_rate_limited' | 'storage_unavailable' | 'command_failed' | 'command_outcome_unknown' | 'material_save_failed' | 'material_read_failed' | 'feed_delete_failed' | 'telegram_read_failed' | 'profile_not_configured' | 'profile_unavailable' | 'account_identity_mismatch' | 'source_identity_conflict' | 'duplicate_source' | 'profile_in_use' | 'profile_account_conflict';
+export type ProblemCode = 'job_target_unknown' | 'processor_not_configured' | 'processor_configuration_invalid' | 'public_ai_not_allowed' | 'source_reconnect_required' | 'source_unavailable' | 'material_incomplete' | 'processing_failed' | 'youtube_rate_limited' | 'storage_unavailable' | 'command_failed' | 'command_outcome_unknown' | 'material_save_failed' | 'material_read_failed' | 'feed_delete_failed' | 'telegram_read_failed' | 'profile_not_configured' | 'profile_unavailable' | 'account_identity_mismatch' | 'source_identity_conflict' | 'duplicate_source' | 'profile_in_use' | 'profile_account_conflict';
 
 export type ProblemId = string;
 
@@ -2229,7 +2235,10 @@ export type RetryingProblem = {
      * Current domain consequence, preserved independently of diagnostic details. No page or navigation instruction.
      */
     consequence: string;
-    created_at: Timestamp;
+    /**
+     * Creation time, or null when the original time is unknown.
+     */
+    created_at: Timestamp | null;
     id: ProblemId;
     message: string;
     recovery: Array<RecoveryIntent>;

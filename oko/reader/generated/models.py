@@ -706,6 +706,7 @@ class PowerRequest(WireModel):
 class ProblemCode(
     RootModel[
         Literal[
+            "job_target_unknown",
             "processor_not_configured",
             "processor_configuration_invalid",
             "public_ai_not_allowed",
@@ -733,6 +734,7 @@ class ProblemCode(
 ):
     model_config = ConfigDict(allow_inf_nan=False)
     root: Literal[
+        "job_target_unknown",
         "processor_not_configured",
         "processor_configuration_invalid",
         "public_ai_not_allowed",
@@ -3647,7 +3649,9 @@ class RetryingProblem(WireModel):
         ...,
         description="Current domain consequence, preserved independently of diagnostic details. No page or navigation instruction.",
     )
-    created_at: Timestamp
+    created_at: Timestamp | None = Field(
+        ..., description="Creation time, or null when the original time is unknown."
+    )
     id: ProblemId
     message: StrictStr
     recovery: list[RecoveryIntent]
@@ -3750,7 +3754,9 @@ class CurrentProblem(WireModel):
         ...,
         description="Current domain consequence, preserved independently of diagnostic details. No page or navigation instruction.",
     )
-    created_at: Timestamp
+    created_at: Timestamp | None = Field(
+        ..., description="Creation time, or null when the original time is unknown."
+    )
     id: ProblemId
     message: StrictStr
     recovery: list[RecoveryIntent]
@@ -3810,7 +3816,9 @@ class FinishedProblem(WireModel):
         ...,
         description="Current domain consequence, preserved independently of diagnostic details. No page or navigation instruction.",
     )
-    created_at: Timestamp
+    created_at: Timestamp | None = Field(
+        ..., description="Creation time, or null when the original time is unknown."
+    )
     finished_at: Timestamp
     id: ProblemId
     message: StrictStr

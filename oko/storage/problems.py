@@ -3740,6 +3740,8 @@ class Problems:
                 continue
             if code in ('codex-choice', 'ai-permission'):
                 continue
+            if job['item'] in (None,'') and job['kind'] in ('fetch','filter','theses','download_media','delete','feed-delete') and code not in ('youtube-admission','processor-config'):
+                continue
             if job['kind']=='download_media' and job['resource_key']=='youtube:subtitles':
                 if youtube['paused'] or code is None and youtube['next_at']>now:
                     continue
@@ -3759,7 +3761,7 @@ class Problems:
             if code == 'processor-config':
                 identity = 'processor:configuration'
             settings_action = code in ('processor-config', 'ai-permission')
-            obj = dict(kind='feed' if job['kind'] in ('discover', 'read', 'feed-delete') else 'material', id=feed if job['kind'] in ('discover', 'read', 'feed-delete') else job['affected_item'])
+            obj = None if job['affected_item'] in (None,'') and job['kind'] not in ('discover','read','feed-delete') else dict(kind='feed' if job['kind'] in ('discover', 'read', 'feed-delete') else 'material', id=feed if job['kind'] in ('discover', 'read', 'feed-delete') else job['affected_item'])
             group_key: str | tuple[str,str] | tuple[str,str,str] = identity if code=='processor-config' else (identity,job['kind']) if shared else (identity,job['kind'],job['item'])
             if group_key not in groups:
                 kind = job['kind']
@@ -3782,7 +3784,7 @@ class Problems:
             legacy_identity = 'job:' + code + ':' + legacy_feed + ':' + job['kind'] + ('' if shared else ':' + job['item'])
             if identity.startswith('job:') and legacy_identity != identity:
                 groups[group_key].setdefault('_legacy_ids',set()).add(legacy_identity)
-            if job['kind'] != 'delete' and obj not in groups[group_key]['objects']:
+            if job['kind'] != 'delete' and obj is not None and obj not in groups[group_key]['objects']:
                 groups[group_key]['objects'].append(obj)
         if youtube['paused'] and (scope_items is not None or not getattr(self.store,'youtube_admission_ready',False)):
             owners={job['affected_item'] for job in jobs if job['status'] in ('pending','running')
@@ -4118,6 +4120,15 @@ class Problems:
                 if not isinstance(value,list) or len(value)!=3 or value[0]!='oko-source-legacy-v1' or value[1]!=expected[0] or not isinstance(value[2],str):
                     protected_source_legacy.add(expected[1])
                 elif value[2]==expected[1]:protected_source_legacy.add(value[2])
+        # A legacy source Job without a target cannot prove that a matching
+        # saved occurrence belongs to it. Preserve that record byte-for-byte.
+        for job in self.db.execute("""SELECT kind,item,feed_id,problem_code FROM jobs
+            WHERE (item IS NULL OR item='') AND kind IN ('fetch','filter','theses','download_media','delete','feed-delete')
+            AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))
+            AND (status IN ('pending','running','failed','unavailable','blocked') OR (status='done' AND kind='fetch' AND error IS NOT NULL))
+            AND problem_code LIKE 'source-%%' AND NOT source_event_owned"""):
+            identity='job:'+job['problem_code']+':'+(job['feed_id'] or job['item'] or 'demo')+':'+job['kind']
+            if identity in existing:protected_source_legacy.add(existing[identity]['id'])
         managed_incomplete=bool(self.db.execute("SELECT 1 FROM state WHERE key='experimental-incomplete-problems-v1'").fetchone())
         uncertain_materials: set[str]=set()
         uncertain_refs: list[tuple[str,str,set[str]]]=[]
@@ -4327,6 +4338,9 @@ class Problems:
                     if row['identity'] in owned_source_identities and isinstance(body.get('code'),str) and body['code'].startswith('source-'):continue
                     if row['id'] in protected_source_legacy:continue
                     code=body.get('code')
+                    # Legacy source status rows without a proven event owner
+                    # remain untouched even after their Job disappears.
+                    if isinstance(code,str) and code.startswith('source-') and body.get('operation') in (None,'producer:status'):continue
                     if row['id'] in protected_fetch_null:continue
                     if getattr(self.store,'youtube_admission_ready',False) and code=='youtube-admission':
                         from oko.storage.youtube_admission import valid as valid_admission
@@ -4519,7 +4533,32 @@ class Problems:
         if managed_incomplete:
             current.sort(key=lambda problem:(-float(problem['created_at']),str(problem['id'])))
             recent.sort(key=lambda problem:(-float(problem['created_at']),str(problem['id'])))
+        # Old schemas allowed NULL targets. They cannot name an actionable
+        # resource; show the Job without inventing a material or writing on GET.
+        jobs=self.db.execute("""SELECT id,kind FROM jobs WHERE (item IS NULL OR item='')
+            AND kind IN ('fetch','filter','theses','download_media','delete','feed-delete','read','discover')
+            AND (kind<>'read' OR problem_code IS NULL)
+            AND (kind<>'discover' OR problem_code='')
+            AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))
+            AND (status IN ('pending','running','failed','unavailable','blocked') OR (status='done' AND kind='fetch' AND problem_code IS NOT NULL AND error IS NOT NULL))
+            AND (problem_code IS NOT NULL OR error IS NOT NULL)
+            AND NOT (coalesce(problem_code,'') LIKE 'source-%%' AND source_event_owned)
+            AND coalesce(problem_code,'') NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config') ORDER BY id""").fetchall()
+        visible_ids={entry['id'] for entry in current+recent}
+        for job in jobs:
+            seed=f"legacy-null-job:{job['id']}"
+            # Among N+1 distinct candidates at least one is absent from N visible IDs.
+            for attempt in range(len(visible_ids)+1):
+                identity=seed if not attempt else seed+':'+str(attempt)
+                if identity not in visible_ids:break
+            else:raise AssertionError('unreachable ID allocation')
+            visible_ids.add(identity)
+            current.append(dict(id=identity,code='legacy-unaddressable',section='object',
+                title='Сохранённое задание требует проверки',consequence='Исходное задание сохранено.',
+                next_step='Проверьте журнал диагностики.',objects=[],action=None,
+                operation='producer:'+job['kind'],created_at=None,finished_at=None,outcome=None,state='current',next_at=None))
         return dict(current=current, recent=recent, count=len(current), updated_at=now)
+
 
     @staticmethod
     def header(raw: str | None) -> dict[str,Any]:

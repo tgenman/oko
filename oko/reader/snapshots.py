@@ -303,7 +303,7 @@ class Problem(WireModel):
     model_config = ConfigDict(extra='ignore')
     code: StrictStr = Field(..., title='Code')
     consequence: StrictStr = Field(..., title='Consequence')
-    created_at: StrictFloat = Field(..., title='Created At')
+    created_at: StrictFloat | None = Field(..., title='Created At')
     finished_at: StrictFloat | None = Field(..., title='Finished At')
     id: StrictStr = Field(..., title='Id')
     next_at: StrictFloat | None = Field(..., title='Next At')

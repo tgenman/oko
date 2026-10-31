@@ -17295,6 +17295,7 @@ components:
     ProblemCode:
       type: string
       enum:
+      - job_target_unknown
       - processor_not_configured
       - processor_configuration_invalid
       - public_ai_not_allowed
@@ -17340,7 +17341,10 @@ components:
           items:
             $ref: '#/components/schemas/RecoveryIntent'
         created_at:
-          $ref: '#/components/schemas/Timestamp'
+          description: Creation time, or null when the original time is unknown.
+          anyOf:
+          - $ref: '#/components/schemas/Timestamp'
+          - type: 'null'
         title:
           type: string
           description: Human-readable subject explanation; clients branch on code, not this text.
@@ -17395,7 +17399,10 @@ components:
           items:
             $ref: '#/components/schemas/RecoveryIntent'
         created_at:
-          $ref: '#/components/schemas/Timestamp'
+          description: Creation time, or null when the original time is unknown.
+          anyOf:
+          - $ref: '#/components/schemas/Timestamp'
+          - type: 'null'
         retry_at:
           anyOf:
           - $ref: '#/components/schemas/Timestamp'
@@ -17456,7 +17463,10 @@ components:
           items:
             $ref: '#/components/schemas/RecoveryIntent'
         created_at:
-          $ref: '#/components/schemas/Timestamp'
+          description: Creation time, or null when the original time is unknown.
+          anyOf:
+          - $ref: '#/components/schemas/Timestamp'
+          - type: 'null'
         finished_at:
           $ref: '#/components/schemas/Timestamp'
         outcome:
