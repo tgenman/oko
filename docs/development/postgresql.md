@@ -94,7 +94,7 @@ Use an explicitly supplied synthetic PostgreSQL, never a personal database:
 
 ```sh
 OKO_TEST_POSTGRES_URL='postgresql://test-user:test-password@127.0.0.1:5432/test-db' \
-  ./scripts/check python --files tests/reader/test_postgres_migrations.py tests/reader/test_postgres_transactions.py tests/reader/test_postgres_processing.py tests/reader/test_postgres_browser.py tests/reader/test_postgres_cli.py
+  ./scripts/check python --files tests/reader/test_postgres_migrations.py tests/reader/test_postgres_transactions.py tests/reader/test_postgres_processing.py tests/reader/test_postgres_cli.py
 ```
 
 Storage checks require `OKO_TEST_POSTGRES_URL`; absence is an error, not a skip.

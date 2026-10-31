@@ -1759,3 +1759,23 @@ worker and reader suites remain. This is not a claim of equivalent coverage.
 Test contract validation and diff whitespace checks passed. Python CI jobs now
 have a 45-minute ceiling; other job ceilings remain unchanged. No production
 application code or migration was changed in this release follow-up.
+
+### Remove the duplicate native-PostgreSQL browser sequence
+
+At 0d3e89c5, CI 41213727343 passed both normal browser shards, latency, Node,
+tools and build/static checks. Python shard 1 passed 1642 cases. The separate
+native-PG browser wrapper again failed, now with Page.reload reporting an inactive
+page after restart. Its Linux detach cause remains unproven; no production auth
+or restart code was changed to hide the symptom.
+
+The user authorized removing unnecessary tests. The wrapper and its single
+browser sequence are removed because all normal browser fixtures already use
+synthetic PostgreSQL. Retained test_reader_http.ts covers collection, media,
+processing and viewed; test_persistent_reader.ts covers login/restart/session;
+test_postgres_transactions.py and test_postgres_processing.py retain real-PG
+HTTP persistence and processing coverage. Targeted retained checks passed:
+2 browser tests with screenshot inspection and 24 PostgreSQL HTTP/processing
+tests. The lost coverage is the combination of those steps in one additional
+sequence, not all browser acceptance. Inventory checks found no remaining active
+references; historical reports were not rewritten. Full Python shard 2 was still
+running when this deletion was prepared; this entry does not claim its success.

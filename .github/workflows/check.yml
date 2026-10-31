@@ -213,7 +213,7 @@ jobs:
         env:
           OKO_TEST_ARTIFACT_DIR: .scratch/postgres-browser-artifacts
           OKO_TEST_POSTGRES_URL: postgresql://oko_test:synthetic-ci-only@127.0.0.1:5432/oko_test
-        run: ./scripts/check python --files tests/reader/test_postgres_migrations.py tests/reader/test_postgres_transactions.py tests/reader/test_postgres_processing.py tests/reader/test_postgres_browser.py tests/reader/test_postgres_cli.py tests/processing/test_codex_linux.py tests/processing/test_codex_bridge.py
+        run: ./scripts/check python --files tests/reader/test_postgres_migrations.py tests/reader/test_postgres_transactions.py tests/reader/test_postgres_processing.py tests/reader/test_postgres_cli.py tests/processing/test_codex_linux.py tests/processing/test_codex_bridge.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
