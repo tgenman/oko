@@ -1062,6 +1062,9 @@ def test_dirty_settings_work_is_reconciled_after_restart(postgres_database_url, 
             if table=='feeds' and 'original_urls' in names:
                 url_index=names.index('original_urls')
                 rows=[tuple(json.dumps(value) if index==url_index and isinstance(value,list) else value for index,value in enumerate(row)) for row in rows]
+            if table=='jobs' and 'manual_once' in names:
+                manual_index=names.index('manual_once')
+                rows=[tuple(int(value) if index==manual_index and isinstance(value,bool) else value for index,value in enumerate(row)) for row in rows]
             statement = sql.SQL('INSERT INTO {} ({}) VALUES ({}) ON CONFLICT DO NOTHING').format(
                 sql.Identifier(table),sql.SQL(',').join(map(sql.Identifier,names)),
                 sql.SQL(',').join(sql.Placeholder() for _ in names))

@@ -92,9 +92,8 @@ def test_existing_reader_table_privileges_survive_type_change(postgres_database_
    db.execute(sql.SQL('DROP ROLE {}').format(sql.Identifier(role)))
 
 
-def test_new_readers_and_writers_use_migrated_array_in_store_and_http(tmp_path,postgres_database_url,monkeypatch):
+def test_new_readers_and_writers_use_migrated_array_in_store_and_http(tmp_path,postgres_database_url):
  from tests.support.storage import Store
- from oko.storage import postgres_connection
  from oko.subscriptions.subscriptions import AddFeed
  from fastapi.testclient import TestClient
  from tests.support.app import create_app
@@ -104,7 +103,8 @@ def test_new_readers_and_writers_use_migrated_array_in_store_and_http(tmp_path,p
   db.execute("INSERT INTO folders(id,title,position) VALUES ('folder','Folder',1)")
   db.execute("INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport) VALUES ('old','old','Old','rss','folder',%s,'connected','rss')",(json.dumps(['https://old.test/feed','https://old.test/feed']),))
   migrate(db,TARGET)
- monkeypatch.setattr(postgres_connection,'MIGRATIONS',TARGET)
+  assert db.execute("SELECT original_urls FROM feeds WHERE id='old'").fetchone()[0]==['https://old.test/feed','https://old.test/feed']
+  migrate(db,MIGRATIONS)
  store=Store(tmp_path,lambda _:None,database_url=postgres_database_url)
  try:
   assert next(f for f in store.subscriptions.feeds() if f['id']=='old')['original_urls']==['https://old.test/feed','https://old.test/feed']

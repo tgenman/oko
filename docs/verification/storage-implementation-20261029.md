@@ -1704,3 +1704,29 @@ browser run was blocked by the checkout's stale frontend build; one processing
 Playwright scenario passed in a temporary copy with matching changed files and
 its screenshot was inspected. SQL budgets were deferred by user decision. No
 working database was migrated.
+
+## 2026-10-31: frozen release candidate
+
+The user froze implementation scope to finish PR #182. `source_id`, transitional
+columns, remaining read-time reconciliation and incomplete target-schema work
+remain. Unintegrated malformed-problem and other experimental patches are excluded.
+No additional tests or application abstractions were added in this release pass.
+
+Candidate 3d6ef02b was pushed. Independent release review found no demonstrated
+loss of publications/saved results or broken normal startup in the exercised
+synthetic scenarios. This is not proof about personal production data. Diagnostic
+JSON number normalization remains a known compatibility limitation.
+
+The existing migration/CLI selection initially had 226 passes and two outdated
+fixture failures. After test-only corrections (boolean to historical bigint;
+current Store opened only after full migration), the same selection passed 228
+tests. Two explicitly deferred SQL limits now remain as JUnit measurements;
+functional assertions remain. Those two scenarios passed: completion 870 SQL
+calls, global-rule update 127 calls. No SQL optimization was added.
+
+CI 41211155606 at 3d6ef02b recorded a PostgreSQL browser timeout waiting for
+Reload Oko after restart and the historical bigint fixture error. The unchanged
+browser test passed on an isolated synthetic rerun, including collection, media,
+processing, restart and viewed; its screenshot was inspected. The timeout cause
+is unproven. Full CI results and the final release are reported separately;
+this entry does not assert a full CI pass or a deployed release.
