@@ -1694,3 +1694,13 @@ plus a restricted TEMP-role check, API generation/build/typecheck and a real
 HTTP Playwright card with desktop/mobile screenshots inspected. A direct
 checkout run stopped after 90 passes on a stale frontend contract manifest; it
 was not a functional pass. No working database was changed.
+
+
+Migration 093 converts jobs.manual_once to boolean while retaining SQL NULL
+and mapping 0/1 to false/true. Other integers cause a rollback with original
+values and ledger intact; NOT NULL is not asserted. Synthetic migration/worker/
+processing/binding suite passed 224 tests, mypy for two modules passed. A direct
+browser run was blocked by the checkout's stale frontend build; one processing
+Playwright scenario passed in a temporary copy with matching changed files and
+its screenshot was inspected. SQL budgets were deferred by user decision. No
+working database was migrated.

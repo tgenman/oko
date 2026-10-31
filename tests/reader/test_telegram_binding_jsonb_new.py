@@ -62,7 +62,7 @@ def test_concurrent_writer_is_locked_and_bad_value_rejected(postgres_database_ur
   started=threading.Event();done=threading.Event();errors=[]
   def run():
    started.set()
-   try:migrate(db,MIGRATIONS)
+   try:migrate(db,MIGRATIONS[:92])
    except BaseException as error:errors.append(error)
    finally:done.set()
   thread=threading.Thread(target=run);thread.start();assert started.wait(2) and not done.wait(.2)
@@ -80,7 +80,7 @@ def test_builtin_and_temp_shadow_cannot_skip_guard(postgres_database_url):
   db.execute("CREATE TEMP TABLE telegram_bindings(binding text NOT NULL)")
   db.execute(sql.SQL("CREATE FUNCTION {}.json_typeof(json) RETURNS text LANGUAGE sql IMMUTABLE AS 'SELECT ''string''::text'").format(sql.Identifier(schema)))
   try:
-   migrate(db,MIGRATIONS)
+   migrate(db,MIGRATIONS[:92])
    assert db.execute(sql.SQL("SELECT binding,binding_raw FROM {}.telegram_bindings WHERE feed='f'").format(sql.Identifier(schema))).fetchone()==(None,'{"n":1e3}')
    assert db.execute('SELECT max(version) FROM oko_schema_migrations').fetchone()[0]==92
   finally:db.execute(sql.SQL('DROP FUNCTION {}.json_typeof(json)').format(sql.Identifier(schema)))
