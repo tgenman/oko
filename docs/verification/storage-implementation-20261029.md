@@ -1467,3 +1467,14 @@ the changed module and 16 Playwright status scenarios with screenshot inspection
 A separate independent review passed 19 tests. A pre-existing case with 10,000
 actually eligible fetch Jobs still reads about 60,000 plan rows on one selection;
 this optimization does not resolve that case. No working database was changed.
+
+
+Scoped incomplete-material suppression now accounts for event-owned fetch,
+stage, media and processor errors while preserving the distinct ownership
+rules for orphan and colliding media IDs and YouTube admission. Synthetic
+checks cover false suppression, graph owners, rollback and 10,000 unrelated
+Jobs. The integrated scoped/source/fetch/identity/YouTube suite passed 203
+PostgreSQL tests, mypy on 166 files and 16 Playwright status scenarios with
+desktop/mobile screenshots inspected. A broader run containing the 10,000
+group stress test was interrupted after five minutes and is not counted as
+passed. No working database was changed.

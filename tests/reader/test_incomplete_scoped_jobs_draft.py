@@ -10,14 +10,9 @@ def test_scoped_generic_job_query_on_unrelated_errors(tmp_path,postgres_url):
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('filter','selected','failed','error','source-network')")
             store.db._db.execute('ANALYZE jobs')
         queries=[];store.db.set_trace_callback(queries.append)
-        try:store.problems.candidates(1)
+        try:store.problems.incomplete_generic_groups(1,['selected'])
         finally:store.db.set_trace_callback(None)
-        q=next(q for q in queries if q.startswith('SELECT jobs . *'))
-        first="SELECT * FROM jobs WHERE kind IS DISTINCT FROM 'read'"
-        second="WHERE subtitle.resource_key='youtube:subtitles' AND j.kind='download_media'"
-        assert q.count(first)==1 and q.count(second)==1
-        q=q.replace('%','%%')
-        scoped=q.replace(first,"SELECT * FROM jobs WHERE item=ANY(%s) AND kind IS DISTINCT FROM 'read'",1).replace(second,"WHERE j.item=ANY(%s) AND subtitle.resource_key='youtube:subtitles' AND j.kind='download_media'",1)
+        scoped=next(q for q in queries if q.startswith('SELECT jobs . *'))
         rows=store.db._db.execute(scoped,(['selected'],['selected'])).fetchall()
         assert len(rows)==1 and rows[0]['item']=='selected'
         plan=store.db._db.execute('EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) '+scoped,(['selected'],['selected'])).fetchone()[0][0]['Plan']
@@ -40,8 +35,10 @@ def test_scoped_generic_jobs_match_root_and_child_media_projection(tmp_path,post
         q=next(q for q in queries if q.startswith('SELECT jobs . *'))
         all_rows=store.db._db.execute(q).fetchall()
         targets=['root','child','m-child']
-        q=q.replace('%','%%')
-        scoped=q.replace("SELECT * FROM jobs WHERE kind IS DISTINCT FROM 'read'","SELECT * FROM jobs WHERE item=ANY(%s) AND kind IS DISTINCT FROM 'read'",1).replace("WHERE subtitle.resource_key='youtube:subtitles' AND j.kind='download_media'","WHERE j.item=ANY(%s) AND subtitle.resource_key='youtube:subtitles' AND j.kind='download_media'",1)
+        queries=[];store.db.set_trace_callback(queries.append)
+        try:store.problems.incomplete_generic_groups(1,targets)
+        finally:store.db.set_trace_callback(None)
+        scoped=next(q for q in queries if q.startswith('SELECT jobs . *'))
         scope_rows=store.db._db.execute(scoped,(targets,targets)).fetchall()
         def selected(rows):return sorted((r['kind'],r['item'],r['affected_item']) for r in rows if r['affected_item']=='root')
         assert selected(scope_rows)==selected(all_rows)
