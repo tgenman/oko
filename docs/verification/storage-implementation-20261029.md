@@ -1668,3 +1668,15 @@ mypy for six modules and a persisted subtitle-profile card via real HTTP in
 Playwright; desktop/mobile screenshots were inspected. One Starlette/httpx
 warning was emitted. SQL budgets were not acceptance criteria by user decision.
 No working database was migrated.
+
+
+Migration 092 stores convertible Telegram bindings as JSONB; invalid, deeply
+nested or semantically lossy values remain byte-preserved in a binding_raw
+fallback so existing orphan/startup behavior is retained. This is an interim
+two-column representation, not the final JSONB-only form. Existing explicit
+column grants on binding cause a safe refusal rather than being silently widened;
+table-level grants are preserved. Synthetic tests cover raw/typed transitions,
+numeric semantics, ACL, concurrency and rollback. The integrated suite passed
+258 PostgreSQL tests, mypy and six Playwright status cases; a Telegram browser
+case timed out during parallel load and passed separately, with screenshot
+inspected. No working database was migrated.

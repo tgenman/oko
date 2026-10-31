@@ -14,7 +14,7 @@ def test_invalid_orphan_binding_preserved_through_upgrade(tmp_path,postgres_data
     with psycopg.connect(postgres_database_url,autocommit=True) as db:
         assert db.execute('SELECT feed FROM telegram_bindings WHERE feed=ANY(%s)',([],)).fetchall()==[]
         migrate(db,MIGRATIONS)
-        assert db.execute("SELECT binding FROM telegram_bindings WHERE feed='orphan'").fetchone()[0]=='{invalid'
+        assert db.execute("SELECT binding_raw FROM telegram_bindings WHERE feed='orphan'").fetchone()[0]=='{invalid'
 
 
 def test_invalid_problem_json_before_migration(postgres_database_url):
@@ -57,5 +57,5 @@ def test_profile_selection_skips_invalid_orphan_and_uses_role_index(tmp_path,pos
         query=next(q for q in statements if q.startswith('SELECT feed FROM telegram_bindings WHERE'))
         plan=store.db._db.execute('EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) '+query,(['personal'],['personal'])).fetchone()[0][0]['Plan']
         assert scan_rows(plan)<1000,plan
-        assert store.db.execute("SELECT binding FROM telegram_bindings WHERE feed='orphan'").fetchone()[0]=='{invalid'
+        assert store.db.execute("SELECT binding_raw FROM telegram_bindings WHERE feed='orphan'").fetchone()[0]=='{invalid'
     finally:store.db.close()

@@ -8,6 +8,7 @@ from oko.storage.reading import reading_value
 from oko.storage.source_configuration import changed as source_changed
 from oko.storage.reader_status import changed as status_changed
 import json
+import math
 import base64
 import hashlib
 import binascii
@@ -72,25 +73,49 @@ class TelegramAccess:
 
     @reading_value
     def _bindings(self, feeds: tuple[str, ...] | None) -> dict[str, dict[str, Any]]:
-        query='SELECT feed , binding FROM telegram_bindings'
+        query='SELECT feed,binding,binding_raw FROM telegram_bindings'
         params: tuple[list[str],...]=()
         if feeds is not None:
             query+=' WHERE feed = ANY(%s)'
             params=(list(feeds),)
-        return {row['feed']:json.loads(row['binding']) for row in self.db.execute(query,params)}
+        return {row['feed']:json.loads(row['binding_raw']) if row['binding_raw'] is not None else row['binding'] for row in self.db.execute(query,params)}
 
     def profiles(self) -> dict[str, dict[str, Any]]:
         return {row['role']: dict(row) for row in self.db.execute('SELECT * FROM telegram_profiles')}
 
     @reading_value
     def binding(self, feed: str) -> dict[str, Any] | None:
-        row = self.db.execute('SELECT binding FROM telegram_bindings WHERE feed = %s', (feed,)).fetchone()
-        return json.loads(row[0]) if row else None
+        row = self.db.execute('SELECT binding,binding_raw FROM telegram_bindings WHERE feed = %s', (feed,)).fetchone()
+        return (json.loads(row[1]) if row[1] is not None else row[0]) if row else None
 
     def put_binding(self, feed: str, binding: dict[str, Any]) -> None:
-        changed = self.db.execute('''INSERT INTO telegram_bindings (feed,binding,indexed_role) VALUES (%s,%s,%s)
-            ON CONFLICT(feed) DO UPDATE SET binding=excluded.binding, indexed_role=excluded.indexed_role
-            WHERE telegram_bindings.binding IS DISTINCT FROM excluded.binding OR telegram_bindings.indexed_role IS DISTINCT FROM excluded.indexed_role''', (feed,json.dumps(binding),binding.get('role'))).rowcount
+        encoded=json.dumps(binding)
+        def same(left: Any, right: Any) -> bool:
+            if type(left) is not type(right):return False
+            if isinstance(left,float):return left==right and (left!=0 or math.copysign(1,left)==math.copysign(1,right))
+            if isinstance(left,list):return len(left)==len(right) and all(same(a,b) for a,b in zip(left,right))
+            if isinstance(left,dict):return left.keys()==right.keys() and all(same(value,right[key]) for key,value in left.items())
+            return bool(left==right)
+        try:
+            before=json.loads(encoded)
+            pending=[(before,0)]
+            deep=False
+            while pending:
+                value,depth=pending.pop()
+                if depth>=900:
+                    deep=True
+                    break
+                if isinstance(value,dict):pending.extend((part,depth+1) for part in value.values())
+                elif isinstance(value,list):pending.extend((part,depth+1) for part in value)
+            valid=not deep and expect_row(self.db.execute("SELECT pg_input_is_valid(%s,'jsonb')",(encoded,)).fetchone())[0]
+            after=expect_row(self.db.execute('SELECT %s::jsonb',(encoded,)).fetchone())[0] if valid else None
+            raw=None if valid and same(before,after) else encoded
+        except (RecursionError,ValueError):
+            raw=encoded
+        native=encoded if raw is None else None
+        changed = self.db.execute('''INSERT INTO telegram_bindings (feed,binding,binding_raw,indexed_role) VALUES (%s,%s::jsonb,%s,%s)
+            ON CONFLICT(feed) DO UPDATE SET binding=excluded.binding,binding_raw=excluded.binding_raw,indexed_role=excluded.indexed_role
+            WHERE telegram_bindings.binding::text IS DISTINCT FROM excluded.binding::text OR telegram_bindings.binding_raw IS DISTINCT FROM excluded.binding_raw OR telegram_bindings.indexed_role IS DISTINCT FROM excluded.indexed_role''', (feed,native,raw,binding.get('role'))).rowcount
         if changed:
             source_changed(self.db)
 
