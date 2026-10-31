@@ -1360,3 +1360,14 @@ inspected. The 10,000-group test took several minutes under shared test load;
 the cause of its difference from a faster isolated run is not established. One
 Starlette/httpx warning was emitted. Full check all and real migration were
 not run.
+
+
+Fetch Jobs with NULL problem code and an error now use event ownership when
+all affected owners are outside YouTube; YouTube and mixed cases retain the
+time-dependent path. Synthetic checks cover legacy collisions, exact protected
+occurrence markers, bounded GC, long indexed IDs, digest collisions, rollback
+and HTTP. Protecting a large ambiguous group is atomic: on interruption its
+transaction rolls back and retry starts from the beginning, without a page
+checkpoint. The integrated source/fetch/incomplete/status/YouTube suite passed
+231 PostgreSQL tests, mypy for eight modules and 16 Playwright status scenarios;
+a screenshot was inspected. No working database was migrated.

@@ -517,16 +517,17 @@ class Problems:
             identities=list(counts)
             if not identities:return []
         item_jobs: dict[str,tuple[int,dict[str,Any]]]={}
+        overloaded_ids: set[int]=set()
         for job_id,candidates in projected.items():
             if len(candidates)!=1:continue
             candidate=candidates[0]
             tail=candidate['id'].split(':fetch:')
             if len(tail)==2 and tail[1]:item_jobs[tail[1]]=(job_id,candidate)
         if item_jobs:
-            records=self.db.execute("""SELECT id,identity,body,substring(coalesce(body::jsonb->>'status_job_identity',identity) FROM ':fetch:(.*)$') AS item
-                FROM reader_problems WHERE finished IS NULL AND identity LIKE 'job:%%' AND body::jsonb->>'code'='work-fetch'
+            records=self.db.execute("""SELECT r.*,target.item FROM unnest(%s::text[]) target(item) CROSS JOIN LATERAL (
+                SELECT id,identity,body FROM reader_problems WHERE finished IS NULL AND identity LIKE 'job:%%' AND body::jsonb->>'code'='work-fetch'
                 AND body::jsonb->>'operation' IN ('producer:fetch','producer:status')
-                AND substring(coalesce(body::jsonb->>'status_job_identity',identity) FROM ':fetch:(.*)$')=ANY(%s)""",(list(item_jobs),)).fetchall()
+                AND substring(coalesce(body::jsonb->>'status_job_identity',identity) FROM ':fetch:(.*)$')=target.item LIMIT 101) r""",(list(item_jobs),)).fetchall()
             grouped: dict[int,list[Any]]={}
             for record in records:
                 if record['item'] in item_jobs:grouped.setdefault(item_jobs[record['item']][0],[]).append(record)
@@ -540,6 +541,7 @@ class Problems:
             fallback: dict[int,list[dict[str,Any]]]={}
             for item,(job_id,candidate) in item_jobs.items():
                 prior=grouped.get(job_id,[])
+                if len(prior)>=101:overloaded_ids.add(job_id)
                 if len(prior)!=1 or counts[candidate['id']]!=1:continue
                 old=prior[0]
                 try:body=json.loads(old['body'])
@@ -573,10 +575,12 @@ class Problems:
         occupied_rows={row['identity']:row for row in self.db.execute('SELECT id,identity,body FROM reader_problems WHERE identity=ANY(%s) AND finished IS NULL',(identities+list(legacy_keys),))}
         occupied=set(occupied_rows)
         isolated_rows: dict[str,list[Any]]={}
-        for row in self.db.execute("SELECT id,identity,body,body::jsonb->>'fetch_job_identity' AS canonical FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:fetch' AND body::jsonb->>'fetch_job_identity'=ANY(%s)",(identities,)):
+        for row in self.db.execute("""SELECT r.*,target.canonical FROM unnest(%s::text[]) target(canonical) CROSS JOIN LATERAL (
+            SELECT id,identity,body FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:fetch'
+            AND body::jsonb->>'fetch_job_identity'=target.canonical LIMIT 101) r""",(identities,)):
             isolated_rows.setdefault(row['canonical'],[]).append(row)
         isolated=set(isolated_rows)
-        simple=[];complex_ids=set()
+        simple=[];complex_ids=set(overloaded_ids)
         def ambiguous(candidate: dict[str,Any]) -> bool:
             tail=candidate['id'][len('job:'+candidate['code']+':'):]
             kinds=('fetch','discover','download_media','filter','theses','read','delete','feed-delete')
@@ -591,6 +595,7 @@ class Problems:
             if matches[0]['identity']!=canonical:desired['fetch_job_identity']=canonical
             return bool(body==desired)
         for job_id,candidates in projected.items():
+            if job_id in overloaded_ids:continue
             if candidates and all(counts[c['id']]==1 and already_current(c) for c in candidates):
                 continue
             if any(counts[c['id']]!=1 or c['id'] in occupied or c['id'] in isolated or c['id'] in legacy_keys or c.get('_legacy_id') in occupied or ambiguous(c) for c in candidates):
@@ -637,6 +642,71 @@ class Problems:
             # Advance past the last complete Job even when it has >100 rows.
             cursor=records[-1]['marker']
             self.store.fault('fetch_isolated_work_recovery_batch')
+
+    def protect_fetch_null_legacy(self, job_ids: list[int]) -> None:
+        """Preserve exact occurrences, in bounded pages within the owning transaction."""
+        if not job_ids:return
+        jobs=self.db.execute("SELECT id,item FROM jobs WHERE id=ANY(%s) AND kind='fetch' AND item IS NOT NULL",(job_ids,)).fetchall()
+        for job in jobs:
+            for mode in ('legacy','marked'):
+                cursor: tuple[str,str] | None=None
+                while True:
+                    if mode=='legacy':
+                        query="""SELECT id,identity,md5(id) AS page_hash FROM reader_problems WHERE finished IS NULL AND identity LIKE 'job:%%'
+                            AND body::jsonb->>'code'='work-fetch' AND body::jsonb->>'operation' IN ('producer:fetch','producer:status')
+                            AND md5(substring(coalesce(body::jsonb->>'status_job_identity',identity) FROM ':fetch:(.*)$'))=md5(%s)
+                            AND substring(coalesce(body::jsonb->>'status_job_identity',identity) FROM ':fetch:(.*)$')=%s"""
+                        params: tuple[Any,...]=(job['item'],job['item'])
+                    else:
+                        query="""SELECT id,identity,md5(id) AS page_hash FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:fetch'
+                            AND body::jsonb->>'code'='work-fetch' AND body::jsonb->>'fetch_job_identity' IS NOT NULL
+                            AND body::jsonb->>'fetch_job_id' IS NOT NULL AND (body::jsonb->>'fetch_job_id') COLLATE "C"=%s"""
+                        params=(str(job['id']),)
+                    if cursor is not None:
+                        if mode=='legacy':query+=' AND (md5(id),id COLLATE "C")>(%s,%s)';params=(*params,*cursor)
+                        else:query+=' AND id COLLATE "C">%s';params=(*params,cursor[1])
+                    order='md5(id),id COLLATE "C"' if mode=='legacy' else 'id COLLATE "C"'
+                    rows=self.db.execute(query+' ORDER BY '+order+' LIMIT 400',params).fetchall()
+                    if not rows:break
+                    markers=[('fetch-null-protected:'+hashlib.sha256(row['id'].encode()).hexdigest(),json.dumps(['oko-fetch-null-v2',row['id'],row['identity']])) for row in rows]
+                    self.db.execute('INSERT INTO state(key,value) SELECT key,value FROM unnest(%s::text[],%s::text[]) v(key,value) ON CONFLICT(key) DO NOTHING',([key for key,_ in markers],[value for _,value in markers]))
+                    saved={row['key']:row['value'] for row in self.db.execute('SELECT key,value FROM state WHERE key=ANY(%s)',([key for key,_ in markers],))}
+                    if any(saved.get(key)!=value for key,value in markers):raise RuntimeError('Conflicting fetch-null protection marker')
+                    cursor=(rows[-1]['page_hash'],rows[-1]['id'])
+                    self.store.fault('fetch_null_protection_batch')
+
+    def recover_fetch_null(self) -> None:
+        if self.db.execute("SELECT 1 FROM state WHERE key='fetch-null-recovered-v1'").fetchone():return
+        cursor: int | None=None
+        while True:
+            query="SELECT id FROM jobs WHERE kind='fetch' AND item IS NOT NULL AND item<>'' AND problem_code IS NULL AND error IS NOT NULL"
+            if cursor is not None:query+=' AND id>%s'
+            rows=self.db.execute(query+' ORDER BY id LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
+            if not rows:break
+            with self.db:
+                from oko.storage import memberships
+                memberships.lock_graph(self.db)
+                markers=[str(row['id']) for row in rows]
+                overflows=self.db.execute("""SELECT target.marker FROM unnest(%s::text[]) target(marker) CROSS JOIN LATERAL (
+                    SELECT id FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:fetch'
+                    AND body::jsonb->>'code'='work-fetch' AND body::jsonb->>'fetch_job_identity' IS NOT NULL
+                    AND body::jsonb->>'fetch_job_id' IS NOT NULL AND (body::jsonb->>'fetch_job_id') COLLATE "C"=target.marker COLLATE "C"
+                    LIMIT 101) r GROUP BY target.marker HAVING count(*)>100""",(markers,)).fetchall()
+                overflow_ids={int(row['marker']) for row in overflows}
+                if overflow_ids:
+                    self.protect_fetch_null_legacy(list(overflow_ids))
+                    self.db.execute('UPDATE jobs SET fetch_null_owned=false,fetch_null_ambiguous=true WHERE id=ANY(%s)',(list(overflow_ids),))
+                bounded_rows=[row for row in rows if row['id'] not in overflow_ids]
+                complex_rows=self.recover_fetch_batch(bounded_rows,self.store.wall_clock()) if bounded_rows else []
+                for row in complex_rows:self.sync_fetch(row['id'],[],self.store.wall_clock())
+                from oko.storage.fetch_job_problems import managed_candidates_many
+                eligible=managed_candidates_many(self.store,[row['id'] for row in rows],self.store.wall_clock())
+                complex_ids={row['id'] for row in complex_rows} | overflow_ids
+                owned=[job for job,candidates in eligible.items() if candidates and job not in complex_ids]
+                if owned:self.db.execute('UPDATE jobs SET fetch_null_owned=true,fetch_null_ambiguous=false WHERE id=ANY(%s) AND problem_code IS NULL AND error IS NOT NULL',(owned,))
+            cursor=rows[-1]['id']
+            self.store.fault('fetch_null_recovery_batch')
+        with self.db:self.db.execute("INSERT INTO state(key,value) VALUES ('fetch-null-recovered-v1','true') ON CONFLICT DO NOTHING")
 
     def recover_fetch_problems(self) -> None:
         if self.db.execute("SELECT 1 FROM state WHERE key='fetch-problems-recovered-v2'").fetchone():
@@ -773,6 +843,16 @@ class Problems:
     def sync_fetch(self, job_id: int, previous: list[dict[str,Any]], now: float) -> None:
         from oko.storage.fetch_job_problems import managed_candidates
         candidates=managed_candidates(self.store,job_id,now)
+        self.db.execute('UPDATE jobs SET fetch_null_owned=(%s=1) WHERE id=%s AND problem_code IS NULL AND error IS NOT NULL AND fetch_null_owned IS DISTINCT FROM (%s=1)',(bool(candidates),job_id,bool(candidates)))
+        legacy=self.db.execute("""SELECT r.id FROM jobs j CROSS JOIN LATERAL (
+            SELECT id FROM reader_problems WHERE finished IS NULL AND identity LIKE 'job:%%' AND body::jsonb->>'code'='work-fetch'
+            AND body::jsonb->>'operation' IN ('producer:fetch','producer:status')
+            AND substring(coalesce(body::jsonb->>'status_job_identity',identity) FROM ':fetch:(.*)$')=j.item LIMIT 101) r
+            WHERE j.id=%s AND j.kind='fetch' AND (j.fetch_null_ambiguous OR (j.problem_code IS NULL AND j.error IS NOT NULL))""",(job_id,)).fetchall()
+        if len(legacy)>=101:
+            self.protect_fetch_null_legacy([job_id])
+            self.db.execute('UPDATE jobs SET fetch_null_owned=false,fetch_null_ambiguous=true WHERE id=%s',(job_id,))
+            return
         if previous and not candidates:
             from oko.storage.fetch_job_problems import candidates as all_candidates
             handoff=all_candidates(self.store,job_id,now)
@@ -785,10 +865,18 @@ class Problems:
         by_identity={row['identity']:row for row in rows}
         isolated: dict[str,list[Any]]={}
         if keys:
-            for row in self.db.execute("SELECT *,body::jsonb->>'fetch_job_identity' AS canonical FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:fetch' AND body::jsonb->>'fetch_job_identity'=ANY(%s)",(sorted(keys),)):
-                isolated.setdefault(row['canonical'],[]).append(row)
-            for row in self.db.execute("SELECT *,body::jsonb->>'status_job_identity' AS canonical FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:fetch' AND body::jsonb->>'status_job_identity'=ANY(%s)",(sorted(keys),)):
-                isolated.setdefault(row['canonical'],[]).append(row)
+            for field in ('fetch_job_identity','status_job_identity'):
+                query=f"""SELECT r.*,target.canonical FROM unnest(%s::text[]) target(canonical) CROSS JOIN LATERAL (
+                    SELECT * FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:fetch'
+                    AND body::jsonb->>'{field}'=target.canonical LIMIT 101) r"""
+                for row in self.db.execute(query,(sorted(keys),)):
+                    isolated.setdefault(row['canonical'],[]).append(row)
+            if any(len(rows)>=101 for rows in isolated.values()):
+                self.protect_fetch_null_legacy([job_id])
+                self.db.execute('UPDATE jobs SET fetch_null_owned=false,fetch_null_ambiguous=true WHERE id=%s',(job_id,))
+                return  # Preserve ambiguous records and keep NULL failures visible through GET.
+
+        self.db.execute('UPDATE jobs SET fetch_null_ambiguous=false WHERE id=%s AND fetch_null_ambiguous',(job_id,))
         def record(candidate: dict[str,Any]) -> Any:
             for saved in isolated.get(candidate['id'],[]):
                 if self.fetch_record_matches(saved,candidate):return saved
@@ -2715,8 +2803,8 @@ class Problems:
                              for obj in json.loads(row['body'])['objects'] if obj['kind'] == 'feed'}
         groups: dict[str | tuple[str,str] | tuple[str,str,str], dict[str, Any]] = {}
         youtube = self.store.youtube.status(now)
-        source_owned_filter="AND NOT (kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code IS NOT NULL AND problem_code LIKE 'source-%' AND source_event_owned)" if scope_items is None else ''
-        jobs = self.db.execute(f"SELECT jobs . * , coalesce ( {owner_expr('items')} , {owner_expr('media_owner')} , {owner_expr('linked_root')} ) AS resolved_feed_id , coalesce ( items . viewed , media_owner . viewed ) AS viewed , m . resource_key AS resource_key , coalesce ( linked_root . id , m . publication_id , jobs . item ) AS affected_item FROM (SELECT * FROM (SELECT * FROM jobs WHERE {direct_scope}kind IS DISTINCT FROM 'read' AND kind IS DISTINCT FROM 'discover' AND problem_code IS DISTINCT FROM 'processor-config' AND NOT ((kind IS NOT DISTINCT FROM 'filter' OR kind IS NOT DISTINCT FROM 'theses') AND item IS NOT NULL AND item<>'' AND (((problem_code='' OR (problem_code IS NULL AND error IS NOT NULL))) OR (problem_code IS NOT NULL AND problem_code<>'' AND problem_code NOT LIKE '{source_like}' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')))) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL AND problem_code NOT LIKE '{source_like}' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')) AND (problem_code IS NOT NULL OR error IS NOT NULL) {source_owned_filter} AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL AND problem_code NOT LIKE '{source_like}' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) UNION ALL SELECT j.* FROM media_files subtitle JOIN jobs j ON j.kind='download_media' AND j.item=subtitle.id WHERE {media_scope}subtitle.resource_key='youtube:subtitles' AND j.kind='download_media' AND j.item IS NOT NULL AND j.item<>'' AND j.problem_code IS NOT NULL AND j.problem_code NOT LIKE '{source_like}' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) status_jobs ORDER BY kind,item OFFSET 0) jobs LEFT JOIN publications items ON items . id = jobs . item LEFT JOIN media_files m ON jobs . kind = 'download_media' AND m . id = jobs . item LEFT JOIN publications media_owner ON media_owner . id = m . publication_id LEFT JOIN publication_links link ON link . target_publication_id = coalesce ( items . id , media_owner . id ) LEFT JOIN publications linked_root ON linked_root . id = link . source_publication_id AND linked_root . viewed = 0 WHERE ( jobs . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' , 'blocked' ) OR ( jobs . status = 'done' AND jobs . kind = 'fetch' AND jobs . problem_code IS NOT NULL AND jobs . error IS NOT NULL ) ) AND ( jobs . problem_code IS NOT NULL OR jobs . error IS NOT NULL ) AND jobs.kind IS DISTINCT FROM 'read' AND jobs.problem_code IS DISTINCT FROM 'processor-config' AND NOT (jobs.kind IN ('delete','feed-delete') AND coalesce(nullif(jobs.problem_code,''),'work-'||jobs.kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))",parameters).fetchall()
+        source_owned_filter="AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND problem_code IS NULL AND error IS NOT NULL AND fetch_null_owned) AND NOT (kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code IS NOT NULL AND problem_code LIKE 'source-%' AND source_event_owned)" if scope_items is None else ''
+        jobs = self.db.execute(f"SELECT jobs . * , coalesce ( {owner_expr('items')} , {owner_expr('media_owner')} , {owner_expr('linked_root')} ) AS resolved_feed_id , coalesce ( items . viewed , media_owner . viewed ) AS viewed , m . resource_key AS resource_key , coalesce ( linked_root . id , m . publication_id , jobs . item ) AS affected_item FROM (SELECT * FROM (SELECT * FROM jobs WHERE {direct_scope}kind IS DISTINCT FROM 'read' AND kind IS DISTINCT FROM 'discover' AND problem_code IS DISTINCT FROM 'processor-config' AND NOT ((kind IS NOT DISTINCT FROM 'filter' OR kind IS NOT DISTINCT FROM 'theses') AND item IS NOT NULL AND item<>'' AND (((problem_code='' OR (problem_code IS NULL AND error IS NOT NULL))) OR (problem_code IS NOT NULL AND problem_code<>'' AND problem_code NOT LIKE '{source_like}' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')))) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL AND problem_code NOT LIKE '{source_like}' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') AND NOT fetch_null_ambiguous) AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')) AND (problem_code IS NOT NULL OR error IS NOT NULL) {source_owned_filter} AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL AND problem_code NOT LIKE '{source_like}' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) UNION ALL SELECT j.* FROM media_files subtitle JOIN jobs j ON j.kind='download_media' AND j.item=subtitle.id WHERE {media_scope}subtitle.resource_key='youtube:subtitles' AND j.kind='download_media' AND j.item IS NOT NULL AND j.item<>'' AND j.problem_code IS NOT NULL AND j.problem_code NOT LIKE '{source_like}' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) status_jobs ORDER BY kind,item OFFSET 0) jobs LEFT JOIN publications items ON items . id = jobs . item LEFT JOIN media_files m ON jobs . kind = 'download_media' AND m . id = jobs . item LEFT JOIN publications media_owner ON media_owner . id = m . publication_id LEFT JOIN publication_links link ON link . target_publication_id = coalesce ( items . id , media_owner . id ) LEFT JOIN publications linked_root ON linked_root . id = link . source_publication_id AND linked_root . viewed = 0 WHERE ( jobs . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' , 'blocked' ) OR ( jobs . status = 'done' AND jobs . kind = 'fetch' AND jobs . problem_code IS NOT NULL AND jobs . error IS NOT NULL ) ) AND ( jobs . problem_code IS NOT NULL OR jobs . error IS NOT NULL ) AND jobs.kind IS DISTINCT FROM 'read' AND jobs.problem_code IS DISTINCT FROM 'processor-config' AND NOT (jobs.kind IN ('delete','feed-delete') AND coalesce(nullif(jobs.problem_code,''),'work-'||jobs.kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))",parameters).fetchall()
         if scope_items is not None:
             source_ids=sorted({job['resolved_feed_id'] or job['feed_id'] for job in jobs if job['resolved_feed_id'] or job['feed_id']})
             for start in range(0,len(source_ids),400):
@@ -3070,7 +3158,30 @@ class Problems:
 
     def reconcile(self, candidates: list[dict[str, Any]], now: float, feeds: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
         """Preserve occurrence identity; completed records never become current on restart."""
-        existing = {row['identity']: row for row in self.db.execute("SELECT * FROM reader_problems WHERE finished IS NULL")}
+        existing = {row['identity']: row for row in self.db.execute("""SELECT *,EXISTS (
+            SELECT 1 FROM state WHERE key COLLATE "C">='fetch-null-protected:' AND key COLLATE "C"<'fetch-null-protected;' LIMIT 1
+        ) AS has_fetch_null_protection FROM reader_problems WHERE finished IS NULL""")}
+        protected_fetch_null: set[str]=set()
+        saved_fetch_rows=[]
+        for row in existing.values():
+            if not row['has_fetch_null_protection']:continue
+            if not row['identity'].startswith('job:'):continue
+            try:fetch_body=json.loads(row['body'])
+            except (TypeError,ValueError):continue
+            if isinstance(fetch_body,dict) and fetch_body.get('code')=='work-fetch':saved_fetch_rows.append(row)
+        for offset in range(0,len(saved_fetch_rows),400):
+            batch_fetch_rows=saved_fetch_rows[offset:offset+400]
+            keys={'fetch-null-protected:'+hashlib.sha256(row['id'].encode()).hexdigest():(row['id'],row['identity']) for row in batch_fetch_rows}
+            for marker in self.db.execute('SELECT key,value FROM state WHERE key=ANY(%s)',(list(keys),)):
+                expected=keys[marker['key']]
+                # An occupied key with corrupt or foreign contents is not proof
+                # of ownership.  Keep the corresponding record untouched.
+                try: value=json.loads(marker['value'])
+                except (TypeError,ValueError): value=None
+                if (isinstance(value,list) and len(value)==3 and value[0]=='oko-fetch-null-v2'
+                    and value[1]==expected[0] and isinstance(value[2],str) and value[2]!=expected[1]):
+                    continue  # The ID was reused for a different identity.
+                protected_fetch_null.add(expected[0])
         owned_source_identities: set[str]=set()
         source_legacy: dict[str,str]={}
         for row in existing.values():
@@ -3218,7 +3329,7 @@ class Problems:
                         and old_body.get('code')==candidate.get('code') and alias not in candidate_ids and alias not in claimed_alternates):
                         isolated_aliases.append(alias)
                         claimed_alternates.add(alias)
-                    protected = (isinstance(old_body,dict) and old_body.get('code') in ('delete','feed-delete','work-delete','work-feed-delete')
+                    protected = previous is not None and previous['id'] in protected_fetch_null or (isinstance(old_body,dict) and old_body.get('code') in ('delete','feed-delete','work-delete','work-feed-delete')
                                  and (old_body.get('operation') in ('producer:delete','producer:feed-delete')
                                       or (old_body.get('operation') in (None,'producer:status') and (':delete:' in alias or ':feed-delete:' in alias))))
                     if isinstance(old_body,dict) and isinstance(old_body.get('source_group_identity'),str):protected=True
@@ -3232,6 +3343,7 @@ class Problems:
             prior_alternate = isolated.get((identity,operation,target)) if isinstance(operation,str) else None
             if prior_alternate is None and isinstance(operation,str) and not (isinstance(body,dict) and body.get('operation')==operation and target is not None and (body.get('status_job_target')==target or body.get('status_job_target') is None and body.get('objects')==candidate.get('objects'))):
                 prior_alternate = isolated.get((identity,operation,None))
+            if prior_alternate in existing and existing[prior_alternate]['id'] in protected_fetch_null:prior_alternate=None
             if prior_alternate in claimed_alternates:
                 prior_alternate = None
             if prior_alternate:
@@ -3242,7 +3354,8 @@ class Problems:
                     candidate['status_job_target'] = target
                 candidate.pop('_legacy_ids',None)
             elif (isinstance(operation,str) and operation.startswith('producer:') and (
-                (isinstance(body,dict) and isinstance(body.get('source_group_identity'),str) and isinstance(candidate.get('code'),str) and candidate['code'].startswith('source-'))
+                (saved is not None and saved['id'] in protected_fetch_null)
+                or (isinstance(body,dict) and isinstance(body.get('source_group_identity'),str) and isinstance(candidate.get('code'),str) and candidate['code'].startswith('source-'))
                 or (isinstance(body,dict) and isinstance(body.get('operation'),str) and body['operation'].startswith('producer:') and body['operation'] not in ('producer:status',operation))
                 or (identity in claimed and claimed[identity]!=(operation,target))
                 or (isinstance(body,dict) and body.get('operation')==operation and isinstance(body.get('status_job_target'),str) and body['status_job_target']!=target)
@@ -3297,6 +3410,7 @@ class Problems:
                     if row['identity'] in owned_source_identities and isinstance(body.get('code'),str) and body['code'].startswith('source-'):continue
                     if row['id'] in protected_source_legacy:continue
                     code=body.get('code')
+                    if row['id'] in protected_fetch_null:continue
                     if code=='material-incomplete' and managed_incomplete:
                         continue
                     eligible_fetch=(isinstance(code,str) and bool(code) and not code.startswith('source-') and code not in ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','work-fetch'))

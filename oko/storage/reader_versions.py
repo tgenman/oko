@@ -18,6 +18,8 @@ class ReaderVersions:
         self._next_action_cleanup = float('-inf')
         self._source_legacy_gc_cursor: str | None = None
         self._next_source_legacy_gc = float('-inf')
+        self._fetch_null_gc_cursor: str | None = None
+        self._next_fetch_null_gc = float('-inf')
         self._processor_youtube_paused = store.problems.processor_youtube_paused(store.wall_clock())
         self._incomplete_due_cursor: tuple[float,str] | None = None
         with self.db:
@@ -89,6 +91,17 @@ class ReaderVersions:
                 self.db.after_rollback(restore_source_legacy_gc)
                 self.db.after_commit(lambda: setattr(self,'_source_legacy_gc_cursor',cursor))
                 if done:self.db.after_commit(lambda: setattr(self,'_next_source_legacy_gc',now+60))
+            if now>=self._next_fetch_null_gc:
+                from oko.storage.fetch_job_problems import cleanup_null_protection
+                cursor,done=cleanup_null_protection(self.store,self._fetch_null_gc_cursor)
+                old_fetch_cursor=self._fetch_null_gc_cursor
+                old_fetch_next=self._next_fetch_null_gc
+                def restore_fetch_null_gc() -> None:
+                    self._fetch_null_gc_cursor=old_fetch_cursor
+                    self._next_fetch_null_gc=old_fetch_next
+                self.db.after_rollback(restore_fetch_null_gc)
+                self.db.after_commit(lambda: setattr(self,'_fetch_null_gc_cursor',cursor))
+                if done:self.db.after_commit(lambda: setattr(self,'_next_fetch_null_gc',now+60))
             due_query="SELECT id,identity,body,finished,incomplete_due,incomplete_future,incomplete_closes FROM reader_problems WHERE incomplete_due IS NOT NULL AND incomplete_due<=%s"
             due_params: tuple[Any,...]=(wall,)
             if self._incomplete_due_cursor is not None:

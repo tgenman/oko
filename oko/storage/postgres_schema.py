@@ -84,4 +84,5 @@ MIGRATIONS = (
     Migration(77, 'fetch-work-job-index', (Path(__file__).parent / 'postgres' / '077-fetch-work-job-index.sql').read_text()),
     Migration(78, 'source-event-ownership', (Path(__file__).parent / 'postgres' / '078-source-event-ownership.sql').read_text()),
     Migration(79, 'incomplete-groups', (Path(__file__).parent / 'postgres' / '079-incomplete-groups.sql').read_text()),
+    Migration(80, 'fetch-null-non-youtube', (Path(__file__).parent / 'postgres' / '080-fetch-null-non-youtube.sql').read_text()),
 )

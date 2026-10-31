@@ -156,6 +156,7 @@ class Store:
             collection_jobs.recover(self)
             self.problems.recover_discover_problems()
             self.problems.recover_fetch_problems()
+            self.problems.recover_fetch_null()
             self.problems.recover_media_problems()
             with self.db:
                 self.problems.recover_processor_duplicates(self.wall_clock())

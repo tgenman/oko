@@ -15,6 +15,7 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float) -> dict[int,
         LEFT JOIN publications root ON root.id=link.source_publication_id AND root.viewed=0
         LEFT JOIN feeds f ON f.id=coalesce({owner_expr('p')},{owner_expr('root')},j.feed_id)
         WHERE j.id=ANY(%s) AND j.kind='fetch' AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL) ORDER BY j.id,root.id""",(job_ids,)).fetchall()
+    youtube_jobs={row['id'] for row in rows if row['feed_kind']=='youtube'}
     results: dict[tuple[int,str],dict[str,Any]]={}
     for row in rows:
         if not isinstance(row['item'],str) or not row['item']:
@@ -35,7 +36,7 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float) -> dict[int,
         if group not in results:
             body: dict[str,Any]=dict(id=identity,code=code,section='object',title='Не удалось загрузить материал',
                 consequence='Сохранённое содержимое остаётся доступным.',next_step='Включите обработку, чтобы повторить попытку.' if row['status']=='blocked' else 'Повторите загрузку вручную.' if row['status'] in ('done','failed') else 'Проверьте доступность источника.' if row['status']=='unavailable' else 'Око повторит попытку автоматически.',
-                objects=[],action=None,operation='producer:fetch',fetch_owner=feed,_code_present=row['problem_code'] is not None,created_at=now,state='retrying' if row['status']=='running' or not row['error'] else 'current',finished_at=None,outcome=None,next_at=None)
+                objects=[],action=None,operation='producer:fetch',fetch_owner=feed,_code_present=row['problem_code'] is not None or (row['error'] is not None and row['id'] not in youtube_jobs),created_at=now,state='retrying' if row['status']=='running' or not row['error'] else 'current',finished_at=None,outcome=None,next_at=None)
             if code=='work-fetch':body['fetch_implicit_code']=row['problem_code'] in (None,'')
             if row['error']:body['reason']=row['error']
             if code=='source-reconnect':body.update(section='action',next_step='Проверьте привязку источника; доступ не изменяется автоматически.')
@@ -74,8 +75,33 @@ def previous_candidates(store: 'Store', job_id: int, now: float) -> list[dict[st
     excluded={'codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'}
     eligible=[dict({k:v for k,v in row.items() if k!='_code_present'},fetch_job_id=str(job_id)) for row in rows
               if row['code'] not in excluded and not row['code'].startswith('source-')]
-    if eligible and any(not row['_code_present'] for row in rows):
+    if eligible and any(not row['_code_present'] or row.get('fetch_implicit_code') is True for row in rows):
         job=store.db.execute('SELECT item FROM jobs WHERE id=%s',(job_id,)).fetchone()
         if job:
             for row in eligible:row['_fetch_item']=job['item']
     return eligible
+
+
+def cleanup_null_protection(store: 'Store', cursor: str | None) -> tuple[str | None,bool]:
+    """Collect only verified markers whose exact occurrence no longer remains active."""
+    import hashlib,json
+    from oko.storage.problems import _readable_timestamp
+    query="SELECT key,value FROM state WHERE key COLLATE \"C\">='fetch-null-protected:' AND key COLLATE \"C\"<'fetch-null-protected;'"
+    params: tuple[Any,...]=()
+    if cursor is not None:
+        query+=' AND key COLLATE "C">%s';params=(cursor,)
+    rows=store.db.execute(query+' ORDER BY key COLLATE "C" LIMIT 100',params).fetchall()
+    if not rows:return None,True
+    verified=[]
+    for row in rows:
+        try:value=json.loads(row['value'])
+        except (ValueError,TypeError):continue
+        if (not isinstance(value,list) or len(value)!=3 or value[0]!='oko-fetch-null-v2'
+            or not isinstance(value[1],str) or not isinstance(value[2],str)
+            or row['key']!='fetch-null-protected:'+hashlib.sha256(value[1].encode()).hexdigest()):continue
+        verified.append((row['key'],row['value'],value[1],value[2]))
+    current={row['id']:row for row in store.db.execute('SELECT id,identity,finished,outcome FROM reader_problems WHERE id=ANY(%s)',([v[2] for v in verified],))} if verified else {}
+    stale=[(key,value) for key,value,identity,canonical in verified if identity not in current or current[identity]['identity']!=canonical or (_readable_timestamp(current[identity]['finished']) and current[identity]['outcome'] in ('resolved','irrelevant'))]
+    if stale:
+        store.db.execute('DELETE FROM state s USING unnest(%s::text[],%s::text[]) v(key,value) WHERE s.key=v.key AND s.value=v.value',([v[0] for v in stale],[v[1] for v in stale]))
+    return rows[-1]['key'],False
