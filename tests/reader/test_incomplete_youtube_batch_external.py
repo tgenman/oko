@@ -9,7 +9,7 @@ def test_timed_youtube_jobs_are_not_materialized_in_one_unbounded_batch(tmp_path
             store.db.execute("INSERT INTO jobs(kind,item,status,error,incomplete_youtube_sensitive) SELECT 'fetch','p-'||n,'pending','failure',true FROM generate_series(1,10000)n")
         tracker=TransactionGroupDraft(store)
         sizes=[]
-        monkeypatch.setattr(tracker,'mark_jobs',lambda rows: sizes.append(len(rows)))
+        monkeypatch.setattr(tracker,'mark_jobs',lambda rows,**_kwargs: sizes.append(len(rows)))
         with transaction(store.db):tracker.mark_youtube_groups(pause=False)
         print('batch sizes:',sizes)
         assert max(sizes,default=0)<=400

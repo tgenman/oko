@@ -56,11 +56,12 @@ class ReaderVersions:
             (SELECT greatest(next_at,blocked_until) FROM youtube_access WHERE id=1 AND greatest(next_at,blocked_until)>%s),
             (SELECT least(
                 (SELECT finished FROM reader_problems WHERE finished>%s AND id IS DISTINCT FROM %s AND incomplete_due IS NULL ORDER BY finished LIMIT 1),
-                (SELECT incomplete_due FROM reader_problems WHERE finished IS NULL AND incomplete_closes AND incomplete_due<=%s AND incomplete_due>%s ORDER BY incomplete_due LIMIT 1))),
+                (SELECT incomplete_due FROM reader_problems WHERE finished IS NULL AND incomplete_closes AND incomplete_due<=%s AND incomplete_due>%s ORDER BY incomplete_due LIMIT 1),
+                (SELECT p.youtube_admission_due FROM youtube_access y JOIN reader_problems p ON p.id=y.youtube_admission_problem_id WHERE y.id=1 AND p.finished IS NULL AND p.youtube_admission_due<=%s AND p.youtube_admission_due>%s))),
             (SELECT jsonb_build_array(next_at,blocked_until,strikes) FROM youtube_access WHERE id=1),
             (SELECT coalesce(jsonb_agg(jsonb_build_array(key,value) ORDER BY key),'[]'::jsonb)
              FROM state WHERE key='work-enabled' OR key='processor:codex' OR key LIKE 'feed-status:%%')""",
-            (reader_now(self.store.clock()),wall,wall,wall-86400,reserved_id,wall,wall-86400)).fetchone()
+            (reader_now(self.store.clock()),wall,wall,wall-86400,reserved_id,wall,wall-86400,wall,wall-86400)).fetchone()
         return (row[0],row[1],row[2],row[3],row[4],row[5]) if row else (None,None,None,None,None,None)
 
     def advance(self, now: float | None = None, wall: float | None = None) -> None:
@@ -71,6 +72,11 @@ class ReaderVersions:
             if self.db.execute('SELECT 1 FROM reader_problems WHERE incomplete_due IS NOT NULL AND incomplete_due<=%s LIMIT 1',(wall,)).fetchone():
                 from oko.storage import memberships
                 memberships.lock_graph(self.db)
+            if getattr(self.store,'youtube_admission_ready',False) and self.db.execute('SELECT 1 FROM youtube_access y JOIN reader_problems p ON p.id=y.youtube_admission_problem_id WHERE y.id=1 AND p.finished IS NULL AND p.youtube_admission_due IS NOT NULL AND p.youtube_admission_due<=%s LIMIT 1',(wall,)).fetchone():
+                from oko.storage import memberships
+                memberships.lock_graph(self.db)
+                from oko.storage.youtube_admission import finish_due
+                finish_due(self.store,wall)
             paused=self.store.problems.processor_youtube_paused(wall)
             if paused!=self._processor_youtube_paused:
                 from oko.storage import memberships,source_groups

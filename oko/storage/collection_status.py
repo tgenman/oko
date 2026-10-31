@@ -54,7 +54,7 @@ class CollectionStatus:
                 complete=source_groups.sync_transition(self.store,kind,before,after,self.wall(),evidence=evidence)
                 self.db.execute("UPDATE jobs SET source_event_owned=(%s=1) WHERE id=%s",(complete,job))
         mark=getattr(self.db,'incomplete_job_mark',None)
-        if mark is not None and changed['previous_feed']!=feed:mark(changed['kind'],changed['item'])
+        if mark is not None and changed['previous_feed']!=feed:mark(changed['kind'],changed['item'],job)
 
     def finish(self, job: Any, feed: str, data: dict[str, Any], elapsed: float, observation: dict[str, Any]) -> None:
         row = self.db.execute('SELECT * FROM jobs WHERE id = %s', (job.id,)).fetchone()

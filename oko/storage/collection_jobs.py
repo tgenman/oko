@@ -38,7 +38,7 @@ def interrupt(store: 'Store', feeds: set[str] | None = None, *, backoff: bool = 
             (until,store.clock()+max(0,until-store.wall_clock()) if until else 0,row['id']))
         if row['kind'] in ('fetch','download_media','filter','theses') and (row['problem_code'] or '').startswith('source-'):source_changed.append(row['id'])
         manager=getattr(store,'incomplete_draft',None)
-        if manager is not None:manager.mark_job(row['kind'],row['item'])
+        if manager is not None:manager.mark_job(row['kind'],row['item'],row['id'])
         if row['kind']=='discover' and (row['error'] is not None or row['problem_code'] is not None):
             store.problems.sync_discover(row['id'],store.wall_clock())
         if previous_fetch:
@@ -90,7 +90,7 @@ def fail(store: 'Store', job: 'Job', issue: AdapterIssue, *, cancelled: bool = F
         complete=source_groups.sync(store,job.kind,previous_source | source_groups.job_keys(store,job.id),store.wall_clock(),evidence=source_groups.job_evidence_many(store,[(job.id,changed['previous_code'])]))
         job_write(store.db,"UPDATE jobs SET source_event_owned=(%s=1) AND (problem_code LIKE 'source-%%') IS TRUE WHERE id=%s",(complete,job.id))
     store.problems.finish_processor_change([job.id],processor_previous,store.wall_clock())
-    store.incomplete_draft.mark_job(job.kind,job.item)
+    store.incomplete_draft.mark_job(job.kind,job.item,job.id)
     if job.kind=='discover':
         store.problems.sync_discover(job.id,store.wall_clock())
     if job.kind=='fetch':

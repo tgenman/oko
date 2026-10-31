@@ -74,7 +74,7 @@ class JobRepository:
         if job.kind=='discover':
             codes=((discover_before['problem_code'] or 'work-discover'),) if discover_before and (discover_before['problem_code'] is not None or discover_before['error'] is not None) else ()
             self.store.problems.sync_discover(job.id,self.store.wall_clock(),previous_codes=codes)
-        self.store.incomplete_draft.mark_job(job.kind,job.item)
+        self.store.incomplete_draft.mark_job(job.kind,job.item,job.id)
         if job.kind=='filter':
             self.store.processing.filter_changed(job.item)
 
@@ -305,7 +305,7 @@ class JobRepository:
         if changed and previous:self.store.problems.sync_fetch(job.id,previous,self.store.wall_clock())
         if changed and previous_media:self.store.problems.sync_media_problem(job.id,previous_media,self.store.wall_clock())
         if changed and previous_processing:self.store.problems.sync_processing_problem(job.id,previous_processing,self.store.wall_clock())
-        if changed:self.store.incomplete_draft.mark_job(job.kind,job.item)
+        if changed:self.store.incomplete_draft.mark_job(job.kind,job.item,job.id)
 
     def block(self, job: Job) -> None:
         if job.kind in ('fetch','download_media','filter','theses','delete','feed-delete'):
@@ -326,7 +326,7 @@ class JobRepository:
         if changed and previous:self.store.problems.sync_fetch(job.id,previous,self.store.wall_clock())
         if changed and previous_media:self.store.problems.sync_media_problem(job.id,previous_media,self.store.wall_clock())
         if changed and previous_processing:self.store.problems.sync_processing_problem(job.id,previous_processing,self.store.wall_clock())
-        if changed:self.store.incomplete_draft.mark_job(job.kind,job.item)
+        if changed:self.store.incomplete_draft.mark_job(job.kind,job.item,job.id)
 
     def manual(self, job: Job) -> bool:
         row=self.store.db.execute('SELECT manual_once FROM jobs WHERE id = %s AND generation = %s',(job.id,job.generation)).fetchone()
@@ -634,7 +634,7 @@ class JobRepository:
             if row['kind']=='filter':self.store.processing.filter_changed(row['item'])
             if row['kind']=='read':self.store.problems.sync_read_feed(row['item'],self.store.wall_clock())
             if row['kind']=='fetch' and previous_fetch:self.store.problems.sync_fetch(row['id'],previous_fetch,self.store.wall_clock())
-            self.store.incomplete_draft.mark_job(row['kind'],row['item'])
+            self.store.incomplete_draft.mark_job(row['kind'],row['item'],row['id'])
             if row['kind']=='download_media' and previous_media:self.store.problems.sync_media_problem(row['id'],previous_media,self.store.wall_clock())
             if row['kind'] in ('filter','theses') and previous_processing:self.store.problems.sync_processing_problem(row['id'],previous_processing,self.store.wall_clock())
             if row['kind']=='discover' and (row['error'] is not None or row['problem_code'] is not None):self.store.problems.sync_discover(row['id'],self.store.wall_clock())
@@ -673,7 +673,7 @@ class JobRepository:
                 self.store.problems.sync_media_problem(job.id,previous_media,self.store.wall_clock())
             if changed:
                 self.store.problems.finish_processor_change([job.id],processor_previous,self.store.wall_clock())
-                self.store.incomplete_draft.mark_job(job.kind,job.item)
+                self.store.incomplete_draft.mark_job(job.kind,job.item,job.id)
 
 
     def restore_telegram_wait(self, feed: str, deadline: float) -> None:
@@ -701,7 +701,7 @@ class JobRepository:
             source_ids=[row['id'] for row in changed if row['kind'] in ('fetch','download_media','filter','theses','delete','feed-delete') and (row['problem_code'] or '').startswith('source-')]
             if source_ids:source_groups.sync_jobs(self.store,source_ids,self.store.wall_clock())
             for row in changed:
-                self.store.incomplete_draft.mark_job(row['kind'],row['item'])
+                self.store.incomplete_draft.mark_job(row['kind'],row['item'],row['id'])
                 if row['kind']=='filter':self.store.processing.filter_changed(row['item'])
                 if row['kind']=='read':self.store.problems.sync_read_feed(row['item'],self.store.wall_clock())
                 if row['kind'] in ('delete','feed-delete') and (row['error'] is not None or row['problem_code'] is not None):
@@ -870,7 +870,7 @@ class JobRepository:
             if changed and job.kind=='discover':self.store.problems.sync_discover(job.id,self.store.wall_clock())
             if changed and previous_media:self.store.problems.sync_media_problem(job.id,previous_media,self.store.wall_clock())
             if changed:self.store.problems.finish_processor_change([job.id],processor_previous,self.store.wall_clock())
-            if changed:self.store.incomplete_draft.mark_job(job.kind,job.item)
+            if changed:self.store.incomplete_draft.mark_job(job.kind,job.item,job.id)
 
     def fail_media(self, job: Job, issue: AdapterIssue) -> None:
         collection_jobs.fail(self.store,job,issue,cancelled=issue.kind==AdapterErrorKind.media_changed)
@@ -883,7 +883,7 @@ class JobRepository:
             from oko.storage import source_groups
             source_groups.sync_changed_rows(self.store,[changed],self.store.wall_clock())
         if changed:self.store.problems.finish_processor_change([job.id],processor_previous,self.store.wall_clock())
-        if changed:self.store.incomplete_draft.mark_job(job.kind,job.item)
+        if changed:self.store.incomplete_draft.mark_job(job.kind,job.item,job.id)
 
     def source_http_until(self, scope: str) -> float:
         return self.store.source_http_until(scope)
@@ -1025,6 +1025,7 @@ class JobRepository:
             eligible_set=set(eligible)
             ineligible=[job_id for job_id in current if job_id not in eligible_set]
             if ineligible:job_write(self.store.db,"UPDATE jobs SET source_event_owned=false WHERE id=ANY(%s) AND source_event_owned",(ineligible,))
+            source_groups.notify_admission(self.store,eligible+ineligible)
 
     def sync_captured_deletions(self, effects: CollectionEffects) -> None:
         if effects.source_groups_before:
@@ -1218,6 +1219,7 @@ class JobRepository:
         self.store.fault('before_feed_claim_release')
         with self.store.db:
             memberships.lock_graph(self.store.db)
+            self.store.incomplete_draft.mark_admission_feed(feed)
             feed_exists = self.store.db.execute('SELECT 1 FROM feeds WHERE id=%s', (feed,)).fetchone() is not None
             affects_codex = feed_exists and self.store.problems.codex_choice(self.store.wall_clock(), feed=feed) is not None
             previous_problem = self.store.problems.deletion_candidates(job.id,self.store.wall_clock())
@@ -1329,7 +1331,7 @@ class JobRepository:
             from oko.storage import source_groups
             source_groups.sync_changed_rows(self.store,[changed],self.store.wall_clock())
         if changed and previous:self.store.problems.sync_media_problem(job.id,previous,self.store.wall_clock())
-        if changed:self.store.incomplete_draft.mark_job(job.kind,job.item)
+        if changed:self.store.incomplete_draft.mark_job(job.kind,job.item,job.id)
 
     def invalidate_processing(self) -> None:
         from oko.storage import memberships,source_groups

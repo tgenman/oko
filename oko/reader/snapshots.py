@@ -245,7 +245,8 @@ class YouTube(WireModel):
     has_password: StrictBool = Field(..., title='Has Password')
     has_username: StrictBool = Field(..., title='Has Username')
     mode: Literal['direct', 'proxy'] = Field(..., title='Mode')
-    next_at: StrictFloat = Field(..., title='Next At')
+    next_at: StrictFloat | None = Field(..., title='Next At')
+    time_unknown: StrictBool = False
     paused: StrictBool = Field(..., title='Paused')
     reason: StrictStr = Field(..., title='Reason')
     strikes: StrictInt = Field(..., title='Strikes')

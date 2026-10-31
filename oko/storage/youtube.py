@@ -45,10 +45,15 @@ class YouTubeAccess:
         wall = reader_wall(wall)
         config = self.config()
         row = self._limits()
+        from oko.storage.problems import _readable_timestamp
+        blocked_known=_readable_timestamp(row['blocked_until'])
+        next_known=_readable_timestamp(row['next_at'])
+        paused=not blocked_known or row['blocked_until']>wall
+        next_value=max(row['next_at'],row['blocked_until']) if blocked_known and next_known else float('inf')
         return dict(mode=config['mode'], address=config['address'], has_username=bool(config['username']),
-                    has_password=bool(config['password']), paused=row['blocked_until'] > wall,
-                    next_at=max(row['next_at'], row['blocked_until']), strikes=row['strikes'],
-                    reason='YouTube ограничил получение субтитров' if row['blocked_until'] > wall else '')
+                    has_password=bool(config['password']), paused=paused,
+                    next_at=next_value, strikes=row['strikes'],
+                    reason='YouTube ограничил получение субтитров' if paused else '')
 
     @reading_value
     def _limits(self) -> Row:
@@ -58,6 +63,8 @@ class YouTubeAccess:
 
     def ready_at(self) -> float:
         row = self._limits()
+        from oko.storage.problems import _readable_timestamp
+        if not _readable_timestamp(row['next_at']) or not _readable_timestamp(row['blocked_until']):return float('inf')
         return float(max(row['next_at'], row['blocked_until']))
 
     def start(self, wall: float) -> None:

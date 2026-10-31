@@ -1726,13 +1726,14 @@ def test_profile_problem_suppresses_publication_job_without_saved_job_feed(tmp_p
 
 def test_youtube_pause_counts_publication_when_job_feed_is_missing(tmp_path, postgres_url):
     from tests.support.storage import Store
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:1)
     try:
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','youtube','youtube','connected','[]')")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('item','youtube','item',0)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','item',true,true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','item','pending','paused','youtube-admission')")
+            store.incomplete_draft.mark_job('fetch','item')
             store.youtube.blocked(1,900)
         problems=store.problems.snapshot(2)['current']
         paused=next(p for p in problems if p['code']=='youtube-admission')

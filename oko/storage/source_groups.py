@@ -142,6 +142,13 @@ def project(store: 'Store', identity: str, kind: str, now: float) -> dict[str,An
     return result
 
 
+def notify_admission(store: 'Store', ids: list[int]) -> None:
+    """Capture changed source ownership before the enclosing commit."""
+    if not ids or not getattr(store,'youtube_admission_ready',False):return
+    from oko.storage.youtube_admission_jobs import capture_fetch_flag_changes
+    capture_fetch_flag_changes(store,ids)
+
+
 def sync(store: 'Store', kind: str, keys: set[str], now: float, *, exclude: set[int] | None = None, evidence: dict[str,set[tuple[str,str]]] | None = None) -> bool:
     """Synchronize the exact groups captured around a Job/graph mutation.
 
@@ -160,6 +167,7 @@ def sync(store: 'Store', kind: str, keys: set[str], now: float, *, exclude: set[
             _,_,members=group_snapshot(store,canonical,kind,now,exclude=exclude)
             ordered_members=sorted(members)
             for offset in range(0,len(ordered_members),400):store.db.execute('UPDATE jobs SET source_event_owned=false WHERE id=ANY(%s) AND source_event_owned',(ordered_members[offset:offset+400],))
+            notify_admission(store,ordered_members)
             complete=False
             continue
         row=matches[0] if matches else None
@@ -169,6 +177,7 @@ def sync(store: 'Store', kind: str, keys: set[str], now: float, *, exclude: set[
         if len(actual_codes)>1:
             ordered_members=sorted(members)
             for offset in range(0,len(ordered_members),400):store.db.execute('UPDATE jobs SET source_event_owned=false WHERE id=ANY(%s) AND source_event_owned',(ordered_members[offset:offset+400],))
+            notify_admission(store,ordered_members)
             complete=False
             continue
         if row is not None:
@@ -188,6 +197,7 @@ def sync(store: 'Store', kind: str, keys: set[str], now: float, *, exclude: set[
             if not valid:
                 ordered_members=sorted(members)
                 for offset in range(0,len(ordered_members),400):store.db.execute('UPDATE jobs SET source_event_owned=false WHERE id=ANY(%s) AND source_event_owned',(ordered_members[offset:offset+400],))
+                notify_admission(store,ordered_members)
                 complete=False
                 continue
         timer_key='source-youtube-timed:'+hashlib.sha256((kind+'\0'+canonical).encode()).hexdigest()
@@ -377,6 +387,7 @@ def recover(store: 'Store') -> None:
                     store.db.execute('UPDATE state s SET value=batch.value FROM unnest(%s::text[],%s::text[]) AS batch(key,value) WHERE s.key=batch.key',([r[0] for r in updates],[r[1] for r in updates]))
             eligible=[job_id for job_id,(kind,keys) in groups.items() if all(status.get((kind,key))=='done' for key in keys)]
             if eligible:store.db.execute("UPDATE jobs SET source_event_owned=(status IN ('pending','running','failed','unavailable','blocked') OR (kind='fetch' AND status='done' AND error IS NOT NULL)) WHERE id=ANY(%s) AND problem_code LIKE 'source-%%'",(eligible,))
+            notify_admission(store,eligible)
             cursor=ids[-1]
         store.fault('source_problem_recovery_batch')
     with store.db:
@@ -427,6 +438,7 @@ def sync_jobs(store: 'Store', job_ids: list[int], now: float) -> None:
         store.db.execute("UPDATE jobs SET source_event_owned=(status IN ('pending','running','failed','unavailable','blocked') OR (kind='fetch' AND status='done' AND error IS NOT NULL)) WHERE id=ANY(%s) AND problem_code LIKE 'source-%%'",(eligible[start:start+400],))
     for start in range(0,len(ineligible),400):
         store.db.execute("UPDATE jobs SET source_event_owned=false WHERE id=ANY(%s) AND source_event_owned",(ineligible[start:start+400],))
+    notify_admission(store,eligible+ineligible)
 
 
 def previous_keys_many(store: 'Store', rows: list[tuple[int,str]]) -> dict[int,tuple[str,set[str]]]:
@@ -466,6 +478,7 @@ def sync_changed_rows(store: 'Store', rows: list[Any], now: float) -> None:
         store.db.execute("UPDATE jobs SET source_event_owned=(status IN ('pending','running','failed','unavailable','blocked') OR (kind='fetch' AND status='done' AND error IS NOT NULL)) WHERE id=ANY(%s) AND problem_code LIKE 'source-%%'",(eligible[start:start+400],))
     for start in range(0,len(ineligible),400):
         store.db.execute("UPDATE jobs SET source_event_owned=false WHERE id=ANY(%s) AND source_event_owned",(ineligible[start:start+400],))
+    notify_admission(store,eligible+ineligible)
 
 
 def cleanup_legacy_protected(store: 'Store', cursor: str | None) -> tuple[str | None,bool]:

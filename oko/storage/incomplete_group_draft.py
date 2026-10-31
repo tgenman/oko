@@ -198,7 +198,6 @@ class TransactionGroupDraft:
     def __init__(self,store: Any) -> None:
         self.store=store
         self.flushing=False
-
     def clear(self) -> None:
         # SQL scratch is transaction-local and disappears on commit/rollback.
         pass
@@ -243,31 +242,45 @@ class TransactionGroupDraft:
             (SELECT count(*) FROM publications p WHERE p.incomplete_group_key COLLATE "C"=g.key)
             + (SELECT count(*) FROM pg_temp.oko_incomplete_work w WHERE w.old_key=g.key)''')
 
-    def mark_materials(self, items: list[str]) -> None:
+    def mark_materials(self, items: list[str], *, capture_admission: bool = True) -> bool:
         ordered=sorted({item for item in items if isinstance(item,str) and item})
-        self.mark(ordered)
+        relevant=self.mark(ordered)
+        if capture_admission and relevant and not self.flushing and getattr(self.store,'youtube_admission_ready',False):
+            from oko.storage.youtube_admission_jobs import capture_items
+            capture_items(self.store,ordered,relevant_checked=True,workset_ready=True)
         for start in range(0,len(ordered),100):
             batch=ordered[start:start+100]
             if not self.store.db.execute('SELECT 1 FROM publication_links WHERE target_publication_id=ANY(%s) LIMIT 1',(batch,)).fetchone():continue
             for rows in self.store.db.incomplete_row_pages('SELECT source_publication_id FROM publication_links WHERE target_publication_id=ANY(%s)',(batch,)):
                 self.mark([row['source_publication_id'] for row in rows])
+        return relevant
+
+    def mark_admission_feed(self, feed: str) -> None:
+        if self.flushing or not getattr(self.store,'youtube_admission_ready',False):return
+        from oko.storage.youtube_admission_jobs import capture_feed
+        capture_feed(self.store,feed)
 
     def mark_youtube_groups(self, *, pause: bool) -> None:
         db=self.store.db
+        admission_relevant=pause or (getattr(self.store,'youtube_admission_ready',False) and self.store.youtube.status(self.store.wall_clock())['paused'])
+        if admission_relevant and getattr(self.store,'youtube_admission_ready',False):
+            db.ensure_incomplete_workset()
+            db.ensure_youtube_admission_workset()
+            db.execute('INSERT INTO pg_temp.oko_youtube_admission_control VALUES (true) ON CONFLICT DO NOTHING')
         if pause:
             for rows in db.incomplete_row_pages("SELECT p.id FROM feeds f JOIN publications p ON p.incomplete_group_owner=f.id WHERE f.kind='youtube' AND p.incomplete_group_key IS NOT NULL"):
-                self.mark_materials([r['id'] for r in rows])
+                self.mark_materials([r['id'] for r in rows],capture_admission=False)
         # Caption waits also occur for a YouTube publication owned by another feed.
         for rows in db.incomplete_row_pages("""SELECT p.id FROM jobs j JOIN media_files m ON m.id=j.item
             JOIN publications p ON p.id=m.publication_id WHERE j.kind='download_media' AND j.status='pending'
             AND j.problem_code IS NULL AND m.resource_key='youtube:subtitles' AND p.incomplete_group_key IS NOT NULL"""):
-            self.mark_materials([r['id'] for r in rows])
+            self.mark_materials([r['id'] for r in rows],capture_admission=False)
         for rows in db.incomplete_row_pages("""SELECT kind,item FROM jobs WHERE kind='fetch' AND incomplete_youtube_sensitive AND problem_code IS NULL AND error IS NOT NULL
                 AND status IN ('pending','running','failed','unavailable','blocked')
             UNION ALL SELECT j.kind,j.item FROM jobs j JOIN media_files m ON m.id=j.item
                 WHERE j.kind='download_media' AND j.problem_code IS NULL AND j.error IS NOT NULL
                 AND j.status IN ('pending','running','failed','unavailable','blocked') AND m.resource_key='youtube:subtitles'"""):
-            self.mark_jobs([(row['kind'],row['item']) for row in rows])
+            self.mark_jobs([(row['kind'],row['item']) for row in rows],capture_admission=False)
 
     def mark_profile_feeds(self, feeds: set[str]) -> None:
         ordered=sorted(feeds)
@@ -278,7 +291,7 @@ class TransactionGroupDraft:
             for rows in self.store.db.incomplete_row_pages("SELECT kind,item FROM jobs WHERE feed_id=ANY(%s) AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')",(batch,)):
                 self.mark_jobs([(row['kind'],row['item']) for row in rows])
 
-    def mark_jobs(self, jobs: list[tuple[str,Any]]) -> None:
+    def mark_jobs(self, jobs: list[tuple[str,Any]], *, capture_admission: bool = True) -> bool:
         # Legacy generic status can resolve a media item's text ID as a
         # publication ID as well as through media_files; preserve both paths.
         roots: set[str]=set()
@@ -290,32 +303,62 @@ class TransactionGroupDraft:
         ordered=sorted(media)
         for start in range(0,len(ordered),400):
             roots.update(row['publication_id'] for row in self.store.db.execute('SELECT publication_id FROM media_files WHERE id=ANY(%s)',(ordered[start:start+400],)))
-        self.mark_materials(sorted(roots))
+        return self.mark_materials(sorted(roots),capture_admission=capture_admission)
 
-    def mark_job(self, kind: str, item: str) -> None:
-        self.mark_jobs([(kind,item)])
+    def mark_job(self, kind: str, item: str, job_id: int | None = None) -> None:
+        relevant=self.mark_jobs([(kind,item)],capture_admission=job_id is None)
+        if job_id is not None and kind in ('fetch','download_media') and not self.flushing and getattr(self.store,'youtube_admission_ready',False):
+            from oko.storage.youtube_admission_jobs import capture_ids
+            capture_ids(self.store,[job_id],relevant_checked=relevant,workset_ready=relevant)
 
-    def mark(self, items: list[str]) -> None:
-        if self.flushing or not items:return
+    def mark(self, items: list[str]) -> bool:
+        if self.flushing or not items:return False
         db=self.store.db
         if not db.in_transaction:raise RuntimeError('Incomplete event requires an open transaction')
         ordered=sorted({item for item in items if isinstance(item,str) and item})
-        if not ordered:return
-        db.ensure_incomplete_workset()
+        if not ordered:return False
+        relevant=db.ensure_incomplete_workset()
         for start in range(0,len(ordered),100):
             db.execute("""INSERT INTO pg_temp.oko_incomplete_work(item,old_key)
                 SELECT id,incomplete_group_key FROM publications WHERE id=ANY(%s)
                 AND (viewed=0 OR incomplete_group_key IS NOT NULL)
                 AND (incomplete_class IS DISTINCT FROM 1 OR incomplete_group_key IS NOT NULL OR NOT incomplete_group_ready)
                 ON CONFLICT(item) DO NOTHING""",(ordered[start:start+100],))
+        return bool(relevant)
 
     def flush(self) -> None:
         if self.flushing:return
         db=self.store.db
-        if db.execute("SELECT to_regclass('pg_temp.oko_incomplete_work')").fetchone()[0] is None:return
+        scratch=db.execute("SELECT to_regclass('pg_temp.oko_incomplete_work'),to_regclass('pg_temp.oko_youtube_admission_work')").fetchone()
+        if scratch[0] is None:return
         self.flushing=True
         try:
             now=self.store.wall_clock()
+            if getattr(self.store,'youtube_admission_ready',False) and scratch[1] is not None:
+                relevant=db.execute("SELECT EXISTS(SELECT 1 FROM pg_temp.oko_youtube_admission_work) OR EXISTS(SELECT 1 FROM pg_temp.oko_youtube_admission_control)").fetchone()[0]
+                if relevant:
+                    from oko.storage.youtube_admission_jobs import sync_captured,group_objects,apply_delta,has_unknown_objects
+                    from oko.storage.youtube_admission import sync,finish_due,close_current,current as current_admission
+                    finish_due(self.store,now)
+                    touched=sync_captured(self.store)
+                    changed=db.execute('SELECT 1 FROM pg_temp.oko_youtube_admission_control LIMIT 1').fetchone() is not None
+                    if touched or changed:
+                        limits=self.store.youtube._limits()
+                        status=self.store.youtube.status(now)
+                        from oko.storage.problems import _readable_timestamp
+                        if status['paused']:
+                            saved=current_admission(self.store)
+                            if saved is None:
+                                objects=group_objects(self.store)
+                            else:
+                                objects=apply_delta(self.store,[obj['id'] for obj in json.loads(saved['body'])['objects']])
+                            blocked=limits['blocked_until'] if _readable_timestamp(limits['blocked_until']) else None
+                            next_at=status['next_at'] if _readable_timestamp(status['next_at']) else None
+                            sync(self.store,objects,blocked,now,next_at=next_at,unknown=has_unknown_objects(self.store),time_unknown=next_at is None or blocked is None)
+                        else:close_current(self.store,now)
+                    db.execute('DELETE FROM pg_temp.oko_youtube_admission_delta')
+                    db.execute('DELETE FROM pg_temp.oko_youtube_admission_work')
+                    db.execute('DELETE FROM pg_temp.oko_youtube_admission_control')
             db.execute('INSERT INTO pg_temp.oko_incomplete_groups(key,is_old) SELECT DISTINCT old_key,true FROM pg_temp.oko_incomplete_work WHERE old_key IS NOT NULL ON CONFLICT(key) DO UPDATE SET is_old=true')
             due_exists=db.execute('SELECT 1 FROM reader_problems WHERE incomplete_due IS NOT NULL AND incomplete_due<=%s LIMIT 1',(now,)).fetchone() is not None
             if due_exists:self.update_group_weights()
@@ -566,6 +609,17 @@ def create_reservations_batch(store: Any, future: dict[str,dict[str,Any]], now: 
     return set(chosen)
 
 
+def youtube_finite_deadline(store: Any, now: float) -> float | None:
+    """Keep a known pause boundary even if the later admission time is unknown."""
+    from oko.storage.problems import _readable_timestamp
+    limits=store.youtube._limits()
+    blocked=limits['blocked_until']
+    next_at=limits['next_at']
+    if not _readable_timestamp(blocked):return None
+    if not _readable_timestamp(next_at):return float(blocked) if blocked>now else None
+    return float(max(next_at,blocked))
+
+
 def sync_groups_time_batch(store: Any, keys: list[str], now: float, previous_items: dict[str,set[str]] | None = None, sticky: set[str] | None = None) -> None:
     if not keys:return
     possible={key:reservation_pointers(key) for key in keys}
@@ -585,9 +639,8 @@ def sync_groups_time_batch(store: Any, keys: list[str], now: float, previous_ite
     if ordinary:
         now_candidates=group_candidates(store,ordinary,now,sticky)
         sync_groups_batch(store,ordinary,now,previous_items,sticky,now_candidates)
-        limits=store.youtube._limits()
-        deadline=max(limits['next_at'],limits['blocked_until'])
-        if deadline>now:
+        deadline=youtube_finite_deadline(store,now)
+        if deadline is not None and deadline>now:
             future=group_candidates(store,[key for key in ordinary if key not in now_candidates],deadline)
             ambiguous=[]
             if future:
@@ -599,8 +652,8 @@ def sync_groups_time_batch(store: Any, keys: list[str], now: float, previous_ite
             ambiguous_keys=set(ambiguous)
             create_reservations_batch(store,{key:value for key,value in future.items() if key not in ambiguous_keys},now,deadline)
     existing_current=sync_existing_reservations_batch(store,existing,now,previous_items,sticky,pointer_rows=rows) if existing else set()
-    limits=store.youtube._limits();deadline=max(limits['next_at'],limits['blocked_until'])
-    if deadline>now:schedule_current_groups(store,keys,now,deadline,(set(now_candidates) | existing_current) if existing_current is not None else None)
+    deadline=youtube_finite_deadline(store,now)
+    if deadline is not None and deadline>now:schedule_current_groups(store,keys,now,deadline,(set(now_candidates) | existing_current) if existing_current is not None else None)
     else:
         scheduled_rows=scheduled_group_rows(store,keys)
         valid_ids=[row['id'] for row in scheduled_rows if current_schedule(row) is not None]
@@ -691,7 +744,7 @@ def sync_existing_reservations_batch(store: Any, keys: list[str], now: float, pr
     current=group_candidates(store,list(valid),now,sticky)
     # Close stale current groups before computing future sticky visibility.
     inactive=[key for key in valid if key not in current]
-    if inactive:sync_groups_batch(store,inactive,now,previous_items,sticky)
+    if inactive:sync_groups_batch(store,inactive,now,previous_items,sticky,projected={})
     canonical={r['identity']:r for r in store.db.execute('SELECT id,identity,body FROM reader_problems WHERE identity=ANY(%s) AND finished IS NULL',(list(current),))} if current else {}
     activate={};foreign=[]
     for key,candidate in current.items():
@@ -728,12 +781,12 @@ def sync_existing_reservations_batch(store: Any, keys: list[str], now: float, pr
         if changed!=len(activations):raise RuntimeError('Incomplete reservation changed during activation')
         manager=getattr(store,'incomplete_draft',None)
         if manager is not None and manager.flushing:manager.materialize(row[0] for row in activations)
-    limits=store.youtube._limits();deadline=max(limits['next_at'],limits['blocked_until'])
-    future=group_candidates(store,inactive,deadline) if inactive and deadline>now else {}
+    deadline=youtube_finite_deadline(store,now)
+    future=group_candidates(store,inactive,deadline) if inactive and deadline is not None and deadline>now else {}
     updates=[];delete_ids=[]
     for key in inactive:
         saved=valid[key]
-        if key in future:
+        if key in future and deadline is not None:
             if saved['deadline']!=deadline or saved['future']!=reservation_body(key,deadline,future[key])['future']:
                 updates.append((saved['id'],json.dumps(reservation_body(key,deadline,future[key])),deadline))
         else:

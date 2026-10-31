@@ -100,12 +100,14 @@ class PostgresConnection:
                 yield batch
             if self._trace:self._trace('CLOSE incomplete cursor')
 
-    def ensure_incomplete_workset(self) -> None:
+    def ensure_incomplete_workset(self) -> bool:
         """Create transaction-local scratch state; rollback and commit discard it."""
         if not self.in_transaction or self._read_only:
             raise RuntimeError('Incomplete workset requires a write transaction')
-        if self._trace:self._trace("SELECT to_regclass('pg_temp.oko_incomplete_work')")
-        result=self._db.execute("SELECT to_regclass('pg_temp.oko_incomplete_work')").fetchone()
+        probe="""SELECT to_regclass('pg_temp.oko_incomplete_work'),
+            EXISTS(SELECT 1 FROM feeds WHERE kind='youtube' LIMIT 1) OR EXISTS(SELECT 1 FROM jobs WHERE youtube_admission_candidate LIMIT 1)"""
+        if self._trace:self._trace(probe)
+        result=self._db.execute(probe).fetchone()
         assert result is not None
         if result[0] is None:
             if self._trace:self._trace('CREATE TEMP TABLE oko_incomplete_work')
@@ -118,7 +120,21 @@ class PostgresConnection:
             self._db.execute('CREATE TEMP TABLE oko_incomplete_materialized (id text COLLATE "C" PRIMARY KEY) ON COMMIT DROP')
             if self._trace:self._trace('CREATE TEMP TABLE oko_incomplete_groups')
             self._db.execute('CREATE TEMP TABLE oko_incomplete_groups (key text COLLATE "C" PRIMARY KEY, is_old boolean NOT NULL DEFAULT false, weight bigint NOT NULL DEFAULT 0) ON COMMIT DROP')
+        return bool(result[1])
 
+    def ensure_youtube_admission_workset(self) -> None:
+        if not self.in_transaction or self._read_only:raise RuntimeError('Admission workset requires a write transaction')
+        probe="SELECT to_regclass('pg_temp.oko_youtube_admission_work')"
+        if self._trace:self._trace(probe)
+        result=self._db.execute(probe).fetchone()
+        assert result is not None
+        if result[0] is None:
+            if self._trace:self._trace('CREATE TEMP TABLE oko_youtube_admission_work')
+            self._db.execute('CREATE TEMP TABLE oko_youtube_admission_work (job_id bigint PRIMARY KEY, had_candidate boolean NOT NULL, old_objects jsonb NOT NULL) ON COMMIT DROP')
+            if self._trace:self._trace('CREATE TEMP TABLE oko_youtube_admission_control')
+            self._db.execute('CREATE TEMP TABLE oko_youtube_admission_control (refresh boolean PRIMARY KEY) ON COMMIT DROP')
+            if self._trace:self._trace('CREATE TEMP TABLE oko_youtube_admission_delta')
+            self._db.execute('CREATE TEMP TABLE oko_youtube_admission_delta (item text COLLATE "C" PRIMARY KEY) ON COMMIT DROP')
     def set_trace_callback(self, callback: Callable[[str], None] | None) -> None:
         """Observe native statement text without expanding bound values."""
         self._trace = callback

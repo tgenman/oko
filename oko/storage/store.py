@@ -130,6 +130,8 @@ class Store:
                 self.db.before_commit=self.incomplete_draft.flush
                 setattr(self.db,'incomplete_group_mark',self.incomplete_draft.mark_materials)
                 setattr(self.db,'incomplete_job_mark',self.incomplete_draft.mark_job)
+                setattr(self.db,'youtube_admission_feed_mark',self.incomplete_draft.mark_admission_feed)
+                if expect_row(self.db.execute('SELECT youtube_admission_recovered FROM youtube_access WHERE id=1').fetchone())[0]:self.youtube_admission_ready=True
             with self.db:
                 self.problems.sync_codex_choice(self.wall_clock())
                 self.problems.sync_profiles(self.wall_clock())
@@ -174,6 +176,28 @@ class Store:
                 self.db.before_commit=self.incomplete_draft.flush
                 setattr(self.db,'incomplete_group_mark',self.incomplete_draft.mark_materials)
                 setattr(self.db,'incomplete_job_mark',self.incomplete_draft.mark_job)
+                setattr(self.db,'youtube_admission_feed_mark',self.incomplete_draft.mark_admission_feed)
+            from oko.storage.youtube_admission_jobs import recover_flags,group_objects,has_unknown_objects
+            from oko.storage.youtube_admission import sync as sync_admission,close_current as close_admission
+            recover_flags(self)
+            self.youtube_admission_ready=True
+            with self.db:
+                from oko.storage.transaction import begin_write
+                begin_write(self.db)
+                now=self.wall_clock()
+                limits=self.youtube._limits()
+                status=self.youtube.status(now)
+                from oko.storage.problems import _readable_timestamp
+                if status['paused']:
+                    blocked=limits['blocked_until'] if _readable_timestamp(limits['blocked_until']) else None
+                    next_at=status['next_at'] if _readable_timestamp(status['next_at']) else None
+                    sync_admission(self,group_objects(self),blocked,now,next_at=next_at,unknown=has_unknown_objects(self),time_unknown=next_at is None or blocked is None)
+                else:close_admission(self,now)
+            from oko.storage.problems import _readable_timestamp
+            if not _readable_timestamp(self.youtube.ready_at()):
+                with self.db:
+                    membership_graph.lock_graph(self.db)
+                    self.incomplete_draft.mark_youtube_groups(pause=True)
             self.recover_files()
             if self.db.execute(f"SELECT 1 FROM ({owned_ids('= %s')}) owner LIMIT 1", ('demo','demo')).fetchone():
                 self.ensure_demo()

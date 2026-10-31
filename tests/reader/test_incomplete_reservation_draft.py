@@ -224,7 +224,7 @@ def test_ten_thousand_reservations_are_excluded_from_gc_and_expiry_probe(tmp_pat
         try:store.read_versions.time_boundaries()
         finally:store.db.set_trace_callback(None)
         q=next(q for q in queries if 'jsonb_build_array(next_at,blocked_until,strikes)' in q)
-        plan=store.db._db.execute('EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) '+q,(store.clock(),200000,200000,200000-86400,None,200000,200000-86400)).fetchone()[0][0]['Plan']
+        plan=store.db._db.execute('EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) '+q,(store.clock(),200000,200000,200000-86400,None,200000,200000-86400,200000,200000-86400)).fetchone()[0][0]['Plan']
         print('expiry probe rows',scan_rows(plan),'buffers',plan.get('Shared Hit Blocks'))
         assert scan_rows(plan)<1000
         store.read_versions.advance(wall=200000)

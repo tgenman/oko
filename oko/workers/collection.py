@@ -484,7 +484,7 @@ class CollectionWorker:
                             'telegram:account:'+str(native.read.user_id),datetime.fromtimestamp(self._wall_clock()+source_error.delay,timezone.utc))
                     if caption_attempt and caption_attempt.blocked:
                         issue=AdapterIssue(issue.code,issue.message,AdapterErrorKind.source_wait,download.publication,download.media.key,
-                            'youtube:captions',datetime.fromtimestamp(self.service.caption_ready(),timezone.utc))
+                            'youtube:captions',caption_retry_datetime(self.service.caption_ready()))
                     if issue.kind!=AdapterErrorKind.notice:
                         record_caught('runtime._execute_media')
                     self._media_failure(current,job, issue,None if issue.kind==AdapterErrorKind.notice else source_error or error)
@@ -563,6 +563,12 @@ class CollectionWorker:
                         self.jobs._media_jobs[lane] = job
                     self.jobs._lane_feeds[lane] = job.item if job.kind in ('discover', 'read', 'feed-delete') else self.service.feed(job.item)
                     self.jobs._lanes[lane] = asyncio.create_task(self._execute(job))
+
+
+def caption_retry_datetime(value: float) -> datetime | None:
+    """Unrepresentable admission deadlines remain explicitly unknown."""
+    try:return datetime.fromtimestamp(value,timezone.utc)
+    except (ValueError,OverflowError,OSError):return None
 
 
 class CaptionAttempt:

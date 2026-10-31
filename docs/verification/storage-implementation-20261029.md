@@ -1405,3 +1405,18 @@ with two Linux-only skips; mypy passed on 163 files and one Playwright processin
 scenario passed with a screenshot inspected. A synthetic 100-parent benchmark
 remains expensive due mostly to the existing graph path; contention and real
 production latency were not measured. No real model or database was used.
+
+
+YouTube admission now maintains its occurrence and contributor changes on
+events, with read-only virtual expiry at the blocked deadline before host tick.
+Synthetic checks cover ETag continuity, shared objects, graph and feed changes,
+legacy collisions, privacy, rollback, restart and bounded updates. Unknown or
+nonfinite deadlines are preserved and treated conservatively; caption network
+is not started for an unknown deadline. The integrated admission/YouTube/
+incomplete/processor/worker scope passed 575 PostgreSQL tests, mypy for ten
+modules and a restricted TEMP-role test; a persisted admission card was checked
+in Playwright with desktop/mobile screenshots. Earlier admission-only exact
+snapshot passed 616 tests; it did not include the later deadline fix. One
+Starlette/httpx warning was emitted. A pre-existing strikes=NULL legacy value
+can still cause HTTP 500; fixing it requires a separate API contract change.
+No working database was migrated.

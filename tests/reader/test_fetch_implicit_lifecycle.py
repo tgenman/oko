@@ -77,7 +77,7 @@ def test_recovery_preserves_unmarked_work_fetch_when_code_changed(tmp_path,postg
     finally:store.db.close()
 
 def test_youtube_admission_keeps_managed_fetch_material(tmp_path,postgres_url):
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:1)
     try:
         with transaction(store.db):
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
@@ -85,14 +85,16 @@ def test_youtube_admission_keeps_managed_fetch_material(tmp_path,postgres_url):
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','article',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','article','pending','failure','') RETURNING id").fetchone()[0]
             store.problems.sync_fetch(job,[],1)
+            store.incomplete_draft.mark_job('fetch','article')
             store.youtube.blocked(1,60)
-        problem=next(p for p in store.problems.candidates(2) if p['id']=='youtube:admission')
+        problem=next(p for p in store.problems.snapshot(2)['current'] if p['code']=='youtube-admission')
         assert dict(kind='material',id='article') in problem['objects']
     finally:store.db.close()
 
+
 def test_youtube_admission_does_not_scan_unrelated_fetch_jobs(tmp_path,postgres_url):
     from tests.support.postgres_work import scan_rows
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:1)
     try:
         with transaction(store.db):
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected','[]')")
@@ -100,15 +102,15 @@ def test_youtube_admission_does_not_scan_unrelated_fetch_jobs(tmp_path,postgres_
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('yt','article',true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','article','pending','failure','')")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) SELECT 'fetch','foreign-'||n,'pending','failure','' FROM generate_series(1,10000)n")
+            store.incomplete_draft.mark_job('fetch','article')
             store.youtube.blocked(1,60)
             store.db._db.execute('ANALYZE jobs')
-        sql=[];store.db.set_trace_callback(sql.append)
-        try:store.problems.candidates(2)
-        finally:store.db.set_trace_callback(None)
-        query=next(q for q in sql if q.startswith('WITH affected(id)'))
-        plan=store.db._db.execute('EXPLAIN (ANALYZE,FORMAT JSON) '+query,(['yt'],)*4).fetchone()[0][0]
+        problem=next(p for p in store.problems.snapshot(2)['current'] if p['code']=='youtube-admission')
+        assert dict(kind='material',id='article') in problem['objects']
+        plan=store.db._db.execute('EXPLAIN (ANALYZE,FORMAT JSON) SELECT id FROM jobs WHERE youtube_admission_candidate ORDER BY id LIMIT 100').fetchone()[0][0]
         assert scan_rows(plan['Plan'])<1000,plan
     finally:store.db.close()
+
 
 def test_present_to_null_fetch_handoff_keeps_occurrence(tmp_path,postgres_url):
     from oko.storage.fetch_job_problems import managed_candidates
@@ -171,7 +173,7 @@ def test_recovery_avoids_unrelated_null_fetch_legacy(tmp_path,postgres_url):
         pages=[q for q in sql if q.startswith('SELECT id,identity,body,created FROM reader_problems')]
         assert len(pages)<10,len(pages)
         from tests.support.postgres_work import scan_rows
-        query=next(q for q in sql if q.startswith('SELECT id,identity,body,substring('))
+        query=next(q for q in sql if q.startswith('SELECT r.*,target.item FROM unnest('))
         plan=store.db._db.execute('EXPLAIN (ANALYZE,FORMAT JSON) '+query,(['focus'],)).fetchone()[0][0]
         assert scan_rows(plan['Plan'])<1000,plan
     finally:store.db.close()

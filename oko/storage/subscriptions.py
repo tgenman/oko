@@ -160,10 +160,13 @@ class SubscriptionRepository:
         title = body.title or urlsplit(body.url).hostname or 'RSS'
         identity_id = self.new_feed_id()
         with self.db:
-            begin_write(self.db)
+            from oko.storage import memberships
+            memberships.lock_graph(self.db)
             folder = self.ensure_folder(body.folder)
             self.db.execute('INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport , public_ai ) VALUES ( %s , %s , %s , %s , %s , %s , %s , %s , %s )',
                             (identity_id, identity, title, kind, folder, json.dumps([body.url]), connection, kind, kind == 'youtube'))
+            marker=getattr(self.db,'youtube_admission_feed_mark',None)
+            if marker is not None and kind=='youtube':marker(identity_id)
             source_changed(self.db)
             self.details.created(identity_id)
             self.history.configure(identity_id, body.initial_history)

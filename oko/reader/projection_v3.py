@@ -210,7 +210,7 @@ def youtube(value: facts.YouTube | None) -> wire.YouTubeState:
         return wire.YouTubeState(mode='direct', address='', has_password=False, has_username=False,
             admission='ready', retry_at=None, strikes=0, reason=None)
     return wire.YouTubeState(mode=value.mode, address=value.address, has_password=value.has_password, has_username=value.has_username,
-        admission='paused' if value.paused else 'waiting' if value.next_at else 'ready',
+        admission='paused' if value.paused else 'waiting' if value.next_at or value.time_unknown else 'ready',
         retry_at=timestamp(value.next_at) if value.next_at else None, strikes=value.strikes,
         reason=wire.WaitingReason('youtube_rate_limited') if value.reason else None)
 

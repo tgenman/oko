@@ -237,7 +237,11 @@ class ReaderApplication:
 
 
     def youtube_status(self) -> dict[str, Any]:
-        return self.connections.youtube_status(self._wall_clock())
+        result=self.connections.youtube_status(self._wall_clock())
+        from oko.storage.problems import _readable_timestamp
+        if not _readable_timestamp(result['next_at']):
+            result=dict(result,next_at=None,time_unknown=True)
+        return result
 
 
     async def configure_youtube(self, body: Any) -> dict[str, Any]:
