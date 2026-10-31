@@ -80,7 +80,13 @@ def migrate(db: psycopg.Connection[Any], migrations: Sequence[Migration]) -> Non
                         raise SchemaMismatch('Migration 89 requires feeds in the current schema')
                     db.execute(sql.SQL('LOCK TABLE {}.{} IN ACCESS EXCLUSIVE MODE').format(
                         sql.Identifier(target[0]),sql.Identifier('feeds')))
+                    path_row=db.execute("SELECT current_setting('search_path')").fetchone()
+                    if not path_row:raise SchemaMismatch('Cannot read migration search_path')
+                    original_path=path_row[0]
+                    db.execute("SELECT set_config('search_path',format('pg_catalog,%%I,pg_temp',%s::text),true)",(target[0],))
                 db.execute(migration.sql, prepare=False)
+                if (migration.version, migration.name) == (89, 'feeds-config-jsonb'):
+                    db.execute("SELECT set_config('search_path',%s,true)",(original_path,))
                 db.execute('INSERT INTO oko_schema_migrations(version,name,checksum) VALUES (%s,%s,%s)',
                            (migration.version, migration.name, migration.checksum))
     finally:

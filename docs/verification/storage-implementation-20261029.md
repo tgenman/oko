@@ -1635,3 +1635,13 @@ schema names, insufficient lock permission, rollback and already-applied 089.
 The integrated migration/CLI suite passed 184 PostgreSQL tests, mypy and six
 Playwright status scenarios with a screenshot inspected. No working database
 was changed; release still needs the documented writer and backup procedure.
+
+
+The runner now protects migration 089 against temporary-table and function
+shadowing: during 089 it places pg_catalog first, then the qualified target
+schema, and restores the original search_path before subsequent migrations.
+Synthetic checks cover quoted schemas, a fake builtin, temp feeds, rollback,
+ledger and the subsequent 090 candidate. Independent review passed 36 tests;
+combined checking with candidate 090 passed 54 tests after fixing a test-only
+synthetic version collision. No existing migration checksum was modified. No
+working database was changed.
