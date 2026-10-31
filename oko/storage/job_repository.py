@@ -463,7 +463,7 @@ class JobRepository:
             placeholders = ','.join('%s' for _ in available) or "''"
             dependencies=available if dependency_feeds is None else dependency_feeds
             dependency_keys=','.join('%s' for _ in dependencies) or "''"
-            query += f""" AND id IN (
+            query += f""" AND kind IN ('delete','feed-delete','discover','read','fetch') AND id IN (WITH allowed AS MATERIALIZED (
                 SELECT id FROM jobs WHERE status='pending' AND kind IN ('delete','feed-delete')
                 UNION SELECT id FROM jobs WHERE status='pending' AND kind IN ('discover','read') AND item IN ({placeholders})
                 UNION SELECT id FROM jobs WHERE status='pending' AND kind='fetch' AND item IN (
@@ -472,7 +472,7 @@ class JobRepository:
                     UNION SELECT i.id FROM feed_publications owner JOIN publications root ON root.id=owner.publication_id
                         JOIN publication_links l ON l.source_publication_id=root.id JOIN publications i ON i.id=l.target_publication_id
                         WHERE owner.is_primary AND owner.is_unviewed AND owner.feed_id IN ({dependency_keys}) AND root.viewed=0 AND i.viewed=0
-                        AND NOT EXISTS (SELECT 1 FROM feed_publications m WHERE m.publication_id=i.id AND m.is_primary)))"""
+                        AND NOT EXISTS (SELECT 1 FROM feed_publications m WHERE m.publication_id=i.id AND m.is_primary))) SELECT id FROM allowed)"""
         if media_only:
             subtitles="SELECT 1 FROM media_files m JOIN publications i ON i . id = m . publication_id JOIN jsonb_array_elements(CASE WHEN jsonb_typeof(i.content::jsonb->'blocks')='array' THEN i.content::jsonb->'blocks' ELSE '[]'::jsonb END) b(value) ON b.value->>'media_id' = m.id WHERE m . id = jobs . item AND i . platform = 'youtube' AND b.value->>'role' = 'subtitles'"
             query += ' AND '+('EXISTS' if captions_only else 'NOT EXISTS')+' ('+subtitles+')'
@@ -589,12 +589,13 @@ class JobRepository:
                 WHERE publication_id=selected.id OFFSET 0
             ) m
             CROSS JOIN LATERAL (
-                SELECT j.* FROM jobs j
-                WHERE j.item=m.id AND j.kind='download_media'
-                    AND j.status='pending' AND j.next<=%s
+                WITH matching AS MATERIALIZED (
+                    SELECT * FROM jobs WHERE item=m.id AND kind='download_media'
+                ) SELECT j.* FROM matching j
+                WHERE j.status='pending' AND j.next<=%s
                     AND NOT (coalesce(j.problem_code,'')='ai-permission' AND j.error IS NOT NULL)
                     AND """ + (caption if captions else 'NOT '+caption) + """
-                ORDER BY j.id LIMIT 1
+                OFFSET 0
             ) candidate ORDER BY candidate.id LIMIT 1"""
         return self.store.db.execute(query, (feeds, dependencies, now)).fetchone()
 

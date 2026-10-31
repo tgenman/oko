@@ -1457,3 +1457,13 @@ and 16 Playwright status scenarios; a screenshot was inspected after rebuilding
 the generated frontend. One Starlette/httpx warning was emitted. Other profile
 codes and unresolved legacy fallback remain separate. No working database was
 migrated.
+
+
+Dispatch lookups now materialize the selected media and allowed IDs once,
+avoiding repeated scans of unrelated Jobs. One synthetic worst-order test with
+10,000 older foreign media Jobs read seven plan rows instead of 10,007. The
+integrated dispatch/history/worker suite passed 162 PostgreSQL tests, mypy for
+the changed module and 16 Playwright status scenarios with screenshot inspection.
+A separate independent review passed 19 tests. A pre-existing case with 10,000
+actually eligible fetch Jobs still reads about 60,000 plan rows on one selection;
+this optimization does not resolve that case. No working database was changed.
