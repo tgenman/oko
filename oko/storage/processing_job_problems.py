@@ -36,7 +36,7 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
             body: dict[str,Any]=dict(id=identity,code=code,section='object',title='Не удалось обработать материал',
                 consequence='Сохранённое содержимое остаётся доступным.',next_step='Включите обработку, чтобы повторить попытку.' if row['status']=='blocked' else 'Повторите загрузку вручную.' if row['status'] in ('done','failed') else 'Проверьте доступность источника.' if row['status']=='unavailable' else 'Око повторит попытку автоматически.',
                 objects=[],action=None,operation='producer:'+row['kind'],processing_kind=row['kind'],processing_owner=feed,_explicit_code=explicit_code,created_at=now,state='retrying' if row['status']=='running' or not row['error'] else 'current',finished_at=None,outcome=None,next_at=None)
-            if row['kind']=='filter' and row['problem_code'] in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'):body['filter_profile_event']=True
+            if row['kind'] in ('filter','theses') and row['problem_code'] in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'):body[row['kind']+'_profile_event']=True
             if row['error']:body['reason']=row['error']
             if code=='source-reconnect':body.update(section='action',next_step='Проверьте привязку источника; доступ не изменяется автоматически.')
             results[group]=body
@@ -60,11 +60,11 @@ def managed_candidates(store: 'Store', job_id: int, now: float) -> list[dict[str
     excluded={'codex-choice','ai-permission','youtube-admission','processor-config'}
     profiles={'identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'}
     return [dict({k:v for k,v in row.items() if k!='_explicit_code'},processing_job_id=str(job_id)) for row in rows
-            if row['code'] not in excluded and (row['code'] not in profiles or row.get('filter_profile_event')) and not row['code'].startswith('source-')]
+            if row['code'] not in excluded and (row['code'] not in profiles or (row.get('filter_profile_event') or row.get('theses_profile_event'))) and not row['code'].startswith('source-')]
 
 
 def managed_candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_suppressed: bool = False) -> dict[int,list[dict[str, Any]]]:
     excluded={'codex-choice','ai-permission','youtube-admission','processor-config'}
     profiles={'identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'}
     groups=candidates_many(store,job_ids,now,include_suppressed=include_suppressed)
-    return {job_id:[dict({k:v for k,v in row.items() if k!='_explicit_code'},processing_job_id=str(job_id)) for row in rows if row['code'] not in excluded and (row['code'] not in profiles or row.get('filter_profile_event')) and not row['code'].startswith('source-')] for job_id,rows in groups.items()}
+    return {job_id:[dict({k:v for k,v in row.items() if k!='_explicit_code'},processing_job_id=str(job_id)) for row in rows if row['code'] not in excluded and (row['code'] not in profiles or (row.get('filter_profile_event') or row.get('theses_profile_event'))) and not row['code'].startswith('source-')] for job_id,rows in groups.items()}

@@ -1930,6 +1930,49 @@ class Problems:
                 protect_rows(self.store,list(records));legacy_cursor=records[-1]['id']
             self.store.fault('filter_profile_legacy_protection_batch')
 
+    def recover_theses_profile_problems(self) -> None:
+        """Recover supported profile-coded theses jobs and preserve ambiguous legacy."""
+        from oko.storage import memberships
+        from oko.storage.processing_job_problems import managed_candidates_many
+        cursor: int | None=None
+        while True:
+            with self.db:
+                memberships.lock_graph(self.db)
+                if self.db.execute("SELECT 1 FROM state WHERE key='theses-profile-problems-recovered-v1'").fetchone():return
+                query="""SELECT id FROM jobs WHERE kind='theses' AND item IS NOT NULL AND item<>''
+                    AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')"""
+                if cursor is not None:query+=' AND id>%s'
+                rows=self.db.execute(query+' ORDER BY id LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
+                if not rows:break
+                now=self.store.wall_clock();ids=[row['id'] for row in rows]
+                before=managed_candidates_many(self.store,ids,now,include_suppressed=True)
+                visible=managed_candidates_many(self.store,ids,now)
+                for row in rows:
+                    old=before.get(row['id'],[]);current=visible.get(row['id'],[])
+                    suppressed=bool({part['id'] for part in old}-{part['id'] for part in current})
+                    self.sync_processing_problem(row['id'],old,now,allow_rekey=not suppressed)
+                cursor=rows[-1]['id']
+            self.store.fault('theses_profile_problems_recovery_batch')
+        legacy_cursor: str | None=None
+        while True:
+            with self.db:
+                memberships.lock_graph(self.db)
+                if self.db.execute("SELECT 1 FROM state WHERE key='theses-profile-problems-recovered-v1'").fetchone():return
+                query="""SELECT id,identity FROM reader_problems WHERE finished IS NULL AND identity LIKE 'job:%%'
+                    AND body::jsonb->>'code' IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')
+                    AND (identity LIKE '%%:theses:%%' OR body::jsonb->>'status_job_identity' LIKE '%%:theses:%%' OR body::jsonb->>'processing_job_identity' LIKE '%%:theses:%%')
+                    AND (body::jsonb->>'operation' IS NULL OR body::jsonb->>'operation' IN ('producer:status','producer:theses'))
+                    AND (body::jsonb->>'processing_job_id' IS NULL OR body::jsonb->>'theses_profile_event' IS DISTINCT FROM 'true')"""
+                if legacy_cursor is not None:query+=' AND id COLLATE "C">%s'
+                else:query=query.replace('%%','%')
+                records=self.db.execute(query+' ORDER BY id COLLATE "C" LIMIT 100',(legacy_cursor,) if legacy_cursor is not None else ()).fetchall()
+                if not records:
+                    self.db.execute("INSERT INTO state(key,value) VALUES ('theses-profile-problems-recovered-v1','true') ON CONFLICT DO NOTHING")
+                    return
+                from oko.storage.subtitle_problems import protect_rows
+                protect_rows(self.store,list(records));legacy_cursor=records[-1]['id']
+            self.store.fault('theses_profile_legacy_protection_batch')
+
     def recover_processing_problems(self) -> None:
         if self.db.execute("SELECT 1 FROM state WHERE key='processing-problems-recovered-v2'").fetchone():return
         def saved_job_id(value: Any) -> int | None:
@@ -2042,25 +2085,25 @@ class Problems:
         except (TypeError,ValueError):return False
         if not isinstance(body,dict) or body.get('code')!=candidate['code']:
             return False
-        if candidate.get('filter_profile_event'):
-            allowed_fields={'code','section','title','consequence','next_step','objects','action','operation','state','next_at','reason','processing_kind','processing_owner','processing_job_id','processing_job_identity','status_job_identity','status_job_target','filter_profile_event'}
+        if (candidate.get('filter_profile_event') or candidate.get('theses_profile_event')):
+            allowed_fields={'code','section','title','consequence','next_step','objects','action','operation','state','next_at','reason','processing_kind','processing_owner','processing_job_id','processing_job_identity','status_job_identity','status_job_target',candidate['processing_kind']+'_profile_event'}
             if set(body)-allowed_fields or body.get('action') is not None:return False
         operation=body.get('operation')
         objects=body.get('objects')
         if not isinstance(objects,list) or not objects or any(not isinstance(obj,dict) or obj.get('kind')!='material' or not isinstance(obj.get('id'),str) for obj in objects):return False
-        if candidate.get('filter_profile_event'):
-            if body.get('processing_kind','filter')!='filter' or any(set(obj)!={'kind','id'} for obj in objects):return False
+        if (candidate.get('filter_profile_event') or candidate.get('theses_profile_event')):
+            if body.get('processing_kind',candidate['processing_kind'])!=candidate['processing_kind'] or any(set(obj)!={'kind','id'} for obj in objects):return False
             if len({obj['id'] for obj in objects})!=len(objects):return False
         allowed={(obj.get('kind'),obj.get('id')) for obj in candidate['objects'] if isinstance(obj,dict)}
         if not all((obj.get('kind'),obj.get('id')) in allowed for obj in objects):return False
         status_identity=body.get('status_job_identity')
-        if candidate.get('filter_profile_event') and status_identity is not None:
+        if (candidate.get('filter_profile_event') or candidate.get('theses_profile_event')) and status_identity is not None:
             prefix='job:'+candidate['code']+':'
             tail=candidate['id'][len(prefix):] if candidate['id'].startswith(prefix) else ''
             owner=body.get('processing_job_id')
             kinds=('fetch','discover','download_media','filter','theses','read','delete','feed-delete')
             found=[kind for kind in kinds if ':'+kind+':' in tail]
-            return bool(operation in ('producer:status','producer:filter') and (owner is None or owner==candidate['processing_job_id']) and body.get('processing_kind','filter')=='filter' and body.get('processing_job_identity',candidate['id'])==candidate['id'] and status_identity==candidate['id'] and found==['filter'] and tail.count(':filter:')==1 and body.get('status_job_target')==tail.split(':filter:',1)[1])
+            return bool(operation in ('producer:status',candidate['operation']) and (owner is None or owner==candidate['processing_job_id']) and body.get('processing_kind',candidate['processing_kind'])==candidate['processing_kind'] and body.get('processing_job_identity',candidate['id'])==candidate['id'] and status_identity==candidate['id'] and found==[candidate['processing_kind']] and tail.count(':'+candidate['processing_kind']+':')==1 and body.get('status_job_target')==tail.split(':'+candidate['processing_kind']+':',1)[1])
         marker=body.get('processing_job_id')
         if marker is not None:
             return bool(operation==candidate['operation'] and marker==candidate['processing_job_id'] and body.get('processing_job_identity',candidate['id'])==candidate['id'])
@@ -2102,8 +2145,8 @@ class Problems:
         for start in range(0,len(ids),400):
             batch=ids[start:start+400]
             current=managed_candidates_many(self.store,batch,now)
-            profile_ids={row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE id=ANY(%s) AND kind='filter' AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')",(batch,))}
-            profile_ids.update(job for job in batch if any(part.get('filter_profile_event') for part in previous_by_job[job]))
+            profile_ids={row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE id=ANY(%s) AND kind IN ('filter','theses') AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')",(batch,))}
+            profile_ids.update(job for job in batch if any((part.get('filter_profile_event') or part.get('theses_profile_event')) for part in previous_by_job[job]))
             for job in sorted(profile_ids):self.sync_processing_problem(job,previous_by_job[job],now)
             batch=[job for job in batch if job not in profile_ids]
             if not batch:continue
@@ -2149,8 +2192,8 @@ class Problems:
     def sync_processing_problem(self, job_id: int, previous: list[dict[str,Any]], now: float, *, allow_rekey: bool = True) -> None:
         from oko.storage.processing_job_problems import managed_candidates
         candidates=managed_candidates(self.store,job_id,now)
-        profile=self.db.execute("SELECT 1 FROM jobs WHERE id=%s AND kind='filter' AND item IS NOT NULL AND item<>'' AND status IN ('pending','running','failed','unavailable','blocked') AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')",(job_id,)).fetchone()
-        self.db.execute("UPDATE jobs SET identity_event_owned=(%s=1) WHERE id=%s AND kind='filter' AND identity_event_owned IS DISTINCT FROM (%s=1)",(bool(profile),job_id,bool(profile)))
+        profile=self.db.execute("SELECT 1 FROM jobs WHERE id=%s AND kind IN ('filter','theses') AND item IS NOT NULL AND item<>'' AND status IN ('pending','running','failed','unavailable','blocked') AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')",(job_id,)).fetchone()
+        self.db.execute("UPDATE jobs SET identity_event_owned=(%s=1) WHERE id=%s AND kind IN ('filter','theses') AND identity_event_owned IS DISTINCT FROM (%s=1)",(bool(profile),job_id,bool(profile)))
         keys={candidate['id'] for candidate in previous+candidates}
         keys.update(candidate['_legacy_id'] for candidate in candidates if candidate.get('_legacy_id'))
         rows=self.db.execute('SELECT * FROM reader_problems WHERE finished IS NULL AND identity=ANY(%s)',(sorted(keys),)).fetchall() if keys else []
@@ -2159,10 +2202,10 @@ class Problems:
         if keys:
             for row in self.db.execute("SELECT *,body::jsonb->>'processing_job_identity' AS canonical FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation' IN ('producer:filter','producer:theses') AND body::jsonb->>'processing_job_identity'=ANY(%s)",(sorted(keys),)):
                 isolated.setdefault(row['canonical'],[]).append(row)
-            if any(candidate.get('filter_profile_event') for candidate in previous+candidates):
-                for row in self.db.execute("SELECT *,body::jsonb->>'status_job_identity' AS canonical FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation' IN ('producer:filter','producer:status') AND body::jsonb->>'status_job_identity'=ANY(%s)",(sorted(keys),)):
+            if any((candidate.get('filter_profile_event') or candidate.get('theses_profile_event')) for candidate in previous+candidates):
+                for row in self.db.execute("SELECT *,body::jsonb->>'status_job_identity' AS canonical FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation' IN ('producer:filter','producer:theses','producer:status') AND body::jsonb->>'status_job_identity'=ANY(%s)",(sorted(keys),)):
                     isolated.setdefault(row['canonical'],[]).append(row)
-        profile_related=any(candidate.get('filter_profile_event') for candidate in previous+candidates)
+        profile_related=any((candidate.get('filter_profile_event') or candidate.get('theses_profile_event')) for candidate in previous+candidates)
         protected: set[str]=set()
         if profile_related:
             possible={row['id'] for row in by_identity.values()}
@@ -2171,7 +2214,7 @@ class Problems:
             if marker_ids:protected={marker_ids[row['key']] for row in self.db.execute('SELECT key FROM state WHERE key=ANY(%s)',(list(marker_ids),))}
         trusted_previous: dict[str,str]={}
         for old_candidate in previous:
-            if not old_candidate.get('filter_profile_event'):continue
+            if not (old_candidate.get('filter_profile_event') or old_candidate.get('theses_profile_event')):continue
             possible_old=([by_identity[old_candidate['id']]] if old_candidate['id'] in by_identity else [])+isolated.get(old_candidate['id'],[])
             matches_old={row['id']:row for row in possible_old if row['id'] not in protected and self.processing_record_matches(row,old_candidate)}
             if len(matches_old)==1:trusted_previous[old_candidate['id']]=next(iter(matches_old))
@@ -2179,13 +2222,13 @@ class Problems:
             def matches(saved: Any) -> bool:
                 if saved['id'] in protected:return False
                 if self.processing_record_matches(saved,candidate):return True
-                return bool(any(candidate is part for part in candidates) and candidate.get('filter_profile_event') and trusted_previous.get(candidate['id'])==saved['id'])
+                return bool(any(candidate is part for part in candidates) and (candidate.get('filter_profile_event') or candidate.get('theses_profile_event')) and trusted_previous.get(candidate['id'])==saved['id'])
             for saved in isolated.get(candidate['id'],[]):
                 if matches(saved):return saved
             saved=by_identity.get(candidate['id'])
             return saved if saved and matches(saved) else None
         for candidate in previous+candidates:
-            if not candidate.get('filter_profile_event'):continue
+            if not (candidate.get('filter_profile_event') or candidate.get('theses_profile_event')):continue
             possible_rows=([by_identity[candidate['id']]] if candidate['id'] in by_identity else [])+isolated.get(candidate['id'],[])
             matches={row['id']:row for row in possible_rows if self.processing_record_matches(row,candidate)}
             if len(matches)>1:
@@ -2250,7 +2293,7 @@ class Problems:
             for target,prior_rows in assigned.items():
                 occupied=existing.get(target)
                 own=occupied if occupied and self.processing_record_matches(occupied,current[target]) else None
-                if own and current[target].get('filter_profile_event'):
+                if own and (current[target].get('filter_profile_event') or current[target].get('theses_profile_event')):
                     close_ids.extend(row['id'] for row in prior_rows)
                     continue
                 choices=sorted([*prior_rows,*([own] if own else [])],key=lambda row:(row['created'],row['id']))
@@ -3204,7 +3247,7 @@ class Problems:
             from oko.storage.processing_job_problems import managed_candidates_many as managed_filter_candidates
             for start in range(0,len(feeds_changed),100):
                 batch=feeds_changed[start:start+100]
-                query="""SELECT j.id FROM jobs j WHERE j.kind='filter'
+                query="""SELECT j.id FROM jobs j WHERE j.kind IN ('filter','theses')
                     AND j.problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')
                     AND (j.feed_id=ANY(%s) OR j.item IN (SELECT publication_id FROM feed_publications WHERE is_primary AND feed_id=ANY(%s))
                     OR j.item IN (SELECT l.target_publication_id FROM feed_publications f JOIN publication_links l ON l.source_publication_id=f.publication_id WHERE f.is_primary AND f.feed_id=ANY(%s)))"""
@@ -3230,7 +3273,7 @@ class Problems:
                 self.sync_identity_profile_transition({int(row['job_id']):row['previous'] for row in page},now)
             for page in self.db.incomplete_row_pages("SELECT w.job_id,w.previous FROM oko_identity_profile_work w JOIN jobs j ON j.id=w.job_id WHERE j.kind='download_media' ORDER BY w.job_id"):
                 for row in page:self.sync_media_problem(int(row['job_id']),row['previous'],now,allow_rekey=False)
-            for page in self.db.incomplete_row_pages("SELECT w.job_id,w.previous FROM oko_identity_profile_work w JOIN jobs j ON j.id=w.job_id WHERE j.kind='filter' ORDER BY w.job_id"):
+            for page in self.db.incomplete_row_pages("SELECT w.job_id,w.previous FROM oko_identity_profile_work w JOIN jobs j ON j.id=w.job_id WHERE j.kind IN ('filter','theses') ORDER BY w.job_id"):
                 for row in page:self.sync_processing_problem(int(row['job_id']),row['previous'],now,allow_rekey=False)
             self.db.execute('DELETE FROM oko_identity_profile_work')
         manager=getattr(self.store,'incomplete_draft',None)
@@ -3591,7 +3634,7 @@ class Problems:
                              for obj in json.loads(row['body'])['objects'] if obj['kind'] == 'feed'}
         groups: dict[str | tuple[str,str] | tuple[str,str,str], dict[str, Any]] = {}
         youtube = self.store.youtube.status(now)
-        source_owned_filter="AND NOT (kind IS NOT DISTINCT FROM 'filter' AND identity_event_owned AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND identity_event_owned AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) AND NOT (kind IN ('delete','feed-delete') AND deletion_extra_owned) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND problem_code IS NULL AND error IS NOT NULL AND media_null_owned) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') AND identity_event_owned) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND subtitle_event_owned) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND problem_code IS NULL AND error IS NOT NULL AND fetch_null_owned) AND NOT (kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code IS NOT NULL AND problem_code LIKE 'source-%' AND source_event_owned)" if scope_items is None else ''
+        source_owned_filter="AND NOT ((kind IS NOT DISTINCT FROM 'filter' OR kind IS NOT DISTINCT FROM 'theses') AND identity_event_owned AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND identity_event_owned AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) AND NOT (kind IN ('delete','feed-delete') AND deletion_extra_owned) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND problem_code IS NULL AND error IS NOT NULL AND media_null_owned) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') AND identity_event_owned) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND subtitle_event_owned) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND problem_code IS NULL AND error IS NOT NULL AND fetch_null_owned) AND NOT (kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code IS NOT NULL AND problem_code LIKE 'source-%' AND source_event_owned)" if scope_items is None else ''
         admission_filter="AND problem_code IS DISTINCT FROM 'youtube-admission'" if scope_items is None and getattr(self.store,'youtube_admission_ready',False) else ''
         subtitle_owned_filter='AND NOT j.subtitle_event_owned' if scope_items is None else ''
         item_join_filter=("(jobs.kind IS DISTINCT FROM 'download_media' OR left(jobs.problem_code,7)='source-' "

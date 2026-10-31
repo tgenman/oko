@@ -1615,3 +1615,12 @@ migration and Telegram scope passed 201 synthetic functional tests, mypy for
 two files and one Playwright Telegram scenario with screenshot inspection.
 Independent tests covered nested values, long numeric values, permissions,
 foreign views and rollback. No working database was migrated.
+
+
+The four profile-related codes on theses Jobs now use event updates and
+restart recovery, including profile suppression and separate linked roots.
+Ambiguous legacy records remain protected. The integrated theses/089 scope
+passed 199 PostgreSQL functional tests, mypy for six modules and six Playwright
+status cases with a screenshot inspected; independent review covered graph,
+colliding identities and rollback. One Starlette/httpx warning was emitted.
+No working database was changed.
