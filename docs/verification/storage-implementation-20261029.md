@@ -1446,3 +1446,14 @@ persisted subtitle card through a synthetic backend passed, with screenshots
 inspected. For one Job linked to many roots, each due page may reproject its
 related roots; 250 roots required three projections, and large fan-out cost
 remains to be improved. One warning was emitted. No working database migrated.
+
+
+Fetch identity-unconfirmed problems now use event-owned updates, with
+profile-based suppression and restartable recovery. Synthetic coverage includes
+shared roots, suppression/reopen, graph lock ordering, legacy occurrences,
+rollback and 1,000 affected Jobs with indexed access. The integrated profile/
+subtitle/fetch/status suite passed 141 PostgreSQL tests, mypy for seven modules
+and 16 Playwright status scenarios; a screenshot was inspected after rebuilding
+the generated frontend. One Starlette/httpx warning was emitted. Other profile
+codes and unresolved legacy fallback remain separate. No working database was
+migrated.

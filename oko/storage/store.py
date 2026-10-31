@@ -63,12 +63,14 @@ class Store:
     def save_telegram_profile(self, role: str, account: str, user_id: int, generation: int, checked: float) -> None:
         boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
         with boundary:
+            membership_graph.lock_graph(self.db)
             self.subscriptions.telegram.save_profile(role, account, user_id, generation, checked)
             self.problems.sync_profiles(checked, {role})
 
     def check_telegram_profile(self, role: str, generation: int, user_id: int | None, checked: float) -> bool:
         boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
         with boundary:
+            membership_graph.lock_graph(self.db)
             valid = self.subscriptions.telegram.checked(role, generation, user_id, checked)
             self.problems.sync_profiles(checked, {role})
             return valid
@@ -159,6 +161,7 @@ class Store:
             self.problems.recover_discover_problems()
             self.problems.recover_fetch_problems()
             self.problems.recover_fetch_null()
+            self.problems.recover_fetch_identity_unconfirmed()
             self.problems.recover_media_problems()
             self.problems.recover_subtitles()
             with self.db:

@@ -122,6 +122,17 @@ class PostgresConnection:
             self._db.execute('CREATE TEMP TABLE oko_incomplete_groups (key text COLLATE "C" PRIMARY KEY, is_old boolean NOT NULL DEFAULT false, weight bigint NOT NULL DEFAULT 0) ON COMMIT DROP')
         return bool(result[1])
 
+    def ensure_identity_profile_workset(self) -> None:
+        if not self.in_transaction or self._read_only:
+            raise RuntimeError('Profile workset requires a write transaction')
+        probe = "SELECT to_regclass('pg_temp.oko_identity_profile_work')"
+        if self._trace: self._trace(probe)
+        result = self._db.execute(probe).fetchone()
+        assert result is not None
+        if result[0] is None:
+            if self._trace: self._trace('CREATE TEMP TABLE oko_identity_profile_work')
+            self._db.execute('CREATE TEMP TABLE oko_identity_profile_work (job_id bigint PRIMARY KEY, previous jsonb NOT NULL) ON COMMIT DROP')
+
     def ensure_youtube_admission_workset(self) -> None:
         if not self.in_transaction or self._read_only:raise RuntimeError('Admission workset requires a write transaction')
         probe="SELECT to_regclass('pg_temp.oko_youtube_admission_work')"

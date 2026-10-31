@@ -711,6 +711,42 @@ class Problems:
             self.store.fault('fetch_null_recovery_batch')
         with self.db:self.db.execute("INSERT INTO state(key,value) VALUES ('fetch-null-recovered-v1','true') ON CONFLICT DO NOTHING")
 
+    def recover_fetch_identity_unconfirmed(self) -> None:
+        from oko.storage.transaction import begin_write
+        from oko.storage.fetch_job_problems import managed_candidates_many
+        cursor: int | None=None
+        while True:
+            with self.db:
+                begin_write(self.db)
+                self.db.execute('SELECT pg_advisory_xact_lock(hashtextextended(current_schema(),%s))',(746582095,))
+                if self.db.execute("SELECT 1 FROM state WHERE key='fetch-identity-unconfirmed-recovered-v1'").fetchone():return
+                from oko.storage import memberships
+                memberships.lock_graph(self.db)
+                sql="SELECT id FROM jobs WHERE kind='fetch' AND item IS NOT NULL AND item<>'' AND problem_code='identity-unconfirmed'"
+                if cursor is not None:sql+=' AND id>%s'
+                jobs=self.db.execute(sql+' ORDER BY id LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
+                if not jobs:
+                    self.db.execute("INSERT INTO state(key,value) VALUES ('fetch-identity-unconfirmed-recovered-v1','true') ON CONFLICT DO NOTHING")
+                    return
+                ids=[row['id'] for row in jobs]
+                now=self.store.wall_clock()
+                previous=managed_candidates_many(self.store,ids,now,include_suppressed=True)
+                current=managed_candidates_many(self.store,ids,now)
+                mixed={job_id:previous.get(job_id,[]) for job_id in ids if current.get(job_id)
+                    and {candidate['id'] for candidate in current[job_id]}!={candidate['id'] for candidate in previous.get(job_id,[])}}
+                if mixed:self.sync_identity_profile_transition(mixed,now)
+                active=[row for row in jobs if current.get(row['id']) and row['id'] not in mixed]
+                if active:
+                    complex_rows=self.recover_fetch_batch(active,now)
+                    complex_ids={row['id'] for row in complex_rows}
+                    simple_ids=[row['id'] for row in active if row['id'] not in complex_ids]
+                    if simple_ids:self.db.execute("UPDATE jobs SET identity_event_owned=true WHERE id=ANY(%s) AND problem_code='identity-unconfirmed' AND NOT fetch_null_ambiguous",(simple_ids,))
+                    for row in complex_rows:self.sync_fetch(row['id'],previous.get(row['id'],[]),now)
+                suppressed={job_id:previous.get(job_id,[]) for job_id in ids if not current.get(job_id)}
+                if suppressed:self.sync_identity_profile_transition(suppressed,now)
+                cursor=ids[-1]
+            self.store.fault('fetch_identity_unconfirmed_recovery_batch')
+
     def recover_fetch_problems(self) -> None:
         if self.db.execute("SELECT 1 FROM state WHERE key='fetch-problems-recovered-v2'").fetchone():
             self.recover_fetch_isolated_work()
@@ -843,7 +879,15 @@ class Problems:
         canonical_row=self.db.execute('SELECT id,identity,body FROM reader_problems WHERE identity=%s AND finished IS NULL',(candidate['id'],)).fetchone()
         return canonical_row if canonical_row and self.fetch_record_matches(canonical_row,candidate) else None
 
-    def sync_fetch(self, job_id: int, previous: list[dict[str,Any]], now: float) -> None:
+    def protect_foreign_identity_fetch(self, row: Any) -> None:
+        """Protect an occupied foreign occurrence without changing its contents."""
+        key='fetch-null-protected:'+hashlib.sha256(row['id'].encode()).hexdigest()
+        value=json.dumps(['oko-fetch-null-v2',row['id'],row['identity']])
+        self.db.execute('INSERT INTO state(key,value) VALUES (%s,%s) ON CONFLICT DO NOTHING',(key,value))
+        saved=self.db.execute('SELECT value FROM state WHERE key=%s',(key,)).fetchone()
+        if not saved or saved['value']!=value:raise RuntimeError('Conflicting fetch protection marker')
+
+    def sync_fetch(self, job_id: int, previous: list[dict[str,Any]], now: float, *, allow_rekey: bool = True) -> None:
         if getattr(self.store,'youtube_admission_ready',False):
             from oko.storage import memberships
             from oko.storage.youtube_admission_jobs import capture_fetch_flag_changes
@@ -859,7 +903,7 @@ class Problems:
             WHERE j.id=%s AND j.kind='fetch' AND (j.fetch_null_ambiguous OR (j.problem_code IS NULL AND j.error IS NOT NULL))""",(job_id,)).fetchall()
         if len(legacy)>=101:
             self.protect_fetch_null_legacy([job_id])
-            self.db.execute('UPDATE jobs SET fetch_null_owned=false,fetch_null_ambiguous=true WHERE id=%s',(job_id,))
+            self.db.execute('UPDATE jobs SET fetch_null_owned=false,fetch_null_ambiguous=true,identity_event_owned=false WHERE id=%s',(job_id,))
             return
         if previous and not candidates:
             from oko.storage.fetch_job_problems import candidates as all_candidates
@@ -881,7 +925,7 @@ class Problems:
                     isolated.setdefault(row['canonical'],[]).append(row)
             if any(len(rows)>=101 for rows in isolated.values()):
                 self.protect_fetch_null_legacy([job_id])
-                self.db.execute('UPDATE jobs SET fetch_null_owned=false,fetch_null_ambiguous=true WHERE id=%s',(job_id,))
+                self.db.execute('UPDATE jobs SET fetch_null_owned=false,fetch_null_ambiguous=true,identity_event_owned=false WHERE id=%s',(job_id,))
                 return  # Preserve ambiguous records and keep NULL failures visible through GET.
 
         self.db.execute('UPDATE jobs SET fetch_null_ambiguous=false WHERE id=%s AND fetch_null_ambiguous',(job_id,))
@@ -910,6 +954,7 @@ class Problems:
             kinds=('fetch','discover','download_media','filter','theses','read','delete','feed-delete')
             found=[kind for kind in kinds if ':'+kind+':' in tail]
             if not matched and (occupied or found!=['fetch'] or tail.count(':fetch:')!=1):
+                if occupied and candidate['code']=='identity-unconfirmed':self.protect_foreign_identity_fetch(occupied)
                 digest=hashlib.sha256(canonical.encode('utf-8')).hexdigest()
                 for _ in range(3):
                     alternate='job:fetch-isolated:'+digest+':'+new_read_problem_token()
@@ -920,7 +965,7 @@ class Problems:
         current={candidate['id']:candidate for candidate in candidates}
         old_ids={candidate['id'] for candidate in previous if candidate['id'] and candidate['id'] not in current}
         old_candidates={candidate['id']:candidate for candidate in previous if candidate['id']}
-        if current and old_ids:
+        if current and old_ids and allow_rekey:
             existing={row['identity']:row for row in self.db.execute('SELECT * FROM reader_problems WHERE finished IS NULL AND identity=ANY(%s)',(sorted(old_ids | set(current)),))}
             assigned: dict[str,list[Any]]={}
             for old in sorted((existing[identity] for identity in old_ids if identity in existing),key=lambda row:(row['created'],row['id'])):
@@ -982,6 +1027,7 @@ class Problems:
             self.db.execute("""INSERT INTO reader_problems(id,identity,origin,body,created,finished,outcome)
                 SELECT id,identity,origin,body,created,NULL,NULL FROM unnest(%s::text[],%s::text[],%s::text[],%s::text[],%s::double precision[]) AS p(id,identity,origin,body,created)""",tuple([row[i] for row in added] for i in range(5)))
         if updates or added:status_changed(self.db)
+        self.db.execute("UPDATE jobs SET identity_event_owned=(problem_code IS NOT DISTINCT FROM 'identity-unconfirmed' AND item IS NOT NULL AND item<>'' AND NOT fetch_null_ambiguous) WHERE id=%s AND identity_event_owned IS DISTINCT FROM (problem_code IS NOT DISTINCT FROM 'identity-unconfirmed' AND item IS NOT NULL AND item<>'' AND NOT fetch_null_ambiguous)",(job_id,))
 
     def active_media_roots(self, items: set[str]) -> set[str]:
         result: set[str]=set()
@@ -2534,7 +2580,46 @@ class Problems:
             groups[identity]['objects'].append(dict(kind='feed',id=saved_feed['id']))
         return groups
 
+    def sync_identity_profile_transition(self, before: dict[int,list[dict[str,Any]]], now: float) -> None:
+        """Batch unambiguous per-job profile suppression; fall back for complex history."""
+        from oko.storage.fetch_job_problems import managed_candidates_many
+        ordered=sorted(before)
+        for start in range(0,len(ordered),100):
+            ids=ordered[start:start+100]
+            after=managed_candidates_many(self.store,ids,now)
+            simple={job_id:parts[0] for job_id in ids if len(parts:=before[job_id])==1 and not after.get(job_id)}
+            keys=[candidate['id'] for candidate in simple.values()]
+            canonical={row['identity']:row for row in self.db.execute('SELECT id,identity,body FROM reader_problems WHERE finished IS NULL AND identity=ANY(%s)',(keys,))} if keys else {}
+            isolated: set[str]=set()
+            if keys:
+                for field in ('fetch_job_identity','status_job_identity'):
+                    for row in self.db.execute(f"""SELECT r.canonical FROM unnest(%s::text[]) t(canonical) CROSS JOIN LATERAL
+                        (SELECT body::jsonb->>'{field}' AS canonical FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:fetch' AND body::jsonb->>'{field}'=t.canonical LIMIT 1) r""",(keys,)):
+                        isolated.add(row['canonical'])
+            counts: dict[str,int]={}
+            for candidate in simple.values():counts[candidate['id']]=counts.get(candidate['id'],0)+1
+            closed=[];processed=set()
+            for job_id,candidate in simple.items():
+                saved_row=canonical.get(candidate['id'])
+                if counts[candidate['id']]==1 and candidate['id'] not in isolated and saved_row is not None and self.fetch_record_matches(saved_row,candidate):
+                    closed.append(saved_row['id']);processed.add(job_id)
+            if closed:
+                changed=self.db.execute("UPDATE reader_problems SET finished=%s,outcome='resolved' WHERE id=ANY(%s) AND finished IS NULL",(now,closed)).rowcount
+                if changed:status_changed(self.db)
+                self.db.execute("UPDATE jobs SET identity_event_owned=true WHERE id=ANY(%s) AND problem_code='identity-unconfirmed'",(sorted(processed),))
+            opening=[{'id':job_id} for job_id in ids if not before[job_id] and after.get(job_id)]
+            if opening:
+                complex_rows=self.recover_fetch_batch(opening,now)
+                complex_ids={row['id'] for row in complex_rows}
+                simple_ids=[row['id'] for row in opening if row['id'] not in complex_ids]
+                if simple_ids:self.db.execute("UPDATE jobs SET identity_event_owned=true WHERE id=ANY(%s) AND problem_code='identity-unconfirmed'",(simple_ids,))
+                processed.update(simple_ids)
+            for job_id in ids:
+                if job_id not in processed:self.sync_fetch(job_id,before[job_id],now,allow_rekey=False)
+
     def sync_profiles(self, now: float, roles: set[str] | None = None) -> None:
+        from oko.storage import memberships
+        memberships.lock_graph(self.db)
         if roles is None:
             previous = {row['identity']:row['body'] for row in self.db.execute("SELECT identity,body FROM reader_problems WHERE identity LIKE 'profile:%%' AND finished IS NULL")}
             identities = set(previous)
@@ -2561,6 +2646,25 @@ class Problems:
             candidates = self.profile_candidates(now,feeds,bindings)
         if roles is None:
             identities.update(candidates)
+        new_profile_feeds = {obj['id'] for group in candidates.values() for obj in group['objects'] if obj['kind']=='feed'}
+        old_profile_feeds = {obj['id'] for body in previous.values() for obj in json.loads(body)['objects'] if obj['kind']=='feed'}
+        profile_visibility_changed=new_profile_feeds ^ old_profile_feeds
+        if profile_visibility_changed:
+            self.db.ensure_identity_profile_workset()
+            self.db.execute('DELETE FROM oko_identity_profile_work')
+            from oko.storage.fetch_job_problems import managed_candidates_many
+            feeds_changed=sorted(profile_visibility_changed)
+            for start in range(0,len(feeds_changed),100):
+                batch=feeds_changed[start:start+100]
+                for jobs in self.db.incomplete_row_pages("""SELECT * FROM (WITH roots AS MATERIALIZED (SELECT publication_id FROM feed_publications WHERE is_primary AND feed_id=ANY(%s)),
+                    affected AS MATERIALIZED (SELECT publication_id AS item FROM roots UNION SELECT l.target_publication_id FROM roots r JOIN publication_links l ON l.source_publication_id=r.publication_id)
+                    SELECT j.id FROM affected a CROSS JOIN LATERAL (SELECT id FROM jobs WHERE kind='fetch' AND item=a.item AND problem_code='identity-unconfirmed' OFFSET 0) j
+                    UNION SELECT j.id FROM unnest(%s::text[]) AS f(feed) CROSS JOIN LATERAL (SELECT id FROM jobs WHERE kind='fetch' AND problem_code='identity-unconfirmed' AND feed_id IS NOT NULL AND md5(feed_id)=md5(f.feed) AND feed_id=f.feed OFFSET 0) j) AS matching_jobs""",(batch,batch)):
+                    fetch_ids=[int(row['id']) for row in jobs]
+                    previous_candidates=managed_candidates_many(self.store,fetch_ids,now)
+                    self.db.execute("""INSERT INTO oko_identity_profile_work(job_id,previous)
+                        SELECT item.id,item.previous::jsonb FROM unnest(%s::bigint[],%s::text[]) AS item(id,previous)
+                        ON CONFLICT (job_id) DO NOTHING""",(fetch_ids,[json.dumps(previous_candidates.get(job_id,[])) for job_id in fetch_ids]))
         for identity in sorted(identities):
             candidate = candidates.get(identity)
             outcome = 'resolved'
@@ -2572,6 +2676,10 @@ class Problems:
         old_profile_feeds = {obj['id'] for body in previous.values() for obj in json.loads(body)['objects'] if obj['kind']=='feed'}
         affected = new_profile_feeds | old_profile_feeds
         profile_visibility_changed=new_profile_feeds ^ old_profile_feeds
+        if profile_visibility_changed:
+            for page in self.db.incomplete_row_pages('SELECT job_id,previous FROM oko_identity_profile_work ORDER BY job_id'):
+                self.sync_identity_profile_transition({int(row['job_id']):row['previous'] for row in page},now)
+            self.db.execute('DELETE FROM oko_identity_profile_work')
         manager=getattr(self.store,'incomplete_draft',None)
         if manager is not None and profile_visibility_changed:
             from oko.storage.transaction import begin_write
@@ -2930,7 +3038,7 @@ class Problems:
                              for obj in json.loads(row['body'])['objects'] if obj['kind'] == 'feed'}
         groups: dict[str | tuple[str,str] | tuple[str,str,str], dict[str, Any]] = {}
         youtube = self.store.youtube.status(now)
-        source_owned_filter="AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND subtitle_event_owned) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND problem_code IS NULL AND error IS NOT NULL AND fetch_null_owned) AND NOT (kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code IS NOT NULL AND problem_code LIKE 'source-%' AND source_event_owned)" if scope_items is None else ''
+        source_owned_filter="AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND problem_code='identity-unconfirmed' AND identity_event_owned) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND subtitle_event_owned) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND problem_code IS NULL AND error IS NOT NULL AND fetch_null_owned) AND NOT (kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code IS NOT NULL AND problem_code LIKE 'source-%' AND source_event_owned)" if scope_items is None else ''
         admission_filter="AND problem_code IS DISTINCT FROM 'youtube-admission'" if scope_items is None and getattr(self.store,'youtube_admission_ready',False) else ''
         subtitle_owned_filter='AND NOT j.subtitle_event_owned' if scope_items is None else ''
         jobs = self.db.execute(f"SELECT jobs . * , coalesce ( {owner_expr('items')} , {owner_expr('media_owner')} , {owner_expr('linked_root')} ) AS resolved_feed_id , coalesce ( items . viewed , media_owner . viewed ) AS viewed , m . resource_key AS resource_key , coalesce ( linked_root . id , m . publication_id , jobs . item ) AS affected_item FROM (SELECT * FROM (SELECT * FROM jobs WHERE {direct_scope}kind IS DISTINCT FROM 'read' AND kind IS DISTINCT FROM 'discover' AND problem_code IS DISTINCT FROM 'processor-config' AND NOT ((kind IS NOT DISTINCT FROM 'filter' OR kind IS NOT DISTINCT FROM 'theses') AND item IS NOT NULL AND item<>'' AND (((problem_code='' OR (problem_code IS NULL AND error IS NOT NULL))) OR (problem_code IS NOT NULL AND problem_code<>'' AND problem_code NOT LIKE '{source_like}' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')))) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL AND problem_code NOT LIKE '{source_like}' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') AND NOT fetch_null_ambiguous) AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')) AND (problem_code IS NOT NULL OR error IS NOT NULL) {source_owned_filter} {admission_filter} AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL AND problem_code NOT LIKE '{source_like}' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) UNION ALL SELECT j.* FROM media_files subtitle JOIN jobs j ON j.kind='download_media' AND j.item=subtitle.id WHERE {media_scope}subtitle.resource_key='youtube:subtitles' AND j.kind='download_media' {subtitle_owned_filter} AND j.item IS NOT NULL AND j.item<>'' AND j.problem_code IS NOT NULL AND j.problem_code NOT LIKE '{source_like}' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) status_jobs ORDER BY kind,item OFFSET 0) jobs LEFT JOIN publications items ON items . id = jobs . item LEFT JOIN media_files m ON jobs . kind = 'download_media' AND m . id = jobs . item LEFT JOIN publications media_owner ON media_owner . id = m . publication_id LEFT JOIN publication_links link ON link . target_publication_id = coalesce ( items . id , media_owner . id ) LEFT JOIN publications linked_root ON linked_root . id = link . source_publication_id AND linked_root . viewed = 0 WHERE ( jobs . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' , 'blocked' ) OR ( jobs . status = 'done' AND jobs . kind = 'fetch' AND jobs . problem_code IS NOT NULL AND jobs . error IS NOT NULL ) ) AND ( jobs . problem_code IS NOT NULL OR jobs . error IS NOT NULL ) AND jobs.kind IS DISTINCT FROM 'read' AND jobs.problem_code IS DISTINCT FROM 'processor-config' AND NOT (jobs.kind IN ('delete','feed-delete') AND coalesce(nullif(jobs.problem_code,''),'work-'||jobs.kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))",parameters).fetchall()
