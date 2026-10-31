@@ -1572,3 +1572,13 @@ writer. The integrated snapshot passed 182 PostgreSQL tests, mypy on 167 files,
 16 Playwright status scenarios and a persisted synthetic media card; desktop
 and mobile screenshots were inspected. The first temporary build attempt failed
 during typecheck, and a repeated build succeeded. No working database changed.
+
+
+Non-subtitle media Jobs with the four profile-related error codes now use
+event updates and restart recovery, including profile suppression and separate
+linked roots. The integrated synthetic suite passed 163 PostgreSQL tests,
+mypy on 167 files, 16 Playwright status scenarios and one persisted profile
+media card; desktop/mobile screenshots were inspected. The first temporary
+browser build failed during fixture preparation; the repeat succeeded. The
+worker accepts these codes from AdapterIssue, although a built-in media adapter
+producing them was not identified. No working database was changed.

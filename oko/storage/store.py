@@ -168,6 +168,7 @@ class Store:
             self.problems.recover_fetch_identity_unconfirmed(additional=True)
             self.problems.recover_media_problems()
             self.problems.recover_media_null_problems()
+            self.problems.recover_media_profile_problems()
             self.problems.recover_subtitles()
             with self.db:
                 self.problems.recover_processor_duplicates(self.wall_clock())
