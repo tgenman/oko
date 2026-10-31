@@ -249,7 +249,7 @@ class YouTube(WireModel):
     time_unknown: StrictBool = False
     paused: StrictBool = Field(..., title='Paused')
     reason: StrictStr = Field(..., title='Reason')
-    strikes: StrictInt = Field(..., title='Strikes')
+    strikes: StrictInt | None = Field(..., title='Strikes')
 
 class CodexState(WireModel):
     model_config = ConfigDict(extra='forbid')

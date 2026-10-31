@@ -1420,3 +1420,15 @@ snapshot passed 616 tests; it did not include the later deadline fix. One
 Starlette/httpx warning was emitted. A pre-existing strikes=NULL legacy value
 can still cause HTTP 500; fixing it requires a separate API contract change.
 No working database was migrated.
+
+
+The YouTube API contract now represents an unknown legacy strikes count as a
+required nullable integer. Reads preserve NULL; a new block uses a conservative
+maximum backoff when the count is unknown, and successful completion resets it.
+Synthetic HTTP/rollback tests (26) and worker/backoff tests (13) passed in a
+copy with the changed files matching the task checkout; API generation check,
+frontend build, mypy and a persisted-card Playwright check passed there with
+desktop/mobile screenshots inspected. On the task checkout itself 23 tests
+passed and three infrastructure checks could not use its stale frontend build
+or write the protected scratch cache; those failures were not represented as
+passes. No working database or real YouTube account was used.

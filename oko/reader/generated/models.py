@@ -1304,6 +1304,16 @@ class WorkWaiting(WireModel):
     retry_at: Timestamp | None
 
 
+class Strikes(RootModel[StrictInt]):
+    model_config = ConfigDict(allow_inf_nan=False)
+    root: StrictInt = Field(
+        ...,
+        description="Number of consecutive limits, or null when the legacy value is unknown.",
+        ge=0,
+        le=9007199254740991,
+    )
+
+
 class YouTubeState(WireModel):
     model_config = ConfigDict(extra="forbid")
     address: StrictStr
@@ -1313,7 +1323,10 @@ class YouTubeState(WireModel):
     mode: Literal["direct", "proxy"]
     reason: WaitingReason | None
     retry_at: Timestamp | None
-    strikes: StrictInt = Field(..., ge=0, le=9007199254740991)
+    strikes: Strikes | None = Field(
+        ...,
+        description="Number of consecutive limits, or null when the legacy value is unknown.",
+    )
 
 
 class YoutubeSourceReference(WireModel):

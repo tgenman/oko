@@ -2922,7 +2922,10 @@ export type YouTubeState = {
     mode: 'direct' | 'proxy';
     reason: WaitingReason | null;
     retry_at: Timestamp | null;
-    strikes: number;
+    /**
+     * Number of consecutive limits, or null when the legacy value is unknown.
+     */
+    strikes: number | null;
 };
 
 export type YoutubeSourceReference = {

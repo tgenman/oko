@@ -208,10 +208,10 @@ def work(jobs: list['WorkSummary']) -> list[wire.WorkEntry]:
 def youtube(value: facts.YouTube | None) -> wire.YouTubeState:
     if value is None:
         return wire.YouTubeState(mode='direct', address='', has_password=False, has_username=False,
-            admission='ready', retry_at=None, strikes=0, reason=None)
+            admission='ready', retry_at=None, strikes=wire.Strikes(0), reason=None)
     return wire.YouTubeState(mode=value.mode, address=value.address, has_password=value.has_password, has_username=value.has_username,
         admission='paused' if value.paused else 'waiting' if value.next_at or value.time_unknown else 'ready',
-        retry_at=timestamp(value.next_at) if value.next_at else None, strikes=value.strikes,
+        retry_at=timestamp(value.next_at) if value.next_at else None, strikes=wire.Strikes(value.strikes) if value.strikes is not None else None,
         reason=wire.WaitingReason('youtube_rate_limited') if value.reason else None)
 
 

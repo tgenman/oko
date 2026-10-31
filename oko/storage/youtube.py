@@ -82,8 +82,16 @@ class YouTubeAccess:
             if self.store.problems.processor_resume_candidate(wall):
                 self.store.problems.finish_processor_change([],None,wall)
             previous=self.store.problems.prepare_processor_pause(wall)
-            strikes = min(6, expect_row(self.db.execute('SELECT strikes FROM youtube_access WHERE id = 1').fetchone())[0] + 1)
-            until = wall + max(min(900 * 2 ** (strikes - 1), 21600), retry_after)
+            row = expect_row(self.db.execute('SELECT strikes, blocked_until FROM youtube_access WHERE id = 1').fetchone())
+            strikes = None if row['strikes'] is None else min(6, row['strikes'] + 1)
+            delay = 21600 if strikes is None else min(900 * 2 ** (strikes - 1), 21600)
+            until = wall + max(delay, retry_after)
+            if strikes is None:
+                from oko.storage.problems import _readable_timestamp
+                if _readable_timestamp(row['blocked_until']):
+                    until = max(until, row['blocked_until'])
+                else:
+                    until = row['blocked_until']
             self.db.execute('UPDATE youtube_access SET strikes = %s , blocked_until = %s WHERE id = 1', (strikes, until))
             source_groups.sync_youtube_timer(self.store,wall)
             manager=getattr(self.store,'incomplete_draft',None)
