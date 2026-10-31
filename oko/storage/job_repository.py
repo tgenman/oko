@@ -170,6 +170,23 @@ class JobRepository:
         # The common claim code retains monotonic generations and interrupted choices.
         return self.store.jobs.next_job(now,ai_only=True,processing_kind=kind)
 
+    def _revoke_running_input(self, row: Any) -> None:
+        previous=self.store.problems.saved_processing_candidates([row['id']]).get(row['id'],[]) if row['error'] is not None or row['problem_code'] is not None else []
+        processor_previous=self.store.problems.prepare_processor_change([row['id']],self.store.wall_clock())
+        changed=job_write(self.store.db, """UPDATE jobs SET status='pending',generation=generation+1,input_snapshot=NULL,
+            next=CASE WHEN wait_scope IS NOT NULL AND retry_at>%s THEN next ELSE 0 END,
+            error=CASE WHEN wait_scope IS NOT NULL AND retry_at>%s THEN error ELSE NULL END,
+            problem_code=CASE WHEN wait_scope IS NOT NULL AND retry_at>%s THEN problem_code ELSE NULL END
+            WHERE id=%s AND status='running' AND generation=%s RETURNING id,OLD.problem_code AS previous_code""",
+            (self.store.wall_clock(),self.store.wall_clock(),self.store.wall_clock(),row['id'],row['generation'])).fetchone()
+        if changed:
+            if (changed['previous_code'] or '').startswith('source-'):
+                from oko.storage import source_groups
+                source_groups.sync_changed_rows(self.store,[changed],self.store.wall_clock())
+            self.store.problems.finish_processor_change([row['id']],processor_previous,self.store.wall_clock())
+            if previous:self.store.problems.sync_processing_problem(row['id'],previous,self.store.wall_clock())
+            self.store.incomplete_draft.mark_materials([row['item']])
+
     def revoke_changed_running_inputs(self) -> None:
         """Settings writes revoke only running attempts whose stage input changed."""
         memberships.lock_graph(self.store.db)
@@ -178,21 +195,43 @@ class JobRepository:
             FROM jobs WHERE status='running' AND kind IN ('filter','theses')""").fetchall()
         for row in rows:
             if row['signature'] is None or signature(self.store,row['item'],row['kind']) != row['signature']:
-                previous=self.store.problems.saved_processing_candidates([row['id']]).get(row['id'],[]) if row['error'] is not None or row['problem_code'] is not None else []
-                processor_previous=self.store.problems.prepare_processor_change([row['id']],self.store.wall_clock())
-                changed=job_write(self.store.db, """UPDATE jobs SET status='pending',generation=generation+1,input_snapshot=NULL,
-                    next=CASE WHEN wait_scope IS NOT NULL AND retry_at>%s THEN next ELSE 0 END,
-                    error=CASE WHEN wait_scope IS NOT NULL AND retry_at>%s THEN error ELSE NULL END,
-                    problem_code=CASE WHEN wait_scope IS NOT NULL AND retry_at>%s THEN problem_code ELSE NULL END
-                    WHERE id=%s AND status='running' AND generation=%s AND CASE WHEN problem_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING id,OLD.problem_code AS previous_code""",
-                    (self.store.wall_clock(),self.store.wall_clock(),self.store.wall_clock(),row['id'],row['generation'])).fetchone()
-                if changed:
-                    if (changed['previous_code'] or '').startswith('source-'):
-                        from oko.storage import source_groups
-                        source_groups.sync_changed_rows(self.store,[changed],self.store.wall_clock())
-                    self.store.problems.finish_processor_change([row['id']],processor_previous,self.store.wall_clock())
-                    if previous:self.store.problems.sync_processing_problem(row['id'],previous,self.store.wall_clock())
-                    self.store.incomplete_draft.mark_materials([row['item']])
+                self._revoke_running_input(row)
+
+    def invalidate_source_url_inputs(self, item: str) -> None:
+        """Retain results but invalidate attempts and provenance involving a changed source URL."""
+        memberships.lock_graph(self.store.db)
+        target_query="""SELECT id,processing_metadata FROM publications WHERE id=%s
+            UNION SELECT p.id,p.processing_metadata FROM publication_links l
+            JOIN publications p ON p.id=l.source_publication_id WHERE l.target_publication_id=%s"""
+        for targets in self.store.db.incomplete_row_pages(target_query,(item,item)):
+            ids=[row['id'] for row in targets]
+            rows=self.store.db.execute("""SELECT id,kind,item,generation,error,problem_code,status,input_snapshot
+                FROM jobs WHERE kind IN ('filter','theses') AND item=ANY(%s)""",(ids,)).fetchall()
+            def affected(row: Any) -> bool:
+                if row is None or row['item']==item:return True
+                snapshot=row['input_snapshot']
+                sources=snapshot.get('sources') if isinstance(snapshot,dict) else None
+                return (not isinstance(sources,list) or any(not isinstance(source,dict) or not isinstance(source.get('id'),str) for source in sources)
+                        or any(source['id']==item for source in sources))
+            saved_targets: set[tuple[str,str]]=set()
+            for target in targets:
+                metadata=json.loads(target['processing_metadata'])
+                updated=False
+                for kind,key in (('filter','filter'),('theses','summary')):
+                    saved=metadata.get(key)
+                    if isinstance(saved,dict) and saved.get('reason')!='no_input':
+                        saved_targets.add((target['id'],kind))
+                        if not saved.get('source_url_stale'):
+                            saved['source_url_stale']=True;updated=True
+                if updated:
+                    self.store.db.execute('UPDATE publications SET processing_metadata=%s WHERE id=%s',(json.dumps(metadata,ensure_ascii=False),target['id']))
+            for row in rows:
+                if row['status']=='cancelled':continue
+                if row['status']=='running':
+                    if affected(row):self._revoke_running_input(row)
+                elif affected(row) or (row['item'],row['kind']) in saved_targets:
+                    self.store.db.execute('UPDATE jobs SET input_snapshot=NULL WHERE id=%s AND input_snapshot IS NOT NULL',(row['id'],))
+            for target in targets:self.store.processing.reconcile_accepted_item(target['id'])
 
     def retry_processing(self, item: str, kind: Kind) -> bool:
         db=self.store.db

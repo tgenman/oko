@@ -26,7 +26,7 @@ class FilterResults:
             return dict(status='off',hidden=False,reason='',removed=[])
         row=material_read.item(self.store.db,item)
         metadata=json.loads(row['processing_metadata']).get('filter',{}) if row else {}
-        if row is not None and metadata.get('signature')==signature:
+        if row is not None and metadata.get('signature')==signature and not metadata.get('source_url_stale'):
             result=json.loads(row['filtered_content'])
             return dict(status='done',hidden=result.get('hidden',False),
                         reason=result['reason'],removed=[part['text'] for part in result['removed']],error=None)

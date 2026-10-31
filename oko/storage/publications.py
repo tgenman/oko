@@ -124,14 +124,18 @@ class Publications:
 
     def identify(self, item: str, ref: ExternalReference) -> None:
         row = expect_row(self.store.db.execute('SELECT * FROM publications WHERE id = %s', (item,)).fetchone())
-        if row['platform'] != ref.key.platform.value and self.store.db.in_transaction:
+        if row['platform'] != ref.key.platform.value or row['url'] != ref.url:
             memberships.lock_graph(self.store.db)
+            row = expect_row(self.store.db.execute('SELECT * FROM publications WHERE id = %s', (item,)).fetchone())
+        if row['platform'] != ref.key.platform.value:
             self.store.incomplete_draft.mark_materials([item])
         if row['url'] != ref.url:
             status_changed(self.store.db)
         self.store.db.execute('UPDATE publications SET platform = %s , external_id = %s , url = %s , published_at = %s , discovered_at = COALESCE ( discovered_at , %s ) WHERE id = %s',
             (ref.key.platform.value, ref.key.external_id, ref.url, row['published'] if row['published_known'] else None,
              self.store.wall_clock(), item))
+        if row['url'] != ref.url:
+            self.store.jobs.invalidate_source_url_inputs(item)
 
     def changed_adapter(self, feed: str) -> None:
         """Invalidate old opaque descriptions atomically with a binding change."""

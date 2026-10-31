@@ -1381,3 +1381,15 @@ worker and HTTP checks passed 67 tests with two Linux bubblewrap-only tests
 skipped; both model adapters, A-to-B-to-A, late answers and restart were
 covered. Mypy passed on 163 files; one Playwright processing scenario passed
 and its screenshot was inspected. No real model or working database was used.
+
+
+A source URL is part of InputSource sent to the model. URL changes now
+invalidate affected attempts and mark retained results stale without deleting
+their bytes or provenance; cancelled work is not automatically restarted.
+Synthetic worker and HTTP checks cover A-to-B-to-A, late success/failure,
+linked parents, saved-result provenance, explicit retry, rollback and restart.
+The exact earlier v4 suite passed 277 tests with two Linux-only skips but did
+not cover the provenance defect subsequently fixed in v6. The integrated v6
+passed 17 targeted tests, mypy on 163 files and one Playwright processing
+scenario with screenshot inspection. No real model or working database was used.
+Persisted input_revision remains; its removal is not established.
