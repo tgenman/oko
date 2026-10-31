@@ -16,6 +16,8 @@ class ReaderVersions:
     def __init__(self, store: 'Store') -> None:
         self.store, self.db = store, store.db
         self._next_action_cleanup = float('-inf')
+        self._source_legacy_gc_cursor: str | None = None
+        self._next_source_legacy_gc = float('-inf')
         self._processor_youtube_paused = store.problems.processor_youtube_paused(store.wall_clock())
         with self.db:
             self.db.execute("INSERT INTO state(key,value) VALUES ('storage-id',%s) ON CONFLICT DO NOTHING", (json.dumps(str(uuid.uuid4())),))
@@ -63,10 +65,24 @@ class ReaderVersions:
             begin_write(self.db)
             paused=self.store.problems.processor_youtube_paused(wall)
             if paused!=self._processor_youtube_paused:
+                from oko.storage import memberships,source_groups
+                memberships.lock_graph(self.db)
+                source_groups.sync_youtube_timer(self.store,wall)
                 self.store.problems.finish_processor_change([],None,wall)
                 old_paused=self._processor_youtube_paused
                 self.db.after_rollback(lambda: setattr(self,'_processor_youtube_paused',old_paused))
                 self.db.after_commit(lambda: setattr(self,'_processor_youtube_paused',paused))
+            if now>=self._next_source_legacy_gc:
+                from oko.storage.source_groups import cleanup_legacy_protected
+                cursor,done=cleanup_legacy_protected(self.store,self._source_legacy_gc_cursor)
+                old_cursor=self._source_legacy_gc_cursor
+                old_next=self._next_source_legacy_gc
+                def restore_source_legacy_gc() -> None:
+                    self._source_legacy_gc_cursor=old_cursor
+                    self._next_source_legacy_gc=old_next
+                self.db.after_rollback(restore_source_legacy_gc)
+                self.db.after_commit(lambda: setattr(self,'_source_legacy_gc_cursor',cursor))
+                if done:self.db.after_commit(lambda: setattr(self,'_next_source_legacy_gc',now+60))
             cutoff = wall-86400
             reservation=self.store.problems.processor_reservation()
             reserved_id=reservation['id'] if reservation else None

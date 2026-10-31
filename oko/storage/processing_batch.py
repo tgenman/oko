@@ -16,6 +16,8 @@ def reconcile_settings(store: 'Store', identities: list[str]) -> None:
     """Update stage Jobs and publication statuses in the settings transaction."""
     if not store.db.in_transaction:
         raise RuntimeError('Settings reconciliation requires an owned transaction')
+    from oko.storage import memberships
+    memberships.lock_graph(store.db)
     ordered = sorted(set(identities))
     affected: list[int]=[]
     for start in range(0,len(ordered),400):
@@ -77,9 +79,10 @@ def _stage(store: 'Store', batch: list[str], kind: Kind) -> None:
                 upsert.append((item,status,json.dumps(dict(input_revision=revision)),json.dumps(dict(signature=signature))))
     changed=set(unblock)|set(block)|set(cancel)|{row[0] for row in upsert}
     from oko.domain.collection import CollectionEffects
-    from oko.storage.publication_links import capture_processing_problems
+    from oko.storage.publication_links import capture_processing_problems,capture_source_groups
     effects=CollectionEffects()
     if changed:capture_processing_problems(store,effects,changed,kinds=(kind,))
+    if changed:capture_source_groups(store,effects,changed,kinds=(kind,))
     if unblock:
         job_write(store.db, """UPDATE jobs SET status='pending',
             error=CASE WHEN payload::jsonb->>'preclaim_blocked'='true' THEN NULL ELSE error END,
@@ -103,3 +106,4 @@ def _stage(store: 'Store', batch: list[str], kind: Kind) -> None:
 
     if effects.processing_problems_before:
         store.problems.sync_processing_problems(effects.processing_problems_before,store.wall_clock())
+    if effects.source_groups_before:store.jobs.sync_captured_source_groups(effects)

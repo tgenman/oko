@@ -3,7 +3,10 @@ from oko.storage.database import Database, Row
 from collections.abc import Callable
 from datetime import datetime, timezone
 import json
-from typing import Any
+from typing import Any,TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from oko.storage.store import Store
 from oko.diagnostics import redact, exception_details
 
 
@@ -17,8 +20,8 @@ def clipped(value: str, limit: int) -> tuple[str, bool]:
 
 
 class CollectionStatus:
-    def __init__(self, db: Database, clock: Callable[[], float], wall: Callable[[], float]) -> None:
-        self.db, self.clock, self.wall = db, clock, wall
+    def __init__(self, db: Database, clock: Callable[[], float], wall: Callable[[], float], store: 'Store') -> None:
+        self.db, self.clock, self.wall, self.store = db, clock, wall, store
 
     def read(self, job: int) -> dict[str, Any]:
         row = self.db.execute('SELECT collection_attempt FROM jobs WHERE id = %s', (job,)).fetchone()
@@ -34,9 +37,20 @@ class CollectionStatus:
         return data
 
     def _write(self, job: int, feed: str, data: dict[str, Any]) -> None:
-        changed = self.db.execute('UPDATE jobs SET feed_id=%s, collection_attempt=%s::jsonb WHERE id=%s', (feed, json.dumps(data), job)).rowcount
-        if changed != 1:
-            raise LookupError('Collection job no longer exists')
+        changed = self.db.execute("""UPDATE jobs SET feed_id=%s,collection_attempt=%s::jsonb WHERE id=%s
+            AND CASE WHEN kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code LIKE 'source-%%' AND feed_id IS DISTINCT FROM %s
+                THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END
+            RETURNING OLD.feed_id AS previous_feed,OLD.problem_code AS previous_code,kind""",(feed,json.dumps(data),job,feed)).fetchone()
+        if changed is None:raise LookupError('Collection job no longer exists')
+        if changed['kind'] in ('fetch','download_media','filter','theses','delete','feed-delete') and (changed['previous_code'] or '').startswith('source-') and changed['previous_feed']!=feed:
+            from oko.storage import source_groups
+            old=source_groups.job_keys_with_previous_feed(self.store,job,changed['previous_feed'])
+            if old:
+                kind,before=old
+                after=source_groups.job_keys(self.store,job)
+                evidence=source_groups.job_evidence_with_previous_feed(self.store,job,changed['previous_feed'])
+                complete=source_groups.sync_transition(self.store,kind,before,after,self.wall(),evidence=evidence)
+                self.db.execute("UPDATE jobs SET source_event_owned=(%s=1) WHERE id=%s",(complete,job))
 
     def finish(self, job: Any, feed: str, data: dict[str, Any], elapsed: float, observation: dict[str, Any]) -> None:
         row = self.db.execute('SELECT * FROM jobs WHERE id = %s', (job.id,)).fetchone()

@@ -40,6 +40,8 @@ class DiscoveryProjection:
     media_problem_exists: bool = False
     media_problem_children: tuple[str,...] = ()
     processing_problem_exists: bool = False
+    source_problem_exists: bool = False
+    new_source_jobs: tuple[int,...] = ()
     processing_problem_children: tuple[str,...] = ()
     fingerprint: str | None = None
     content: tuple[dict[str, Any], list[dict[str, Any]]] | None = None
@@ -147,18 +149,25 @@ class Publications:
             if publication.id in plans:
                 continue
             source_id = feed+':'+publication.id
-            existing = self.store.db.execute('SELECT id , source_id FROM publications WHERE ( platform = %s AND external_id = %s ) OR source_id = %s',
-                (ref.key.platform.value, ref.key.external_id, source_id)).fetchall()
+            proposed_item=str(uuid4())
+            checked = self.store.db.execute("""SELECT id,source_id,ARRAY[]::bigint[] AS source_jobs FROM publications
+                WHERE (platform=%s AND external_id=%s) OR source_id=%s
+                UNION ALL SELECT NULL::text,NULL::text,ARRAY(SELECT id FROM jobs WHERE item=%s AND problem_code LIKE 'source-%%')""",
+                (ref.key.platform.value,ref.key.external_id,source_id,proposed_item)).fetchall()
+            new_source_jobs=next(row['source_jobs'] for row in checked if row['id'] is None)
+            existing=[row for row in checked if row['id'] is not None]
             if not existing and publication.members:
                 placeholders = ','.join('%s' for _ in publication.members)
-                existing = self.store.db.execute(f'SELECT DISTINCT i . id , i . source_id FROM ({owned_ids("= %s")}) owner JOIN publications i ON i.id=owner.id CROSS JOIN jsonb_array_elements_text(i.members::jsonb) m(value) WHERE CAST ( m . value AS BIGINT ) IN ( {placeholders} )', (feed, feed, *publication.members)).fetchall()
+                existing = list(self.store.db.execute(f'SELECT DISTINCT i . id , i . source_id FROM ({owned_ids("= %s")}) owner JOIN publications i ON i.id=owner.id CROSS JOIN jsonb_array_elements_text(i.members::jsonb) m(value) WHERE CAST ( m . value AS BIGINT ) IN ( {placeholders} )', (feed, feed, *publication.members)).fetchall())
             if len(existing)>1:
                 raise ValueError('Conflicting publication identity or Telegram album membership')
             if publication.observed_only and not existing:
                 continue
-            item=existing[0]['id'] if existing else str(uuid4())
+            item=existing[0]['id'] if existing else proposed_item
             plan=DiscoveryProjection(item,existing[0]['source_id'] if existing else source_id)
+            if not existing:plan.new_source_jobs=tuple(new_source_jobs)
             current=self.store.db.execute("""SELECT viewed,members,complete,
+                EXISTS (SELECT 1 FROM jobs j WHERE j.item=publications.id AND j.problem_code LIKE 'source-%%') OR EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=publications.id AND j.problem_code LIKE 'source-%%') OR EXISTS (SELECT 1 FROM publication_links l JOIN jobs j ON j.item=l.target_publication_id AND j.problem_code LIKE 'source-%%' WHERE l.source_publication_id=publications.id) OR EXISTS (SELECT 1 FROM publication_links l JOIN media_files m ON m.publication_id=l.target_publication_id JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE l.source_publication_id=publications.id AND j.problem_code LIKE 'source-%%') AS source_problem_exists,
                 (SELECT j.id FROM jobs j WHERE j.kind='delete' AND j.item=publications.id AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)) AS delete_problem_job,
                 EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=publications.id AND m.resource_key IS DISTINCT FROM 'youtube:subtitles' AND j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%') AS media_problem_exists,
                 ARRAY(SELECT DISTINCT m.publication_id FROM publication_links l JOIN media_files m ON m.publication_id=l.target_publication_id JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE l.source_publication_id=publications.id AND m.resource_key IS DISTINCT FROM 'youtube:subtitles' AND j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%') AS media_problem_children,
@@ -186,6 +195,7 @@ class Publications:
                 plan.media_problem_exists = bool(current['media_problem_exists'])
                 plan.media_problem_children = tuple(current['media_problem_children'])
                 plan.processing_problem_exists = bool(current['processing_problem_exists'])
+                plan.source_problem_exists = bool(current['source_problem_exists'])
                 plan.processing_problem_children = tuple(current['processing_problem_children'])
             described=publication.teaser.adapter_content if publication.teaser else None
             album_changed=bool(current and described and ref.key.platform.value=='telegram'
@@ -294,10 +304,22 @@ class Publications:
         """Called in the accepting transaction, after durable media preparation."""
         content, media = prepared
         store = self.store
-        old = expect_row(store.db.execute("""SELECT p.content,p.platform,EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id
+        old = expect_row(store.db.execute("""SELECT p.content,p.platform,
+            EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=p.id AND j.problem_code LIKE 'source-%%') AS source_media_exists,
+            ARRAY(SELECT j.id FROM jobs j WHERE j.kind='download_media' AND j.item=ANY(%s) AND j.problem_code LIKE 'source-%%' AND NOT EXISTS (SELECT 1 FROM media_files m WHERE m.id=j.item)) AS source_orphan_jobs,
+            EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id
             WHERE m.publication_id=p.id AND m.resource_key IS DISTINCT FROM 'youtube:subtitles' AND j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%') AS media_problem_exists,
             ARRAY(SELECT j.id FROM jobs j WHERE j.kind='download_media' AND j.item=ANY(%s) AND j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%' AND NOT EXISTS (SELECT 1 FROM media_files m WHERE m.id=j.item)) AS orphan_media_jobs
-            FROM publications p WHERE p.id=%s""",([row['id'] for row in media],item)).fetchone())
+            FROM publications p WHERE p.id=%s""",([row['id'] for row in media],[row['id'] for row in media],item)).fetchone())
+        if old['source_media_exists']:publication_links.capture_source_groups(store,effects,{item})
+        if old['source_orphan_jobs']:
+            from oko.storage import source_groups
+            ids=[job_id for job_id in old['source_orphan_jobs'] if job_id not in effects.source_groups_before]
+            for start in range(0,len(ids),400):
+                group=ids[start:start+400]
+                effects.source_groups_before.update(source_groups.job_keys_many(store,group))
+                evidence=source_groups.job_evidence_many(store,[(job_id,None) for job_id in group])
+                for key,objects in evidence.items():effects.source_evidence_before.setdefault(key,set()).update(objects)
         if old['media_problem_exists']:
             publication_links.capture_media_problems(store,effects,{item})
         if old['orphan_media_jobs']:
@@ -510,6 +532,7 @@ class Publications:
         memberships.lock_graph(db)
         local_effects=effects if effects is not None else CollectionEffects()
         publication_links.capture_media_problems(self.store,local_effects,set(items))
+        publication_links.capture_source_groups(self.store,local_effects,set(items))
         for start in range(0, len(items), 400):
             batch = items[start:start+400]
             marks = ','.join('%s' for _ in batch)
@@ -520,5 +543,6 @@ class Publications:
             db.execute(f"UPDATE publications SET content = '{{}}' , incomplete_class = 1 , media_ids = '[]' , filtered_content = '{{}}' , summarized_content = '{{}}' , processing_metadata = '{{}}' WHERE id IN ( {marks} )", batch)
             self.store.processing.memberships_removed(removed)
         if effects is None:
+            if local_effects.source_groups_before:self.store.jobs.sync_captured_source_groups(local_effects)
             for job_id,previous in local_effects.media_problems_before.items():
                 self.store.problems.sync_media_problem(job_id,previous,self.store.wall_clock())

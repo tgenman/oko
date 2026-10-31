@@ -115,7 +115,7 @@ class Store:
             self.subscriptions = SubscriptionRepository(self.db, self.fault, wall_clock=self.wall_clock)
             self.publications = Publications(self)
             self.media = MediaFiles(self)
-            self.collection_status = CollectionStatus(self.db, self.clock, self.wall_clock)
+            self.collection_status = CollectionStatus(self.db, self.clock, self.wall_clock,self)
             self.filters = FilterResults(self)
             self.processing = ProcessingState(self)
             self.reading = ReadingComposition(self)
@@ -133,7 +133,11 @@ class Store:
                 collection_jobs.interrupt(self)
                 running_read = [row['item'] for row in self.db.execute("SELECT item FROM jobs WHERE kind='read' AND status='running' AND (error IS NOT NULL OR problem_code IS NOT NULL)")]
                 running_delete = [row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE kind IN ('delete','feed-delete') AND status='running' AND (error IS NOT NULL OR problem_code IS NOT NULL) AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')")]
+                running_source=[row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE status='running' AND kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code LIKE 'source-%%'")]
                 job_write(self.db, "UPDATE jobs SET status='pending', generation=generation+1 WHERE status='running'")
+                if running_source:
+                    from oko.storage import source_groups
+                    source_groups.sync_jobs(self,running_source,self.wall_clock())
                 job_write(self.db, "UPDATE jobs SET next = 0 WHERE status = 'pending' AND next IS DISTINCT FROM 0")
                 if self.db.execute("SELECT 1 FROM state WHERE key='read-problems-recovered-v1'").fetchone():
                     for feed in running_read:
@@ -151,6 +155,11 @@ class Store:
                 self.problems.recover_processor_duplicates(self.wall_clock())
                 self.problems.finish_processor_change([],None,self.wall_clock())
             self.problems.recover_processing_problems()
+            from oko.storage.source_groups import recover as recover_source_groups
+            recover_source_groups(self)
+            if self.db.execute("SELECT 1 FROM state WHERE key LIKE 'source-youtube-timed:%%' LIMIT 1").fetchone():
+                from oko.storage.source_groups import sync_youtube_timer
+                with self.db:sync_youtube_timer(self,self.wall_clock())
             self.recover_files()
             if self.db.execute(f"SELECT 1 FROM ({owned_ids('= %s')}) owner LIMIT 1", ('demo','demo')).fetchone():
                 self.ensure_demo()
@@ -273,6 +282,14 @@ class Store:
                 if plan is None:
                     continue
                 item=plan.item
+                if plan.new_source_jobs:
+                    from oko.storage import source_groups
+                    source_ids=[job_id for job_id in plan.new_source_jobs if job_id not in effects.source_groups_before]
+                    for start in range(0,len(source_ids),400):
+                        group=source_ids[start:start+400]
+                        effects.source_groups_before.update(source_groups.job_keys_many(self,group))
+                        evidence=source_groups.job_evidence_many(self,[(job_id,None) for job_id in group])
+                        for key,objects in evidence.items():effects.source_evidence_before.setdefault(key,set()).update(objects)
                 if item not in effects.delete_problems_checked:
                     if plan.delete_problem_job is not None:
                         effects.delete_problem_ids_before[item] = self.problems.deletion_problem_ids(plan.delete_problem_job,self.wall_clock())
@@ -290,6 +307,8 @@ class Store:
                     publication_links.capture_media_problems(self,effects,{item})
                 if plan.media_problem_children:
                     publication_links.capture_media_problems(self,effects,set(plan.media_problem_children))
+                if plan.source_problem_exists:
+                    publication_links.capture_source_groups(self,effects,{item})
                 if plan.processing_problem_exists:
                     publication_links.capture_processing_problems(self,effects,{item})
                 if plan.processing_problem_children:
@@ -541,11 +560,15 @@ class Store:
 
     def set_processor_viewed(self, items: list[str], viewed: bool) -> None:
         """Prototype: keep processor visibility in the same graph transaction."""
+        membership_graph.lock_graph(self.db)
+        source_effects=CollectionEffects()
+        publication_links.capture_source_groups(self,source_effects,set(items))
         affected=self.problems.processor_jobs_for_materials(items)
         previous=self.problems.prepare_processor_change(affected,self.wall_clock())
         if previous is not None and viewed:
             previous['objects']=[obj for obj in previous['objects'] if obj['kind']!='material' or obj['id'] not in items]
         membership_graph.set_viewed(self.db,items,viewed)
+        if source_effects.source_groups_before:self.jobs.sync_captured_source_groups(source_effects)
         if affected:
             self.problems.finish_processor_change(affected,previous,self.wall_clock(),removed_outcome='irrelevant' if viewed else 'resolved')
 

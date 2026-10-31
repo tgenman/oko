@@ -66,12 +66,15 @@ class YouTubeAccess:
 
     def blocked(self, wall: float, retry_after: float) -> None:
         with self.db:
+            from oko.storage import memberships,source_groups
+            memberships.lock_graph(self.db)
             if self.store.problems.processor_resume_candidate(wall):
                 self.store.problems.finish_processor_change([],None,wall)
             previous=self.store.problems.prepare_processor_pause(wall)
             strikes = min(6, expect_row(self.db.execute('SELECT strikes FROM youtube_access WHERE id = 1').fetchone())[0] + 1)
             until = wall + max(min(900 * 2 ** (strikes - 1), 21600), retry_after)
             self.db.execute('UPDATE youtube_access SET strikes = %s , blocked_until = %s WHERE id = 1', (strikes, until))
+            source_groups.sync_youtube_timer(self.store,wall)
             self.store.problems.finish_processor_change([],previous,wall)
             old_paused=self.store.read_versions._processor_youtube_paused
             self.db.after_rollback(lambda: setattr(self.store.read_versions,'_processor_youtube_paused',old_paused))
@@ -79,11 +82,20 @@ class YouTubeAccess:
 
     def completed(self) -> None:
         with self.db:
-            reservation=self.store.problems.processor_reservation()
+            from oko.storage import memberships
+            memberships.lock_graph(self.db)
+            pointer=self.db.execute("""SELECT processor_reservation_id,blocked_until,
+                EXISTS(SELECT 1 FROM state WHERE key LIKE 'source-youtube-timed:%%' LIMIT 1) AS source_timed
+                FROM youtube_access WHERE id=1""").fetchone()
+            source_timed=bool(pointer and pointer['source_timed'] and pointer['blocked_until'])
+            reservation=self.store.problems.processor_reservation(pointer)
             if reservation is not None:
                 deadline=min(float(reservation['deadline']),self.store.wall_clock())
                 self.db.execute('UPDATE reader_problems SET body=%s WHERE id=%s AND identity=%s',(json.dumps(self.store.problems.processor_reservation_body(deadline)),reservation['id'],'processor:reservation:'+reservation['id']))
             self.db.execute('UPDATE youtube_access SET strikes = 0 , blocked_until = 0 WHERE id = 1')
+            if source_timed:
+                from oko.storage import source_groups
+                source_groups.sync_youtube_timer(self.store,self.store.wall_clock())
             self.store.problems.finish_processor_change([],None,self.store.wall_clock())
             old_paused=self.store.read_versions._processor_youtube_paused
             self.db.after_rollback(lambda: setattr(self.store.read_versions,'_processor_youtube_paused',old_paused))

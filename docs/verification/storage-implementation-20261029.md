@@ -1330,3 +1330,17 @@ mypy on 161 files and 10 Playwright status scenarios with screenshot inspection.
 One Starlette/httpx warning was emitted. This repair assumes byte-identical
 confirmed records for the same Job are duplicate active occurrences; their
 history rows are retained. No working database was migrated.
+
+
+Source-coded Job problems now use event-owned grouped updates, startup
+recovery and graph-aware ownership; ambiguous legacy records remain on the
+existing fallback and are not overwritten. Timed subtitle groups use the host
+tick. Strict graph-before-row locking prevents the reproduced concurrent Job /
+YouTube lock cycle. This adds one SQL statement on a measured ordinary claim
+and serializes source-capable operations on the graph lock; contention has not
+been measured. In one synthetic page experiment the change added one SQL
+statement per 50-publication page. The integrated source/worker/status suite
+passed 346 PostgreSQL tests, mypy for 13 modules and 17 Playwright scenarios.
+Screenshots were inspected; the dedicated source visual used a substituted API
+response, while the real path was tested through PostgreSQL and HTTP. One
+Starlette/httpx warning was emitted. No working database was migrated.

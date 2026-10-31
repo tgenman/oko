@@ -204,6 +204,12 @@ class MediaFiles:
             from oko.storage.media_job_problems import previous_candidates as managed_candidates
             problem_job=problem_jobs[0] if problem_jobs else None
             previous_problem=managed_candidates(store,problem_job,store.wall_clock()) if problem_job is not None else []
+            source_before: set[str]=set()
+            source_evidence: dict[str,set[tuple[str,str]]]={}
+            if problem_job is not None and identity!=media_id:
+                from oko.storage import source_groups
+                source_before=source_groups.job_keys(store,problem_job)
+                if source_before:source_evidence=source_groups.job_evidence_many(store,[(problem_job,None)])
             if identity!=media_id:
                 job=store.db.execute("SELECT id FROM jobs WHERE kind='download_media' AND item=%s AND processor_visible",(media_id,)).fetchone()
                 if job:
@@ -221,6 +227,8 @@ class MediaFiles:
             publication_links.notify_parents(store,download.publication_id)
             if problem_job is not None and previous_problem:
                 store.problems.sync_media_problem(problem_job,previous_problem,store.wall_clock(),successful=True)
+            if problem_job is not None and source_before:
+                source_groups.sync(store,'download_media',source_before,store.wall_clock(),exclude={problem_job},evidence=source_evidence)
             store.fault('before_media_commit')
         return True
 
@@ -272,15 +280,22 @@ class MediaFiles:
         self.project_header(content,media)
         with store.db:
             memberships.lock_graph(store.db)
-            job=store.db.execute("SELECT id FROM jobs WHERE kind='download_media' AND item=%s AND processor_visible",(media_id,)).fetchone()
-            if job:
+            job=store.db.execute("SELECT id,processor_visible,problem_code FROM jobs WHERE kind='download_media' AND item=%s",(media_id,)).fetchone()
+            source_before: set[str]=set()
+            source_evidence: dict[str,set[tuple[str,str]]]={}
+            if job and job['processor_visible']:
                 store.problems.capture_processor_history(job['id'],store.wall_clock())
+            if job and identity!=media_id and (job['problem_code'] or '').startswith('source-'):
+                from oko.storage import source_groups
+                source_before=source_groups.job_keys(store,job['id'])
+                if source_before:source_evidence=source_groups.job_evidence_many(store,[(job['id'],None)])
             store.db.execute("UPDATE media_files SET id = %s , status = 'unavailable' , reason = %s , storage_key = NULL , size_bytes = NULL WHERE id = %s",(identity,issue.message,media_id))
             store.db.execute('UPDATE publications SET content = %s , media_ids = %s WHERE id = %s',(json.dumps(content,ensure_ascii=False),json.dumps([value['id'] for value in media]),owner))
             from oko.storage.incomplete_index import save_class
             save_class(store.db,owner,content)
             store.processing.reconcile_accepted_item(owner)
             publication_links.notify_parents(store,owner)
+            if job and source_before:source_groups.sync(store,'download_media',source_before,store.wall_clock(),exclude={job['id']},evidence=source_evidence)
         store.processing.sync()
 
     def failed(self, media_id: str, issue: AdapterIssue) -> None:

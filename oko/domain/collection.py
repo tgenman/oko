@@ -16,3 +16,5 @@ class CollectionEffects:
     media_problems_checked: set[int] = field(default_factory=set)
     processing_problems_before: dict[int,list[dict[str,Any]]] = field(default_factory=dict)
     processing_problems_checked: set[int] = field(default_factory=set)
+    source_groups_before: dict[int,tuple[str,set[str]]] = field(default_factory=dict)
+    source_evidence_before: dict[str,set[tuple[str,str]]] = field(default_factory=dict)

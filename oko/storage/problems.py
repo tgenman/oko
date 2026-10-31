@@ -2511,8 +2511,19 @@ class Problems:
             return None
         return self.processor_configuration_candidate(now,overrides=captures)
 
-    def prepare_processor_change(self, job_ids: list[int], now: float) -> dict[str,Any] | None:
-        if self.processor_resume_candidate(now):
+    def prepare_processor_change(self, job_ids: list[int], now: float, *, source_lock: bool = False) -> dict[str,Any] | None:
+        # Acquire the graph before any processor reservation row can be changed.
+        # Reuse the reservation read so ordinary jobs do not gain a round trip.
+        from oko.storage.transaction import begin_write
+        begin_write(self.db)
+        pointer=self.db.execute("""SELECT processor_reservation_id,
+            CASE WHEN %s=1 OR EXISTS (SELECT 1 FROM jobs WHERE id=ANY(%s)
+                AND kind IN ('fetch','download_media','filter','theses','delete','feed-delete'))
+            THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text
+            ELSE NULL END AS source_graph_lock FROM youtube_access WHERE id=1""",(source_lock,job_ids)).fetchone()
+        if pointer and pointer['source_graph_lock'] is not None:
+            pointer=self.db.execute('SELECT processor_reservation_id FROM youtube_access WHERE id=1').fetchone()
+        if self.processor_resume_candidate(now,pointer=pointer):
             self.finish_processor_change([],None,now)
         if not job_ids or not self.db.execute('SELECT 1 FROM jobs WHERE id=ANY(%s) AND processor_visible LIMIT 1',(job_ids,)).fetchone():
             return None
@@ -2597,8 +2608,8 @@ class Problems:
             operation='processor:reservation',state='current',next_at=None,
             processor_reservation=True,deadline=deadline)
 
-    def processor_reservation(self) -> dict[str,Any] | None:
-        pointer=self.db.execute('SELECT processor_reservation_id FROM youtube_access WHERE id=1').fetchone()
+    def processor_reservation(self, pointer: Any = None) -> dict[str,Any] | None:
+        if pointer is None:pointer=self.db.execute('SELECT processor_reservation_id FROM youtube_access WHERE id=1').fetchone()
         if not pointer or pointer['processor_reservation_id'] is None:
             return None
         identity=pointer['processor_reservation_id']
@@ -2641,8 +2652,8 @@ class Problems:
             self.db.execute('UPDATE youtube_access SET processor_reservation_id=NULL WHERE id=1 AND processor_reservation_id=%s',(reservation['id'],))
             self.db.execute("DELETE FROM reader_problems WHERE id=%s AND identity=%s",(reservation['id'],'processor:reservation:'+reservation['id']))
 
-    def processor_resume_candidate(self, now: float) -> tuple[str,dict[str,Any],float] | None:
-        reservation=self.processor_reservation()
+    def processor_resume_candidate(self, now: float, *, pointer: Any = None) -> tuple[str,dict[str,Any],float] | None:
+        reservation=self.processor_reservation(pointer)
         if not reservation or now<float(reservation['deadline']) or self.processor_youtube_paused(now):
             return None
         if self.processor_current():
@@ -2692,7 +2703,31 @@ class Problems:
                          for obj in json.loads(row['body'])['objects'] if obj['kind'] == 'feed'}
         groups: dict[str | tuple[str,str] | tuple[str,str,str], dict[str, Any]] = {}
         youtube = self.store.youtube.status(now)
-        jobs = self.db.execute(f"SELECT jobs . * , coalesce ( {owner_expr('items')} , {owner_expr('media_owner')} , {owner_expr('linked_root')} ) AS resolved_feed_id , coalesce ( items . viewed , media_owner . viewed ) AS viewed , m . resource_key AS resource_key , coalesce ( linked_root . id , m . publication_id , jobs . item ) AS affected_item FROM (SELECT * FROM (SELECT * FROM jobs WHERE kind IS DISTINCT FROM 'read' AND kind IS DISTINCT FROM 'discover' AND problem_code IS DISTINCT FROM 'processor-config' AND NOT ((kind IS NOT DISTINCT FROM 'filter' OR kind IS NOT DISTINCT FROM 'theses') AND item IS NOT NULL AND item<>'' AND (((problem_code='' OR (problem_code IS NULL AND error IS NOT NULL))) OR (problem_code IS NOT NULL AND problem_code<>'' AND problem_code NOT LIKE 'source-%' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')))) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL AND problem_code NOT LIKE 'source-%' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')) AND (problem_code IS NOT NULL OR error IS NOT NULL) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL AND problem_code NOT LIKE 'source-%' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) UNION ALL SELECT j.* FROM media_files subtitle JOIN jobs j ON j.kind='download_media' AND j.item=subtitle.id WHERE subtitle.resource_key='youtube:subtitles' AND j.kind='download_media' AND j.item IS NOT NULL AND j.item<>'' AND j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) status_jobs ORDER BY kind,item OFFSET 0) jobs LEFT JOIN publications items ON items . id = jobs . item LEFT JOIN media_files m ON jobs . kind = 'download_media' AND m . id = jobs . item LEFT JOIN publications media_owner ON media_owner . id = m . publication_id LEFT JOIN publication_links link ON link . target_publication_id = coalesce ( items . id , media_owner . id ) LEFT JOIN publications linked_root ON linked_root . id = link . source_publication_id AND linked_root . viewed = 0 WHERE ( jobs . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' , 'blocked' ) OR ( jobs . status = 'done' AND jobs . kind = 'fetch' AND jobs . problem_code IS NOT NULL AND jobs . error IS NOT NULL ) ) AND ( jobs . problem_code IS NOT NULL OR jobs . error IS NOT NULL ) AND jobs.kind IS DISTINCT FROM 'read' AND jobs.problem_code IS DISTINCT FROM 'processor-config' AND NOT (jobs.kind IN ('delete','feed-delete') AND coalesce(nullif(jobs.problem_code,''),'work-'||jobs.kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))").fetchall()
+        jobs = self.db.execute(f"SELECT jobs . * , coalesce ( {owner_expr('items')} , {owner_expr('media_owner')} , {owner_expr('linked_root')} ) AS resolved_feed_id , coalesce ( items . viewed , media_owner . viewed ) AS viewed , m . resource_key AS resource_key , coalesce ( linked_root . id , m . publication_id , jobs . item ) AS affected_item FROM (SELECT * FROM (SELECT * FROM jobs WHERE kind IS DISTINCT FROM 'read' AND kind IS DISTINCT FROM 'discover' AND problem_code IS DISTINCT FROM 'processor-config' AND NOT ((kind IS NOT DISTINCT FROM 'filter' OR kind IS NOT DISTINCT FROM 'theses') AND item IS NOT NULL AND item<>'' AND (((problem_code='' OR (problem_code IS NULL AND error IS NOT NULL))) OR (problem_code IS NOT NULL AND problem_code<>'' AND problem_code NOT LIKE 'source-%' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')))) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL AND problem_code NOT LIKE 'source-%' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')) AND (problem_code IS NOT NULL OR error IS NOT NULL) AND NOT (kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code IS NOT NULL AND problem_code LIKE 'source-%' AND source_event_owned) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL AND problem_code NOT LIKE 'source-%' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) UNION ALL SELECT j.* FROM media_files subtitle JOIN jobs j ON j.kind='download_media' AND j.item=subtitle.id WHERE subtitle.resource_key='youtube:subtitles' AND j.kind='download_media' AND j.item IS NOT NULL AND j.item<>'' AND j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) status_jobs ORDER BY kind,item OFFSET 0) jobs LEFT JOIN publications items ON items . id = jobs . item LEFT JOIN media_files m ON jobs . kind = 'download_media' AND m . id = jobs . item LEFT JOIN publications media_owner ON media_owner . id = m . publication_id LEFT JOIN publication_links link ON link . target_publication_id = coalesce ( items . id , media_owner . id ) LEFT JOIN publications linked_root ON linked_root . id = link . source_publication_id AND linked_root . viewed = 0 WHERE ( jobs . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' , 'blocked' ) OR ( jobs . status = 'done' AND jobs . kind = 'fetch' AND jobs . problem_code IS NOT NULL AND jobs . error IS NOT NULL ) ) AND ( jobs . problem_code IS NOT NULL OR jobs . error IS NOT NULL ) AND jobs.kind IS DISTINCT FROM 'read' AND jobs.problem_code IS DISTINCT FROM 'processor-config' AND NOT (jobs.kind IN ('delete','feed-delete') AND coalesce(nullif(jobs.problem_code,''),'work-'||jobs.kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))").fetchall()
+        source_keys={
+            'job:'+job['problem_code']+':'+(job['resolved_feed_id'] or job['feed_id'] or job['item'] or 'demo')+':'+job['kind']
+            for job in jobs if isinstance(job['problem_code'],str) and job['problem_code'].startswith('source-')
+            and job['kind'] in ('fetch','download_media','filter','theses','delete','feed-delete')
+        }
+        source_owned: set[str]=set()
+        ordered_source_keys=sorted(source_keys)
+        for start in range(0,len(ordered_source_keys),400):
+            rows=self.db.execute("""SELECT requested.canonical,min(found.body) AS body
+                FROM unnest(%s::text[]) requested(canonical)
+                CROSS JOIN LATERAL (SELECT body FROM reader_problems
+                    WHERE finished IS NULL AND octet_length(body::jsonb->>'source_group_identity')<=1000 AND body::jsonb->>'source_group_identity'=requested.canonical LIMIT 2) found
+                GROUP BY requested.canonical HAVING count(*)=1""",(ordered_source_keys[start:start+400],))
+            from oko.storage import source_groups
+            for row in rows:
+                canonical=row['canonical'];kind=canonical.rsplit(':',1)[-1]
+                if not source_groups.manageable(canonical,kind):continue
+                try:body=json.loads(row['body'])
+                except (TypeError,ValueError):continue
+                if not isinstance(body,dict) or body.get('operation')!='producer:'+kind or body.get('code') not in {code for code,_ in source_groups.possible_pairs(canonical,kind)} or any(not isinstance(body.get(field),str) for field in ('title','section','consequence','next_step')) or body.get('state') not in ('current','retrying') or body.get('action') is not None:continue
+                candidate,_,_=source_groups.group_snapshot(self.store,canonical,kind,now)
+                if candidate is None or len(candidate.get('_source_codes',set()))!=1 or body.get('code') not in candidate.get('_source_codes',set()) or not isinstance(body.get('objects'),list):continue
+                allowed={(obj.get('kind'),obj.get('id')) for obj in candidate['objects']}
+                if (body['objects'] or kind=='delete') and all(isinstance(obj,dict) and set(obj)=={'kind','id'} and (obj.get('kind'),obj.get('id')) in allowed for obj in body['objects']) and len({(obj['kind'],obj['id']) for obj in body['objects']})==len(body['objects']):source_owned.add(canonical)
         for job in jobs:
             resolved_feed = job['item'] if job['kind']=='read' else job['resolved_feed_id'] or job['feed_id']
             code = job['problem_code']
@@ -2717,6 +2752,7 @@ class Problems:
                 continue
             shared = code in ('processor-config', 'ai-permission') or code.startswith('source-')
             identity = 'job:' + code + ':' + feed + ':' + job['kind'] + ('' if shared else ':' + job['item'])
+            if code.startswith('source-') and identity in source_owned:continue
             if code == 'processor-config':
                 identity = 'processor:configuration'
             settings_action = code in ('processor-config', 'ai-permission')
@@ -2998,6 +3034,26 @@ class Problems:
     def reconcile(self, candidates: list[dict[str, Any]], now: float, feeds: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
         """Preserve occurrence identity; completed records never become current on restart."""
         existing = {row['identity']: row for row in self.db.execute("SELECT * FROM reader_problems WHERE finished IS NULL")}
+        owned_source_identities: set[str]=set()
+        source_legacy: dict[str,str]={}
+        for row in existing.values():
+            try:body=json.loads(row['body'])
+            except (TypeError,ValueError):continue
+            if not isinstance(body,dict):continue
+            if isinstance(body.get('source_group_identity'),str):owned_source_identities.add(body['source_group_identity'])
+            elif isinstance(body.get('code'),str) and body['code'].startswith('source-'):source_legacy[row['identity']]=row['id']
+        protected_source_legacy: set[str]=set()
+        ordered_legacy=sorted(source_legacy)
+        for start in range(0,len(ordered_legacy),400):
+            legacy_id_batch=ordered_legacy[start:start+400]
+            markers={'source-legacy-protected:'+hashlib.sha256(identity.encode()).hexdigest():(identity,source_legacy[identity]) for identity in legacy_id_batch}
+            for marker in self.db.execute('SELECT key,value FROM state WHERE key=ANY(%s)',(list(markers),)):
+                expected=markers[marker['key']]
+                try:value=json.loads(marker['value'])
+                except (TypeError,ValueError):value=None
+                if not isinstance(value,list) or len(value)!=3 or value[0]!='oko-source-legacy-v1' or value[1]!=expected[0] or not isinstance(value[2],str):
+                    protected_source_legacy.add(expected[1])
+                elif value[2]==expected[1]:protected_source_legacy.add(value[2])
         uncertain_materials: set[str]=set()
         uncertain_refs: list[tuple[str,str,set[str]]]=[]
         invalid_fetch_objects: set[str]=set()
@@ -3120,13 +3176,14 @@ class Problems:
                         claimed_alternates.add(isolated_alias)
                     previous = existing.get(alias)
                     old_body = json.loads(previous['body']) if previous else None
-                    if (isinstance(old_body,dict) and old_body.get('operation')==alias_operation
+                    if (isinstance(old_body,dict) and not isinstance(old_body.get('source_group_identity'),str) and old_body.get('operation')==alias_operation
                         and old_body.get('code')==candidate.get('code') and alias not in candidate_ids and alias not in claimed_alternates):
                         isolated_aliases.append(alias)
                         claimed_alternates.add(alias)
                     protected = (isinstance(old_body,dict) and old_body.get('code') in ('delete','feed-delete','work-delete','work-feed-delete')
                                  and (old_body.get('operation') in ('producer:delete','producer:feed-delete')
                                       or (old_body.get('operation') in (None,'producer:status') and (':delete:' in alias or ':feed-delete:' in alias))))
+                    if isinstance(old_body,dict) and isinstance(old_body.get('source_group_identity'),str):protected=True
                     if not protected:
                         safe_aliases.add(alias)
                 candidate['_legacy_ids'] = safe_aliases
@@ -3147,7 +3204,8 @@ class Problems:
                     candidate['status_job_target'] = target
                 candidate.pop('_legacy_ids',None)
             elif (isinstance(operation,str) and operation.startswith('producer:') and (
-                (isinstance(body,dict) and isinstance(body.get('operation'),str) and body['operation'].startswith('producer:') and body['operation'] not in ('producer:status',operation))
+                (isinstance(body,dict) and isinstance(body.get('source_group_identity'),str) and isinstance(candidate.get('code'),str) and candidate['code'].startswith('source-'))
+                or (isinstance(body,dict) and isinstance(body.get('operation'),str) and body['operation'].startswith('producer:') and body['operation'] not in ('producer:status',operation))
                 or (identity in claimed and claimed[identity]!=(operation,target))
                 or (isinstance(body,dict) and body.get('operation')==operation and isinstance(body.get('status_job_target'),str) and body['status_job_target']!=target)
                 or (isinstance(body,dict) and body.get('code') in ('delete','feed-delete','work-delete','work-feed-delete')
@@ -3197,6 +3255,9 @@ class Problems:
                     body = json.loads(row['body'])
                     if isinstance(body,dict) and body.get('code')=='processor-config' and body.get('processor_group_identity')=='processor:configuration':
                         continue
+                    if isinstance(body.get('source_group_identity'),str):continue
+                    if row['identity'] in owned_source_identities and isinstance(body.get('code'),str) and body['code'].startswith('source-'):continue
+                    if row['id'] in protected_source_legacy:continue
                     code=body.get('code')
                     eligible_fetch=(isinstance(code,str) and bool(code) and not code.startswith('source-') and code not in ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','work-fetch'))
                     if body.get('operation')=='producer:fetch' and (eligible_fetch or isinstance(body.get('fetch_job_id'),str)):

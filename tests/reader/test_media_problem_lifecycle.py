@@ -588,7 +588,7 @@ def test_orphan_cleanup_resolves_existing_problem_without_get(tmp_path,postgres_
     finally:store.db.close()
 
 
-def test_source_grouped_media_stays_on_existing_get_path(tmp_path,postgres_url):
+def test_source_grouped_media_is_owned_by_source_event(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
@@ -599,5 +599,7 @@ def test_source_grouped_media_stays_on_existing_get_path(tmp_path,postgres_url):
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('download_media','file','running',1) RETURNING id").fetchone()[0]
             store.jobs.fail_media(Job(job,'download_media','file',1),AdapterIssue('source-connection','failure',AdapterErrorKind.permanent))
             assert not store.db.execute("SELECT 1 FROM reader_problems WHERE body::jsonb->>'media_job_id'=%s",(str(job),)).fetchone()
-        assert any(p['id']=='job:source-connection:feed:download_media' for p in store.problems.candidates(2))
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE body::jsonb->>'source_group_identity'='job:source-connection:feed:download_media' AND finished IS NULL").fetchone()
+        assert any(p['code']=='source-connection' for p in store.problems.snapshot(2)['current'])
+        assert not any(p['id']=='job:source-connection:feed:download_media' for p in store.problems.candidates(2))
     finally:store.db.close()

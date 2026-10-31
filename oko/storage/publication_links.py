@@ -28,7 +28,12 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
     owner=expect_row(store.db.execute(f"SELECT i.*, {owner_expr('i')} AS feed_id FROM publications i WHERE i.id = %s",(item,)).fetchone())
     if owner['feed_id'] is None:
         return False
-    previous={row[0] for row in store.db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id = %s',(item,))}
+    previous_rows=store.db.execute("""SELECT l.target_publication_id,
+        EXISTS (SELECT 1 FROM jobs j WHERE j.item=l.target_publication_id AND j.problem_code LIKE 'source-%%') OR
+        EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=l.target_publication_id AND j.problem_code LIKE 'source-%%') AS source_problem
+        FROM publication_links l WHERE l.source_publication_id=%s""",(item,)).fetchall()
+    previous={row['target_publication_id'] for row in previous_rows}
+    source_targets={row['target_publication_id'] for row in previous_rows if row['source_problem']}
     capture_deletion_problems(store,effects,previous)
     capture_fetch_problems(store,effects,previous)
     capture_media_problems(store,effects,previous)
@@ -36,8 +41,14 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
     existing: set[str]=set()
     for start in range(0,len(keys),400):
         batch=keys[start:start+400]
-        existing.update(row['id'] for row in store.db.execute("SELECT p.id FROM unnest(%s::text[],%s::text[]) AS v(platform,external_id) JOIN publications p ON p.platform=v.platform AND p.external_id=v.external_id",([key[0] for key in batch],[key[1] for key in batch])))
+        found=store.db.execute("""SELECT p.id,
+            EXISTS (SELECT 1 FROM jobs j WHERE j.item=p.id AND j.problem_code LIKE 'source-%%') OR
+            EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=p.id AND j.problem_code LIKE 'source-%%') AS source_problem
+            FROM unnest(%s::text[],%s::text[]) AS v(platform,external_id) JOIN publications p ON p.platform=v.platform AND p.external_id=v.external_id""",([key[0] for key in batch],[key[1] for key in batch])).fetchall()
+        existing.update(row['id'] for row in found)
+        source_targets.update(row['id'] for row in found if row['source_problem'])
     if previous!=existing or len(existing)<len(keys):
+        if source_targets:capture_source_groups(store,effects,source_targets)
         affected=store.problems.processor_jobs_for_materials(sorted(previous | existing))
         store.problems.capture_processor_histories(affected,store.wall_clock())
     capture_processing_problems(store,effects,previous)
@@ -163,6 +174,28 @@ def capture_deletion_problems(store: 'Store', effects: CollectionEffects, items:
             effects.delete_problem_ids_before[row['item']] = store.problems.deletion_problem_ids(row['id'],store.wall_clock())
 
 
+def capture_source_groups(store: 'Store', effects: CollectionEffects, roots: set[str], *, kinds: tuple[str,...]=('fetch','download_media','filter','theses','delete','feed-delete')) -> None:
+    from oko.storage import source_groups
+    ordered=sorted(roots)
+    for start in range(0,len(ordered),400):
+        batch=ordered[start:start+400]
+        rows=store.db.execute("""WITH affected(id) AS MATERIALIZED (
+            SELECT id FROM unnest(%s::text[]) x(id)
+            UNION SELECT l.target_publication_id FROM unnest(%s::text[]) x(id)
+                CROSS JOIN LATERAL (SELECT target_publication_id FROM publication_links WHERE source_publication_id=x.id OFFSET 0) l
+        ) SELECT DISTINCT j.id FROM affected a CROSS JOIN LATERAL (
+            SELECT id FROM jobs WHERE item=a.id AND kind=ANY(%s) AND problem_code LIKE 'source-%%'
+            UNION ALL SELECT j.id FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id
+                WHERE 'download_media'=ANY(%s) AND m.publication_id=a.id AND j.problem_code LIKE 'source-%%'
+        ) j""",(batch,batch,list(kinds),list(kinds))).fetchall()
+        ids=[row['id'] for row in rows if row['id'] not in effects.source_groups_before]
+        for offset in range(0,len(ids),400):
+            group=ids[offset:offset+400]
+            effects.source_groups_before.update(source_groups.job_keys_many(store,group))
+            evidence=source_groups.job_evidence_many(store,[(job_id,None) for job_id in group])
+            for key,objects in evidence.items():effects.source_evidence_before.setdefault(key,set()).update(objects)
+
+
 def capture_root_deletion_problems(store: 'Store', effects: CollectionEffects, roots: set[str]) -> None:
     ordered = sorted(roots)
     for start in range(0,len(ordered),400):
@@ -171,6 +204,7 @@ def capture_root_deletion_problems(store: 'Store', effects: CollectionEffects, r
         capture_fetch_problems(store,effects,set(batch))
         capture_media_problems(store,effects,set(batch))
         capture_processing_problems(store,effects,set(batch))
+        capture_source_groups(store,effects,set(batch))
         processing_children=store.db.execute("""SELECT DISTINCT j.item FROM unnest(%s::text[]) root(id)
             CROSS JOIN LATERAL (SELECT target_publication_id FROM publication_links WHERE source_publication_id=root.id OFFSET 0) link
             CROSS JOIN LATERAL (SELECT item FROM jobs j WHERE j.kind IN ('filter','theses') AND j.item=link.target_publication_id AND (((j.problem_code='' OR (j.problem_code IS NULL AND j.error IS NOT NULL))) OR (j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%')) OFFSET 0) j""",(batch,)).fetchall()
