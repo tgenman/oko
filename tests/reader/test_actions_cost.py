@@ -56,6 +56,7 @@ def test_unchanged_status_does_not_rewrite_problems(tmp_path):
         seed.db.execute("UPDATE publications SET content = jsonb_set(jsonb_set(content::jsonb,'{extra,_reader,full}','false'::jsonb),'{extra,_reader,reason}',to_jsonb('Fixture incomplete'::text))::text, incomplete_class=0 WHERE id = %s",(items[0],))
     with seed.db:
         seed.db.execute("UPDATE jobs SET status = 'done' WHERE kind = 'fetch' AND item = %s", (items[0],))
+        seed.incomplete_draft.mark_materials([items[0]])
     seed.db.close()
     app = traced_app(tmp_path)
     with TestClient(app, headers=HEADERS) as client:
@@ -71,8 +72,9 @@ def test_unchanged_status_does_not_rewrite_problems(tmp_path):
         def change_fixture():
             store = app.state.host.require_store()
             with store.db:
-                store.db.execute("UPDATE publications SET content = jsonb_set(jsonb_set(content::jsonb,'{extra,_reader,full}','true'::jsonb),'{extra,_reader,reason}',to_jsonb(''::text))::text WHERE id = %s",(items[0],))
+                store.db.execute("UPDATE publications SET content = jsonb_set(jsonb_set(content::jsonb,'{extra,_reader,full}','true'::jsonb),'{extra,_reader,reason}',to_jsonb(''::text))::text, incomplete_class=1 WHERE id = %s",(items[0],))
                 store.db.execute("UPDATE jobs SET status = 'done' WHERE kind = 'fetch' AND item = %s", (items[0],))
+                store.incomplete_draft.mark_materials([items[0]])
         client.portal.call(change_fixture)
         response = client.get('/api/v3/status/details')
         assert response.status_code == 200

@@ -45,7 +45,9 @@ def test_real_collection_updates_derived_class_with_content(tmp_path,postgres_ur
         row=store.db.execute('SELECT incomplete_class,content FROM publications WHERE id=%s',(item,)).fetchone()
         assert row['incomplete_class']==0
         assert json.loads(row['content'])['extra']['_reader']['full'] is False
-        with store.db:store.db.execute("UPDATE jobs SET status='done',error=NULL,problem_code=NULL WHERE kind='fetch' AND item=%s",(item,))
+        with store.db:
+            store.db.execute("UPDATE jobs SET status='done',error=NULL,problem_code=NULL WHERE kind='fetch' AND item=%s",(item,))
+            store.incomplete_draft.mark_materials([item])
         assert any(p['code']=='material-incomplete' for p in store.problems.snapshot(10)['current'])
     finally:store.db.close()
 
@@ -106,16 +108,18 @@ def test_actual_get_uses_index_and_python_valid_non_jsonb_is_not_lost(tmp_path,p
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,source_deleted,content) VALUES ('partial','rss','partial',0,1,false,%s)",(partial,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','partial',true)")
         recover(store)
+        from oko.storage.incomplete_group_draft import recover_group_keys,recover_group_problems
+        with store.db:
+            store.db.execute("DELETE FROM state WHERE key IN ('experimental-incomplete-groups-v1','experimental-incomplete-problems-v1')")
+        recover_group_keys(store);recover_group_problems(store)
         with store.db:store.db._db.execute('ANALYZE publications')
         sql=[];store.db.set_trace_callback(sql.append)
         try: snapshot=store.problems.snapshot(100)
         finally:store.db.set_trace_callback(None)
         assert any(p['code']=='material-incomplete' and any(o['id']=='partial' for o in p['objects']) for p in snapshot['current'])
         assert store.db.execute("SELECT content FROM publications WHERE id='partial'").fetchone()[0]==partial
-        q=next(q for q in sql if 'AS media_waiting' in q)
-        plan=store.db._db.execute('EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) '+q).fetchone()[0][0]['Plan']
-        print('actual GET rows',scan_rows(plan),'buffers',plan.get('Shared Hit Blocks'))
-        assert scan_rows(plan)<100
+        assert not any('AS media_waiting' in q for q in sql)
+        assert not [q for q in sql if q.lstrip().upper().startswith(('UPDATE READER_PROBLEMS','INSERT INTO READER_PROBLEMS','DELETE FROM READER_PROBLEMS'))]
     finally:store.db.close()
 
 
@@ -141,6 +145,8 @@ def test_unknown_full_is_not_silently_discarded(tmp_path,postgres_url):
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,source_deleted,content) VALUES ('p','rss','p',0,1,false,%s)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
         recover(store)
+        from oko.storage.incomplete_group_draft import save_keys
+        with store.db:save_keys(store.db,['p'])
         assert tuple(store.db.execute("SELECT content,incomplete_class FROM publications WHERE id='p'").fetchone())==(raw,2)
         with pytest.raises(ValueError,match='Unrecognized publication completeness'):store.problems.snapshot(1)
     finally:store.db.close()

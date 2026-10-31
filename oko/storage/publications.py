@@ -76,6 +76,8 @@ class Publications:
                 f'UPDATE publications SET source_deleted={literal} WHERE id=ANY(%s) AND source_deleted IS DISTINCT FROM {literal} RETURNING id', (batch,))]
             if not changed:
                 continue
+            manager=getattr(self.store,'incomplete_draft',None)
+            if manager is not None:manager.mark_materials(changed)
             if not deleted:
                 from oko.storage.incomplete_index import classify_newly_eligible
                 classify_newly_eligible(self.store.db,changed)
@@ -122,6 +124,9 @@ class Publications:
 
     def identify(self, item: str, ref: ExternalReference) -> None:
         row = expect_row(self.store.db.execute('SELECT * FROM publications WHERE id = %s', (item,)).fetchone())
+        if row['platform'] != ref.key.platform.value and self.store.db.in_transaction:
+            memberships.lock_graph(self.store.db)
+            self.store.incomplete_draft.mark_materials([item])
         if row['url'] != ref.url:
             status_changed(self.store.db)
         self.store.db.execute('UPDATE publications SET platform = %s , external_id = %s , url = %s , published_at = %s , discovered_at = COALESCE ( discovered_at , %s ) WHERE id = %s',
@@ -536,6 +541,8 @@ class Publications:
         for start in range(0, len(items), 400):
             batch = items[start:start+400]
             marks = ','.join('%s' for _ in batch)
+            children=[row['target_publication_id'] for row in db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id=ANY(%s)',(batch,))]
+            self.store.incomplete_draft.mark_materials(batch+children)
             removed = memberships.remove(db,items=batch)
             self.store.read_versions.memberships_changed(removed)
             db.execute(f'DELETE FROM publication_links WHERE source_publication_id IN ( {marks} ) OR target_publication_id IN ( {marks} )', batch+batch)

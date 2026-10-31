@@ -37,6 +37,8 @@ def interrupt(store: 'Store', feeds: set[str] | None = None, *, backoff: bool = 
         job_write(store.db, "UPDATE jobs SET queued_wall=CASE WHEN kind IN ('discover','fetch','download_media') AND status!='pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END, status='pending', generation=generation+1, retry_at=%s, next=%s WHERE id=%s",
             (until,store.clock()+max(0,until-store.wall_clock()) if until else 0,row['id']))
         if row['kind'] in ('fetch','download_media','filter','theses') and (row['problem_code'] or '').startswith('source-'):source_changed.append(row['id'])
+        manager=getattr(store,'incomplete_draft',None)
+        if manager is not None:manager.mark_job(row['kind'],row['item'])
         if row['kind']=='discover' and (row['error'] is not None or row['problem_code'] is not None):
             store.problems.sync_discover(row['id'],store.wall_clock())
         if previous_fetch:
@@ -63,6 +65,9 @@ def failure_status(issue: AdapterIssue) -> str:
 
 
 def fail(store: 'Store', job: 'Job', issue: AdapterIssue, *, cancelled: bool = False) -> None:
+    if job.kind not in ('read','discover','feed-delete'):
+        from oko.storage import memberships
+        memberships.lock_graph(store.db)
     if not store.jobs.valid(job):
         return
     from oko.storage.fetch_job_problems import previous_candidates as managed_candidates
@@ -85,6 +90,7 @@ def fail(store: 'Store', job: 'Job', issue: AdapterIssue, *, cancelled: bool = F
         complete=source_groups.sync(store,job.kind,previous_source | source_groups.job_keys(store,job.id),store.wall_clock(),evidence=source_groups.job_evidence_many(store,[(job.id,changed['previous_code'])]))
         job_write(store.db,"UPDATE jobs SET source_event_owned=(%s=1) AND (problem_code LIKE 'source-%%') IS TRUE WHERE id=%s",(complete,job.id))
     store.problems.finish_processor_change([job.id],processor_previous,store.wall_clock())
+    store.incomplete_draft.mark_job(job.kind,job.item)
     if job.kind=='discover':
         store.problems.sync_discover(job.id,store.wall_clock())
     if job.kind=='fetch':

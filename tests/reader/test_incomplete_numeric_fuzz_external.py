@@ -35,5 +35,7 @@ def test_unknown_full_not_hidden_by_other_problem(tmp_path,postgres_url):
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','rss','p',0,1,%s,2)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','p','failed','failure','source-network')")
+            from oko.storage.incomplete_group_draft import save_keys
+            save_keys(store.db,['p'])
         with pytest.raises(ValueError,match='Unrecognized publication completeness'):store.problems.snapshot(1)
     finally:store.db.close()

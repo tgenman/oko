@@ -1344,3 +1344,19 @@ passed 346 PostgreSQL tests, mypy for 13 modules and 17 Playwright scenarios.
 Screenshots were inspected; the dedicated source visual used a substituted API
 response, while the real path was tested through PostgreSQL and HTTP. One
 Starlette/httpx warning was emitted. No working database was migrated.
+
+
+Material-incomplete problems now use event-owned group updates and two-phase
+startup recovery instead of their former full GET reconciliation. Synthetic
+checks cover sticky waiting, graph and owner changes, preserved ambiguous
+legacy records, transaction rollback/savepoints, large groups, YouTube timer
+open/update/close and HTTP body/ETag before and after the host tick. Temporary
+transaction-local tables bound the workset; the application database role now
+requires TEMPORARY, checked by preflight before migration. One large group still
+requires memory proportional to its actual returned card. The integrated scope
+passed 456 PostgreSQL tests, a separate restricted-role test, mypy for 13
+modules and six Playwright status scenarios; desktop/mobile screenshots were
+inspected. The 10,000-group test took several minutes under shared test load;
+the cause of its difference from a faster isolated run is not established. One
+Starlette/httpx warning was emitted. Full check all and real migration were
+not run.

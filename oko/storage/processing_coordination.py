@@ -86,6 +86,8 @@ class ProcessingState:
 
     def memberships_removed(self, identities: list[str]) -> None:
         """Reconcile surviving owners and revoke own AI work when none remain."""
+        from oko.storage import memberships
+        memberships.lock_graph(self.store.db)
         ordered = sorted(set(identities))
         for start in range(0,len(ordered),400):
             batch = ordered[start:start+400]
@@ -108,6 +110,7 @@ class ProcessingState:
                     AND (filtered_content IS DISTINCT FROM '{}' OR summarized_content IS DISTINCT FROM '{}'
                          OR processing_metadata::jsonb ?| ARRAY['filter','summary','_pass','_revision','_revision_input']
                          OR (viewed=0 AND status IS DISTINCT FROM 'ready'))""", (feedless,))
+                self.store.incomplete_draft.mark_materials(feedless)
                 for job_id,candidates in stage_previous.items():
                     self.store.problems.sync_processing_problem(job_id,candidates,self.store.wall_clock())
             for row in rows:

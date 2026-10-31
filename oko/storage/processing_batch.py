@@ -104,6 +104,7 @@ def _stage(store: 'Store', batch: list[str], kind: Kind) -> None:
                 problem_code=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.problem_code ELSE NULL END""",
             (kind,*([row[index] for row in upsert] for index in range(4)),wall,wall,wall))
 
+    if changed:store.incomplete_draft.mark_materials(sorted(changed))
     if effects.processing_problems_before:
         store.problems.sync_processing_problems(effects.processing_problems_before,store.wall_clock())
     if effects.source_groups_before:store.jobs.sync_captured_source_groups(effects)

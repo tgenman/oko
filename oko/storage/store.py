@@ -124,6 +124,12 @@ class Store:
             self.problems = Problems(self)
             from oko.storage.incomplete_index import recover as recover_incomplete_class
             recover_incomplete_class(self)
+            from oko.storage.incomplete_group_draft import recover_group_keys,recover_group_problems,TransactionGroupDraft
+            if self.db.execute("SELECT 1 FROM state WHERE key='experimental-incomplete-problems-v1'").fetchone():
+                self.incomplete_draft=TransactionGroupDraft(self)
+                self.db.before_commit=self.incomplete_draft.flush
+                setattr(self.db,'incomplete_group_mark',self.incomplete_draft.mark_materials)
+                setattr(self.db,'incomplete_job_mark',self.incomplete_draft.mark_job)
             with self.db:
                 self.problems.sync_codex_choice(self.wall_clock())
                 self.problems.sync_profiles(self.wall_clock())
@@ -160,6 +166,13 @@ class Store:
             if self.db.execute("SELECT 1 FROM state WHERE key LIKE 'source-youtube-timed:%%' LIMIT 1").fetchone():
                 from oko.storage.source_groups import sync_youtube_timer
                 with self.db:sync_youtube_timer(self,self.wall_clock())
+            recover_group_keys(self)
+            recover_group_problems(self)
+            if not hasattr(self,'incomplete_draft'):
+                self.incomplete_draft=TransactionGroupDraft(self)
+                self.db.before_commit=self.incomplete_draft.flush
+                setattr(self.db,'incomplete_group_mark',self.incomplete_draft.mark_materials)
+                setattr(self.db,'incomplete_job_mark',self.incomplete_draft.mark_job)
             self.recover_files()
             if self.db.execute(f"SELECT 1 FROM ({owned_ids('= %s')}) owner LIMIT 1", ('demo','demo')).fetchone():
                 self.ensure_demo()
@@ -496,6 +509,7 @@ class Store:
                     row.update(status='unavailable',reason=error.label,storage_key=None)
                 self.media.project_header(content,media)
                 with self.db:
+                    membership_graph.lock_graph(self.db)
                     for row in missing:
                         self.db.execute("UPDATE media_files SET status = 'unavailable' , reason = %s , storage_key = NULL WHERE id = %s",(error.label,row['id']))
                     self.db.execute('UPDATE publications SET content = %s WHERE id = %s',(json.dumps(content,ensure_ascii=False),item))
@@ -601,6 +615,7 @@ class Store:
             for feed, messages in eligibility.items():
                 self.subscriptions.details.record(feed, 'marked_read')
                 self.read_sync.eligible(feed, sorted(messages), 'viewed')
+            self.incomplete_draft.mark_materials(members)
             self.problems.forget_materials(set(members), self.wall_clock())
             # Capture all read-sync facts before removing any membership. A
             # single reachability pass then sees the final remaining roots.
@@ -645,6 +660,7 @@ class Store:
             for row in self.db.execute("SELECT id FROM jobs WHERE kind='discover' AND (item=%s OR feed_id=%s) AND (error IS NOT NULL OR problem_code IS NOT NULL)",(feed,feed)):
                 self.problems.sync_discover(row['id'],self.wall_clock())
             shared=[r[0] for r in self.db.execute(f'SELECT p.id FROM ({owned_ids("= %s")}) owner JOIN publications p ON p.id=owner.id WHERE p.platform IS NOT NULL',(feed,feed))]
+            self.incomplete_draft.mark_materials(sorted(set(shared) | set(selected)))
             publication_links.capture_root_deletion_problems(self,effects,set(shared))
             removed = membership_graph.remove(self.db,feed=feed)
             self.read_versions.memberships_changed(removed)

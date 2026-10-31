@@ -19,8 +19,8 @@ configuration, independently of the running containers.
 
 Use two database identities. The migration identity owns the Oko schema and its
 objects. The reader needs schema USAGE, table SELECT/INSERT/UPDATE/DELETE and
-sequence USAGE/SELECT. Give it SELECT only on `oko_schema_migrations`; it needs no
-CREATE privilege or schema ownership. Database/server administration credentials
+sequence USAGE/SELECT, and database TEMPORARY for transaction-local worksets. Give it SELECT only on `oko_schema_migrations`; it needs no
+CREATE privilege on the application schema or schema ownership. Check the reader identity before applying the release migration; if TEMPORARY was revoked, have the database administrator grant it before proceeding. Database/server administration credentials
 are not reader credentials.
 
 The connection string must select the intended schema through `search_path`.
@@ -30,6 +30,12 @@ process environment. Mode 0600 is suitable; a read-only private file also works.
 Never commit these files or include them in an image.
 
 ## Migration and startup
+
+Check the existing reader credentials before stopping the reader or migrating. This checks privileges without changing the schema:
+
+```sh
+python -m oko.storage.postgres_migrations --check-reader-permissions --database-url-file /run/secrets/oko-reader-dsn
+```
 
 Stop the reader before applying a release schema:
 

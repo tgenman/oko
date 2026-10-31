@@ -49,6 +49,7 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
         source_targets.update(row['id'] for row in found if row['source_problem'])
     if previous!=existing or len(existing)<len(keys):
         if source_targets:capture_source_groups(store,effects,source_targets)
+        store.incomplete_draft.mark_materials(sorted(previous | existing | {item}))
         affected=store.problems.processor_jobs_for_materials(sorted(previous | existing))
         store.problems.capture_processor_histories(affected,store.wall_clock())
     capture_processing_problems(store,effects,previous)

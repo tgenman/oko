@@ -251,12 +251,12 @@ def test_index_migration_preserves_rows_and_rolls_back(postgres_database_url):
         migrate(db,MIGRATIONS[:76])
         body=json.dumps(dict(code='work-fetch',operation='producer:fetch',fetch_job_id='1',fetch_job_identity='job:work-fetch:f:fetch:p',fetch_implicit_code=True,objects=[dict(kind='material',id='p')]))
         db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('old','job:fetch-isolated:old','background',%s,1)",(body,))
-        before=db.execute("SELECT * FROM reader_problems WHERE id='old'").fetchone()
+        before=db.execute("SELECT id,identity,origin,body,created,finished,outcome FROM reader_problems WHERE id='old'").fetchone()
         migration=MIGRATIONS[76]
         failing=Migration(77,migration.name,migration.sql+'; SELECT nonexistent FROM reader_problems')
         with pytest.raises(psycopg.errors.UndefinedColumn):migrate(db,(*MIGRATIONS[:76],failing))
         assert db.execute("SELECT to_regclass('reader_fetch_work_job_owner')").fetchone()[0] is None
         assert db.execute('SELECT max(version) FROM oko_schema_migrations').fetchone()[0]==76
-        assert db.execute("SELECT * FROM reader_problems WHERE id='old'").fetchone()==before
+        assert db.execute("SELECT id,identity,origin,body,created,finished,outcome FROM reader_problems WHERE id='old'").fetchone()==before
         migrate(db,MIGRATIONS);verify(db,MIGRATIONS)
-        assert db.execute("SELECT * FROM reader_problems WHERE id='old'").fetchone()==before
+        assert db.execute("SELECT id,identity,origin,body,created,finished,outcome FROM reader_problems WHERE id='old'").fetchone()==before

@@ -44,6 +44,7 @@ class JobRepository:
         return bool(row and row['status']=='running' and row['generation']==job.generation and row['kind']==job.kind and row['item']==job.item)
 
     def finish(self, job: Job) -> None:
+        if job.kind not in ('read','discover','feed-delete'):memberships.lock_graph(self.store.db)
         processor_previous=self.store.problems.processor_history_before_finish(job.id,self.store.wall_clock())
         previous = self.store.problems.deletion_candidates(job.id,self.store.wall_clock()) if job.kind=='delete' else []
         from oko.storage.fetch_job_problems import previous_candidates as managed_candidates
@@ -73,10 +74,12 @@ class JobRepository:
         if job.kind=='discover':
             codes=((discover_before['problem_code'] or 'work-discover'),) if discover_before and (discover_before['problem_code'] is not None or discover_before['error'] is not None) else ()
             self.store.problems.sync_discover(job.id,self.store.wall_clock(),previous_codes=codes)
+        self.store.incomplete_draft.mark_job(job.kind,job.item)
         if job.kind=='filter':
             self.store.processing.filter_changed(job.item)
 
     def reconcile(self, kind: Kind, candidates: list[tuple[str, str | None, bool, str]]) -> None:
+        memberships.lock_graph(self.store.db)
         db=self.store.db
         def sync_source_after(row: Any) -> None:
             if row and (row['previous_code'] or '').startswith('source-'):
@@ -146,6 +149,7 @@ class JobRepository:
             if previous_problem and job:self.store.problems.sync_processing_problem(job['id'],previous_problem,self.store.wall_clock())
         if affected:
             self.store.problems.finish_processor_change(affected,processor_previous,self.store.wall_clock())
+        if items and db.in_transaction:self.store.incomplete_draft.mark_materials(items)
 
     def forget_input(self, kind: Kind, identities: list[str]) -> None:
         ordered = sorted(set(identities))
@@ -168,6 +172,7 @@ class JobRepository:
 
     def revoke_changed_running_inputs(self) -> None:
         """Settings writes revoke only running attempts whose stage input changed."""
+        memberships.lock_graph(self.store.db)
         from oko.storage.processing_input import signature
         rows = self.store.db.execute("""SELECT id,kind,item,generation,error,problem_code,input_snapshot->>'signature' AS signature
             FROM jobs WHERE status='running' AND kind IN ('filter','theses')""").fetchall()
@@ -187,9 +192,11 @@ class JobRepository:
                         source_groups.sync_changed_rows(self.store,[changed],self.store.wall_clock())
                     self.store.problems.finish_processor_change([row['id']],processor_previous,self.store.wall_clock())
                     if previous:self.store.problems.sync_processing_problem(row['id'],previous,self.store.wall_clock())
+                    self.store.incomplete_draft.mark_materials([row['item']])
 
     def retry_processing(self, item: str, kind: Kind) -> bool:
         db=self.store.db
+        memberships.lock_graph(db)
         before=db.execute("SELECT id,error,problem_code,processor_visible FROM jobs WHERE kind=%s AND item=%s AND input_snapshot IS NOT NULL",(kind,item)).fetchone()
         if before is None:
             return False
@@ -204,6 +211,7 @@ class JobRepository:
         if kind=='filter':self.store.processing.filter_changed(item)
         if affected:self.store.problems.finish_processor_change(affected,previous,self.store.wall_clock())
         if stage_previous:self.store.problems.sync_processing_problem(before['id'],stage_previous,self.store.wall_clock())
+        self.store.incomplete_draft.mark_materials([item])
         return True
 
     def origin(self, job: Job, signature: str) -> dict[str, Any] | None:
@@ -228,6 +236,7 @@ class JobRepository:
                 self.store.publications.status(job.item)
 
     def cancel(self, job: Job) -> None:
+        if job.kind not in ('read','discover','feed-delete'):memberships.lock_graph(self.store.db)
         from oko.storage.fetch_job_problems import previous_candidates as managed_candidates
         previous=managed_candidates(self.store,job.id,self.store.wall_clock()) if job.kind=='fetch' else []
         from oko.storage.media_job_problems import previous_candidates as media_candidates
@@ -245,6 +254,7 @@ class JobRepository:
         if changed and previous:self.store.problems.sync_fetch(job.id,previous,self.store.wall_clock())
         if changed and previous_media:self.store.problems.sync_media_problem(job.id,previous_media,self.store.wall_clock())
         if changed and previous_processing:self.store.problems.sync_processing_problem(job.id,previous_processing,self.store.wall_clock())
+        if changed:self.store.incomplete_draft.mark_job(job.kind,job.item)
 
     def block(self, job: Job) -> None:
         if job.kind in ('fetch','download_media','filter','theses','delete','feed-delete'):
@@ -265,6 +275,7 @@ class JobRepository:
         if changed and previous:self.store.problems.sync_fetch(job.id,previous,self.store.wall_clock())
         if changed and previous_media:self.store.problems.sync_media_problem(job.id,previous_media,self.store.wall_clock())
         if changed and previous_processing:self.store.problems.sync_processing_problem(job.id,previous_processing,self.store.wall_clock())
+        if changed:self.store.incomplete_draft.mark_job(job.kind,job.item)
 
     def manual(self, job: Job) -> bool:
         row=self.store.db.execute('SELECT manual_once FROM jobs WHERE id = %s AND generation = %s',(job.id,job.generation)).fetchone()
@@ -299,6 +310,7 @@ class JobRepository:
         discovery = '' if feed == 'demo' else feed
         active = self.store.db.execute("SELECT 1 FROM jobs WHERE kind = 'discover' AND item = %s AND ( status = 'running' OR ( status = 'pending' AND error IS NULL AND next <= %s ) )", (discovery,self.store.clock())).fetchone()
         with self.store.db:
+            memberships.lock_graph(self.store.db)
             history = self.store.subscriptions.history.status(feed)
             if history and not history.get('cancelled'):
                 self.store.subscriptions.history.pause(feed, False)
@@ -323,6 +335,7 @@ class JobRepository:
                     if changed_fetch and (changed_fetch['processor_visible'] or changed_fetch['problem_code']=='processor-config'):
                         self.store.problems.finish_processor_change([changed_fetch['id']],None,self.store.wall_clock())
                     if prior:self.store.problems.sync_fetch(row['job_id'],prior,self.store.wall_clock())
+                    self.store.incomplete_draft.mark_materials([row['id']])
                     if changed_fetch and (changed_fetch['problem_code'] or '').startswith('source-'):source_ids.append(changed_fetch['id'])
             if source_ids:
                 from oko.storage import source_groups
@@ -345,6 +358,7 @@ class JobRepository:
 
 
     def enqueue_fetch(self, item: str, *, sync_problem: bool = True, sync_processor: bool = True, sync_source: bool = True) -> None:
+        memberships.lock_graph(self.store.db)
         from oko.storage.fetch_job_problems import previous_candidates as managed_candidates
         before = self.store.db.execute("SELECT id,status,error,next,problem_code,processor_visible FROM jobs WHERE kind='fetch' AND item=%s", (item,)).fetchone()
         previous=managed_candidates(self.store,before['id'],self.store.wall_clock()) if sync_problem and before and (before['error'] is not None or before['problem_code'] is not None) else []
@@ -361,6 +375,7 @@ class JobRepository:
             status_changed(self.store.db)
             if previous and after:self.store.problems.sync_fetch(after['id'],previous,self.store.wall_clock())
             if affected:self.store.problems.finish_processor_change(affected,processor_previous,self.store.wall_clock())
+            self.store.incomplete_draft.mark_job('fetch',item)
 
 
     def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False, include_deletions: bool = True, media_only: bool = False, captions_only: bool = False, dependency_feeds: list[str] | None = None, processing_kind: str | None = None) -> Job | None:
@@ -467,6 +482,7 @@ class JobRepository:
                     source_groups.sync_changed_rows(self.store,[source_changed],self.store.wall_clock())
                 self.store.problems.finish_processor_change([job['id']],processor_previous,self.store.wall_clock())
                 if previous:self.store.problems.sync_processing_problem(current['id'],previous,self.store.wall_clock())
+                self.store.incomplete_draft.mark_materials([job['item']])
                 return None
             metadata['_pass'] = dict(feed_id=chosen)
             db.execute('UPDATE publications SET processing_metadata=%s WHERE id=%s', (json.dumps(metadata,ensure_ascii=False),job['item']))
@@ -491,6 +507,7 @@ class JobRepository:
             if changed_sibling and (changed_sibling['error'] is not None or changed_sibling['problem_code'] is not None):
                 previous=self.store.problems.saved_processing_candidates([changed_sibling['id']]).get(changed_sibling['id'],[])
                 if previous:self.store.problems.sync_processing_problem(changed_sibling['id'],previous,self.store.wall_clock())
+            self.store.incomplete_draft.mark_materials([job['item']])
             current = db.execute("SELECT * FROM jobs WHERE id=%s AND status='pending'", (job['id'],)).fetchone()
             if current is None:
                 raise JobRejected('Selected processing candidate is no longer eligible')
@@ -566,6 +583,7 @@ class JobRepository:
             if row['kind']=='filter':self.store.processing.filter_changed(row['item'])
             if row['kind']=='read':self.store.problems.sync_read_feed(row['item'],self.store.wall_clock())
             if row['kind']=='fetch' and previous_fetch:self.store.problems.sync_fetch(row['id'],previous_fetch,self.store.wall_clock())
+            self.store.incomplete_draft.mark_job(row['kind'],row['item'])
             if row['kind']=='download_media' and previous_media:self.store.problems.sync_media_problem(row['id'],previous_media,self.store.wall_clock())
             if row['kind'] in ('filter','theses') and previous_processing:self.store.problems.sync_processing_problem(row['id'],previous_processing,self.store.wall_clock())
             if row['kind']=='discover' and (row['error'] is not None or row['problem_code'] is not None):self.store.problems.sync_discover(row['id'],self.store.wall_clock())
@@ -584,6 +602,7 @@ class JobRepository:
                 if valid and job.kind=='filter':self.store.processing.filter_changed(job.item)
             return
         with self.store.db:
+            memberships.lock_graph(self.store.db)
             processor_previous=self.store.problems.prepare_processor_change([job.id],self.store.wall_clock(),source_lock=job.kind in ('download_media','delete','feed-delete') and (code or '').startswith('source-'))
             previous = self.store.problems.deletion_candidates(job.id,self.store.wall_clock()) if job.kind in ('delete','feed-delete') else []
             from oko.storage.media_job_problems import previous_candidates as media_candidates
@@ -603,6 +622,7 @@ class JobRepository:
                 self.store.problems.sync_media_problem(job.id,previous_media,self.store.wall_clock())
             if changed:
                 self.store.problems.finish_processor_change([job.id],processor_previous,self.store.wall_clock())
+                self.store.incomplete_draft.mark_job(job.kind,job.item)
 
 
     def restore_telegram_wait(self, feed: str, deadline: float) -> None:
@@ -630,6 +650,7 @@ class JobRepository:
             source_ids=[row['id'] for row in changed if row['kind'] in ('fetch','download_media','filter','theses','delete','feed-delete') and (row['problem_code'] or '').startswith('source-')]
             if source_ids:source_groups.sync_jobs(self.store,source_ids,self.store.wall_clock())
             for row in changed:
+                self.store.incomplete_draft.mark_job(row['kind'],row['item'])
                 if row['kind']=='filter':self.store.processing.filter_changed(row['item'])
                 if row['kind']=='read':self.store.problems.sync_read_feed(row['item'],self.store.wall_clock())
                 if row['kind'] in ('delete','feed-delete') and (row['error'] is not None or row['problem_code'] is not None):
@@ -667,8 +688,10 @@ class JobRepository:
                 memberships.lock_graph(self.store.db)
                 affected=[row['id'] for row in self.store.db.execute(f"SELECT j.id FROM jobs j JOIN media_files m ON j.kind='download_media' AND j.item=m.id JOIN ({owned_ids('= %s')}) owner ON owner.id=m.publication_id WHERE m.resource_key='youtube:subtitles' AND j.status IN ('pending','running') AND (j.processor_visible OR j.problem_code='processor-config')",(feed,feed))]
                 previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
-                changed_source=job_write(self.store.db, f"UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL WHERE kind = 'download_media' AND status IN ( 'pending' , 'running' ) AND item IN ( SELECT m.id FROM media_files m JOIN ({owned_ids('= %s')}) owner ON owner.id=m.publication_id WHERE m.resource_key = 'youtube:subtitles' ) RETURNING id,OLD.problem_code AS previous_code",(feed,feed)).fetchall()
+                changed_source=job_write(self.store.db, f"UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL WHERE kind = 'download_media' AND status IN ( 'pending' , 'running' ) AND item IN ( SELECT m.id FROM media_files m JOIN ({owned_ids('= %s')}) owner ON owner.id=m.publication_id WHERE m.resource_key = 'youtube:subtitles' ) RETURNING id,item,OLD.problem_code AS previous_code",(feed,feed)).fetchall()
                 source_groups.sync_changed_rows(self.store,list(changed_source),self.store.wall_clock())
+                self.store.incomplete_draft.mark_materials([row['id'] for row in rows])
+                self.store.incomplete_draft.mark_jobs([('download_media',row['item']) for row in changed_source])
                 for row in rows:
                     if row['status']=='pending_download':
                         self.enqueue_fetch(row['id'])
@@ -796,17 +819,20 @@ class JobRepository:
             if changed and job.kind=='discover':self.store.problems.sync_discover(job.id,self.store.wall_clock())
             if changed and previous_media:self.store.problems.sync_media_problem(job.id,previous_media,self.store.wall_clock())
             if changed:self.store.problems.finish_processor_change([job.id],processor_previous,self.store.wall_clock())
+            if changed:self.store.incomplete_draft.mark_job(job.kind,job.item)
 
     def fail_media(self, job: Job, issue: AdapterIssue) -> None:
         collection_jobs.fail(self.store,job,issue,cancelled=issue.kind==AdapterErrorKind.media_changed)
 
     def defer_captions(self, job: Job, now: float, delay: float, reason: str) -> None:
+        memberships.lock_graph(self.store.db)
         processor_previous=self.store.problems.prepare_processor_change([job.id],self.store.wall_clock())
         changed=job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , next = %s , error = %s , problem_code = NULL WHERE id = %s AND generation = %s AND status = 'running' AND CASE WHEN kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING id,OLD.problem_code AS previous_code",(now+max(.05,delay),reason,job.id,job.generation)).fetchone()
         if changed and (changed['previous_code'] or '').startswith('source-'):
             from oko.storage import source_groups
             source_groups.sync_changed_rows(self.store,[changed],self.store.wall_clock())
         if changed:self.store.problems.finish_processor_change([job.id],processor_previous,self.store.wall_clock())
+        if changed:self.store.incomplete_draft.mark_job(job.kind,job.item)
 
     def source_http_until(self, scope: str) -> float:
         return self.store.source_http_until(scope)
@@ -844,12 +870,21 @@ class JobRepository:
         self.store.collection_status.interrupt(job,feed,saved,elapsed)
 
     def apply_collection(self, effects: CollectionEffects) -> None:
+        memberships.lock_graph(self.store.db)
         db=self.store.db
         previous_deletions: dict[str, tuple[int,list[dict[str,Any]]]] = {}
         captured_fetch_items={row['item'] for row in db.execute("SELECT item FROM jobs WHERE kind='fetch' AND id=ANY(%s)",(list(effects.fetch_problems_before),))} if effects.fetch_problems_before else set()
         captured_source_fetch_items={row['item'] for row in db.execute("SELECT item FROM jobs WHERE kind='fetch' AND id=ANY(%s)",(list(effects.source_groups_before),))} if effects.source_groups_before else set()
         affected = sorted(set(effects.fetch) | set(effects.delete_problem_ids_before))
         processor_items=sorted(set(affected) | set(effects.refresh_links) | set(effects.media) | set(effects.revalidate))
+        if processor_items:
+            from oko.storage.transaction import begin_write
+            begin_write(db)
+            self.store.incomplete_draft.mark_materials(processor_items)
+            for start in range(0,len(effects.revalidate),400):
+                ids=sorted(effects.revalidate)[start:start+400]
+                owners=[row['publication_id'] for row in db.execute('SELECT publication_id FROM media_files WHERE id=ANY(%s)',(ids,))]
+                self.store.incomplete_draft.mark_materials(owners)
         processor_jobs=sorted(set(self.store.problems.processor_jobs_for_materials(processor_items)) | set(self.processor_cleanup_jobs()))
         processor_previous=self.store.problems.processor_history_before_batch(processor_jobs,self.store.wall_clock())
         for start in range(0,len(affected),400):
@@ -895,14 +930,15 @@ class JobRepository:
         memberships.lock_graph(db)
         affected=self.processor_cleanup_jobs() if sync_processor else []
         processor_previous=self.store.problems.processor_history_before_batch(affected,self.store.wall_clock())
-        orphaned=job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL WHERE kind = 'download_media' AND status IN ( 'pending' , 'running' , 'failed' , 'unavailable' ) AND item NOT IN ( SELECT id FROM media_files ) RETURNING id,OLD.problem_code AS previous_code").fetchall()
+        orphaned=job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL WHERE kind = 'download_media' AND status IN ( 'pending' , 'running' , 'failed' , 'unavailable' ) AND item NOT IN ( SELECT id FROM media_files ) RETURNING id,item,OLD.problem_code AS previous_code").fetchall()
         ids=[row['id'] for row in orphaned]
         source_groups.sync_changed_rows(self.store,[row for row in orphaned if row['id'] not in skipped_source],self.store.wall_clock())
         for start in range(0,len(ids),400):
             for job_id,previous in self.store.problems.saved_media_candidates(ids[start:start+400]).items():
                 self.store.problems.sync_media_problem(job_id,previous,self.store.wall_clock())
-        viewed_cancelled=job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL WHERE status != 'cancelled' AND ((kind NOT IN ('delete','discover','read','feed-delete','download_media') AND item IN (SELECT id FROM publications WHERE viewed=1)) OR (kind='download_media' AND item IN (SELECT m.id FROM media_files m JOIN publications p ON p.id=m.publication_id WHERE p.viewed=1))) RETURNING id,kind,OLD.problem_code AS previous_code").fetchall()
+        viewed_cancelled=job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL WHERE status != 'cancelled' AND ((kind NOT IN ('delete','discover','read','feed-delete','download_media') AND item IN (SELECT id FROM publications WHERE viewed=1)) OR (kind='download_media' AND item IN (SELECT m.id FROM media_files m JOIN publications p ON p.id=m.publication_id WHERE p.viewed=1))) RETURNING id,kind,item,OLD.problem_code AS previous_code").fetchall()
         source_groups.sync_changed_rows(self.store,[row for row in viewed_cancelled if row['id'] not in skipped_source],self.store.wall_clock())
+        self.store.incomplete_draft.mark_jobs([('download_media',row['item']) for row in orphaned]+[(row['kind'],row['item']) for row in viewed_cancelled])
         viewed_media=[row['id'] for row in viewed_cancelled if row['kind']=='download_media']
         for start in range(0,len(viewed_media),400):
             for job_id,previous in self.store.problems.saved_media_candidates(viewed_media[start:start+400]).items():
@@ -966,6 +1002,10 @@ class JobRepository:
         from oko.storage import memberships
         memberships.lock_graph(db)
         publication_links.capture_source_groups(self.store,effects,set(owned))
+        self.store.incomplete_draft.mark_materials(owned)
+        for start in range(0,len(owned),400):
+            media_ids=[row['id'] for row in db.execute('SELECT id FROM media_files WHERE publication_id=ANY(%s)',(owned[start:start+400],))]
+            self.store.incomplete_draft.mark_jobs([('download_media',identity) for identity in media_ids])
         processor_affected=self.store.problems.processor_jobs_for_materials([feed,*owned])
         processor_previous=self.store.problems.prepare_processor_change(processor_affected,self.store.wall_clock())
         job_write(db, f"UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL , retry_at = NULL , retry_delay = 0 , wait_scope = NULL , next = 0 WHERE kind = 'download_media' AND item IN ( SELECT m.id FROM media_files m JOIN ({owned_ids('= %s')}) owner ON owner.id=m.publication_id )",(feed,feed))
@@ -982,6 +1022,12 @@ class JobRepository:
 
     def remove_feed(self, feed: str, members: set[str]) -> None:
         db=self.store.db
+        memberships.lock_graph(db)
+        self.store.incomplete_draft.mark_materials(sorted(members | {feed}))
+        ordered_members=sorted(members)
+        for start in range(0,len(ordered_members),400):
+            media_ids=[row['id'] for row in db.execute('SELECT id FROM media_files WHERE publication_id=ANY(%s)',(ordered_members[start:start+400],))]
+            self.store.incomplete_draft.mark_jobs([('download_media',identity) for identity in media_ids])
         affected=self.store.problems.processor_jobs_for_materials([feed,*sorted(members)])
         processor_previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
         changed_processing: set[int]=set()
@@ -1018,18 +1064,21 @@ class JobRepository:
         # The owner is recorded when the last membership is removed.
 
     def schedule_media(self, item: str, *, skip_problem_jobs: set[int] | None = None, skip_source_jobs: set[int] | None = None, sync_processor: bool = True) -> None:
+        memberships.lock_graph(self.store.db)
         db = self.store.db
         skipped_source=skip_source_jobs or set()
         processor_affected=self.store.problems.processor_jobs_for_materials([item]) if sync_processor else []
         processor_previous=self.store.problems.prepare_processor_change(processor_affected,self.store.wall_clock()) if sync_processor else None
-        cancelled=job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 WHERE kind = 'download_media' AND status IN ( 'pending' , 'running' ) AND item IN ( SELECT id FROM media_files WHERE publication_id = %s AND status = 'unavailable' ) RETURNING id,error,problem_code,OLD.problem_code AS previous_code",(item,)).fetchall()
+        cancelled=job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 WHERE kind = 'download_media' AND status IN ( 'pending' , 'running' ) AND item IN ( SELECT id FROM media_files WHERE publication_id = %s AND status = 'unavailable' ) RETURNING id,item,error,problem_code,OLD.problem_code AS previous_code",(item,)).fetchall()
         from oko.storage import source_groups
         source_rows=list(cancelled)
         excluded=skip_problem_jobs or set()
         changed_ids=[row['id'] for row in cancelled if row['id'] not in excluded and (row['error'] is not None or row['problem_code'] is not None)]
         saved=self.store.problems.saved_media_candidates(changed_ids)
         for job_id,previous in saved.items():self.store.problems.sync_media_problem(job_id,previous,self.store.wall_clock())
+        media_targets=[]
         for row in db.execute("SELECT m.id,j.id AS job_id,j.error,j.problem_code FROM media_files m LEFT JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=%s AND m.status='pending_download'", (item,)).fetchall():
+            media_targets.append(row['id'])
             from oko.storage.media_job_problems import previous_candidates as media_candidates
             previous=media_candidates(self.store,row['job_id'],self.store.wall_clock()) if row['job_id'] is not None and row['job_id'] not in excluded and (row['error'] is not None or row['problem_code'] is not None) else []
             now,wall=self.store.clock(),self.store.wall_clock()
@@ -1038,11 +1087,15 @@ class JobRepository:
             if previous and row['job_id'] is not None:self.store.problems.sync_media_problem(row['job_id'],previous,self.store.wall_clock())
         if source_rows:source_groups.sync_changed_rows(self.store,[row for row in source_rows if row['id'] not in skipped_source],self.store.wall_clock())
         if processor_affected:self.store.problems.finish_processor_change(processor_affected,processor_previous,self.store.wall_clock())
+        if db.in_transaction:
+            self.store.incomplete_draft.mark_materials([item])
+            self.store.incomplete_draft.mark_jobs([('download_media',row['item']) for row in cancelled]+[('download_media',identity) for identity in media_targets])
 
 
     def retry_media(self, item: str, *, revalidate_ready: bool = True) -> None:
         """Manual retry preserves source deadlines and the accumulated backoff."""
         store = self.store
+        memberships.lock_graph(store.db)
         from oko.storage import source_groups
         source_rows: list[Any]=[]
         affected=store.problems.processor_jobs_for_materials([item])
@@ -1084,6 +1137,9 @@ class JobRepository:
                 self.revalidate_media(resource['id'])
         if source_rows:source_groups.sync_changed_rows(store,source_rows,store.wall_clock())
         if affected:store.problems.finish_processor_change(affected,previous,store.wall_clock())
+        if store.db.in_transaction:
+            store.incomplete_draft.mark_materials([item])
+            store.incomplete_draft.mark_jobs([('download_media',row['item']) for row in rows])
 
 
     def revalidate_media(self, identity: str, *, manual: bool = True, sync_processor: bool = True) -> None:
@@ -1091,6 +1147,7 @@ class JobRepository:
         row=store.db.execute(f"SELECT m.resource_key, i.platform, {owner_expr('i')} AS feed_id FROM media_files m JOIN publications i ON i.id=m.publication_id WHERE m.id = %s AND m.status = 'ready' AND i.viewed = 0",(identity,)).fetchone()
         if row is None or row['resource_key']=='youtube:subtitles' and not store.subscriptions.youtube_theses(row['feed_id']):
             return
+        memberships.lock_graph(store.db)
         affected=store.problems.processor_jobs_for_materials([identity]) if sync_processor else []
         previous=store.problems.prepare_processor_change(affected,store.wall_clock()) if sync_processor else None
         changed_source=job_write(store.db, "INSERT INTO jobs ( kind , item , manual_once , queued_wall ) VALUES ( 'download_media' , %s , 1 , extract(epoch FROM clock_timestamp()) ) ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , manual_once = 1 , generation = jobs . generation + 1 , next = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . next ELSE 0 END , retry_at = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . retry_at ELSE NULL END WHERE (jobs . status IN ( 'done' , 'cancelled' ) OR ( %s = 1 AND jobs . status IN ( 'failed' , 'unavailable' ) )) AND CASE WHEN jobs.problem_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING id,OLD.problem_code AS previous_code",
@@ -1099,6 +1156,7 @@ class JobRepository:
             from oko.storage import source_groups
             source_groups.sync_changed_rows(store,[changed_source],store.wall_clock())
         if affected:store.problems.finish_processor_change(affected,previous,store.wall_clock())
+        if store.db.in_transaction:store.incomplete_draft.mark_job('download_media',identity)
 
 
     def finish_feed_deletion(self, job: Job) -> None:
@@ -1124,6 +1182,7 @@ class JobRepository:
                 source_effects.source_groups_before.update(source_groups.job_keys_many(self.store,group))
                 evidence=source_groups.job_evidence_many(self.store,[(job_id,None) for job_id in group])
                 for key,objects in evidence.items():source_effects.source_evidence_before.setdefault(key,set()).update(objects)
+            self.store.incomplete_draft.mark_materials([row['item'] for row in self.store.db.execute(owned,(feed,))])
             affected=[row['id'] for row in self.store.db.execute(f"SELECT id FROM jobs WHERE (processor_visible OR problem_code='processor-config') AND (item=%s OR (kind='delete' AND payload::jsonb->>'cleanup_feed'=%s) OR (kind!='delete' AND item IN ({owned})))",(feed,feed,feed))]
             processor_previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
             job_write(self.store.db, f"DELETE FROM jobs WHERE kind != 'delete' AND item IN ({owned})", (feed,))
@@ -1187,8 +1246,9 @@ class JobRepository:
         effects=CollectionEffects()
         affected={row['item'] for row in self.store.db.execute("SELECT j.item FROM history_members h JOIN jobs j ON j.item=h.item AND j.kind='fetch' WHERE h.feed=%s AND j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%'",(feed,))}
         publication_links.capture_fetch_problems(self.store,effects,affected)
-        source_rows=job_write(self.store.db, "UPDATE jobs SET status = 'done' , generation = generation + 1 WHERE kind = 'fetch' AND item IN ( SELECT item FROM history_members WHERE feed = %s ) RETURNING id,OLD.problem_code AS previous_code",(feed,)).fetchall()
+        source_rows=job_write(self.store.db, "UPDATE jobs SET status = 'done' , generation = generation + 1 WHERE kind = 'fetch' AND item IN ( SELECT item FROM history_members WHERE feed = %s ) RETURNING id,item,OLD.problem_code AS previous_code",(feed,)).fetchall()
         source_groups.sync_changed_rows(self.store,list(source_rows),self.store.wall_clock())
+        if source_rows:self.store.incomplete_draft.mark_materials([row['item'] for row in source_rows])
         for job_id,previous in effects.fetch_problems_before.items():
             self.store.problems.sync_fetch(job_id,previous,self.store.wall_clock())
         if processor_affected:self.store.problems.finish_processor_change(processor_affected,processor_previous,self.store.wall_clock())
@@ -1210,6 +1270,7 @@ class JobRepository:
                 yield
 
     def replace_media_input(self, job: Job) -> None:
+        memberships.lock_graph(self.store.db)
         from oko.storage.media_job_problems import previous_candidates as media_candidates
         previous=media_candidates(self.store,job.id,self.store.wall_clock())
         changed=job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , generation = generation + 1 , next = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN next ELSE 0 END , error = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN error ELSE NULL END WHERE id = %s AND generation = %s AND status = 'running' AND CASE WHEN problem_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING id,OLD.problem_code AS previous_code",(self.store.wall_clock(),self.store.wall_clock(),job.id,job.generation)).fetchone()
@@ -1217,6 +1278,7 @@ class JobRepository:
             from oko.storage import source_groups
             source_groups.sync_changed_rows(self.store,[changed],self.store.wall_clock())
         if changed and previous:self.store.problems.sync_media_problem(job.id,previous,self.store.wall_clock())
+        if changed:self.store.incomplete_draft.mark_job(job.kind,job.item)
 
     def invalidate_processing(self) -> None:
         from oko.storage import memberships,source_groups
@@ -1233,6 +1295,7 @@ class JobRepository:
         source_groups.sync_changed_rows(self.store,list(changed),self.store.wall_clock())
         for row in changed:
             if row['kind']=='filter':self.store.processing.filter_changed(row['item'])
+        if changed:self.store.incomplete_draft.mark_materials([row['item'] for row in changed])
         if affected:self.store.problems.finish_processor_change(affected,processor_previous,self.store.wall_clock())
         if stage_previous:self.store.problems.sync_processing_problems(stage_previous,self.store.wall_clock())
 

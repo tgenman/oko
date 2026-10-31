@@ -37,10 +37,12 @@ class CollectionStatus:
         return data
 
     def _write(self, job: int, feed: str, data: dict[str, Any]) -> None:
+        from oko.storage import memberships
+        memberships.lock_graph(self.db)
         changed = self.db.execute("""UPDATE jobs SET feed_id=%s,collection_attempt=%s::jsonb WHERE id=%s
             AND CASE WHEN kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code LIKE 'source-%%' AND feed_id IS DISTINCT FROM %s
                 THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END
-            RETURNING OLD.feed_id AS previous_feed,OLD.problem_code AS previous_code,kind""",(feed,json.dumps(data),job,feed)).fetchone()
+            RETURNING OLD.feed_id AS previous_feed,OLD.problem_code AS previous_code,kind,item""",(feed,json.dumps(data),job,feed)).fetchone()
         if changed is None:raise LookupError('Collection job no longer exists')
         if changed['kind'] in ('fetch','download_media','filter','theses','delete','feed-delete') and (changed['previous_code'] or '').startswith('source-') and changed['previous_feed']!=feed:
             from oko.storage import source_groups
@@ -51,6 +53,8 @@ class CollectionStatus:
                 evidence=source_groups.job_evidence_with_previous_feed(self.store,job,changed['previous_feed'])
                 complete=source_groups.sync_transition(self.store,kind,before,after,self.wall(),evidence=evidence)
                 self.db.execute("UPDATE jobs SET source_event_owned=(%s=1) WHERE id=%s",(complete,job))
+        mark=getattr(self.db,'incomplete_job_mark',None)
+        if mark is not None and changed['previous_feed']!=feed:mark(changed['kind'],changed['item'])
 
     def finish(self, job: Any, feed: str, data: dict[str, Any], elapsed: float, observation: dict[str, Any]) -> None:
         row = self.db.execute('SELECT * FROM jobs WHERE id = %s', (job.id,)).fetchone()

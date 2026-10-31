@@ -62,7 +62,11 @@ class YouTubeAccess:
 
     def start(self, wall: float) -> None:
         with self.db:
+            from oko.storage import memberships
+            memberships.lock_graph(self.db)
             self.db.execute('UPDATE youtube_access SET next_at = %s WHERE id = 1', (wall + self.interval,))
+            manager=getattr(self.store,'incomplete_draft',None)
+            if manager is not None:manager.mark_youtube_groups(pause=False)
 
     def blocked(self, wall: float, retry_after: float) -> None:
         with self.db:
@@ -75,6 +79,8 @@ class YouTubeAccess:
             until = wall + max(min(900 * 2 ** (strikes - 1), 21600), retry_after)
             self.db.execute('UPDATE youtube_access SET strikes = %s , blocked_until = %s WHERE id = 1', (strikes, until))
             source_groups.sync_youtube_timer(self.store,wall)
+            manager=getattr(self.store,'incomplete_draft',None)
+            if manager is not None:manager.mark_youtube_groups(pause=True)
             self.store.problems.finish_processor_change([],previous,wall)
             old_paused=self.store.read_versions._processor_youtube_paused
             self.db.after_rollback(lambda: setattr(self.store.read_versions,'_processor_youtube_paused',old_paused))
@@ -96,6 +102,8 @@ class YouTubeAccess:
             if source_timed:
                 from oko.storage import source_groups
                 source_groups.sync_youtube_timer(self.store,self.store.wall_clock())
+            manager=getattr(self.store,'incomplete_draft',None)
+            if manager is not None:manager.mark_youtube_groups(pause=True)
             self.store.problems.finish_processor_change([],None,self.store.wall_clock())
             old_paused=self.store.read_versions._processor_youtube_paused
             self.db.after_rollback(lambda: setattr(self.store.read_versions,'_processor_youtube_paused',old_paused))

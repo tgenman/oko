@@ -15,7 +15,7 @@ import psycopg
 from psycopg.pq import TransactionStatus
 
 from oko.storage.rows import Record
-from oko.storage.postgres_migrations import verify, schema_lock_key
+from oko.storage.postgres_migrations import verify, verify_reader_permissions, schema_lock_key
 from oko.storage.postgres_schema import MIGRATIONS
 
 
@@ -47,6 +47,7 @@ class PostgresConnection:
         self._db = psycopg.connect(dsn, autocommit=True, row_factory=_records)
         try:
             verify(self._db, MIGRATIONS)
+            verify_reader_permissions(self._db)
         except BaseException:
             self._db.close()
             raise
@@ -83,6 +84,40 @@ class PostgresConnection:
             # A broken connection is a database failure, not an unowned action.
             raise psycopg.OperationalError('the connection is closed or broken')
         return status != TransactionStatus.IDLE
+
+    def incomplete_row_pages(self, sql: str, parameters: Sequence[Any] = ()) -> Any:
+        """Stream a bounded batch of event inputs through a server cursor."""
+        from uuid import uuid4
+        if not self.in_transaction or self._read_only or _command(sql) != 'SELECT':
+            raise RuntimeError('Incomplete cursor requires a write transaction and SELECT')
+        if self._trace:self._trace(sql)
+        with self._db.cursor(name='incomplete_'+uuid4().hex) as cursor:
+            cursor.execute(sql,parameters or None)
+            while True:
+                if self._trace:self._trace('FETCH 100 FROM incomplete cursor')
+                batch=cursor.fetchmany(100)
+                if not batch:break
+                yield batch
+            if self._trace:self._trace('CLOSE incomplete cursor')
+
+    def ensure_incomplete_workset(self) -> None:
+        """Create transaction-local scratch state; rollback and commit discard it."""
+        if not self.in_transaction or self._read_only:
+            raise RuntimeError('Incomplete workset requires a write transaction')
+        if self._trace:self._trace("SELECT to_regclass('pg_temp.oko_incomplete_work')")
+        result=self._db.execute("SELECT to_regclass('pg_temp.oko_incomplete_work')").fetchone()
+        assert result is not None
+        if result[0] is None:
+            if self._trace:self._trace('CREATE TEMP TABLE oko_incomplete_work')
+            self._db.execute('CREATE TEMP TABLE oko_incomplete_work (item text COLLATE "C" PRIMARY KEY, old_key text COLLATE "C", new_key text COLLATE "C", sticky boolean NOT NULL DEFAULT false, forgotten boolean NOT NULL DEFAULT false, unknown boolean NOT NULL DEFAULT false) ON COMMIT DROP')
+            if self._trace:self._trace('CREATE INDEX oko_incomplete_work_old_key')
+            self._db.execute('CREATE INDEX ON oko_incomplete_work(old_key)')
+            if self._trace:self._trace('CREATE INDEX oko_incomplete_work_new_key')
+            self._db.execute('CREATE INDEX ON oko_incomplete_work(new_key)')
+            if self._trace:self._trace('CREATE TEMP TABLE oko_incomplete_materialized')
+            self._db.execute('CREATE TEMP TABLE oko_incomplete_materialized (id text COLLATE "C" PRIMARY KEY) ON COMMIT DROP')
+            if self._trace:self._trace('CREATE TEMP TABLE oko_incomplete_groups')
+            self._db.execute('CREATE TEMP TABLE oko_incomplete_groups (key text COLLATE "C" PRIMARY KEY, is_old boolean NOT NULL DEFAULT false, weight bigint NOT NULL DEFAULT 0) ON COMMIT DROP')
 
     def set_trace_callback(self, callback: Callable[[str], None] | None) -> None:
         """Observe native statement text without expanding bound values."""

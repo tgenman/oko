@@ -82,7 +82,7 @@ def test_boundary_probe_ignores_10000_unrelated_publications_and_jobs(tmp_path,p
         finally:store.db.set_trace_callback(None)
         query=next(q for q in sql if 'greatest(next_at,blocked_until)' in q)
         assert 'publications' not in query
-        params=(store.clock(),100.0,100.0,100.0-86400,None)
+        params=(store.clock(),100.0,100.0,100.0-86400,None,100.0,100.0-86400)
         plan=store.db._db.execute('EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) '+query,params).fetchone()[0][0]['Plan']
         print('status boundary rows',scan_rows(plan),'buffers',plan.get('Shared Hit Blocks'))
         assert scan_rows(plan)<1000

@@ -43,6 +43,8 @@ def content_class(value: Any) -> int:
 
 def save_class(db: Any, item: str, content: Any) -> None:
     db.execute('UPDATE publications SET incomplete_class=%s WHERE id=%s',(content_class(content),item))
+    mark=getattr(db,'incomplete_group_mark',None)
+    if mark is not None:mark([item])
 
 
 def classify_newly_eligible(db: Any, ids: list[str]) -> None:
