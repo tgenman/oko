@@ -3,7 +3,10 @@ from oko.storage.database import Database, Row
 from collections.abc import Callable
 from datetime import datetime, timezone
 import json
-from typing import Any
+from typing import Any,TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from oko.storage.store import Store
 from oko.diagnostics import redact, exception_details
 
 
@@ -17,12 +20,12 @@ def clipped(value: str, limit: int) -> tuple[str, bool]:
 
 
 class CollectionStatus:
-    def __init__(self, db: Database, clock: Callable[[], float], wall: Callable[[], float]) -> None:
-        self.db, self.clock, self.wall = db, clock, wall
+    def __init__(self, db: Database, clock: Callable[[], float], wall: Callable[[], float], store: 'Store') -> None:
+        self.db, self.clock, self.wall, self.store = db, clock, wall, store
 
     def read(self, job: int) -> dict[str, Any]:
-        row = self.db.execute('SELECT data FROM collection_attempts WHERE job = %s', (job,)).fetchone()
-        return json.loads(row[0]) if row else {}
+        row = self.db.execute('SELECT collection_attempt FROM jobs WHERE id = %s', (job,)).fetchone()
+        return dict(row[0]) if row and row[0] is not None else {}
 
     def start(self, job: Any, feed: str) -> dict[str, Any]:
         previous = self.read(job.id)
@@ -34,7 +37,24 @@ class CollectionStatus:
         return data
 
     def _write(self, job: int, feed: str, data: dict[str, Any]) -> None:
-        self.db.execute('INSERT INTO collection_attempts VALUES ( %s , %s , %s ) ON CONFLICT ( job ) DO UPDATE SET feed = excluded . feed , data = excluded . data', (job, feed, json.dumps(data)))
+        from oko.storage import memberships
+        memberships.lock_graph(self.db)
+        changed = self.db.execute("""UPDATE jobs SET feed_id=%s,collection_attempt=%s::jsonb WHERE id=%s
+            AND CASE WHEN kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code LIKE 'source-%%' AND feed_id IS DISTINCT FROM %s
+                THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END
+            RETURNING OLD.feed_id AS previous_feed,OLD.problem_code AS previous_code,kind,item""",(feed,json.dumps(data),job,feed)).fetchone()
+        if changed is None:raise LookupError('Collection job no longer exists')
+        if changed['kind'] in ('fetch','download_media','filter','theses','delete','feed-delete') and (changed['previous_code'] or '').startswith('source-') and changed['previous_feed']!=feed:
+            from oko.storage import source_groups
+            old=source_groups.job_keys_with_previous_feed(self.store,job,changed['previous_feed'])
+            if old:
+                kind,before=old
+                after=source_groups.job_keys(self.store,job)
+                evidence=source_groups.job_evidence_with_previous_feed(self.store,job,changed['previous_feed'])
+                complete=source_groups.sync_transition(self.store,kind,before,after,self.wall(),evidence=evidence)
+                self.db.execute("UPDATE jobs SET source_event_owned=(%s=1) WHERE id=%s",(complete,job))
+        mark=getattr(self.db,'incomplete_job_mark',None)
+        if mark is not None and changed['previous_feed']!=feed:mark(changed['kind'],changed['item'],job)
 
     def finish(self, job: Any, feed: str, data: dict[str, Any], elapsed: float, observation: dict[str, Any]) -> None:
         row = self.db.execute('SELECT * FROM jobs WHERE id = %s', (job.id,)).fetchone()
@@ -60,8 +80,10 @@ class CollectionStatus:
                 data['last_error']['resolved'] = True
         with self.db:
             self._write(job.id, feed, data)
-            result_row = self.db.execute('SELECT data FROM collection_results WHERE feed = %s', (feed,)).fetchone()
-            result = json.loads(result_row[0]) if result_row else {}
+            result_row = self.db.execute('SELECT last_collection_result FROM feeds WHERE id = %s', (feed,)).fetchone()
+            if result_row is None:
+                raise LookupError('Collection feed no longer exists')
+            result = dict(result_row[0])
             if completed:
                 result.update(success_at=self.wall(), duration=data['elapsed_seconds'])
             if data.get('last_error') and (not result.get('last_error') or data['last_error']['occurred_at'] >= result['last_error']['occurred_at']):
@@ -70,16 +92,16 @@ class CollectionStatus:
                 # Only a retry of the same operation resolves its error.
                 if result['last_error']['operation_id'] == data['operation_id']:
                     result['last_error']['resolved'] = True
-            self.db.execute('INSERT INTO collection_results VALUES ( %s , %s ) ON CONFLICT ( feed ) DO UPDATE SET data = excluded . data', (feed, json.dumps(result)))
+            self.db.execute('UPDATE feeds SET last_collection_result=%s::jsonb WHERE id=%s', (json.dumps(result), feed))
             # Completed operations need only the single latest per-feed result.
-            self.db.execute("DELETE FROM collection_attempts WHERE job IN ( SELECT id FROM jobs WHERE status = 'done' AND error IS NULL ) AND feed = %s", (feed,))
+            self.db.execute("UPDATE jobs SET feed_id=NULL, collection_attempt=NULL WHERE status='done' AND error IS NULL AND feed_id=%s AND collection_attempt IS NOT NULL", (feed,))
             self._bound(feed)
 
     def _bound(self, feed: str) -> None:
-        rows = self.db.execute('SELECT job , data FROM collection_attempts WHERE feed = %s', (feed,)).fetchall()
-        attempts = [(row['job'], json.loads(row['data'])) for row in rows]
-        result_row = self.db.execute('SELECT data FROM collection_results WHERE feed = %s', (feed,)).fetchone()
-        result = json.loads(result_row[0]) if result_row else {}
+        rows = self.db.execute('SELECT id, collection_attempt FROM jobs WHERE feed_id=%s AND collection_attempt IS NOT NULL', (feed,)).fetchall()
+        attempts = [(row['id'], dict(row['collection_attempt'])) for row in rows]
+        result_row = self.db.execute('SELECT last_collection_result FROM feeds WHERE id=%s', (feed,)).fetchone()
+        result = dict(result_row[0]) if result_row else {}
         errors = [data['last_error'] for _, data in attempts if data.get('last_error')]
         if result.get('last_error'):
             errors.append(result['last_error'])
@@ -94,7 +116,7 @@ class CollectionStatus:
         for job, data in attempts:
             self._write(job, feed, data)
         if result:
-            self.db.execute('UPDATE collection_results SET data = %s WHERE feed = %s', (json.dumps(result), feed))
+            self.db.execute('UPDATE feeds SET last_collection_result=%s::jsonb WHERE id=%s', (json.dumps(result), feed))
 
     def interrupt(self, job: Any, feed: str, data: dict[str, Any], elapsed: float) -> None:
         data.update(finished_at=self.wall(), elapsed_seconds=elapsed)
@@ -104,25 +126,26 @@ class CollectionStatus:
         """Select only the requested feeds; summary never transfers diagnostic bodies."""
         jobs: list[Row] = []
         results: dict[str, dict[str, Any]] = {}
-        attempt_fields = "a.data AS attempt_data" if details else " oko_json_extract ( a . data , '$.attempt_id' ) AS saved_attempt , oko_json_extract ( a . data , '$.started_at' ) AS started_at , oko_json_extract ( a . data , '$.finished_at' ) AS finished_at , oko_json_extract ( a . data , '$.elapsed_seconds' ) AS elapsed_seconds , oko_json_extract ( a . data , '$.last_error.resolved' ) AS error_resolved"
-        result_fields = "r.data AS result_data" if details else " oko_json_extract ( r . data , '$.success_at' ) AS success_at , oko_json_extract ( r . data , '$.duration' ) AS duration , oko_json_extract ( r . data , '$.last_error.resolved' ) AS error_resolved"
-        fields = 'j.id,j.kind,j.item,j.status,j.generation,j.next,j.error,j.queued_wall,j.problem_code'
+        attempt_fields = "j.collection_attempt AS attempt_data" if details else "j.collection_attempt->>'attempt_id' AS saved_attempt, j.collection_attempt->>'started_at' AS started_at, j.collection_attempt->>'finished_at' AS finished_at, j.collection_attempt->>'elapsed_seconds' AS elapsed_seconds, j.collection_attempt #>> '{last_error,resolved}' AS error_resolved"
+        result_fields = "f.last_collection_result AS result_data" if details else "f.last_collection_result->>'success_at' AS success_at, f.last_collection_result->>'duration' AS duration, f.last_collection_result #>> '{last_error,resolved}' AS error_resolved"
+        fields = 'j.id,j.kind,j.item,j.status,j.generation,j.next,j.error,j.queued_wall,j.problem_code,j.collection_attempt'
+        outer_fields = 'j.id,j.kind,j.item,j.status,j.generation,j.next,j.error,j.queued_wall,j.problem_code,j.feed'
         for start in range(0, len(feeds), 400):
             batch = feeds[start:start + 400]
             marks = ','.join('%s' for _ in batch)
             discoveries = batch + ([''] if 'demo' in batch else [])
             discovery_marks = ','.join('%s' for _ in discoveries)
             # Job kinds are disjoint, so these branches cannot duplicate an operation.
-            selected = f"SELECT {fields} , CASE WHEN j . item = '' THEN 'demo' ELSE j . item END AS feed FROM jobs j WHERE j . kind = 'discover' AND j . item IN ( {discovery_marks} ) UNION ALL SELECT {fields} , i . feed_id AS feed FROM jobs j JOIN unviewed_items_by_feed i ON i . id = j . item WHERE j . kind = 'fetch' AND i . viewed = 0 AND i . feed_id IN ( {marks} ) UNION ALL SELECT {fields} , i . feed_id AS feed FROM jobs j JOIN media_files m ON m . id = j . item JOIN unviewed_items_by_feed i ON i . id = m . publication_id WHERE j . kind = 'download_media' AND i . viewed = 0 AND i . feed_id IN ( {marks} )"
-            jobs.extend(self.db.execute(f"SELECT j . * , {attempt_fields} FROM ( {selected} ) j LEFT JOIN collection_attempts a ON a . job = j . id WHERE ( j . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' ) OR j . status = 'done' AND j . error IS NOT NULL ) AND coalesce ( j . problem_code , '' ) != 'source-deleted'", (discoveries + batch + batch)).fetchall())
-            for row in self.db.execute(f'SELECT f . id , d . updated , {result_fields} FROM feeds f LEFT JOIN collection_results r ON r . feed = f . id LEFT JOIN feed_details d ON d . feed = f . id WHERE f . id IN ( {marks} )', batch):
+            selected = f"SELECT {fields} , CASE WHEN j . item = '' THEN 'demo' ELSE j . item END AS feed FROM jobs j WHERE j . kind = 'discover' AND j . item IN ( {discovery_marks} ) UNION ALL SELECT {fields} , owner.feed_id AS feed FROM jobs j JOIN publications i ON i . id = j . item JOIN feed_publications owner ON owner.publication_id=i.id AND owner.is_primary AND owner.is_unviewed WHERE j . kind = 'fetch' AND i . viewed = 0 AND owner.feed_id IN ( {marks} ) UNION ALL SELECT {fields} , owner.feed_id AS feed FROM jobs j JOIN media_files m ON m . id = j . item JOIN publications i ON i . id = m . publication_id JOIN feed_publications owner ON owner.publication_id=i.id AND owner.is_primary AND owner.is_unviewed WHERE j . kind = 'download_media' AND i . viewed = 0 AND owner.feed_id IN ( {marks} )"
+            jobs.extend(self.db.execute(f"SELECT {outer_fields}, {attempt_fields} FROM ( {selected} ) j WHERE ( j . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' ) OR j . status = 'done' AND j . error IS NOT NULL ) AND coalesce ( j . problem_code , '' ) != 'source-deleted'", (discoveries + batch + batch)).fetchall())
+            for row in self.db.execute(f'SELECT f.id, f.last_discovery_at AS updated, {result_fields} FROM feeds f WHERE f.id IN ( {marks} )', batch):
                 if details:
-                    result = json.loads(row['result_data']) if row['result_data'] else {}
+                    result = dict(row['result_data']) if row['result_data'] else {}
                 else:
                     result = dict(
                         success_at=float(row['success_at']) if row['success_at'] is not None else None,
                         duration=float(row['duration']) if row['duration'] is not None else None,
-                        last_error=dict(resolved=bool(int(row['error_resolved']))) if row['error_resolved'] is not None else None)
+                        last_error=dict(resolved=row['error_resolved'] == 'true') if row['error_resolved'] is not None else None)
                 if not result.get('success_at') and row['updated'] is not None:
                     result['success_at'] = row['updated']
                 results[row['id']] = result
@@ -135,14 +158,14 @@ class CollectionStatus:
         groups: dict[str, list[dict[str, Any]]] = {}
         for job in jobs:
             if details:
-                data = json.loads(job['attempt_data']) if job['attempt_data'] else {}
+                data = dict(job['attempt_data']) if job['attempt_data'] else {}
             else:
                 data = dict(
                     attempt_id=job['saved_attempt'],
                     started_at=float(job['started_at']) if job['started_at'] is not None else None,
                     finished_at=float(job['finished_at']) if job['finished_at'] is not None else None,
                     elapsed_seconds=float(job['elapsed_seconds']) if job['elapsed_seconds'] is not None else None,
-                    last_error=dict(resolved=bool(int(job['error_resolved']))) if job['error_resolved'] is not None else None)
+                    last_error=dict(resolved=job['error_resolved'] == 'true') if job['error_resolved'] is not None else None)
             running = active.get(job['id'])
             if job['status'] == 'done' and not job['error']:
                 continue

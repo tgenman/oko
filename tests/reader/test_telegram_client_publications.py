@@ -42,9 +42,9 @@ def test_channel_text_is_ready_before_independent_native_media(tmp_path):
             material=client.get('/api/v3/publication/'+card['id']).json()
             assert material['text']=='Native own text'
             with database(root) as db:
-                assert db.execute('SELECT platform , external_id FROM items WHERE id = %s',(card['id'],)).fetchone()==('telegram','https://t.me/fixture/11')
+                assert db.execute('SELECT platform , external_id FROM publications WHERE id = %s',(card['id'],)).fetchone()==('telegram','https://t.me/fixture/11')
                 assert db.execute('SELECT adapter FROM feeds WHERE id = %s',(card['feed_id'],)).fetchone()[0]=='telegram_client_adapter'
-                content=json.loads(db.execute('SELECT content FROM items WHERE id = %s',(card['id'],)).fetchone()[0])
+                content=json.loads(db.execute('SELECT content FROM publications WHERE id = %s',(card['id'],)).fetchone()[0])
                 media_id=next(b['media_id'] for b in content['blocks'] if b['type']=='media')
                 assert db.execute('SELECT status FROM media_files WHERE id = %s',(media_id,)).fetchone()[0]=='pending_download'
             release.set()

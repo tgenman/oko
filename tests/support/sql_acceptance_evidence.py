@@ -1,3 +1,4 @@
+from oko.storage.publication_owners import owner_expr
 from tests.support.storage import analyze
 from tests.support.collection_acceptance import discovered
 from tests.support.source import publication_packet
@@ -23,14 +24,14 @@ def archive_evidence():
     with TemporaryDirectory() as d:
      s=Store(Path(d),lambda _:None);s.subscriptions.ensure_demo()
      with s.db:
-      s.db.executemany('INSERT INTO items ( id , published , viewed ) VALUES ( %s , %s , %s )',[(f'archive-{n}',n,int(n>=100)) for n in range(20000)])
-      s.db.executemany("INSERT INTO feed_publications(feed_id,publication_id) VALUES ('demo',%s)", [(f'archive-{n}',) for n in range(20000)])
+      s.db.executemany('INSERT INTO publications ( id , published , viewed ) VALUES ( %s , %s , %s )',[(f'archive-{n}',n,int(n>=100)) for n in range(20000)])
+      s.db.executemany("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) SELECT 'demo',id,true,viewed=0 FROM publications WHERE id=%s", [(f'archive-{n}',) for n in range(20000)])
       s.db.executemany("INSERT INTO jobs ( kind , item , status ) VALUES ( 'fetch' , %s , 'done' )",[(f'archive-{n}',) for n in range(20000)])
       s.db.executemany("INSERT INTO history_members ( feed , item ) VALUES ( 'demo' , %s )",[(f'archive-{n}',) for n in range(20000)])
       s.db.execute("INSERT INTO jobs(kind,item) VALUES ('filter','pending')")
       analyze(s.db)
      operations={
-      'unviewed':('SELECT id,feed_id FROM items_read WHERE viewed=0 ORDER BY published DESC',()),
+      'unviewed':(f"SELECT i.id,{owner_expr('i')} AS feed_id FROM publications i WHERE i.viewed=0 ORDER BY i.published DESC",()),
       'history_point':('SELECT * FROM history_members WHERE item=%s',('archive-100',)),
       'job_point':('SELECT * FROM jobs WHERE item=%s',('archive-100',)),
       'pending':("SELECT id FROM jobs WHERE status='pending' AND next<=%s ORDER BY next,id LIMIT 1",(0,))}
@@ -81,7 +82,7 @@ def background_evidence():
        s.db.execute("INSERT INTO folders VALUES ('folder','Synthetic',0)")
        for i in range(count):
         feed=f'{i:032x}'
-        s.db.execute("INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport , telegram_peer , auto_read ) VALUES ( %s , %s , %s , 'telegram' , 'folder' , '[]' , 'connected' , 'telegram' , %s , 0 )",(feed,feed,feed,-1000000-i))
+        s.db.execute("INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport , telegram_peer , auto_read ) VALUES ( %s , %s , %s , 'telegram' , 'folder' , ARRAY[]::text[] , 'connected' , 'telegram' , %s , 0 )",(feed,feed,feed,-1000000-i))
         s.db.execute('INSERT INTO telegram_bindings VALUES ( %s , %s )',(feed,json.dumps(dict(kind='client',role='personal',peer_id=str(-1000000-i)))))
         s.db.execute('INSERT INTO telegram_read_state ( feed , since ) VALUES ( %s , 0 )',(feed,))
       q=[];s.db.set_trace_callback(q.append);s.jobs.sync_reads();s.db.set_trace_callback(None)

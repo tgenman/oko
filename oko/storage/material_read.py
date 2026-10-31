@@ -3,6 +3,7 @@
 Synchronous reading calculations open this scope. Nothing survives it;
 write paths use the same accessors against current storage without a snapshot.
 """
+from oko.storage.publication_owners import owner_expr
 from oko.storage.database import Database, Row
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -11,7 +12,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from oko.storage.reading import reading_value, saved_content
-from oko.storage.feed_facts import feed_facts
+from oko.storage.feed_facts import feed_facts, READER_FEED_COLUMNS
 import json
 
 
@@ -22,12 +23,15 @@ class Inputs:
     jobs: dict[str, dict[str, Row]] = field(default_factory=dict)
     media_jobs: dict[str,list[Row]] = field(default_factory=dict)
     feeds: dict[str, Row] = field(default_factory=dict)
+    settings: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
     state: dict[str, str] = field(default_factory=dict)
     state_keys: set[str] = field(default_factory=set)
     subtitles: dict[str, str | None] = field(default_factory=dict)
+    subtitle_owners: dict[str, str] = field(default_factory=dict)
     related_items: dict[str, Row] = field(default_factory=dict)
     children: dict[str, list[Row]] = field(default_factory=dict)
     owners: dict[str, set[str]] = field(default_factory=dict)
+    memberships: dict[str, list[str]] = field(default_factory=dict)
 
 
 _current: ContextVar[Inputs | None] = ContextVar('material_inputs', default=None)
@@ -38,9 +42,16 @@ def current(db: Database) -> Inputs | None:
     return value if value is not None and value.db is db else None
 
 
-_ITEM = 'SELECT i . * , d . item AS source_deleted , coalesce ( v . hidden , 0 ) AS reader_hidden FROM items_read i LEFT JOIN source_deleted d ON d . item = i . id LEFT JOIN reader_visibility v ON v . item = i . id'
-_FEED = 'SELECT f . * , b . binding AS reader_binding FROM feeds f LEFT JOIN telegram_bindings b ON b . feed = f . id'
-
+_ITEM = f"SELECT i.*, {owner_expr('i')} AS feed_id, CASE WHEN i.status='filter_out' THEN 1 ELSE 0 END AS reader_hidden FROM publications i"
+_FEED_COLUMNS = ','.join('f.' + name for name in READER_FEED_COLUMNS)
+_FEED = 'SELECT ' + _FEED_COLUMNS + ', b.binding AS reader_binding,b.binding_raw AS reader_binding_raw FROM feeds f LEFT JOIN telegram_bindings b ON b.feed = f.id'
+_BATCH_FEED = 'SELECT ' + _FEED_COLUMNS + ''', b.binding AS reader_binding,b.binding_raw AS reader_binding_raw,
+    COALESCE((SELECT jsonb_agg(jsonb_build_array(
+        CASE WHEN s.feed_id IS NOT NULL THEN 'feed' WHEN s.folder_id IS NOT NULL THEN 'folder' ELSE 'oko' END,
+        COALESCE(s.feed_id,s.folder_id,'global'), s.field, s.value))
+              FROM settings s WHERE (s.folder_id IS NULL AND s.feed_id IS NULL)
+                 OR s.folder_id = f.folder_id OR s.feed_id = f.id), '[]'::jsonb) AS reader_settings
+    FROM feeds f LEFT JOIN telegram_bindings b ON b.feed = f.id'''
 
 @reading_value
 def item(db: Database, identity: str) -> Row | None:
@@ -50,7 +61,7 @@ def item(db: Database, identity: str) -> Row | None:
             return value.items[identity]
         if identity in value.related_items:
             return value.related_items[identity]
-    return db.execute('SELECT * FROM items_read WHERE id = %s', (identity,)).fetchone()
+    return db.execute(f"SELECT i.*, {owner_expr('i')} AS feed_id FROM publications i WHERE i.id = %s", (identity,)).fetchone()
 
 
 
@@ -71,7 +82,7 @@ def feed(db: Database, identity: str) -> tuple[dict[str, Any], dict[str, Any] | 
     row = value.feeds.get(identity) if value and identity in value.feeds else db.execute(f'{_FEED} WHERE f . id = %s', (identity,)).fetchone()
     if row is None:
         raise ValueError('Feed not found')
-    binding = json.loads(row['reader_binding']) if row['kind'] == 'telegram' and row['reader_binding'] else None
+    binding = (json.loads(row['reader_binding_raw']) if row['reader_binding_raw'] is not None else row['reader_binding']) if row['kind']=='telegram' else None
     return feed_facts(row), binding
 
 
@@ -97,17 +108,27 @@ def material_inputs(db: Database, identities: set[str], *, include_subtitles: bo
             else:
                 value.jobs.setdefault(r['reader_item'],{})[r['kind']]=r
         value.children.update({identity: [] for identity in batch})
-        for row in db.execute("SELECT l . source_publication_id AS reader_source , i . * , j . error AS fetch_error FROM publication_links l JOIN items_read i ON i . id = l . target_publication_id LEFT JOIN jobs j ON j . kind = 'fetch' AND j . item = i . id WHERE l . source_publication_id = ANY ( %s ) AND i . viewed = 0 ORDER BY l . rowid", (batch,)):
+        for row in db.execute(f"SELECT l . source_publication_id AS reader_source , i . * , {owner_expr('i')} AS feed_id , j . error AS fetch_error FROM publication_links l JOIN publications i ON i . id = l . target_publication_id LEFT JOIN jobs j ON j . kind = 'fetch' AND j . item = i . id WHERE l . source_publication_id = ANY ( %s ) AND i . viewed = 0 ORDER BY l . rowid", (batch,)):
             value.children[row['reader_source']].append(row)
             value.related_items[row['id']] = row
+        value.memberships.update({identity: [] for identity in batch})
+        for row in db.execute('SELECT publication_id,feed_id FROM feed_publications WHERE publication_id=ANY(%s) ORDER BY publication_id,is_primary DESC,feed_id', (batch,)):
+            value.memberships[row['publication_id']].append(row['feed_id'])
         value.owners.update({identity: set() for identity in batch})
-        for row in db.execute('SELECT m . publication_id AS reader_source , m . feed_id FROM reading_memberships m WHERE m . publication_id = ANY ( %s ) UNION SELECT l . source_publication_id AS reader_source , m . feed_id FROM publication_links l JOIN reading_memberships m ON m . publication_id = l . target_publication_id WHERE l . source_publication_id = ANY ( %s )', (batch, batch)):
+        for row in db.execute('SELECT m . publication_id AS reader_source , m . feed_id FROM feed_publications m WHERE m . publication_id = ANY ( %s ) UNION SELECT l . source_publication_id AS reader_source , m . feed_id FROM publication_links l JOIN feed_publications m ON m . publication_id = l . target_publication_id WHERE l . source_publication_id = ANY ( %s )', (batch, batch)):
             value.owners[row['reader_source']].add(row['feed_id'])
-    feeds = sorted({r['feed_id'] for r in value.items.values() if r['feed_id'] is not None})
+    feeds = sorted({r['feed_id'] for r in value.items.values() if r['feed_id'] is not None}
+                   | {feed for owners in value.owners.values() for feed in owners})
     for start in range(0, len(feeds), 400):
         batch = feeds[start:start+400]
-        value.feeds.update({r['id']: r for r in db.execute(_FEED+' WHERE f.id = ANY(%s)', (batch,))})
-    keys = ['settings-version'] + ['settings-version:'+f for f in feeds]
+        for row in db.execute(_BATCH_FEED+' WHERE f.id = ANY(%s)', (batch,)):
+            value.feeds[row['id']] = row
+            value.settings.setdefault(('oko', 'global'), {})
+            value.settings.setdefault(('feed', row['id']), {})
+            value.settings.setdefault(('folder', row['folder_id']), {})
+            for scope, owner, field, setting in row['reader_settings']:
+                value.settings.setdefault((scope, owner), {})[field] = setting
+    keys = ['settings-version', 'processor:codex', 'processor:llamacpp'] + ['settings-version:'+f for f in feeds]
     value.state_keys=set(keys)
     for start in range(0,len(keys),400):
         batch = keys[start:start+400]
@@ -126,8 +147,9 @@ def material_inputs(db: Database, identities: set[str], *, include_subtitles: bo
     subtitle_ids = sorted(value.subtitles)
     for start in range(0, len(subtitle_ids), 400):
         batch = subtitle_ids[start:start+400]
-        value.subtitles.update({row['id']: row['storage_key'] for row in db.execute(
-            "SELECT id , storage_key FROM media_files WHERE status = 'ready' AND id = ANY ( %s )", (batch,))})
+        for row in db.execute("SELECT id,storage_key,publication_id FROM media_files WHERE status='ready' AND id=ANY(%s)", (batch,)):
+            value.subtitles[row['id']] = row['storage_key']
+            value.subtitle_owners[row['id']] = row['publication_id']
     token = _current.set(value)
     try:
         yield

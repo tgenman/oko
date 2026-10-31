@@ -1,6 +1,7 @@
 from oko.execution import read_locked
 """Typed reading projection and HTTP adapter over the existing reading lifecycle."""
-from oko.storage.reading import reading_snapshot
+from oko.storage.reading import reading_snapshot, stable_reader_time
+from oko.storage.transaction import read_snapshot
 import hashlib
 import json
 from pathlib import Path
@@ -45,10 +46,10 @@ def attempt(status: str, error: str | None, waiting: ProcessingWait | None = Non
         return wire.UnfinishedProcessingAttempt(wire.ProcessingRunning(state='running'))
     if status == 'cancelled':
         return wire.UnfinishedProcessingAttempt(wire.ProcessingCancelled(state='cancelled'))
-    if error:
-        return wire.UnfinishedProcessingAttempt(wire.ProcessingWaiting(state='waiting', reason=wire.WaitingReason(waiting.reason if waiting else 'retry_scheduled'), retry_at=project.timestamp(waiting.retry_at) if waiting and waiting.retry_at is not None else None))
     if status == 'off':
         return wire.UnfinishedProcessingAttempt(wire.ProcessingDisabled(state='disabled'))
+    if error:
+        return wire.UnfinishedProcessingAttempt(wire.ProcessingWaiting(state='waiting', reason=wire.WaitingReason(waiting.reason if waiting else 'retry_scheduled'), retry_at=project.timestamp(waiting.retry_at) if waiting and waiting.retry_at is not None else None))
     return wire.UnfinishedProcessingAttempt(wire.ProcessingQueued(state='queued'))
 
 
@@ -118,7 +119,7 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
     @router.get('/api/v3/navigation')
     @read_locked(runtime.execution)
     async def navigation_view(request: Request) -> Response:
-        with reading_snapshot():
+        with read_snapshot(runtime.require_store().db), reading_snapshot():
             snapshot = composition().model_dump(mode='json')
             groups = [dict(id=folder['id'],title=folder['title'],count=folder['count'],feeds=[])
                       for folder in snapshot['folders']]
@@ -142,13 +143,13 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
     @router.get('/api/v3/reading-composition', response_model=wire.ReadingComposition)
     @read_locked(runtime.execution)
     async def navigation() -> wire.ReadingComposition:
-        with reading_snapshot():
+        with read_snapshot(runtime.require_store().db), reading_snapshot():
             return composition()
 
     @router.get('/api/v3/folders', response_model=list[wire.ReadingFolder])
     @read_locked(runtime.execution)
     async def folders() -> list[wire.ReadingFolder]:
-        with reading_snapshot():
+        with read_snapshot(runtime.require_store().db), reading_snapshot():
             return composition().folders
 
     @app.get('/api/v3/cards', response_model=wire.CardPage)
@@ -177,7 +178,9 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
         target=dict(scope='folder',folder_id=folder) if folder is not None else dict(scope='feed',feed_id=feed) if feed is not None else dict(scope='all')
         options=dict(target=target,sort=sort,show_hidden=scalar_boolean(request,'show_hidden'))
         current=runtime.queries
-        with reading_snapshot():
+        store=runtime.require_store()
+        now, wall=store.clock(), store.wall_clock()
+        with read_snapshot(store.db), stable_reader_time(wall-now, now, wall), reading_snapshot():
             page=current.page(options,request.query_params.get('cursor'),limit)
             if page is None:return JSONResponse({'code':'cursor_expired'},status_code=409)
             identities,total=page

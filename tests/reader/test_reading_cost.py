@@ -3,6 +3,7 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
+from oko.storage.publication_owners import owner_expr
 from tests.support.storage import Store
 from tests.support.postgres_work import measure_reads, scan_rows
 from tests.support.reader import HEADERS
@@ -83,21 +84,21 @@ def test_unviewed_index_bounds_archive_work_and_survives_reopen(tmp_path):
     with store.db:
         # Keep the membership statistics stale, as immediately after a bulk import.
         store.db._db.execute('ALTER TABLE feed_publications SET (autovacuum_enabled=false)')
-        store.db.executemany("INSERT INTO items ( id , published , viewed , platform , external_id ) VALUES ( %s , %s , %s , 'other_web' , %s )",
+        store.db.executemany("INSERT INTO publications ( id , published , viewed , platform , external_id ) VALUES ( %s , %s , %s , 'other_web' , %s )",
             [(f'archive-{n:05}', n, int(n >= 100), f'archive-{n:05}') for n in range(20000)])
-        store.db.executemany("INSERT INTO feed_publications(feed_id,publication_id) VALUES ('demo',%s)", [(f'archive-{n:05}',) for n in range(20000)])
+        store.db.executemany("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) SELECT 'demo',id,true,viewed=0 FROM publications WHERE id=%s", [(f'archive-{n:05}',) for n in range(20000)])
         assert store.db.execute("SELECT 1 FROM pg_indexes WHERE schemaname=current_schema() AND indexname='items_unviewed_order'").fetchone()
-        store.db._db.execute('ANALYZE items')
+        store.db._db.execute('ANALYZE publications')
     store.db.close()
     for _ in range(2):
         store = Store(tmp_path, lambda _: None)
         with measure_reads(store.db) as work:
-            rows = store.db.execute('SELECT id,feed_id FROM items_read WHERE viewed=0 ORDER BY published DESC').fetchall()
+            rows = store.db.execute(f"SELECT i.id,{owner_expr('i')} AS feed_id FROM publications i WHERE i.viewed=0 ORDER BY i.published DESC").fetchall()
         assert len(rows) == 100
         assert rows[0]['id'] == 'archive-00099'
         assert work.rows < 2000, work
         with measure_reads(store.db) as feed_work:
-            feed_rows = store.db.execute("SELECT id FROM unviewed_items_by_feed WHERE feed_id='demo' AND viewed=0 ORDER BY published DESC").fetchall()
+            feed_rows = store.db.execute("SELECT p.id FROM feed_publications m JOIN publications p ON p.id=m.publication_id WHERE m.feed_id='demo' AND m.is_primary AND m.is_unviewed AND p.viewed=0 ORDER BY p.published DESC").fetchall()
         assert len(feed_rows) == 100
         assert feed_work.rows < 2000, feed_work
         # Include transactional entity versions and navigation counts, as well as
@@ -105,7 +106,7 @@ def test_unviewed_index_bounds_archive_work_and_survives_reopen(tmp_path):
         with store.db:
             store.db.begin()
             for viewed in (1, 0):
-                plan = store.db._db.execute('EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) UPDATE items SET viewed=%s WHERE id=%s',
+                plan = store.db._db.execute('EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) UPDATE publications SET viewed=%s WHERE id=%s',
                     (viewed, 'archive-00000')).fetchone()[0][0]['Plan']
                 assert scan_rows(plan) < 10, plan
                 assert plan.get('Shared Hit Blocks', 0) + plan.get('Shared Read Blocks', 0) < 1600, plan
@@ -116,14 +117,49 @@ def test_unviewed_index_bounds_archive_work_and_survives_reopen(tmp_path):
     try:
         with store.db:
             store.db.execute("INSERT INTO feeds(id) VALUES ('foreign'),('small')")
-            store.db.execute("INSERT INTO items(id,viewed) SELECT 'foreign-' || n,0 FROM generate_series(1,1500) AS n")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id) SELECT 'foreign',id FROM items WHERE id LIKE 'foreign-%'")
-            store.db.execute("INSERT INTO items(id,viewed) SELECT 'small-' || n,0 FROM generate_series(1,10) AS n")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id) SELECT 'small',id FROM items WHERE id LIKE 'small-%'")
-            store.db._db.execute('ANALYZE items')
+            store.db.execute("INSERT INTO publications(id,viewed) SELECT 'foreign-' || n,0 FROM generate_series(1,1500) AS n")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'foreign',id,true FROM publications WHERE id LIKE 'foreign-%'")
+            store.db.execute("INSERT INTO publications(id,viewed) SELECT 'small-' || n,0 FROM generate_series(1,10) AS n")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) SELECT 'small',id,true FROM publications WHERE id LIKE 'small-%'")
+            store.db._db.execute('ANALYZE publications')
         with measure_reads(store.db) as small_work:
-            small_rows = store.db.execute("SELECT id FROM unviewed_items_by_feed WHERE feed_id='small'").fetchall()
+            small_rows = store.db.execute("SELECT p.id FROM feed_publications m JOIN publications p ON p.id=m.publication_id WHERE m.feed_id='small' AND m.is_primary AND m.is_unviewed AND p.viewed=0").fetchall()
         assert len(small_rows) == 10
         assert small_work.rows < 200, small_work
     finally:
         store.db.close()
+
+
+@pytest.mark.parametrize('has_root', [False,True])
+def test_prune_read_work_does_not_grow_with_unrelated_link_graph(tmp_path,has_root):
+    from oko.storage import publication_links
+    from tests.support.postgres_work import measure_reads
+    from tests.support.storage import Store
+
+    costs = []
+    for size in (100,5000):
+        store = Store(tmp_path/str(size),lambda _:None)
+        try:
+            if has_root:
+                store.subscriptions.ensure_demo()
+            with store.db:
+                store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('target','other_web','target')")
+                if has_root:
+                    store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('root','other_web','root')")
+                    store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('demo','root',true)")
+                    store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root','target')")
+                store.db.execute("""INSERT INTO publications(id,platform,external_id)
+                    SELECT 'foreign-'||n,'other_web','foreign-'||n FROM generate_series(1,%s) n""", (size,))
+                store.db.execute("""INSERT INTO publication_links(source_publication_id,target_publication_id)
+                    SELECT 'foreign-'||n,'foreign-'||(n+1) FROM generate_series(1,%s) n""", (size-1,))
+                store.db._db.execute('ANALYZE publications')
+                store.db._db.execute('ANALYZE publication_links')
+            with store.db:
+                with measure_reads(store.db) as work:
+                    publication_links.prune(store,{'target'})
+                costs.append(work.rows)
+            assert store.db.execute("SELECT viewed FROM publications WHERE id='target'").fetchone()[0] == (0 if has_root else 1)
+            assert store.db.execute("SELECT count(*) FROM publications WHERE id LIKE 'foreign-%%' AND viewed=0").fetchone()[0] == size
+        finally:
+            store.db.close()
+    assert costs[1] <= costs[0] + 100, costs

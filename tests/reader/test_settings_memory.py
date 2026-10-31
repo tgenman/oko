@@ -1,6 +1,5 @@
-"""Settings stay in the reader's memory while HTTP edits retain SQL atomicity."""
+"""Settings reads and writes retain database transaction boundaries."""
 from tests.support.cards import read_all_cards
-import re
 import pytest
 
 from fastapi.testclient import TestClient
@@ -12,44 +11,6 @@ from tests.support.reader import HEADERS
 @pytest.fixture
 def settings_database(request):
     return request.getfixturevalue('postgres_url')
-
-
-def test_repeated_settings_reads_do_not_requery_settings_storage(tmp_path):
-    app = create_app(tmp_path, token='test', api_only=True)
-    with TestClient(app, headers=HEADERS) as client:
-        assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
-        assert client.patch('/api/v3/settings/oko/global', json={'theses': True}).status_code == 200
-        queries = []
-        client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(queries.append))
-        try:
-            for _ in range(5):
-                response = client.get('/api/v3/settings/oko/global')
-                assert response.status_code == 200
-                assert response.json()['effective']['theses']['value'] is True
-        finally:
-            client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))
-        reads = [query for query in queries if query.lstrip().upper().startswith('SELECT')
-                 and re.search(r'\bFROM\s+settings\b', query, re.IGNORECASE)]
-        assert reads == [], reads
-
-
-def test_repeated_processor_reads_do_not_requery_configuration_state(tmp_path):
-    app = create_app(tmp_path, token='test', api_only=True)
-    with TestClient(app, headers=HEADERS) as client:
-        assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
-        queries = []
-        client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(queries.append))
-        try:
-            for _ in range(5):
-                for processor in ('codex', 'llamacpp'):
-                    response = client.get('/api/v3/processors/'+processor)
-                    assert response.status_code == 200
-                    assert response.json()['configuration'] is None
-        finally:
-            client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))
-        reads = [query for query in queries if query.lstrip().upper().startswith('SELECT')
-                 and re.search(r'\bFROM\s+state\b', query, re.IGNORECASE) and 'processor:' in query]
-        assert reads == [], reads
 
 
 def test_reading_cards_reuses_feed_processing_options_without_point_reads(tmp_path):
@@ -140,6 +101,270 @@ def test_settings_memory_obeys_nested_rollback_and_failed_commit(tmp_path, setti
         store.db.close()
 
 
+def test_settings_source_revision_tracks_real_changes_and_rolls_back(tmp_path, settings_database):
+    from tests.support.storage import Store
+    from oko.storage.transaction import transaction
+    from oko.subscriptions.subscriptions import Overrides
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        initial = store.subscriptions.source_revision()
+        with transaction(store.db):
+            store.subscriptions.update_settings('oko','global',Overrides(prompt_filters='A'))
+        first = store.subscriptions.source_revision()
+        assert first > initial
+        with transaction(store.db):
+            store.subscriptions.update_settings('oko','global',Overrides(prompt_filters='A'))
+        assert store.subscriptions.source_revision() == first
+        with pytest.raises(ValueError,match='synthetic rollback'):
+            with transaction(store.db):
+                store.subscriptions.update_settings('oko','global',Overrides(prompt_filters='B'))
+                assert store.subscriptions.source_revision() > first
+                raise ValueError('synthetic rollback')
+        assert store.subscriptions.source_revision() == first
+        with transaction(store.db):
+            store.subscriptions.update_settings('oko','global',Overrides(prompt_filters='B'))
+        second = store.subscriptions.source_revision()
+        with transaction(store.db):
+            store.subscriptions.update_settings('oko','global',Overrides(prompt_filters='A'))
+        assert store.subscriptions.source_revision() > second > first
+        restored = store.subscriptions.source_revision()
+        with transaction(store.db):
+            store.subscriptions.update_settings('oko','global',Overrides(prompt_filters=None))
+        cleared = store.subscriptions.source_revision()
+        assert cleared > restored
+        with transaction(store.db):
+            store.subscriptions.update_settings('oko','global',Overrides(prompt_filters=None))
+        assert store.subscriptions.source_revision() == cleared
+    finally:
+        store.db.close()
+
+
+def test_feed_source_revision_changes_only_for_source_configuration(tmp_path, settings_database):
+    from tests.support.storage import Store
+    from oko.storage.transaction import transaction
+    from oko.subscriptions.subscriptions import AddFeed, FeedPatch
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        before = store.subscriptions.source_revision()
+        feed = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/feed',title='First',folder='Folder',verification='synthetic'))
+        created = store.subscriptions.source_revision()
+        assert created > before
+        store.subscriptions.update_feed(feed['id'],FeedPatch(title='Renamed'))
+        assert store.subscriptions.source_revision() == created
+        with transaction(store.db):
+            destination = store.subscriptions.ensure_folder('Other')
+        with pytest.raises(ValueError,match='synthetic rollback'):
+            with transaction(store.db):
+                store.subscriptions.update_feed(feed['id'],FeedPatch(folder_id=destination))
+                assert store.subscriptions.source_revision() > created
+                raise ValueError('synthetic rollback')
+        assert store.subscriptions.source_revision() == created
+        store.subscriptions.update_feed(feed['id'],FeedPatch(folder_id=destination))
+        moved = store.subscriptions.source_revision()
+        store.subscriptions.update_feed(feed['id'],FeedPatch(folder_id=feed['folder_id']))
+        assert store.subscriptions.source_revision() > moved > created
+        restored = store.subscriptions.source_revision()
+        with transaction(store.db):
+            store.remove_feed(feed['id'])
+        assert store.subscriptions.source_revision() > restored
+    finally:
+        store.db.close()
+
+
+def test_telegram_source_revision_tracks_binding_and_identity_changes(tmp_path, settings_database):
+    from tests.support.storage import Store
+    from oko.storage.transaction import transaction
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        telegram = store.subscriptions.telegram
+        before = store.subscriptions.source_revision()
+        with transaction(store.db):
+            telegram.put_binding('synthetic-feed', {'kind':'web','username':'fixture'})
+        bound = store.subscriptions.source_revision()
+        assert bound > before
+        with transaction(store.db):
+            telegram.put_binding('synthetic-feed', {'kind':'web','username':'fixture'})
+        assert store.subscriptions.source_revision() == bound
+        with pytest.raises(ValueError,match='synthetic rollback'):
+            with transaction(store.db):
+                telegram.put_binding('synthetic-feed', {'kind':'web','username':'different'})
+                assert store.subscriptions.source_revision() > bound
+                raise ValueError('synthetic rollback')
+        assert store.subscriptions.source_revision() == bound
+        with transaction(store.db):
+            telegram.save_profile('personal','synthetic',123,0,1.0)
+        saved = store.subscriptions.source_revision()
+        assert saved > bound
+        with transaction(store.db):
+            assert telegram.checked('personal',1,123,2.0)
+        assert store.subscriptions.source_revision() == saved
+        with transaction(store.db):
+            assert not telegram.checked('personal',1,456,3.0)
+        assert store.subscriptions.source_revision() > saved
+        with transaction(store.db):
+            before_release = store.subscriptions.source_revision()
+            telegram.release('synthetic-feed')
+            assert store.subscriptions.source_revision() > before_release
+    finally:
+        store.db.close()
+
+
+def test_telegram_profile_restart_marks_source_revision_once(tmp_path, settings_database):
+    from tests.support.storage import Store
+    from oko.storage.transaction import transaction
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    with transaction(store.db):
+        store.subscriptions.telegram.save_profile('personal','synthetic',123,0,1.0)
+    ready = store.subscriptions.source_revision()
+    store.db.close()
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        unavailable = store.subscriptions.source_revision()
+        assert unavailable > ready
+        assert store.subscriptions.telegram.profile('personal')['state'] == 'unavailable'
+    finally:
+        store.db.close()
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        assert store.subscriptions.source_revision() == unavailable
+    finally:
+        store.db.close()
+
+
+def test_telegram_profile_message_changes_status_without_source_revision(tmp_path, settings_database):
+    from tests.support.storage import Store
+    from oko.storage.transaction import transaction
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    with transaction(store.db):
+        store.subscriptions.telegram.save_profile('personal','synthetic',123,0,1.0)
+        assert not store.subscriptions.telegram.checked('personal',1,None,2.0)
+    revision = store.subscriptions.source_revision()
+    status = store.read_versions.version('status','runtime')['version']
+    store.db.close()
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        assert store.subscriptions.source_revision() == revision
+        assert store.read_versions.version('status','runtime')['version'] > status
+    finally:
+        store.db.close()
+
+
+def test_history_source_revision_ignores_progress_but_tracks_selection(tmp_path, settings_database):
+    from tests.support.storage import Store
+    from oko.storage.transaction import transaction
+    from oko.subscriptions.history import InitialHistory
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        before = store.subscriptions.source_revision()
+        with transaction(store.db):
+            store.subscriptions.history.configure('synthetic',InitialHistory(count=2))
+        configured = store.subscriptions.source_revision()
+        assert configured > before
+        with transaction(store.db):
+            store.subscriptions.history.warnings('synthetic',['Synthetic warning'])
+            store.subscriptions.history.discovery_state('synthetic',{'history_requests':2})
+        assert store.subscriptions.source_revision() == configured
+        with pytest.raises(ValueError,match='synthetic rollback'):
+            with transaction(store.db):
+                store.subscriptions.history.enroll('synthetic',[],False)
+                assert store.subscriptions.source_revision() > configured
+                raise ValueError('synthetic rollback')
+        assert store.subscriptions.source_revision() == configured
+        with transaction(store.db):
+            store.subscriptions.history.enroll('synthetic',[],False)
+        selected = store.subscriptions.source_revision()
+        with transaction(store.db):
+            store.subscriptions.history.enroll('synthetic',[],False)
+        assert store.subscriptions.source_revision() == selected
+        with transaction(store.db):
+            store.subscriptions.history.pause('synthetic',True)
+        paused = store.subscriptions.source_revision()
+        with transaction(store.db):
+            store.subscriptions.history.pause('synthetic',False)
+        assert store.subscriptions.source_revision() > paused > selected
+    finally:
+        store.db.close()
+
+
+def test_telegram_initial_boundary_advances_source_revision_atomically(tmp_path, settings_database):
+    from tests.support.storage import Store
+    from oko.storage.read_sync import ReadPlan
+    from oko.storage.transaction import transaction
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        with transaction(store.db):
+            store.db.execute("INSERT INTO telegram_read_state(feed,since) VALUES ('synthetic',0)")
+        before = store.subscriptions.source_revision()
+        plan = ReadPlan(initial=5,confirmed=0,until=5,candidate=5)
+        with pytest.raises(ValueError,match='synthetic rollback'):
+            with transaction(store.db):
+                store.read_sync.completed('synthetic',plan,5)
+                assert store.subscriptions.source_revision() > before
+                raise ValueError('synthetic rollback')
+        assert store.subscriptions.source_revision() == before
+        with transaction(store.db):
+            store.read_sync.completed('synthetic',plan,5)
+        changed = store.subscriptions.source_revision()
+        assert changed > before
+        with transaction(store.db):
+            store.read_sync.completed('synthetic',plan,5)
+        assert store.subscriptions.source_revision() == changed
+    finally:
+        store.db.close()
+
+
+def test_history_member_status_signal_is_idempotent_and_rolls_back(tmp_path, settings_database):
+    from tests.support.storage import Store
+    from oko.storage.transaction import transaction
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        with transaction(store.db):
+            store.subscriptions.history.enroll('synthetic',['item'],False)
+        before = store.read_versions.version('status','runtime')['version']
+        with transaction(store.db):
+            store.subscriptions.history.saved('item',True)
+        loaded = store.read_versions.version('status','runtime')['version']
+        assert loaded > before
+        with transaction(store.db):
+            store.subscriptions.history.saved('item',True)
+        assert store.read_versions.version('status','runtime')['version'] == loaded
+        with pytest.raises(ValueError,match='synthetic rollback'):
+            with transaction(store.db):
+                store.subscriptions.history.saved('item',False)
+                assert store.read_versions.version('status','runtime')['version'] > loaded
+                raise ValueError('synthetic rollback')
+        assert store.read_versions.version('status','runtime')['version'] == loaded
+        assert store.db.execute("SELECT outcome FROM history_members WHERE item='item'").fetchone()[0] == 'loaded'
+    finally:
+        store.db.close()
+
+
+def test_telegram_read_status_signal_is_idempotent_and_rolls_back(tmp_path, settings_database):
+    from tests.support.storage import Store
+    from oko.storage.transaction import transaction
+    store = Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        with transaction(store.db):
+            store.db.execute("INSERT INTO feeds(id,kind,transport,connection) VALUES ('synthetic','telegram','telegram','connected')")
+        before = store.read_versions.version('status','runtime')['version']
+        with transaction(store.db):
+            store.read_sync.eligible('synthetic',[11],'viewed')
+        viewed = store.read_versions.version('status','runtime')['version']
+        assert viewed > before
+        with transaction(store.db):
+            store.read_sync.eligible('synthetic',[11],'viewed')
+        assert store.read_versions.version('status','runtime')['version'] == viewed
+        with pytest.raises(ValueError,match='synthetic rollback'):
+            with transaction(store.db):
+                store.read_sync.eligible('synthetic',[29],'viewed')
+                assert store.read_versions.version('status','runtime')['version'] > viewed
+                raise ValueError('synthetic rollback')
+        assert store.read_versions.version('status','runtime')['version'] == viewed
+        assert store.db.execute("SELECT 1 FROM telegram_read_members WHERE feed='synthetic' AND member=29").fetchone() is None
+    finally:
+        store.db.close()
+
+
 def test_folder_settings_follow_rollback_and_new_folder_identity(tmp_path, settings_database):
     from tests.support.storage import Store
     from oko.storage.transaction import transaction
@@ -226,6 +451,27 @@ def test_processor_configuration_memory_follows_transaction_rollback(tmp_path, s
         store.db.close()
 
 
+def test_processor_configuration_rolls_back_when_processing_reconciliation_fails(tmp_path, settings_database, monkeypatch):
+    from oko.processing.llamacpp import ProcessorConfig
+    from tests.support.storage import Store
+
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    initial = ProcessorConfig(endpoint='http://localhost:9931', model='local:one', local_execution=True)
+    changed = initial.model_copy(update={'endpoint': 'http://localhost:9932'})
+    try:
+        store.configure_processor(initial)
+        version = store.settings_version()
+        def fail():
+            raise RuntimeError('reconciliation failed')
+        monkeypatch.setattr(store.processing, 'sync', fail)
+        with pytest.raises(RuntimeError, match='reconciliation failed'):
+            store.configure_processor(changed)
+        assert store.processor_config() == initial
+        assert store.settings_version() == version
+    finally:
+        store.db.close()
+
+
 def test_feed_configuration_memory_follows_edits_and_rollback(tmp_path, settings_database):
     from tests.support.storage import Store
     from oko.storage.transaction import transaction
@@ -296,7 +542,8 @@ def test_postgres_failed_rollback_discards_pending_memory_and_connection(tmp_pat
             with psycopg.connect(postgres_url, autocommit=True) as administrator:
                 assert administrator.execute('SELECT pg_terminate_backend(%s)', (identity,)).fetchone()[0]
             raise RuntimeError('abort owned synthetic transaction')
-        assert store.subscriptions.effective('oko', 'global')['effective']['prompt_filters']['value'] == 'Committed'
+        with pytest.raises(psycopg.Error):
+            store.subscriptions.effective('oko', 'global')
         with pytest.raises(psycopg.Error):
             store.db.execute('SELECT 1')
     finally:
@@ -306,3 +553,591 @@ def test_postgres_failed_rollback_discards_pending_memory_and_connection(tmp_pat
         assert reopened.subscriptions.effective('oko', 'global')['effective']['prompt_filters']['value'] == 'Committed'
     finally:
         reopened.db.close()
+
+
+def test_http_settings_reads_committed_changes_from_another_connection(tmp_path, settings_database):
+    import psycopg
+    from oko.collection.demo import DemoSource
+
+    app = create_app(tmp_path, token='test', api_only=True, source=DemoSource(), database_url=settings_database)
+    path = '/api/v3/settings/oko/global'
+    with TestClient(app, headers=HEADERS) as client, psycopg.connect(settings_database) as writer:
+        assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
+        assert client.get(path).json()['effective']['theses']['value'] is False
+        writer.execute("INSERT INTO settings(field,value) VALUES ('theses','true')")
+        assert client.get(path).json()['effective']['theses']['value'] is False
+        writer.commit()
+        assert client.get(path).json()['effective']['theses']['value'] is True
+        writer.execute("UPDATE settings SET value='false' WHERE folder_id IS NULL AND feed_id IS NULL AND field='theses'")
+        writer.rollback()
+        assert client.get(path).json()['effective']['theses']['value'] is True
+
+
+def test_http_inherited_settings_use_one_consistent_database_snapshot(tmp_path, settings_database):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    import psycopg
+    from oko.collection.demo import DemoSource
+
+    app = create_app(tmp_path, token='test', api_only=True, source=DemoSource(), database_url=settings_database)
+    with TestClient(app, headers=HEADERS) as client, psycopg.connect(settings_database) as writer:
+        assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
+        folder = client.get('/api/v3/subscriptions').json()['feeds'][0]['folder_id']
+        assert client.patch('/api/v3/settings/oko/global', json={'theses': False}).status_code == 200
+        path = '/api/v3/settings/folder/' + folder
+        assert client.patch(path, json={'prompt_filters': 'before'}).status_code == 200
+        entered, release = threading.Event(), threading.Event()
+        def trace(query):
+            if 'SELECT field, value FROM settings' in query and not entered.is_set():
+                entered.set()
+                assert release.wait(5)
+        client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(trace))
+        try:
+            with ThreadPoolExecutor() as pool:
+                pending = pool.submit(client.get, path)
+                assert entered.wait(5)
+                writer.execute("UPDATE settings SET value='true' WHERE folder_id IS NULL AND feed_id IS NULL AND field='theses'")
+                writer.execute("UPDATE settings SET value=%s WHERE folder_id=%s AND feed_id IS NULL AND field='prompt_filters'", ('\"after\"', folder))
+                writer.commit()
+                release.set()
+                result = pending.result(5)
+            assert result.status_code == 200, result.text
+            assert result.json()['effective']['theses']['value'] is False
+            assert result.json()['effective']['prompt_filters']['value'] == 'before'
+        finally:
+            release.set()
+            client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))
+
+
+def test_http_processor_settings_follow_committed_storage(tmp_path, settings_database):
+    import json
+    import psycopg
+    from tests.reader.test_codex_settings import Models, configuration
+
+    app = create_app(tmp_path, token='test', api_only=True, codex_client=Models(), database_url=settings_database)
+    with TestClient(app, headers=HEADERS) as client, psycopg.connect(settings_database) as writer:
+        assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
+        assert client.get('/api/v3/processors/codex').json()['configuration'] is None
+        config = configuration()
+        writer.execute('INSERT INTO state(key,value) VALUES (%s,%s)', ('processor:codex', json.dumps(config)))
+        assert client.get('/api/v3/processors/codex').json()['configuration'] is None
+        writer.commit()
+        assert client.get('/api/v3/processors/codex').json()['configuration'] == config
+
+
+def test_feed_processing_settings_follow_committed_storage(tmp_path, settings_database):
+    import psycopg
+    from tests.support.storage import Store
+    from oko.subscriptions.subscriptions import AddFeed
+
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    try:
+        feed = store.subscriptions.add_feed(AddFeed(url='https://source.test/feed', title='Source', folder='Folder', verification='synthetic'))
+        identity = feed['id']
+        with psycopg.connect(settings_database) as writer:
+            writer.execute('UPDATE feeds SET public_ai=1 WHERE id=%s', (identity,))
+            assert store.subscriptions.effective('feed', identity, details=False)['feed']['public_ai'] is False
+            writer.commit()
+            assert store.subscriptions.effective('feed', identity, details=False)['feed']['public_ai'] is True
+    finally:
+        store.db.close()
+
+
+def test_codex_configuration_problem_rolls_back_with_settings(tmp_path, settings_database):
+    from oko.storage.transaction import transaction
+    from oko.subscriptions.subscriptions import Overrides
+    from oko.services.subscriptions import SubscriptionService
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        service=SubscriptionService(lambda:store)
+        with pytest.raises(ValueError,match='rollback'):
+            with transaction(store.db):
+                service.update_settings('oko','global',Overrides(processor='codex',theses=True))
+                assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone()
+                raise ValueError('rollback')
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='processor:codex-choice'").fetchone() is None
+        with transaction(store.db):
+            service.update_settings('oko','global',Overrides(processor='codex',theses=True))
+        identity=store.db.execute("SELECT id FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone()[0]
+        store.db.close()
+        store=Store(tmp_path,lambda _:None,database_url=settings_database)
+        assert store.db.execute("SELECT id FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone()[0]==identity
+        with transaction(store.db):
+            service=SubscriptionService(lambda:store)
+            service.update_settings('oko','global',Overrides(theses=False))
+        assert store.db.execute("SELECT outcome FROM reader_problems WHERE id=%s",(identity,)).fetchone()[0]=='irrelevant'
+    finally:
+        store.db.close()
+
+
+def test_telegram_profile_problem_rolls_back_with_identity_check(tmp_path, settings_database, monkeypatch):
+    import json
+    from oko.services.connections import ConnectionService
+    from oko.storage.transaction import transaction
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('telegram','telegram','Telegram','default','telegram','telegram','connected',ARRAY[]::text[])")
+            store.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'ready',1)")
+            store.subscriptions.telegram.put_binding('telegram',dict(kind='client',role='personal',account_user_id='101',peer_id='123'))
+        service=ConnectionService(lambda:store)
+        with monkeypatch.context() as patch:
+            def fail(*args,**kwargs):
+                raise RuntimeError('problem persistence failed')
+            patch.setattr(store.problems,'sync_profiles',fail)
+            with pytest.raises(RuntimeError,match='problem persistence failed'):
+                service.checked('personal',1,202,2)
+        assert store.subscriptions.telegram.profile('personal')['state']=='ready'
+        with pytest.raises(ValueError,match='rollback'):
+            with transaction(store.db):
+                assert not service.checked('personal',1,202,2)
+                assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='profile:personal' AND finished IS NULL").fetchone()
+                raise ValueError('rollback')
+        assert store.subscriptions.telegram.profile('personal')['state']=='ready'
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='profile:personal'").fetchone() is None
+        with transaction(store.db):
+            assert not service.checked('personal',1,202,2)
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='profile:personal' AND finished IS NULL").fetchone()
+    finally:
+        store.db.close()
+
+
+def test_shared_telegram_profile_problem_keeps_remaining_feed(tmp_path, settings_database):
+    import json
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'unavailable',1)")
+            for feed in ('first','second'):
+                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES (%s,%s,%s,'default','telegram','telegram','connected',ARRAY[]::text[])", (feed,feed,feed))
+                store.subscriptions.telegram.put_binding(feed,dict(kind='client',role='personal',account_user_id='101',peer_id=feed))
+            store.problems.sync_profiles(store.wall_clock(),{'personal'})
+        before=store.db.execute("SELECT id,body FROM reader_problems WHERE identity='profile:personal' AND finished IS NULL").fetchone()
+        assert {v['id'] for v in json.loads(before['body'])['objects']}=={'first','second'}
+        store.remove_feed('first')
+        after=store.db.execute("SELECT id,body FROM reader_problems WHERE identity='profile:personal' AND finished IS NULL").fetchone()
+        assert after['id']==before['id']
+        assert [v['id'] for v in json.loads(after['body'])['objects']]==['second']
+        store.remove_feed('second')
+        assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s',(before['id'],)).fetchone()[0]=='irrelevant'
+    finally:
+        store.db.close()
+
+
+def test_profile_check_does_not_load_unrelated_feed_details(tmp_path, settings_database):
+    import json
+    from oko.services.connections import ConnectionService
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        with store.db:
+            store.db.executemany("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES (%s,%s,%s,'default','rss','rss','connected',ARRAY[]::text[])", [(f'other-{i}',f'other-{i}',f'Other {i}') for i in range(150)])
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('telegram','telegram','Telegram','default','telegram','telegram','connected',ARRAY[]::text[])")
+            store.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'ready',1)")
+            store.subscriptions.telegram.put_binding('telegram',dict(kind='client',role='personal',account_user_id='101',peer_id='123'))
+        statements=[]
+        store.db.set_trace_callback(statements.append)
+        try:
+            assert not ConnectionService(lambda:store).checked('personal',1,202,2)
+        finally:
+            store.db.set_trace_callback(None)
+        assert not any('FROM feeds ORDER BY sort_order' in query for query in statements), statements
+    finally:
+        store.db.close()
+
+
+def test_profile_problem_order_is_stable_across_feed_batches(tmp_path, settings_database):
+    import json
+    from oko.services.connections import ConnectionService
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'ready',1)")
+            for i in range(405):
+                feed=f'feed-{404-i:04}'
+                store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES (%s,%s,%s,'default','telegram','telegram','connected',ARRAY[]::text[])",(feed,feed,feed))
+                store.subscriptions.telegram.put_binding(feed,dict(kind='client',role='personal',account_user_id='101',peer_id=feed))
+        assert not ConnectionService(lambda:store).checked('personal',1,202,2)
+        saved=json.loads(store.db.execute("SELECT body FROM reader_problems WHERE identity='profile:personal' AND finished IS NULL").fetchone()[0])
+        candidate=next(c for c in store.problems.snapshot(2)['current'] if c['code']=='account_identity_mismatch')
+        assert saved['objects']==candidate['objects']
+        assert len(saved['objects'])==405
+    finally:
+        store.db.close()
+
+
+def test_codex_problem_recovers_on_startup_without_status_request(tmp_path, settings_database):
+    from oko.subscriptions.subscriptions import Overrides
+    from oko.services.subscriptions import SubscriptionService
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    try:
+        SubscriptionService(lambda: store).update_settings('oko', 'global', Overrides(processor='codex', theses=True))
+        with store.db:
+            store.db.execute("DELETE FROM reader_problems WHERE identity='processor:codex-choice'")
+        store.db.close()
+        store = Store(tmp_path, lambda _: None, database_url=settings_database)
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone()
+    finally:
+        store.db.close()
+
+
+def test_youtube_subscription_updates_model_problem_atomically(tmp_path, settings_database):
+    from oko.storage.transaction import transaction
+    from oko.subscriptions.subscriptions import AddFeed
+    from oko.services.subscriptions import SubscriptionService
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    service = SubscriptionService(lambda: store)
+    feed = AddFeed(url='https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa', title='YouTube', folder='Folder', verification='synthetic')
+    def current():
+        return store.db.execute("SELECT id FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone()
+    try:
+        assert current() is None
+        with pytest.raises(ValueError, match='rollback'):
+            with transaction(store.db):
+                service.add_feed(feed)
+                assert current() is not None
+                raise ValueError('rollback')
+        assert current() is None
+        service.add_feed(feed)
+        problem_id = current()['id']
+        service.add_feed(AddFeed(url='https://source.test/feed', title='RSS', folder='Folder', verification='synthetic'))
+        assert current()['id'] == problem_id
+    finally:
+        store.db.close()
+
+
+def test_deleting_last_codex_feed_finishes_problem_atomically(tmp_path, settings_database):
+    from types import SimpleNamespace
+    from oko.storage.transaction import transaction
+    from oko.subscriptions.subscriptions import AddFeed
+    from oko.services.subscriptions import SubscriptionService
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    service = SubscriptionService(lambda: store)
+    try:
+        feeds = [service.add_feed(AddFeed(url='https://www.youtube.com/feeds/videos.xml?channel_id=UC'+ch*22,
+                    title=ch, folder='Folder', verification='synthetic')) for ch in ('a', 'b')]
+        problem = store.db.execute("SELECT id FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone()['id']
+        store.jobs.finish_feed_deletion(SimpleNamespace(item=feeds[0]['id'],id=-1))
+        assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s', (problem,)).fetchone()['finished'] is None
+        with pytest.raises(ValueError, match='rollback'):
+            with transaction(store.db):
+                store.jobs.finish_feed_deletion(SimpleNamespace(item=feeds[1]['id'],id=-1))
+                assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s', (problem,)).fetchone()['outcome'] == 'irrelevant'
+                raise ValueError('rollback')
+        assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s', (problem,)).fetchone()['finished'] is None
+        store.jobs.finish_feed_deletion(SimpleNamespace(item=feeds[1]['id'],id=-1))
+        assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s', (problem,)).fetchone()['outcome'] == 'irrelevant'
+    finally:
+        store.db.close()
+
+
+def test_status_does_not_recreate_missing_codex_problem(tmp_path, settings_database):
+    from oko.subscriptions.subscriptions import Overrides
+    from oko.services.subscriptions import SubscriptionService
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    try:
+        SubscriptionService(lambda: store).update_settings('oko', 'global', Overrides(processor='codex', theses=True))
+        with store.db:
+            store.db.execute("DELETE FROM reader_problems WHERE identity='processor:codex-choice'")
+        state = store.problems.snapshot(store.wall_clock())
+        assert not any(problem['code'] == 'codex-choice' for problem in state['current'])
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='processor:codex-choice'").fetchone() is None
+    finally:
+        store.db.close()
+
+
+def test_demo_feed_inherits_folder_model_problem_on_creation(tmp_path, settings_database):
+    from oko.subscriptions.subscriptions import Overrides
+    from oko.services.subscriptions import SubscriptionService
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO folders(id,title,position) VALUES ('demo','Demo',1)")
+        SubscriptionService(lambda: store).update_settings('folder', 'demo', Overrides(processor='codex', theses=True))
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone() is None
+        store.ensure_demo()
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone()
+    finally:
+        store.db.close()
+
+
+def test_deleting_feed_keeps_problem_needed_by_global_settings(tmp_path, settings_database):
+    from types import SimpleNamespace
+    from oko.subscriptions.subscriptions import AddFeed, Overrides
+    from oko.services.subscriptions import SubscriptionService
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    service = SubscriptionService(lambda: store)
+    try:
+        service.update_settings('oko', 'global', Overrides(processor='codex', theses=True))
+        feed = service.add_feed(AddFeed(url='https://www.youtube.com/feeds/videos.xml?channel_id=UC'+'c'*22,
+                                       title='Video', folder='Folder', verification='synthetic'))
+        problem = store.db.execute("SELECT id FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone()['id']
+        store.jobs.finish_feed_deletion(SimpleNamespace(item=feed['id'],id=-1))
+        assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s', (problem,)).fetchone()['finished'] is None
+        store.jobs.finish_feed_deletion(SimpleNamespace(item=feed['id'],id=-1))
+        assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s', (problem,)).fetchone()['finished'] is None
+    finally:
+        store.db.close()
+
+
+def test_legacy_command_problems_recover_at_startup_not_status_read(tmp_path, settings_database):
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    context = lambda identity: dict(identity=identity, title='Command', objects=[], action=None, discardable=True)
+    try:
+        for result in ('failed', 'unknown'):
+            store.problems.report_action(result, context(result), result, 1)
+        with store.db:
+            store.db.execute("DELETE FROM reader_problems WHERE identity LIKE 'action:%%'")
+            store.db.execute("DELETE FROM state WHERE key='action-problems-recovered-v2'")
+        store.db.close()
+        store = Store(tmp_path, lambda _: None, database_url=settings_database)
+        problems = store.db.execute("SELECT identity FROM reader_problems WHERE identity LIKE 'action:%%' AND finished IS NULL ORDER BY identity").fetchall()
+        assert [row['identity'] for row in problems] == ['action:failed', 'action:unknown']
+        with store.db:
+            store.db.execute("DELETE FROM reader_problems WHERE identity='action:failed'")
+        state = store.problems.snapshot(2)
+        assert len([problem for problem in state['current'] if problem['code'].startswith('action-')]) == 1
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='action:failed'").fetchone() is None
+    finally:
+        store.db.close()
+
+
+def test_action_recovery_respects_latest_receipt_and_closes_stale_problem(tmp_path, settings_database):
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    context = dict(identity='same', title='Command', objects=[], action=None, discardable=True)
+    try:
+        store.problems.report_action('old', context, 'failed', 1)
+        store.problems.action_started('new', context, 2)
+        store.problems.action_finished('new', True, 3)
+        with store.db:
+            store.db.execute("UPDATE reader_problems SET finished=NULL,outcome=NULL WHERE identity='action:same'")
+            store.db.execute("DELETE FROM state WHERE key='action-problems-recovered-v2'")
+        store.db.close()
+        store = Store(tmp_path, lambda _: None, database_url=settings_database)
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='action:same' AND finished IS NULL").fetchone() is None
+        assert not [p for p in store.problems.snapshot(4)['current'] if p['code'].startswith('action-')]
+    finally:
+        store.db.close()
+
+
+def test_command_error_updates_problem_in_same_transaction(tmp_path, settings_database):
+    import json
+    from oko.storage.transaction import transaction
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    identity = json.dumps({'operation':'codex_save'},separators=(',',':'))
+    context = dict(identity=identity, title='Command', objects=[], action=None, discardable=True,
+                   command_context={'operation':'codex_save'})
+    try:
+        store.problems.report_action('one', context, 'failed', 1)
+        def error():
+            row=store.db.execute("SELECT body FROM reader_problems WHERE identity=%s AND finished IS NULL",('action:'+identity,)).fetchone()
+            return json.loads(json.loads(row['body'])['operation'])['error']
+        assert error() is None
+        with pytest.raises(ValueError, match='rollback'):
+            with transaction(store.db):
+                store.problems.command_error('one', json.dumps({'code':'failed'}))
+                assert error() == {'code':'failed'}
+                raise ValueError('rollback')
+        assert error() is None
+        store.problems.command_error('one', json.dumps({'code':'failed'}))
+        assert error() == {'code':'failed'}
+    finally:
+        store.db.close()
+
+
+def test_command_problem_recovery_resumes_after_interrupted_batch(tmp_path, settings_database):
+    import json
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    try:
+        with store.db:
+            store.db.execute("DELETE FROM state WHERE key='action-problems-recovered-v2'")
+            body=json.dumps(dict(title='Command', objects=[], action=None, discardable=True))
+            store.db.executemany("INSERT INTO reader_action_results(id,identity,body,started,result) VALUES (%s,%s,%s,1,'failed')",
+                                 [(str(i),str(i),body) for i in range(101)])
+        store.db.close()
+        def fault(point):
+            if point == 'action_problem_recovery_batch':
+                raise RuntimeError('interrupted')
+        with pytest.raises(RuntimeError, match='interrupted'):
+            Store(tmp_path, fault, database_url=settings_database)
+        store=Store(tmp_path,lambda _:None,database_url=settings_database)
+        assert store.db.execute("SELECT count(*) FROM reader_problems WHERE identity LIKE 'action:%%' AND finished IS NULL").fetchone()[0] == 101
+        assert store.db.execute("SELECT 1 FROM state WHERE key='action-problems-recovered-v2'").fetchone()
+    finally:
+        store.db.close()
+
+
+def test_legacy_recovery_does_not_reopen_irrelevant_deleted_material_problem(tmp_path, settings_database):
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    identity = '{"operation":"retry_material","material_id":"gone"}'
+    context = dict(identity=identity, title='Command', objects=[dict(kind='material', id='gone')],
+                   action=None, discardable=True, command_context={'operation':'retry_material','material_id':'gone'})
+    try:
+        store.problems.report_action('command-id', context, 'failed', 1)
+        with store.db:
+            store.problems.forget_materials({'gone'}, 2)
+            store.db.execute("DELETE FROM state WHERE key='action-problems-recovered-v2'")
+        assert store.db.execute("SELECT result FROM reader_action_results WHERE id='command-id'").fetchone()[0] == 'failed'
+        store.db.close()
+        store = Store(tmp_path, lambda _: None, database_url=settings_database)
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity=%s AND finished IS NULL",('action:'+identity,)).fetchone() is None
+    finally:
+        store.db.close()
+
+
+def test_pending_command_for_deleted_material_stays_irrelevant_after_restart(tmp_path, settings_database):
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    identity = '{"operation":"retry_material","material_id":"gone"}'
+    context = dict(identity=identity, title='Command', objects=[dict(kind='material', id='gone')],
+                   action=None, discardable=True, command_context={'operation':'retry_material','material_id':'gone'})
+    try:
+        store.problems.report_action('old', context, 'failed', 1)
+        store.problems.action_started('new', context, 2)
+        with store.db:
+            store.problems.forget_materials({'gone'}, 3)
+            store.db.execute("DELETE FROM state WHERE key='action-problems-recovered-v2'")
+        store.db.close()
+        store = Store(tmp_path, lambda _: None, database_url=settings_database)
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity=%s AND finished IS NULL",('action:'+identity,)).fetchone() is None
+    finally:
+        store.db.close()
+
+
+def test_retry_at_same_timestamp_is_not_hidden_after_restart(tmp_path, settings_database):
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    identity = '{"operation":"codex_save"}'
+    context = dict(identity=identity, title='Command', objects=[], action=None, discardable=True,
+                   command_context={'operation':'codex_save'})
+    try:
+        store.problems.report_action('id', context, 'failed', 1)
+        problem = store.db.execute("SELECT id FROM reader_problems WHERE identity=%s AND finished IS NULL",('action:'+identity,)).fetchone()['id']
+        assert store.problems.abandon(problem, 2)
+        store.problems.action_started('id', context, 2, restart=True)
+        store.db.close()
+        store = Store(tmp_path, lambda _: None, database_url=settings_database)
+        row=store.db.execute("SELECT body FROM reader_problems WHERE identity=%s AND finished IS NULL",('action:'+identity,)).fetchone()
+        assert row is not None
+    finally:
+        store.db.close()
+
+
+def test_recovered_finished_action_for_removed_feed_is_irrelevant(tmp_path, settings_database):
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    context = dict(identity='feed-action', title='Command', objects=[dict(kind='feed', id='missing')], action=None, discardable=True)
+    try:
+        store.problems.report_action('id', context, 'failed', 1)
+        store.problems.action_started('new', context, 2)
+        store.problems.action_finished('new', True, 3)
+        with store.db:
+            store.db.execute("UPDATE reader_problems SET finished=NULL,outcome=NULL WHERE identity='action:feed-action'")
+            store.db.execute("DELETE FROM state WHERE key='action-problems-recovered-v2'")
+        store.db.close()
+        store = Store(tmp_path, lambda _: None, database_url=settings_database)
+        assert store.db.execute("SELECT outcome FROM reader_problems WHERE identity='action:feed-action'").fetchone()['outcome'] == 'irrelevant'
+    finally:
+        store.db.close()
+
+
+def test_status_does_not_recreate_missing_telegram_profile_problem(tmp_path, settings_database):
+    import json
+    from oko.services.connections import ConnectionService
+    from tests.support.storage import Store
+    store = Store(tmp_path, lambda _: None, database_url=settings_database)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('telegram','telegram','Telegram','default','telegram','telegram','connected',ARRAY[]::text[])")
+            store.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'ready',1)")
+            store.subscriptions.telegram.put_binding('telegram',dict(kind='client',role='personal',account_user_id='101',peer_id='123'))
+        assert not ConnectionService(lambda:store).checked('personal',1,202,2)
+        with store.db:
+            store.db.execute("DELETE FROM reader_problems WHERE identity='profile:personal'")
+        state=store.problems.snapshot(3)
+        assert not any(problem['code'] == 'account_identity_mismatch' for problem in state['current'])
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='profile:personal'").fetchone() is None
+        store.db.close()
+        store=Store(tmp_path,lambda _:None,database_url=settings_database)
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='profile:personal' AND finished IS NULL").fetchone()
+    finally:
+        store.db.close()
+
+
+def test_saved_profile_problem_suppresses_only_matching_job_problem(tmp_path, settings_database):
+    import json
+    from oko.services.connections import ConnectionService
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('telegram','telegram','Telegram','default','telegram','telegram','connected',ARRAY[]::text[])")
+            store.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'ready',1)")
+            store.subscriptions.telegram.put_binding('telegram',dict(kind='client',role='personal',account_user_id='101',peer_id='123'))
+            store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('discover','telegram','failed','failure','identity-unconfirmed') ON CONFLICT(kind,item) DO UPDATE SET status='failed',error='failure',problem_code='identity-unconfirmed'")
+        service=ConnectionService(lambda:store)
+        assert not service.checked('personal',1,202,2)
+        problems=store.problems.snapshot(2)['current']
+        assert [p['code'] for p in problems] == ['account_identity_mismatch']
+        assert service.checked('personal',1,101,3)
+        problems=store.problems.snapshot(3)['current']
+        assert [p['code'] for p in problems] == ['identity-unconfirmed']
+    finally:
+        store.db.close()
+
+
+def test_action_recovery_preserves_zero_and_negative_receipt_sequences(tmp_path, settings_database):
+    import json
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        with store.db:
+            store.db.execute("DELETE FROM state WHERE key='action-problems-recovered-v2'")
+            store.db.execute("INSERT INTO state(key,value) VALUES ('action-problems-recovered-v1','true')")
+            body=json.dumps(dict(title='Command',objects=[],action=None,discardable=True))
+            store.db.execute("INSERT INTO reader_action_results(sequence,id,identity,body,started,result) VALUES (-1,'neg','neg',%s,1,'failed'),(0,'zero','zero',%s,1,'failed')",(body,body))
+        store.db.close()
+        store=Store(tmp_path,lambda _:None,database_url=settings_database)
+        assert {r['identity'] for r in store.db.execute("SELECT identity FROM reader_problems WHERE finished IS NULL")} >= {'action:neg','action:zero'}
+    finally:
+        store.db.close()
+
+
+def test_action_recovery_resumes_negative_sequence_batch_after_failure(tmp_path, settings_database):
+    import json
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=settings_database)
+    try:
+        with store.db:
+            store.db.execute("DELETE FROM state WHERE key='action-problems-recovered-v2'")
+            store.db.execute("INSERT INTO state(key,value) VALUES ('action-problems-recovered-v1','true')")
+            body=json.dumps(dict(title='Command',objects=[],action=None,discardable=True))
+            store.db.executemany("INSERT INTO reader_action_results(sequence,id,identity,body,started,result) VALUES (%s,%s,%s,%s,1,'failed')",
+                                 [(n,'id-'+str(n),'identity-'+str(n),body) for n in range(-101,1)])
+        store.db.close()
+        def fault(point):
+            if point=='action_problem_recovery_batch':
+                raise RuntimeError('interrupted')
+        with pytest.raises(RuntimeError,match='interrupted'):
+            Store(tmp_path,fault,database_url=settings_database)
+        store=Store(tmp_path,lambda _:None,database_url=settings_database)
+        assert store.db.execute("SELECT count(*) FROM reader_problems WHERE identity LIKE 'action:%%' AND finished IS NULL").fetchone()[0]==102
+        assert store.db.execute("SELECT 1 FROM state WHERE key='action-problems-recovered-v2'").fetchone()
+        assert not store.db.execute("SELECT 1 FROM state WHERE key='action-problems-recovered-v1'").fetchone()
+    finally:
+        store.db.close()

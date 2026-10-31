@@ -10,6 +10,7 @@ import hashlib
 from typing import Any
 
 import psycopg
+from psycopg import sql
 from psycopg.pq import TransactionStatus
 
 
@@ -71,7 +72,21 @@ def migrate(db: psycopg.Connection[Any], migrations: Sequence[Migration]) -> Non
                 applied_at timestamptz NOT NULL DEFAULT clock_timestamp())''')
             installed = _installed(db, migrations)
             for migration in migrations[installed:]:
+                if (migration.version, migration.name) == (89, 'feeds-config-jsonb'):
+                    # Its preflight and ALTER must see the same feed values, even
+                    # when an external writer does not use our advisory lease.
+                    target=db.execute("SELECT current_schema(),to_regclass(format('%I.%I',current_schema(),'feeds'))").fetchone()
+                    if not target or target[0] is None or target[1] is None:
+                        raise SchemaMismatch('Migration 89 requires feeds in the current schema')
+                    db.execute(sql.SQL('LOCK TABLE {}.{} IN ACCESS EXCLUSIVE MODE').format(
+                        sql.Identifier(target[0]),sql.Identifier('feeds')))
+                    path_row=db.execute("SELECT current_setting('search_path')").fetchone()
+                    if not path_row:raise SchemaMismatch('Cannot read migration search_path')
+                    original_path=path_row[0]
+                    db.execute("SELECT set_config('search_path',format('pg_catalog,%%I,pg_temp',%s::text),true)",(target[0],))
                 db.execute(migration.sql, prepare=False)
+                if (migration.version, migration.name) == (89, 'feeds-config-jsonb'):
+                    db.execute("SELECT set_config('search_path',%s,true)",(original_path,))
                 db.execute('INSERT INTO oko_schema_migrations(version,name,checksum) VALUES (%s,%s,%s)',
                            (migration.version, migration.name, migration.checksum))
     finally:
@@ -88,6 +103,13 @@ def verify(db: psycopg.Connection[Any], migrations: Sequence[Migration]) -> None
         raise SchemaMismatch('Database needs migration before starting this release')
 
 
+def verify_reader_permissions(db: psycopg.Connection[Any]) -> None:
+    """Check prerequisites before migrating or starting with the reader role."""
+    row=db.execute("SELECT has_database_privilege(current_user,current_database(),'TEMPORARY')").fetchone()
+    if row is None or not row[0]:
+        raise SchemaMismatch('Reader role needs TEMPORARY privilege on the Oko database; grant it before migrating or starting this release')
+
+
 def main() -> None:
     import argparse
     from pathlib import Path
@@ -96,12 +118,20 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description='Oko PostgreSQL release schema')
     parser.add_argument('--database-url-file', type=Path, required=True)
-    parser.add_argument('--check', action='store_true', help='Verify only; never execute DDL')
+    checks=parser.add_mutually_exclusive_group()
+    checks.add_argument('--check', action='store_true', help='Verify schema and reader permissions; never execute DDL')
+    checks.add_argument('--check-reader-permissions', action='store_true', help='Preflight reader permissions before a schema migration')
     args = parser.parse_args()
     dsn = private_database_url(args.database_url_file)
     with psycopg.connect(dsn, autocommit=True) as db:
-        verify(db, MIGRATIONS) if args.check else migrate(db, MIGRATIONS)
-    print('PostgreSQL schema verified: version ' + str(len(MIGRATIONS)))
+        if args.check_reader_permissions:
+            verify_reader_permissions(db)
+        elif args.check:
+            verify(db,MIGRATIONS)
+            verify_reader_permissions(db)
+        else:
+            migrate(db,MIGRATIONS)
+    print('PostgreSQL reader permissions verified' if args.check_reader_permissions else 'PostgreSQL schema verified: version ' + str(len(MIGRATIONS)))
 
 
 if __name__ == '__main__':

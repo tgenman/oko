@@ -10,6 +10,7 @@ from oko.reader.generated import models as wire
 from oko.reader import snapshots as facts
 from oko.application.reader import ReaderApplication
 from oko.subscriptions.subscriptions import Overrides, GLOBAL_SERVICE_SETTINGS
+from oko.storage.transaction import read_snapshot
 
 
 def snapshot(scope: Literal['oko', 'folder', 'feed'], owner: str, value: facts.EffectiveSettings, binding: dict[str, object] | None = None, activity: wire.FeedActivity | None = None) -> wire.EffectiveSettingsSnapshot:
@@ -25,6 +26,7 @@ def snapshot(scope: Literal['oko', 'folder', 'feed'], owner: str, value: facts.E
         theses=wire.EffectiveTheses(value=effective.theses.value, origin=origin(effective.theses.scope, effective.theses.owner)),
         prompt_theses=wire.EffectivePromptTheses(value=effective.prompt_theses.value, origin=origin(effective.prompt_theses.scope, effective.prompt_theses.owner)),
         prompt_filters=wire.EffectivePromptFilters(value=effective.prompt_filters.value, origin=origin(effective.prompt_filters.scope, effective.prompt_filters.owner)),
+        filter_enabled=wire.EffectiveFilterEnabled(value=effective.filter_enabled.value, origin=origin(effective.filter_enabled.scope, effective.filter_enabled.owner)),
         processor=wire.EffectiveProcessor(value=processor(effective.processor.value), origin=origin(effective.processor.scope, effective.processor.owner)),
     )
     saved = value.overrides.model_dump(exclude_unset=True)
@@ -94,8 +96,9 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
     @router.get('/api/v3/settings/{scope}/{owner}', response_model=wire.EffectiveSettingsSnapshot)
     @read_locked(runtime.execution)
     async def settings(scope: Literal['oko', 'folder', 'feed'], owner: str) -> wire.EffectiveSettingsSnapshot:
-        target(scope, owner)
-        return snapshot(scope, owner, facts.EffectiveSettings.model_validate(runtime.queries.effective(scope, owner)), runtime.queries.binding(owner) if scope == 'feed' else None, activity_for(scope, owner))
+        with read_snapshot(runtime.require_store().db):
+            target(scope, owner)
+            return snapshot(scope, owner, facts.EffectiveSettings.model_validate(runtime.queries.effective(scope, owner)), runtime.queries.binding(owner) if scope == 'feed' else None, activity_for(scope, owner))
 
     @router.patch('/api/v3/settings/{scope}/{owner}', response_model=wire.EffectiveSettingsSnapshot)
     async def patch(request: Request, scope: Literal['oko', 'folder', 'feed'], owner: str, body: wire.SettingsPatch) -> wire.EffectiveSettingsSnapshot:

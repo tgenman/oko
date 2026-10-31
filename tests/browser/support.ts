@@ -51,7 +51,7 @@ async function reader() {
             if(code!=='legacy_problem'&&action){
               if(action.kind==='settings'&&(action.page==='codex'||action.page==='llamacpp')){recovery.push({kind:'configure_processor',processor_id:action.page});affected=[{kind:'processor',processor_id:action.page}];}
               else if(action.kind==='settings'){
-                const keys=['originals','theses','prompt_theses','prompt_filters','processor']as const;
+                const keys=['originals','theses','prompt_theses','prompt_filters','filter_enabled','processor']as const;
                 const key=keys.find(key=>'field/'+key===action.page);
                 if(key)recovery.push({kind:'change_setting',target:action.scope==='feed'||action.scope==='folder'?{scope:action.scope,owner:action.id||'fixture'}:{scope:'oko',owner:'global'},keys:[key]});
               }
@@ -202,7 +202,7 @@ async function reader() {
         t.replies.set('/api/v3/processors/codex', {body:{config:null}});
         t.replies.set('/api/v3/youtube', {body:{mode:'direct', address:'', has_password:false, has_username:false, paused:false, next_at:0, strikes:0, reason:''}});
         t.replies.set('/api/v3/processors/codex/models', {body:{models:[]}});
-        const settings = {originals: true, theses: true, prompt_theses: 'Тезисы', prompt_filters: '', processor: 'codex'};
+        const settings = {originals: true, theses: true, prompt_theses: 'Тезисы', prompt_filters: '', filter_enabled: false, processor: 'codex'};
         t.replies.set('/api/v3/settings/oko/global', {body: {overrides: {}, effective: Object.fromEntries(Object.entries(settings).map(([key, value]) => [key, {value, scope: 'oko', owner: 'global'}]))}});
         t.replies.set('/api/v3/cards', {body: materials.map(({text, description, display_text, reply_preview, ...card}) => ({folder_id:'f',published_known:true,feed_title:'feed',importance:'normal',snippet:'',...card}))});
         for (const material of materials) {

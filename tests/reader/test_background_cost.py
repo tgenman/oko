@@ -50,7 +50,7 @@ def test_idle_reader_does_not_reconcile_entire_library(tmp_path, count):
             if len(queries) < 1000 and not any(any(f'SELECT id FROM {table} WHERE viewed=0' in q for table in ('items', 'items_read', 'items_by_feed', 'unviewed_items_by_feed')) and 'feed_id=ANY(' not in q for q in queries):
                 break
         else:
-            raise AssertionError(f'Reader never reached bounded idle work: {len(queries)} queries; {[q for q in queries if "SELECT id FROM items WHERE viewed=0" in q]}')
+            raise AssertionError(f'Reader never reached bounded idle work: {len(queries)} queries; {[q for q in queries if "SELECT id FROM publications WHERE viewed=0" in q]}')
         queries.clear()
         time.sleep(.65)
         client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))
@@ -92,7 +92,7 @@ def test_telegram_reconciliation_scales_linearly(tmp_path, count):
         store.db.execute("INSERT INTO folders VALUES ('folder','Synthetic',0)")
         for i in range(count):
             feed = f'{i:032x}'
-            store.db.execute("INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport , telegram_peer , auto_read ) VALUES ( %s , %s , %s , 'telegram' , 'folder' , '[]' , 'connected' , 'telegram' , %s , 0 )", (feed, feed, feed, -1000000-i))
+            store.db.execute("INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport , telegram_peer , auto_read ) VALUES ( %s , %s , %s , 'telegram' , 'folder' , ARRAY[]::text[] , 'connected' , 'telegram' , %s , 0 )", (feed, feed, feed, -1000000-i))
             store.db.execute('INSERT INTO telegram_bindings VALUES ( %s , %s )', (feed, json.dumps(dict(kind='client', role='personal', peer_id=str(-1000000-i)))))
             store.db.execute('INSERT INTO telegram_read_state ( feed , since ) VALUES ( %s , 0 )', (feed,))
     queries = []
@@ -131,11 +131,16 @@ def test_processing_backfill_does_not_scan_unrelated_completed_archive(tmp_path,
             store.db.executemany("INSERT INTO jobs ( kind , item , status ) VALUES ( 'fetch' , %s , 'done' )",
                                 [(f'old-{n}',) for n in range(20000)])
             if saved_inputs:
-                store.db.execute("INSERT INTO filter_inputs VALUES ('synthetic-saved-input','synthetic-signature')")
+                store.db.execute("INSERT INTO jobs(kind,item,status,input_snapshot) VALUES ('filter','synthetic-saved-input','done',%s::jsonb)", ('{\"signature\":\"synthetic-signature\"}',))
+            store.db.execute("INSERT INTO jobs(kind,item,status,next) VALUES ('filter','synthetic-due','pending',10)")
             analyze(store.db)
         with measure_reads(store.db) as work:
             store.jobs.backfill_processing_inputs()
         assert work.rows < 1000, 'Backfill scanned completed jobs without matching saved inputs'
+        with measure_reads(store.db) as deadlines:
+            due = store.db.execute("SELECT next FROM jobs WHERE status='pending' AND kind IN ('fetch','filter','theses') AND next>%s ORDER BY next LIMIT 1", (0,)).fetchone()
+        assert due[0] == 10
+        assert deadlines.rows < 1000, 'Deadline lookup scanned the completed archive'
     finally:
         store.db.close()
 
@@ -160,7 +165,7 @@ def test_progress_writes_do_not_rebuild_source_configuration(tmp_path):
     store.db.set_trace_callback(None)
     assert not any('FROM feeds' in q for q in queries), queries
     with store.db:
-        store.db.execute("UPDATE telegram_profiles SET user_id=202,state='unavailable'")
+        assert not store.subscriptions.telegram.checked('personal',1,202,11)
     queries.clear()
     store.db.set_trace_callback(queries.append)
     store.jobs.sync_reads()

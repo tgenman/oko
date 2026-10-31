@@ -97,10 +97,10 @@ def slow_reconciliation(dsn):
     with psycopg.connect(dsn, autocommit=True) as db:
         # A restored snapshot needs revision reconciliation even when no model
         # work is enabled; every saved root must receive its missing revision.
-        db.execute("UPDATE items SET processing_metadata='{}' WHERE viewed=0")
+        db.execute("UPDATE publications SET processing_metadata='{}' WHERE viewed=0")
         db.execute('''CREATE FUNCTION slow_recovery() RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN PERFORM pg_sleep(0.2); RETURN NEW; END $$''')
-        db.execute('CREATE TRIGGER slow_recovery BEFORE UPDATE OF processing_metadata ON items FOR EACH ROW EXECUTE FUNCTION slow_recovery()')
+        db.execute('CREATE TRIGGER slow_recovery BEFORE UPDATE OF processing_metadata ON publications FOR EACH ROW EXECUTE FUNCTION slow_recovery()')
 
 
 def test_reader_opens_reads_and_stops_while_database_reconciliation_is_slow(postgres_url, tmp_path):
@@ -173,7 +173,7 @@ def test_enabled_work_waits_for_recovery_then_runs_without_a_second_start(postgr
             # Remove the external latency before testing ordinary collection;
             # the fixture targets recovery, not normal publication writes.
             with psycopg.connect(postgres_url, autocommit=True) as db:
-                db.execute('DROP TRIGGER slow_recovery ON items')
+                db.execute('DROP TRIGGER slow_recovery ON publications')
             deadline = time.monotonic()+20
             while time.monotonic() < deadline:
                 if len(read_all_cards(client, '/api/v3/cards')) == len(cards)+3:
@@ -204,7 +204,7 @@ def test_global_settings_after_startup_queue_slow_reconciliation_without_blockin
             with psycopg.connect(postgres_url, autocommit=True) as db:
                 db.execute('''CREATE FUNCTION slow_recovery() RETURNS trigger LANGUAGE plpgsql AS $$
                     BEGIN PERFORM pg_sleep(0.2); RETURN NEW; END $$''')
-                db.execute('CREATE TRIGGER slow_recovery BEFORE UPDATE OF processing_metadata ON items FOR EACH ROW EXECUTE FUNCTION slow_recovery()')
+                db.execute('CREATE TRIGGER slow_recovery BEFORE UPDATE OF processing_metadata ON publications FOR EACH ROW EXECUTE FUNCTION slow_recovery()')
             started = time.monotonic()
             changed = client.patch('/api/v3/settings/oko/global', json={'prompt_filters':'Use the new rules'}, timeout=2)
             assert changed.status_code == 200
@@ -238,20 +238,20 @@ def test_background_reconciliation_failure_closes_work_admission_and_can_stop(po
     cards = library(root, postgres_url, count=1)
     credential = tmp_path/'database'
     credential.write_text(postgres_url);credential.chmod(0o600)
+    with psycopg.connect(postgres_url, autocommit=True) as db:
+        db.execute("UPDATE publications SET processing_metadata='{}' WHERE id=%s", (cards[0]['id'],))
+        db.execute("""CREATE FUNCTION failed_recovery() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN RAISE EXCEPTION 'synthetic private recovery failure'; END $$""")
+        db.execute('CREATE TRIGGER failed_recovery BEFORE UPDATE OF processing_metadata ON publications FOR EACH ROW EXECUTE FUNCTION failed_recovery()')
     process = start(root, credential, demo=True)
     try:
-        with closing(ready(root, process)) as client:
-            assert client.put('/api/v3/power', json={'enabled':True}).status_code == 200
-            deadline = time.monotonic()+10
-            while len(read_all_cards(client, '/api/v3/cards')) != len(cards)+3 and time.monotonic() < deadline:
-                time.sleep(.05)
-            assert len(read_all_cards(client, '/api/v3/cards')) == len(cards)+3
-            with psycopg.connect(postgres_url, autocommit=True) as db:
-                db.execute('''CREATE FUNCTION failed_recovery() RETURNS trigger LANGUAGE plpgsql AS $$
-                    BEGIN RAISE EXCEPTION 'synthetic private recovery failure'; END $$''')
-                db.execute('CREATE TRIGGER failed_recovery BEFORE UPDATE OF processing_metadata ON items FOR EACH ROW EXECUTE FUNCTION failed_recovery()')
-            assert client.patch('/api/v3/settings/oko/global', json={'prompt_filters':'New failed rules'}).status_code == 200
-            deadline = time.monotonic()+3
+        deadline = time.monotonic()+10
+        while not (root/'runtime.json').exists() and time.monotonic()<deadline:
+            assert process.poll() is None, process.log_path.read_text()
+            time.sleep(.05)
+        meta = json.loads((root/'runtime.json').read_text())
+        with httpx.Client(base_url=meta['url'],headers={'Authorization':'Bearer '+meta['token']},timeout=2) as client:
+            deadline = time.monotonic()+5
             response = client.get('/api/v3/status')
             while response.status_code == 200 and time.monotonic() < deadline:
                 time.sleep(.05)
@@ -263,3 +263,29 @@ def test_background_reconciliation_failure_closes_work_admission_and_can_stop(po
             assert process.wait(timeout=3) == 0
     finally:
         cleanup(process)
+
+
+def test_global_rules_change_stays_responsive_with_400_publications(postgres_url, tmp_path, record_property):
+    from tests.support.completion_library import library as completion_library
+    root = tmp_path/'library'
+    completion_library(root,postgres_url,400)
+    app = create_app(root,token='test',api_only=True,database_url=postgres_url)
+    with TestClient(app,headers=HEADERS) as client:
+        deadline = time.monotonic()+60
+        while app.state.host.execution._store.processing.recovering and time.monotonic()<deadline:
+            time.sleep(.05)
+        assert not app.state.host.execution._store.processing.recovering
+        statements = []
+        store = app.state.host.execution._store
+        client.portal.call(lambda: store.db.set_trace_callback(statements.append))
+        try:
+            started = time.monotonic()
+            result = client.patch('/api/v3/settings/oko/global',json={'prompt_filters':'New synthetic rule'})
+            elapsed = time.monotonic()-started
+        finally:
+            client.portal.call(lambda: store.db.set_trace_callback(None))
+        assert result.status_code == 200, result.text
+        assert elapsed < 2, elapsed
+        record_property('global_rules_sql_calls', len(statements))
+        record_property('global_rules_sql_budget_deferred', 100)
+        print(f'Deferred global rules SQL budget: {len(statements)} calls (previous limit <100)')

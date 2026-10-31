@@ -48,6 +48,15 @@ def test_same_video_is_readable_in_both_feeds_and_viewed_everywhere(shared):
     assert client.get('/api/v3/publication/'+cards[0]['id']).status_code==404
 
 
+def test_same_folder_counts_a_shared_publication_only_once(shared):
+    client, feeds, _, _ = shared
+    assert client.patch('/api/v3/feeds/'+feeds[1]['id'], json={'folder_id':feeds[0]['folder_id']}).status_code == 200
+    navigation = client.get('/api/v3/navigation').json()
+    folder = next(folder for folder in navigation['folders'] if folder['id'] == feeds[0]['folder_id'])
+    assert navigation['total'] == 1 and folder['count'] == 1
+    assert [feed['count'] for feed in folder['feeds']] == [1,1]
+
+
 def test_deleting_primary_feed_keeps_shared_publication_and_file(shared):
     client,feeds,_,_=shared
     item=read_all_cards(client, '/api/v3/cards')[0]['id']
@@ -60,6 +69,26 @@ def test_deleting_primary_feed_keeps_shared_publication_and_file(shared):
     assert [c['id'] for c in read_all_cards(client, '/api/v3/cards', params={'feed':remaining['id']})]==[item]
     assert client.get('/api/v3/publication/'+item).status_code==200
     assert client.get(media).content==PNG
+
+
+def test_deleting_primary_marks_remaining_telegram_membership_for_read_sync(shared):
+    client, feeds, _, _ = shared
+    item = read_all_cards(client, '/api/v3/cards')[0]['id']
+    primary = client.get('/api/v3/publication/' + item).json()['feed_id']
+    remaining = next(feed['id'] for feed in feeds if feed['id'] != primary)
+    assert client.put('/api/v3/power', json={'enabled':False}).status_code == 200
+
+    async def remove():
+        async with client.app.state.host.execution._actions:
+            store = client.app.state.host.require_store()
+            with store.db:
+                store.db.execute("UPDATE feeds SET transport='telegram' WHERE id=%s", (remaining,))
+                store.read_sync.mark_feed(remaining)
+                store.db.execute('UPDATE telegram_read_state SET needs_sync=false WHERE feed=%s', (remaining,))
+            store.remove_feed(primary)
+            return store.db.execute('SELECT needs_sync FROM telegram_read_state WHERE feed=%s', (remaining,)).fetchone()[0]
+
+    assert client.portal.call(remove)
 
 
 def test_deleting_secondary_feed_preserves_primary_and_shared_media(shared):
@@ -228,7 +257,7 @@ def test_unreachable_link_cycle_does_not_retain_files_after_last_root_is_viewed(
     try:
         with store.db:
             for identity in ('cycle-a','cycle-b'):
-                store.db.execute("INSERT INTO items ( id , source_id , url , platform , external_id ) VALUES ( %s , %s , %s , 'other_web' , %s )",(identity,identity,'https://example.test/'+identity,'https://example.test/'+identity))
+                store.db.execute("INSERT INTO publications ( id , source_id , url , platform , external_id ) VALUES ( %s , %s , %s , 'other_web' , %s )",(identity,identity,'https://example.test/'+identity,'https://example.test/'+identity))
             store.db.executemany('INSERT INTO publication_links VALUES ( %s , %s )',[(item,'cycle-a'),('cycle-a','cycle-b'),('cycle-b','cycle-a')])
     finally:
         store.db.close()

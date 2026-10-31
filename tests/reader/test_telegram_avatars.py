@@ -102,3 +102,63 @@ FakeClient.download_profile_photo = avatar
             await client.close()
     asyncio.run(scenario())
     assert sum(json.loads(line).get('op')=='small-avatar' for line in trace.read_text().splitlines()) == 2
+
+
+def test_avatar_change_updates_http_and_rollback_preserves_previous_identity(tmp_path):
+    import pytest
+    from oko.storage.transaction import transaction
+
+    tg = AvatarTelegram()
+    with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=tg), headers=HEADERS) as client:
+        assert client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref':'fixture'}).status_code == 200
+        connected = client.post('/api/v3/telegram/connect', json={'source_locator':'@fixture','folder':'Telegram','access':{'kind':'client','profile':'personal'}})
+        assert connected.status_code == 200, connected.text
+        feed = connected.json()['feed_id']
+        assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
+        old_url = next(f['avatar_url'] for f in client.get('/api/v3/subscriptions').json()['feeds'] if f['id'] == feed)
+        old_nav = client.get('/api/v3/navigation')
+        old_status = client.get('/api/v3/status')
+        image = PNG + b'synthetic-new-version'
+        encoded = base64.b64encode(image).decode()
+        def update(fail):
+            store = client.app.state.host.require_store()
+            with transaction(store.db):
+                store.subscriptions.telegram.save_metadata(feed, {'avatar': encoded})
+                if fail:
+                    raise RuntimeError('synthetic rollback')
+        with pytest.raises(RuntimeError, match='synthetic rollback'):
+            client.portal.call(update, True)
+        assert client.get(old_url).content == PNG
+        assert client.get('/api/v3/navigation', headers={'If-None-Match': old_nav.headers['ETag']}).status_code == 304
+        client.portal.call(update, False)
+        new_nav = client.get('/api/v3/navigation', headers={'If-None-Match': old_nav.headers['ETag']})
+        assert new_nav.status_code == 200
+        new_url = next(f['avatar_url'] for group in new_nav.json()['folders'] for f in group['feeds'] if f['id'] == feed)
+        assert new_url != old_url and client.get(new_url).content == image
+        assert client.get(old_url).status_code == 404
+        new_status = client.get('/api/v3/status', headers={'If-None-Match': old_status.headers['ETag']})
+        assert new_status.status_code == 200
+        client.portal.call(update, False)
+        assert client.get('/api/v3/navigation', headers={'If-None-Match': new_nav.headers['ETag']}).status_code == 304
+
+
+def test_navigation_does_not_load_saved_avatar_bytes(tmp_path):
+    import re
+
+    tg = AvatarTelegram()
+    tg.photo = base64.b64encode(PNG + b'x' * 60000).decode()
+    app = create_app(tmp_path, token='test', api_only=True, telegram_client=tg)
+    with TestClient(app, headers=HEADERS) as client:
+        assert client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref':'fixture'}).status_code == 200
+        assert client.post('/api/v3/telegram/connect', json={'source_locator':'@fixture','folder':'Telegram','access':{'kind':'client','profile':'personal'}}).status_code == 200
+        queries = []
+        client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(queries.append))
+        try:
+            response = client.get('/api/v3/navigation')
+        finally:
+            client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))
+        assert response.status_code == 200, response.text
+        assert response.json()['folders'][0]['feeds'][0]['avatar_url']
+        reads = [q for q in queries if q.lstrip().upper().startswith(('SELECT', 'WITH'))]
+        assert not any('avatar_image' in q.lower() for q in reads)
+        assert not any(re.search(r'SELECT\s+(?:\w+\s*\.\s*)?\*\s+FROM\s+feeds', q, re.I) for q in reads)

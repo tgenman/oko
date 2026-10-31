@@ -706,6 +706,7 @@ class PowerRequest(WireModel):
 class ProblemCode(
     RootModel[
         Literal[
+            "job_target_unknown",
             "processor_not_configured",
             "processor_configuration_invalid",
             "public_ai_not_allowed",
@@ -733,6 +734,7 @@ class ProblemCode(
 ):
     model_config = ConfigDict(allow_inf_nan=False)
     root: Literal[
+        "job_target_unknown",
         "processor_not_configured",
         "processor_configuration_invalid",
         "public_ai_not_allowed",
@@ -973,12 +975,24 @@ class SessionRequiredError(WireModel):
 
 class SettingKey(
     RootModel[
-        Literal["originals", "theses", "prompt_theses", "prompt_filters", "processor"]
+        Literal[
+            "originals",
+            "theses",
+            "prompt_theses",
+            "prompt_filters",
+            "filter_enabled",
+            "processor",
+        ]
     ]
 ):
     model_config = ConfigDict(allow_inf_nan=False)
     root: Literal[
-        "originals", "theses", "prompt_theses", "prompt_filters", "processor"
+        "originals",
+        "theses",
+        "prompt_theses",
+        "prompt_filters",
+        "filter_enabled",
+        "processor",
     ] = Field(..., examples=["originals"])
 
 
@@ -1060,6 +1074,7 @@ class SettingsPatch(WireModel):
         default=MISSING,
         description="Global Oko setting only; minutes between automatic collection rounds. Null resets to 15.",
     )
+    filter_enabled: StrictBool | None | MISSING = MISSING
     originals: StrictBool | None | MISSING = MISSING
     processor: ProcessorSelection | None | MISSING = MISSING
     prompt_filters: PromptFilters | None | MISSING = MISSING
@@ -1291,6 +1306,16 @@ class WorkWaiting(WireModel):
     retry_at: Timestamp | None
 
 
+class Strikes(RootModel[StrictInt]):
+    model_config = ConfigDict(allow_inf_nan=False)
+    root: StrictInt = Field(
+        ...,
+        description="Number of consecutive limits, or null when the legacy value is unknown.",
+        ge=0,
+        le=9007199254740991,
+    )
+
+
 class YouTubeState(WireModel):
     model_config = ConfigDict(extra="forbid")
     address: StrictStr
@@ -1300,7 +1325,10 @@ class YouTubeState(WireModel):
     mode: Literal["direct", "proxy"]
     reason: WaitingReason | None
     retry_at: Timestamp | None
-    strikes: StrictInt = Field(..., ge=0, le=9007199254740991)
+    strikes: Strikes | None = Field(
+        ...,
+        description="Number of consecutive limits, or null when the legacy value is unknown.",
+    )
 
 
 class YoutubeSourceReference(WireModel):
@@ -1762,6 +1790,12 @@ class EffectiveFeedRefreshMinutes(WireModel):
     model_config = ConfigDict(extra="forbid")
     origin: DefaultSettingOrigin | OkoSettingOrigin = Field(..., discriminator="scope")
     value: StrictInt = Field(..., ge=1, le=1440)
+
+
+class EffectiveFilterEnabled(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    origin: SettingOrigin
+    value: StrictBool
 
 
 class EffectiveOriginals(WireModel):
@@ -2348,6 +2382,7 @@ class StorageUnavailableErrorDetails(WireModel):
 
 class StoredOverrides(WireModel):
     model_config = ConfigDict(extra="forbid")
+    filter_enabled: StrictBool | MISSING = MISSING
     originals: StrictBool | MISSING = MISSING
     processor: StoredProcessorSelection | MISSING = MISSING
     prompt_filters: StrictStr | MISSING = Field(default=MISSING, max_length=20000)
@@ -2883,6 +2918,7 @@ class DiagnosticReceipt(
 
 class EffectiveSettingsValues(WireModel):
     model_config = ConfigDict(extra="forbid")
+    filter_enabled: EffectiveFilterEnabled
     originals: EffectiveOriginals
     processor: EffectiveProcessor
     prompt_filters: EffectivePromptFilters
@@ -3613,7 +3649,9 @@ class RetryingProblem(WireModel):
         ...,
         description="Current domain consequence, preserved independently of diagnostic details. No page or navigation instruction.",
     )
-    created_at: Timestamp
+    created_at: Timestamp | None = Field(
+        ..., description="Creation time, or null when the original time is unknown."
+    )
     id: ProblemId
     message: StrictStr
     recovery: list[RecoveryIntent]
@@ -3716,7 +3754,9 @@ class CurrentProblem(WireModel):
         ...,
         description="Current domain consequence, preserved independently of diagnostic details. No page or navigation instruction.",
     )
-    created_at: Timestamp
+    created_at: Timestamp | None = Field(
+        ..., description="Creation time, or null when the original time is unknown."
+    )
     id: ProblemId
     message: StrictStr
     recovery: list[RecoveryIntent]
@@ -3776,7 +3816,9 @@ class FinishedProblem(WireModel):
         ...,
         description="Current domain consequence, preserved independently of diagnostic details. No page or navigation instruction.",
     )
-    created_at: Timestamp
+    created_at: Timestamp | None = Field(
+        ..., description="Creation time, or null when the original time is unknown."
+    )
     finished_at: Timestamp
     id: ProblemId
     message: StrictStr
@@ -4045,6 +4087,7 @@ class EffectiveSettingsSnapshot(
         examples=[
             {
                 "effective": {
+                    "filter_enabled": {"origin": {"scope": "default"}, "value": False},
                     "originals": {"origin": {"scope": "default"}, "value": False},
                     "processor": {"origin": {"scope": "default"}, "value": "codex"},
                     "prompt_filters": {

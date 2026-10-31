@@ -48,8 +48,7 @@ def card(store: 'Store', identity: str) -> dict[str, Any] | None:
     if 'reader_hidden' in row.keys():
         hidden=bool(row['reader_hidden'])
     else:
-        visibility=store.db.execute('SELECT hidden FROM reader_visibility WHERE item = %s',(identity,)).fetchone()
-        hidden=bool(visibility and visibility[0])
+        hidden=row['status']=='filter_out'
     result: dict[str, Any] = dict(id=identity,feed_id=row['feed_id'],title='Материал загружается',
         published_at=row['published'] if row['published_known'] else None,
         source_url=row['url'],loading=True,changed=False,preview_url=None,hidden=hidden,

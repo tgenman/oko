@@ -127,3 +127,26 @@ test('discard waits for the pending failure observation before clearing it',{tim
  await expect.poll(async()=>(await api('v3/status/details')).problems.count).toBe(0);
  await expect.poll(async()=>(await api('v3/status/details')).problems.recent[0]?.outcome).toBe('irrelevant');
 });
+
+test('unaddressable legacy job has neutral title and unknown time',{timeout:20000},async t=>{
+ const {page,origin,token}=await productionReader(t);
+ await page.route('**/api/v3/status**',async route=>{
+  const headers={...route.request().headers()};delete headers['if-none-match'];
+  const reply=await route.fetch({headers});
+  if(reply.status()!==200){await route.fulfill({response:reply});return;}
+  const data=await reply.json();
+  if(new URL(route.request().url()).pathname.endsWith('/details')){
+   data.problems.current.push({id:'legacy-null-job:1',code:'job_target_unknown',message:'Check the diagnostic journal.',affected:[],recovery:[],created_at:null,title:'Saved Job Needs Review',consequence:'The original job is retained.',command_id:null,state:'current'});
+   data.problems.count=data.problems.current.length;
+  }else data.problems.push({id:'legacy-null-job:1',message:'Check the diagnostic journal.',feed_id:null});
+  await route.fulfill({response:reply,json:data});
+ });
+ await page.goto(origin+'/#token='+token);
+ await expect(page.locator('#status-toggle')).toContainText('Problems');
+ await page.locator('#status-toggle').click();
+ const card=page.locator('[data-problem-id="legacy-null-job:1"]');
+ await expect(card).toContainText('Saved Job Needs Review');
+ await expect(card).toContainText('Time unknown');
+ await expect(card).not.toContainText('1970');
+ await expect(card.locator('button')).toHaveCount(0);
+});

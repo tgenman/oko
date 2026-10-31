@@ -1,6 +1,7 @@
 """Collection cron owns source/media attempts and their adapter calls."""
 from oko.collection.request_observation import Capture
 import asyncio
+from copy import deepcopy
 from datetime import datetime,timezone
 from collections.abc import Awaitable, Callable
 import secrets
@@ -48,7 +49,7 @@ class CollectionWorker:
         self._youtube_captions = youtube_captions or LocalCaptions()
         self._youtube_history = youtube_history
         self._wall_clock = wall_clock
-        self._captions_active = False
+        self._captions_active: 'CaptionAttempt | None' = None
         self._read_sync_at = 0.0
         self._started=False
         self._source_revision: int | None = None
@@ -201,18 +202,21 @@ class CollectionWorker:
         attempt = self.jobs._collection_active.get(job.id)
         if not attempt or attempt.job.generation != job.generation:
             return
-        del self.jobs._collection_active[job.id]
         capture = attempt.capture
         details = capture.error or (exception_details(error) if error else None)
         if isinstance(error, SourceError) and error.remote_type:
             details = dict(error_type=error.remote_type, message=error.remote_message, traceback=error.remote_traceback, origin='worker')
         observation = self.clean_collection(dict(error=details, requests=capture.requests, request_count=capture.request_count))
-        current.jobs.collection_finish(job, attempt.feed, attempt.saved, max(0., self._clock()-attempt.started), observation)
-        if self.jobs.metrics:
-            from oko.observability import event
-            elapsed = max(0., self._clock()-attempt.started)
-            self.jobs.metrics.attempt(job.kind, 'error' if error else 'returned', elapsed)
-            event('job_finished', job_id=job.id, kind=job.kind, level='error' if error else 'info', error=error, elapsed=elapsed)
+        elapsed = max(0., self._clock()-attempt.started)
+        current.jobs.collection_finish(job, attempt.feed, deepcopy(attempt.saved), elapsed, observation)
+        def committed() -> None:
+            if self.jobs._collection_active.get(job.id) is attempt:
+                del self.jobs._collection_active[job.id]
+            if self.jobs.metrics:
+                from oko.observability import event
+                self.jobs.metrics.attempt(job.kind, 'error' if error else 'returned', elapsed)
+                event('job_finished', job_id=job.id, kind=job.kind, level='error' if error else 'info', error=error, elapsed=elapsed)
+        current.jobs.after_commit(committed)
 
     async def _execute(self, job: Job) -> None:
         capture = Capture()
@@ -281,11 +285,12 @@ class CollectionWorker:
                             current.jobs.checkpoint('collection_after_result')
                             current.jobs.finish(job)
                             current.jobs.checkpoint('collection_after_finish')
-                        if outcome.continuation is not None:
-                            delay = outcome.continuation
-                            current.jobs.enqueue_discovery(feed, self._clock() + delay if delay else 0)
+                            self._finish_collection(job, current, collection_error)
+                            if outcome.continuation is not None:
+                                delay = outcome.continuation
+                                current.jobs.enqueue_discovery(feed, self._clock() + delay if delay else 0)
+                                current.jobs.checkpoint('collection_after_continuation')
                         self.service.feed_status(feed, error=None, gap=outcome.observation.gap, changes=outcome.observation.changes)
-                        self._finish_collection(job, current, collection_error)
             elif publication:
                 if linked:
                     fetched=await self._collection.article_source().fetch(publication)
@@ -311,10 +316,10 @@ class CollectionWorker:
                             else:
                                 current.jobs.finish(job)
                             current.jobs.checkpoint('collection_after_finish')
+                            self._finish_collection(job, current, collection_error)
                         self._account_wait(feed, material.collection_error, job)
                         current.jobs.sync_reads()
                         self.service.feed_status(feed, error=None, gap=fetched.observation.gap, changes=fetched.observation.changes)
-                        self._finish_collection(job, current, collection_error)
         except CaptionsDeferred:
             async with self.execution._actions:
                 if current and self.execution._store is current and not self.stopped:
@@ -334,7 +339,7 @@ class CollectionWorker:
                         with current.jobs.transaction(self._live):
                             self.service.viewed(job.item)
                             current.jobs.reconcile_cleanup()
-                        self._finish_collection(job,current)
+                            self._finish_collection(job,current)
                         return
                     if isinstance(error, SourceDeleted) and job.kind == 'fetch':
                         collection_error = None
@@ -343,7 +348,7 @@ class CollectionWorker:
                             current.jobs.retry(job,self._clock(),error.label,terminal=True,
                                 issue=error.adapter_issue or AdapterIssue('source-unavailable',error.label,AdapterErrorKind.unavailable))
                             self.service.notify_parents(job.item)
-                        self._finish_collection(job,current)
+                            self._finish_collection(job,current)
                         return
                     label = error.label if isinstance(error, SourceError) else str(error) if isinstance(error, TelegramConflict) else 'Ошибка синхронизации Telegram' if job.kind == 'read' else 'Ошибка сбора'
                     if isinstance(error, SourceError):
@@ -359,18 +364,19 @@ class CollectionWorker:
                     else:
                         code = job.kind + ':' + type(error).__name__
                     label = self.execution.diagnostics.clean(label) if self.execution.diagnostics else label
-                    current.jobs.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,code=code,
-                        terminal=isinstance(error, SourceError) and not error.retryable or job.kind in ('discover','fetch') and (isinstance(error,ValueError) or Store.is_integrity_failure(error)),
-                        issue=error.adapter_issue if isinstance(error,SourceError) else None)
-                    if job.kind=='fetch':
-                        self.service.notify_parents(job.item)
-                    if job.kind=='discover':
-                        self.service.discovery_wait(feed,label,current.jobs.retry_at(job))
-                    if job.kind == 'read':
-                        self.service.read_failed(feed, label)
-                    elif isinstance(error, SourceError):
-                        self.service.feed_status(feed, error=label, gap=None)
-                    self._finish_collection(job, current, error)
+                    with current.jobs.transaction(self._live):
+                        current.jobs.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,code=code,
+                            terminal=isinstance(error, SourceError) and not error.retryable or job.kind in ('discover','fetch') and (isinstance(error,ValueError) or Store.is_integrity_failure(error)),
+                            issue=error.adapter_issue if isinstance(error,SourceError) else None)
+                        if job.kind=='fetch':
+                            self.service.notify_parents(job.item)
+                        if job.kind=='discover':
+                            self.service.discovery_wait(feed,label,current.jobs.retry_at(job))
+                        if job.kind == 'read':
+                            self.service.read_failed(feed, label)
+                        elif isinstance(error, SourceError):
+                            self.service.feed_status(feed, error=label, gap=None)
+                        self._finish_collection(job, current, error)
 
         finally:
             attempt = self.jobs._collection_active.get(job.id)
@@ -385,7 +391,7 @@ class CollectionWorker:
                 else:current.jobs.replace_media_input(job)
         return True
 
-    def _media_failure(self, current: Store, job: Job, issue: AdapterIssue) -> None:
+    def _media_failure(self, current: Store, job: Job, issue: AdapterIssue, error: BaseException | None = None) -> None:
         with current.jobs.transaction(self._live):
             if not self._live() or not current.jobs.valid(job):
                 return
@@ -400,6 +406,7 @@ class CollectionWorker:
                     owner=self.media.owner(job.item)
                     if owner:
                         current.jobs.enqueue_fetch(owner)
+            self._finish_collection(job, current, error)
 
     async def _execute_media(self, job: Job, capture: Capture) -> None:
         async with self.execution._actions:
@@ -456,10 +463,10 @@ class CollectionWorker:
                             return
                         media.accept(job.item,download,actual,staged)
                         current.jobs.finish(job)
+                        if caption_attempt and caption_attempt.attempted:
+                            self.service.caption_completed()
+                        self._finish_collection(job,current)
                     current.jobs.checkpoint('after_media_commit')
-                    if caption_attempt and caption_attempt.attempted:
-                        self.service.caption_completed()
-                    self._finish_collection(job,current)
         except CaptionsDeferred:
             pass
         except asyncio.CancelledError:
@@ -477,14 +484,15 @@ class CollectionWorker:
                             'telegram:account:'+str(native.read.user_id),datetime.fromtimestamp(self._wall_clock()+source_error.delay,timezone.utc))
                     if caption_attempt and caption_attempt.blocked:
                         issue=AdapterIssue(issue.code,issue.message,AdapterErrorKind.source_wait,download.publication,download.media.key,
-                            'youtube:captions',datetime.fromtimestamp(self.service.caption_ready(),timezone.utc))
+                            'youtube:captions',caption_retry_datetime(self.service.caption_ready()))
                     if issue.kind!=AdapterErrorKind.notice:
                         record_caught('runtime._execute_media')
-                    self._media_failure(current,job, issue)
-                    self._finish_collection(job,current,None if issue.kind==AdapterErrorKind.notice else source_error or error)
+                    self._media_failure(current,job, issue,None if issue.kind==AdapterErrorKind.notice else source_error or error)
                     if native:
                         self._account_wait(feed,source_error,job)
         finally:
+            if caption_attempt is not None:
+                caption_attempt.release()
             media.release(download)
             attempt=self.jobs._collection_active.get(job.id)
             if attempt and attempt.job.generation==job.generation:
@@ -557,6 +565,12 @@ class CollectionWorker:
                     self.jobs._lanes[lane] = asyncio.create_task(self._execute(job))
 
 
+def caption_retry_datetime(value: float) -> datetime | None:
+    """Unrepresentable admission deadlines remain explicitly unknown."""
+    try:return datetime.fromtimestamp(value,timezone.utc)
+    except (ValueError,OverflowError,OSError):return None
+
+
 class CaptionAttempt:
     """One collection-owned caption call; waiting releases the collection slot."""
     def __init__(self, worker: CollectionWorker, store: Store, job: Job) -> None:
@@ -566,6 +580,7 @@ class CaptionAttempt:
         self.publication=publication
         self.attempted = False
         self.blocked = False
+        self.network_finished = False
 
     def current(self) -> bool:
         return self.worker.execution._store is self.store and self.worker._live() and self.store.jobs.valid(self.job)
@@ -576,6 +591,9 @@ class CaptionAttempt:
             if not self.current():
                 raise asyncio.CancelledError
             delay = worker.service.caption_ready() - worker._wall_clock()
+            active = worker._captions_active
+            if active is not None and active.network_finished and not active.current():
+                worker._captions_active = None
             if delay > 0 or worker._captions_active:
                 with store.jobs.transaction(worker._live):
                     store.jobs.defer_captions(job,worker._clock(),max(delay,.1),'Ожидание допуска получения субтитров')
@@ -584,20 +602,24 @@ class CaptionAttempt:
             client = LocalCaptions(proxy_url(config)) if isinstance(worker._youtube_captions, LocalCaptions) else worker._youtube_captions
             worker.service.caption_started(worker._wall_clock())
             self.attempted = True
-            worker._captions_active = True
+            worker._captions_active = self
         try:
             try:
                 text = await client.fetch(video)
-            except CaptionsBlocked as error:
-                async with worker.execution._actions:
-                    if not self.current():
-                        raise asyncio.CancelledError
-                    worker.service.caption_blocked(worker._wall_clock(), error.retry_after)
-                    self.blocked = True
-                raise
+            finally:
+                self.network_finished = True
+        except CaptionsBlocked as error:
             async with worker.execution._actions:
                 if not self.current():
                     raise asyncio.CancelledError
-            return text
-        finally:
-            worker._captions_active = False
+                worker.service.caption_blocked(worker._wall_clock(), error.retry_after)
+                self.blocked = True
+            raise
+        async with worker.execution._actions:
+            if not self.current():
+                raise asyncio.CancelledError
+        return text
+
+    def release(self) -> None:
+        if self.worker._captions_active is self:
+            self.worker._captions_active = None

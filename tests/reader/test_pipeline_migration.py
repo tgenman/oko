@@ -21,7 +21,7 @@ def test_postgres_web_configuration_keeps_proven_channel_type(tmp_path):
             store.db.execute("UPDATE feeds SET kind='telegram',config=%s WHERE id='demo'",(json.dumps(dict(source_kind='channel')),))
             store.db.execute("INSERT INTO telegram_bindings VALUES ('demo',%s)",(json.dumps(dict(kind='web',username='fixture')),))
             store.publications.configure_feed('demo')
-        assert json.loads(store.db.execute("SELECT config FROM feeds WHERE id='demo'").fetchone()[0])['source_kind']=='channel'
+        assert store.db.execute("SELECT config FROM feeds WHERE id='demo'").fetchone()[0]['source_kind']=='channel'
     finally:
         store.db.close()
 

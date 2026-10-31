@@ -15,7 +15,6 @@ from oko.storage.store import Store as ProductionStore
 from oko.storage.postgres_connection import PostgresConnection
 from oko.storage.postgres_migrations import migrate
 from oko.storage.postgres_schema import MIGRATIONS
-from oko.storage.reader_versions import ReaderVersions
 
 _lock = threading.RLock()
 _owned: list[tuple[str, str]] = []
@@ -58,7 +57,6 @@ class Store(ProductionStore):
 @contextmanager
 def database(root: Path) -> Iterator[PostgresConnection]:
     db = PostgresConnection(database_url(root))
-    db.before_commit = lambda: ReaderVersions.flush_reading_state(db)
     try:
         with db:
             yield db

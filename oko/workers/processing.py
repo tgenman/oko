@@ -43,11 +43,11 @@ class ProcessingWorker:
                     if not self.execution._live():
                         return False
                     self.service.reconcile()
-                    jobs.reconcile(self.kind,self.service.candidates(self.kind))
             if self.tasks._ai and self.tasks._ai.done():
                 if not self.tasks._ai.cancelled():
                     await self.tasks._ai
                 self.tasks._ai=None
+                self.tasks._ai_job=None
             if self.tasks._ai or self.tasks._detached_ai:
                 return True
             if jobs.deleting():
@@ -61,9 +61,13 @@ class ProcessingWorker:
                 prepared=self.service.prepare(job.item,self.kind)
                 work=prepared.input
                 if work is None:
-                    jobs.cancel(job)
+                    if prepared.reason == 'stage_disabled':
+                        jobs.block(job)
+                    else:
+                        jobs.cancel(job)
                     return True
                 # Snapshot and successful claim are committed together.
+                jobs.save_input(job, work)
                 request=work.request.model_copy(update={'generation':job.generation})
                 origin=jobs.origin(job,work.signature)
                 if origin is None or request.processor!='codex':
@@ -77,8 +81,9 @@ class ProcessingWorker:
                         jobs.save_origin(job,work.signature,origin)
                 if origin and origin['processor']=='codex':
                     request=request.model_copy(update={'codex_choice':CodexChoice.model_validate({k:origin[k] for k in ('model','reasoning_effort','fast')})})
-                work=ProcessingInput(work.item,work.kind,work.signature,work.revision,request,work.public_ai,work.no_input)
+                work=ProcessingInput(work.item,work.kind,work.signature,request,work.public_ai,work.no_input)
                 self.tasks._ai_feed=self.service.feed(job.item)
+                self.tasks._ai_job=job
             self.tasks._ai=asyncio.create_task(self.execute_attempt(store,job,work,origin))
             return True
 

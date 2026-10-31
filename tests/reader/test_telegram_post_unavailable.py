@@ -150,7 +150,13 @@ def test_whole_post_restriction_keeps_local_video_but_does_not_hide_lost_file(tm
         url='/api/v3/materials/'+settled(client)[0]['id']
         video=[media for media in client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['media'] if media['role'] == 'attachment'][0]
         if lost:
-            for path in tmp_path.rglob(video['url'].rsplit('/',1)[-1]):path.unlink()
+            from tests.support.storage import database
+            media_id=video['url'].rsplit('/',1)[-1]
+            with database(tmp_path) as db:
+                key=db.execute('SELECT storage_key FROM media_files WHERE id=%s',(media_id,)).fetchone()[0]
+            local_file=tmp_path/key
+            assert local_file.is_file()
+            local_file.unlink()
         restricted[0]=True
         client.post(url+'/retry');settled(client)
         content=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()

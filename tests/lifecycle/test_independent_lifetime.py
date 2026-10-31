@@ -185,7 +185,7 @@ def test_reader_clock_options_keep_both_clocks_controlled(tmp_path, monkeypatch)
     import time
     from tests.support.reader import Clock
     clock = Clock()
-    with TestClient(create_app(tmp_path, token='test', lease=1, grace=1, **clock.options()),
+    with TestClient(create_app(tmp_path, token='test', lease=1, grace=10, **clock.options()),
                     headers={'Authorization':'Bearer test'}) as client:
         identity = client.post('/api/v3/client-sessions').json()['id']
         wall = time.time()

@@ -2,6 +2,9 @@
 
 from oko.storage.access import repository_access
 from collections.abc import Callable
+from contextlib import nullcontext
+from oko.storage.transaction import transaction
+from oko.storage import memberships
 from dataclasses import dataclass
 from typing import Any
 from oko.storage.store import Store
@@ -12,7 +15,6 @@ from oko.subscriptions.subscriptions import Overrides, GLOBAL_SERVICE_SETTINGS, 
 class SettingsChange:
     value: dict[str, Any]
     changed: bool
-    affected: set[str] | None
     interval: float
 
 
@@ -25,16 +27,21 @@ class SubscriptionService:
         repository = self._storage()
         previous = repository.subscriptions.effective(scope, owner)
         value = repository.subscriptions.update_settings(scope, owner, patch)
+        if patch.model_fields_set & {'filter_enabled', 'prompt_filters'}:
+            affected_feeds = repository.subscriptions.feeds(
+                owner if scope == 'feed' else None, folder=owner if scope == 'folder' else None)
+            candidates = [value] + [repository.subscriptions.effective('feed', feed['id'], details=False)
+                                    for feed in affected_feeds]
+            if any(settings['effective']['filter_enabled']['value'] and
+                   not settings['effective']['prompt_filters']['value'].strip() for settings in candidates):
+                raise ValueError('Для включённой фильтрации нужен непустой промпт')
         repository.fault('settings_after_values')
         changed = bool(patch.model_fields_set - GLOBAL_SERVICE_SETTINGS and value != previous)
-        affected = None
-        if changed:
+        processing_fields = {'filter_enabled','prompt_filters','theses','prompt_theses','processor'}
+        if changed and patch.model_fields_set & processing_fields:
             repository.settings_changed(scope, owner)
-            if scope != 'oko':
-                affected = {f['id'] for f in repository.subscriptions.feeds(
-                    owner if scope == 'feed' else None, folder=owner if scope == 'folder' else None)}
         repository.fault('settings_after_invalidation')
-        return SettingsChange(value, changed, affected, repository.subscriptions.feed_refresh_minutes() * 60)
+        return SettingsChange(value, changed, repository.subscriptions.feed_refresh_minutes() * 60)
 
     @repository_access
     def rename_folder(self, identity: str, title: str) -> dict[str, Any]:
@@ -46,19 +53,30 @@ class SubscriptionService:
 
     @repository_access
     def add_feed(self, value: AddFeed) -> dict[str, Any]:
-        return self._storage().subscriptions.add_feed(value)
+        repository = self._storage()
+        boundary = nullcontext() if repository.db.transaction_depth else transaction(repository.db)
+        with boundary:
+            memberships.lock_graph(repository.db)
+            feed = repository.subscriptions.add_feed(value)
+            repository.problems.sync_codex_feed_added(feed['id'], repository.wall_clock())
+            return feed
 
     @repository_access
     def patch_feed(self, identity: str, value: FeedPatch) -> tuple[dict[str, Any], bool]:
         repository = self._storage()
-        known = repository.subscriptions.feeds(identity)
-        if not known:
-            raise LookupError('Фид не найден')
-        previous = known[0]
-        result = repository.subscriptions.update_feed(identity, value)
-        if result != previous and value.model_fields_set & {'folder_id', 'new_folder', 'importance', 'public_ai', 'transport'}:
-            repository.settings_changed('feed', identity)
-        return result, result != previous and bool(value.model_fields_set - {'title'})
+        boundary = nullcontext() if repository.db.transaction_depth else transaction(repository.db)
+        with boundary:
+            known = repository.subscriptions.feeds(identity)
+            if not known:
+                raise LookupError('Фид не найден')
+            previous = known[0]
+            result = repository.subscriptions.update_feed(identity, value)
+            if result != previous and value.model_fields_set & {'folder_id', 'new_folder', 'importance', 'public_ai', 'transport'}:
+                repository.settings_changed('feed', identity)
+            if result != previous and value.model_fields_set & {'auto_read','read_history','transport'}:
+                repository.problems.sync_read_feed(identity,repository.wall_clock())
+            source_fields = value.model_fields_set - {'title', 'folder_id', 'new_folder', 'importance', 'public_ai'}
+            return result, any(result.get(field) != previous.get(field) for field in source_fields)
 
     @repository_access
     def remove_feed(self, identity: str) -> None:

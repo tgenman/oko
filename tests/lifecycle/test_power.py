@@ -204,17 +204,24 @@ def test_queued_web_connection_cannot_start_preview_after_power_off(tmp_path):
     app = create_app(tmp_path, token='test', api_only=True, telegram_client=Client(), rss_transport=httpx.MockTransport(preview))
     with TestClient(app, headers=HEADERS) as client:
         async def queued_actions():
+            power_queued, connect_queued = asyncio.Event(), asyncio.Event()
+            application=app.state.application
+            original=application.action_started
+            async def observe_action(identity, context, **kwargs):
+                operation=context.get('command_context',{}).get('operation')
+                if operation=='power':power_queued.set()
+                if operation=='telegram_connect':connect_queued.set()
+                return await original(identity,context,**kwargs)
+            application.action_started=observe_action
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://testserver', headers=HEADERS) as http:
-                configuration = asyncio.create_task(http.put('/api/v3/processors/llamacpp', json={
-                    'endpoint': 'http://127.0.0.1:8080', 'model': 'fixture', 'local_execution': True,
-                }))
-                await entered.wait()
+                configuration = asyncio.create_task(http.patch('/api/v3/youtube', json={'mode': 'direct'}))
+                await asyncio.wait_for(entered.wait(), timeout=5)
+                power = asyncio.create_task(http.put('/api/v3/power', json={'enabled': False}))
+                await asyncio.wait_for(power_queued.wait(), timeout=5)
                 connect = asyncio.create_task(http.post('/api/v3/telegram/connect', json={
                     'source_locator': '@fixture', 'folder': 'News', 'access': {'kind': 'web'},
                 }))
-                await asyncio.sleep(.02)
-                power = asyncio.create_task(http.put('/api/v3/power', json={'enabled': False}))
-                await asyncio.sleep(.02)
+                await asyncio.wait_for(connect_queued.wait(), timeout=5)
                 release.set()
                 configured, connected, disabled = await asyncio.gather(configuration, connect, power)
                 assert configured.status_code == disabled.status_code == 200

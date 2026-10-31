@@ -62,7 +62,7 @@ def command_recovery(context: wire.CommandContext) -> tuple[list[wire.AffectedRe
 
 
 def producer_code(raw: str, kind: str) -> str:
-    known = {'codex-choice':'processor_not_configured', 'processor-config':'processor_not_configured',
+    known = {'legacy-unaddressable':'job_target_unknown', 'codex-choice':'processor_not_configured', 'processor-config':'processor_not_configured',
         'ai-permission':'public_ai_not_allowed', 'material-read-failed':'material_read_failed', 'material-save-failed':'material_save_failed', 'source-reconnect':'source_reconnect_required',
         'material-incomplete':'material_incomplete', 'youtube-admission':'youtube_rate_limited',
         'storage-unavailable':'storage_unavailable', 'identity-unconfirmed':'profile_not_configured',
@@ -92,7 +92,7 @@ def problem(value: facts.Problem, bindings: dict[str, wire.TelegramAccess] | Non
     live = isinstance(value.operation,str) and value.operation.startswith('producer:')
     resources = [affected(obj) for obj in value.objects]
     recovery: list[wire.RecoveryIntent] = []
-    code = 'command_failed'
+    code = 'command_outcome_unknown' if value.operation=='legacy-action' and value.code=='action-unknown' else 'command_failed'
     if context is not None:
         resources, recovery = command_recovery(context)
         code = 'command_outcome_unknown' if value.code == 'action-unknown' else 'command_failed'
@@ -148,10 +148,15 @@ def problem(value: facts.Problem, bindings: dict[str, wire.TelegramAccess] | Non
         recovery = retained
     if code=='command_outcome_unknown':
         recovery = [intent for intent in recovery if isinstance(intent.root,(wire.RecoveryConfigureProcessor,wire.RecoveryConfigureTelegramProfile,wire.RecoveryChangeSetting,wire.RecoveryConnectSource,wire.RecoveryInspectMaterials))]
-    data = dict(id=value.id,code=code,command_id=command,title=value.title,
-        message=error.message if error else value.reason if isinstance(value.reason,str) and value.reason else value.next_step,
-        consequence=value.consequence,affected=resources,recovery=[] if value.state=='finished' else recovery,
-        created_at=timestamp(value.created_at),state=value.state)
+    unreadable_action = value.code in ('action-failed','action-unknown') and context is None and not live
+    if unreadable_action:
+        code = 'command_outcome_unknown' if value.code=='action-unknown' else 'command_failed'
+        resources, recovery = [], []
+    data = dict(id=value.id,code=code,command_id=command,
+        title='Результат старого действия требует проверки' if unreadable_action else value.title,
+        message='Проверьте результат действия вручную.' if unreadable_action else error.message if error else value.reason if isinstance(value.reason,str) and value.reason else value.next_step,
+        consequence=('Исходные сведения сохранены; время создания неизвестно, показано время проверки.' if value.consequence=='Исходные сведения сохранены; время создания неизвестно, показано время проверки.' else 'Исходные сведения сохранены.') if unreadable_action else value.consequence,affected=resources,recovery=[] if value.state=='finished' else recovery,
+        created_at=timestamp(value.created_at) if value.created_at is not None else None,state=value.state)
     if value.state=='finished':
         data.update(finished_at=timestamp(value.finished_at) if value.finished_at is not None else None,outcome=value.outcome)
     elif value.state=='retrying':
@@ -164,14 +169,14 @@ def problems(value: facts.ProblemSnapshot, bindings: dict[str, wire.TelegramAcce
     current: list[wire.CurrentProblem | wire.RetryingProblem] = []
     recent: list[wire.FinishedProblem] = []
     for entry in value.current:
-        if not isinstance(entry.operation,str) or not entry.operation.startswith(('producer:','{')):
+        if entry.code not in ('action-failed','action-unknown') and (not isinstance(entry.operation,str) or not entry.operation.startswith(('producer:','{'))):
             continue
         projected = problem(entry,bindings,material_feeds,forgotten)
         if isinstance(projected,wire.FinishedProblem):
             raise ValueError('Current snapshot contains a finished problem')
         current.append(projected)
     for entry in value.recent:
-        if not isinstance(entry.operation,str) or not entry.operation.startswith(('producer:','{')):
+        if entry.code not in ('action-failed','action-unknown') and (not isinstance(entry.operation,str) or not entry.operation.startswith(('producer:','{'))):
             continue
         projected = problem(entry,bindings,material_feeds,forgotten)
         if not isinstance(projected,wire.FinishedProblem):
@@ -203,10 +208,10 @@ def work(jobs: list['WorkSummary']) -> list[wire.WorkEntry]:
 def youtube(value: facts.YouTube | None) -> wire.YouTubeState:
     if value is None:
         return wire.YouTubeState(mode='direct', address='', has_password=False, has_username=False,
-            admission='ready', retry_at=None, strikes=0, reason=None)
+            admission='ready', retry_at=None, strikes=wire.Strikes(0), reason=None)
     return wire.YouTubeState(mode=value.mode, address=value.address, has_password=value.has_password, has_username=value.has_username,
-        admission='paused' if value.paused else 'waiting' if value.next_at else 'ready',
-        retry_at=timestamp(value.next_at) if value.next_at else None, strikes=value.strikes,
+        admission='paused' if value.paused else 'waiting' if value.next_at or value.time_unknown else 'ready',
+        retry_at=timestamp(value.next_at) if value.next_at else None, strikes=wire.Strikes(value.strikes) if value.strikes is not None else None,
         reason=wire.WaitingReason('youtube_rate_limited') if value.reason else None)
 
 

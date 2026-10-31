@@ -24,7 +24,7 @@ def worker_library(root, *, text='Useful text', fault=lambda _:None, database_ur
     job=store.jobs.next_job(store.clock())
     assert job.kind=='discover'
     discovered(store,[publication_packet(Publication('one','https://example.org/one',100),Material('Title',text),needs_fetch=False)],'{}',job)
-    item=store.db.execute('SELECT id FROM items').fetchone()[0]
+    item=store.db.execute('SELECT id FROM publications').fetchone()[0]
     execution=Execution(lambda:True)
     execution._store=store
     tasks=JobControl(execution,{},None,store.clock)
@@ -44,7 +44,7 @@ async def pass_worker(worker,tasks):
 
 def saved(store,item):
     return {key:json.loads(value) if key in ('filtered_content','summarized_content','processing_metadata') else value
-        for key,value in dict(store.db.execute('SELECT * FROM items WHERE id=%s',(item,)).fetchone()).items()}
+        for key,value in dict(store.db.execute('SELECT * FROM publications WHERE id=%s',(item,)).fetchone()).items()}
 
 
 def collection_worker(root,store,source):

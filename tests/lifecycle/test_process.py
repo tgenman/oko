@@ -38,7 +38,7 @@ def test_discovery_transaction_survives_process_death(tmp_path: Path, monkeypatc
         assert process.wait(timeout=5) == 79
         from tests.support.storage import database
         with database(tmp_path) as db:
-            assert db.execute('SELECT count(*) FROM items').fetchone()[0] == 0
+            assert db.execute('SELECT count(*) FROM publications').fetchone()[0] == 0
         monkeypatch.delenv('OKO_TEST_HOLD_PRESENCE_BODY', raising=False)
         process = launch(tmp_path)
         with connect(tmp_path, process) as client:

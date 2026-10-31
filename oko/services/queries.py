@@ -26,23 +26,26 @@ class VersionQueries:
     def identity(self) -> str:
         return self._storage().read_versions.identity
 
-    @property
-    @repository_access
-    def offset(self) -> float:
-        return self._storage().read_versions.offset
-
-    @repository_access
-    def batch(self, keys: set[tuple[str, str]]) -> dict[tuple[str, str], dict[str, Any]]:
-        return {key: dict(value) for key, value in self._storage().read_versions.batch(keys).items()}
-
     @repository_access
     def version(self, kind: str, identity: str) -> dict[str, Any] | None:
         row = self._storage().read_versions.version(kind, identity)
         return dict(row) if row else None
 
     @repository_access
-    def advance(self, metadata: dict[str, Any]) -> None:
-        self._storage().read_versions.advance(metadata)
+    def source_revision(self) -> int:
+        return self._storage().subscriptions.source_revision()
+
+    @repository_access
+    def history_versions(self) -> list[Any]:
+        return self._storage().read_versions.history_versions()
+
+    @repository_access
+    def time_boundaries(self) -> tuple[Any, ...]:
+        return self._storage().read_versions.time_boundaries()
+
+    @repository_access
+    def advance(self) -> None:
+        self._storage().read_versions.advance()
 
 
 class ReadingQueries:
@@ -142,7 +145,7 @@ class ReadingQueries:
         return self._storage().reading.page(options, cursor, limit)
 
     @repository_access
-    def card_validators(self, identities: list[str]) -> dict[str, tuple[str, int | None]]:
+    def card_validators(self, identities: list[str]) -> dict[str, tuple[Any, ...]]:
         return self._facts.card_validators(identities)
 
     @repository_access

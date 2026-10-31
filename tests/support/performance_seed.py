@@ -25,7 +25,7 @@ def saved_library(root:Path, per_feed:int) -> dict[str,object]:
         store.settings_changed()
         store.processing.sync()
         store.set_work_enabled(False)
-        count=store.db.execute('SELECT count(*) FROM items WHERE complete=1 AND viewed=0').fetchone()[0]
+        count=store.db.execute('SELECT count(*) FROM publications WHERE complete=1 AND viewed=0').fetchone()[0]
         assert count==per_feed*4
     finally:
         store.db.close()

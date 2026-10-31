@@ -82,7 +82,7 @@ def test_delete_reserves_claim_until_restart_cleanup_then_readd_has_fresh_id(tmp
         assert client.delete('/api/v3/feeds/'+feed).json() == {'feed_id': feed, 'state': 'deleting'}
         from tests.support.storage import database
         with database(tmp_path) as db:
-            assert db.execute("SELECT oko_json_extract(payload, '$.cleanup_feed') FROM jobs WHERE kind = 'delete' AND item = %s", (material,)).fetchone()[0] == feed
+            assert db.execute("SELECT payload::jsonb->>'cleanup_feed' FROM jobs WHERE kind = 'delete' AND item = %s", (material,)).fetchone()[0] == feed
         assert not read_all_cards(client, '/api/v3/cards')
         assert client.get('/api/v3/publication/'+material).status_code == 404
         duplicate = client.post('/api/v3/telegram/connect', json=body)

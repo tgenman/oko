@@ -53,9 +53,10 @@ def test_unchanged_status_does_not_rewrite_problems(tmp_path):
     from tests.support.storage import Store
     seed = Store(tmp_path, lambda _: None)
     with seed.db:
-        seed.db.execute("UPDATE items SET content = jsonb_set(jsonb_set(content::jsonb,'{extra,_reader,full}','false'::jsonb),'{extra,_reader,reason}',to_jsonb('Fixture incomplete'::text))::text WHERE id = %s",(items[0],))
+        seed.db.execute("UPDATE publications SET content = jsonb_set(jsonb_set(content::jsonb,'{extra,_reader,full}','false'::jsonb),'{extra,_reader,reason}',to_jsonb('Fixture incomplete'::text))::text, incomplete_class=0 WHERE id = %s",(items[0],))
     with seed.db:
         seed.db.execute("UPDATE jobs SET status = 'done' WHERE kind = 'fetch' AND item = %s", (items[0],))
+        seed.incomplete_draft.mark_materials([items[0]])
     seed.db.close()
     app = traced_app(tmp_path)
     with TestClient(app, headers=HEADERS) as client:
@@ -71,8 +72,9 @@ def test_unchanged_status_does_not_rewrite_problems(tmp_path):
         def change_fixture():
             store = app.state.host.require_store()
             with store.db:
-                store.db.execute("UPDATE items SET content = jsonb_set(jsonb_set(content::jsonb,'{extra,_reader,full}','true'::jsonb),'{extra,_reader,reason}',to_jsonb(''::text))::text WHERE id = %s",(items[0],))
+                store.db.execute("UPDATE publications SET content = jsonb_set(jsonb_set(content::jsonb,'{extra,_reader,full}','true'::jsonb),'{extra,_reader,reason}',to_jsonb(''::text))::text, incomplete_class=1 WHERE id = %s",(items[0],))
                 store.db.execute("UPDATE jobs SET status = 'done' WHERE kind = 'fetch' AND item = %s", (items[0],))
+                store.incomplete_draft.mark_materials([items[0]])
         client.portal.call(change_fixture)
         response = client.get('/api/v3/status/details')
         assert response.status_code == 200
@@ -84,15 +86,21 @@ def test_latest_outcomes_scale_and_survive_restart(tmp_path):
     import json
     from tests.support.storage import Store
     from tests.support.reading_cost import request_sql
+    from oko.reader.commands_v3 import context_record
+    from oko.reader.generated.models import CommandContext
 
     store = Store(tmp_path, lambda _: None)
     rows = []
     for n in range(3000):
-        context = json.dumps(dict(identity=f'fixture-{n}', title='Synthetic failure', objects=[], action=None,command_context={'operation':'retry_material','material_id':f'fixture-{n}'}))
-        rows.append((f'old-{n:032x}', f'fixture-{n}', context, store.wall_clock(), 'failed'))
-        rows.append((f'new-{n:032x}', f'fixture-{n}', context, store.wall_clock(), {0: 'succeeded', 1: 'unknown', 2: 'pending'}.get(n, 'failed')))
+        context = context_record(CommandContext.model_validate({'operation':'retry_material','material_id':f'fixture-{n}'}))
+        identity = context['identity']
+        encoded = json.dumps(context)
+        rows.append((f'old-{n:032x}', identity, encoded, store.wall_clock(), 'failed'))
+        rows.append((f'new-{n:032x}', identity, encoded, store.wall_clock(), {0: 'succeeded', 1: 'unknown', 2: 'pending'}.get(n, 'failed')))
     with store.db:
         store.db.executemany('INSERT INTO reader_action_results ( id , identity , body , started , result ) VALUES ( %s , %s , %s , %s , %s )', rows)
+        # Model the pre-migration state: the v2 recovery marker does not yet exist.
+        store.db.execute("DELETE FROM state WHERE key IN ('action-problems-recovered-v1','action-problems-recovered-v2')")
         assert store.db.execute("SELECT 1 FROM pg_indexes WHERE schemaname=current_schema() AND indexname='reader_action_identity_sequence'").fetchone()
     store.set_work_enabled(False)
     store.db.close()
@@ -100,9 +108,11 @@ def test_latest_outcomes_scale_and_survive_restart(tmp_path):
         app = traced_app(tmp_path)
         with TestClient(app, headers=HEADERS) as client:
             tracing(client, app)
+            assert app.state.host.require_store().db.execute("SELECT count(*) FROM reader_problems WHERE identity LIKE 'action:%%' AND finished IS NULL").fetchone()[0]==2999
             with measure_reads(app.state.host.require_store().db, enabled=lambda: request_sql.get() is not None) as work:
                 response = client.get('/api/v3/status/details')
             assert response.status_code == 200
+            assert not any(q.lstrip().upper().startswith(('INSERT','UPDATE','DELETE')) for q in app.state.last_sql)
             problems = response.json()['problems']['current']
             assert len(problems) == 2999
             assert all(p['command_id'].startswith('new-') for p in problems)
@@ -152,3 +162,157 @@ def test_status_does_not_scan_completed_job_archive(tmp_path):
             response = client.get('/api/v3/status')
         assert response.status_code == 200
         assert work.rows < 10000, work
+
+
+def test_codex_configuration_problem_changes_without_status_writes(tmp_path):
+    app = traced_app(tmp_path)
+    with TestClient(app, headers=HEADERS) as client:
+        tracing(client, app)
+        assert client.patch('/api/v3/settings/oko/global', json={'processor':'codex','theses':True}).status_code == 200
+        response = client.get('/api/v3/status/details')
+        assert response.status_code == 200
+        assert any(p['code']=='processor_not_configured' for p in response.json()['problems']['current'])
+        assert not any(q.lstrip().upper().startswith(('INSERT','UPDATE','DELETE')) for q in app.state.last_sql)
+        assert client.patch('/api/v3/settings/oko/global', json={'theses':False}).status_code == 200
+        response = client.get('/api/v3/status/details')
+        assert not any(p['code']=='processor_not_configured' for p in response.json()['problems']['current'])
+        assert not any(q.lstrip().upper().startswith(('INSERT','UPDATE','DELETE')) for q in app.state.last_sql)
+
+
+def test_failed_command_problem_is_saved_before_status_read(tmp_path):
+    app=traced_app(tmp_path)
+    with TestClient(app,headers=HEADERS) as client:
+        tracing(client,app)
+        response=client.post('/api/v3/command-observations',json={'id':'synthetic-failed-setting','context':{'operation':'settings_patch','target':{'scope':'oko','owner':'global'},'keys':['theses']},'result':'failed'})
+        assert response.status_code==200,response.text
+        status=client.get('/api/v3/status/details')
+        assert status.status_code==200
+        problem=next(p for p in status.json()['problems']['current'] if p['code']=='command_failed')
+        assert not any(q.lstrip().upper().startswith(('INSERT','UPDATE','DELETE')) for q in app.state.last_sql)
+        assert client.patch('/api/v3/settings/oko/global',json={'theses':False}).status_code==200
+        status=client.get('/api/v3/status/details')
+        assert not any(p['code']=='command_failed' for p in status.json()['problems']['current'])
+        assert any(p['id']==problem['id'] and p['outcome']=='resolved' for p in status.json()['problems']['recent'])
+        assert not any(q.lstrip().upper().startswith(('INSERT','UPDATE','DELETE')) for q in app.state.last_sql)
+    restarted=traced_app(tmp_path)
+    with TestClient(restarted,headers=HEADERS) as client:
+        tracing(client,restarted)
+        status=client.get('/api/v3/status/details')
+        assert any(p['id']==problem['id'] and p['outcome']=='resolved' for p in status.json()['problems']['recent'])
+        assert not any(q.lstrip().upper().startswith(('INSERT','UPDATE','DELETE')) for q in restarted.state.last_sql)
+
+
+def test_interrupted_command_problem_is_recovered_before_status_read(tmp_path):
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None)
+    try:
+        from oko.reader.commands_v3 import context_record
+        from oko.reader.generated.models import CommandContext
+        context=context_record(CommandContext.model_validate({'operation':'collect','target':{'scope':'all'}}))
+        store.problems.action_started('synthetic-pending',context,store.wall_clock())
+        assert store.db.execute('SELECT 1 FROM reader_problems WHERE identity=%s',('action:'+context['identity'],)).fetchone() is None
+    finally:
+        store.db.close()
+    app=traced_app(tmp_path)
+    with TestClient(app,headers=HEADERS) as client:
+        tracing(client,app)
+        status=client.get('/api/v3/status/details')
+        assert any(p['code']=='command_outcome_unknown' and p['command_id']=='synthetic-pending' for p in status.json()['problems']['current'])
+        assert not any(q.lstrip().upper().startswith(('INSERT','UPDATE','DELETE')) for q in app.state.last_sql)
+
+
+def test_command_problem_and_outcome_roll_back_together(tmp_path):
+    from oko.storage.transaction import transaction
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None)
+    context=dict(identity='synthetic-operation',title='Synthetic failure',objects=[],action=None,discardable=True,
+                 command_context={'operation':'collect','target':{'scope':'all'}})
+    try:
+        with pytest.raises(ValueError,match='rollback'):
+            with transaction(store.db):
+                assert store.problems.report_action('synthetic-failed',context,'failed',store.wall_clock())=='failed'
+                assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='action:synthetic-operation' AND finished IS NULL").fetchone()
+                raise ValueError('rollback')
+        assert store.db.execute("SELECT 1 FROM reader_action_results WHERE id='synthetic-failed'").fetchone() is None
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='action:synthetic-operation'").fetchone() is None
+        store.problems.action_started('synthetic-pending',context,store.wall_clock())
+        store.db.close()
+        store=Store(tmp_path,lambda _:None)
+        assert 'synthetic-pending' in store.problems._startup_pending
+        with pytest.raises(ValueError,match='rollback'):
+            with transaction(store.db):
+                store.problems.action_started('synthetic-pending',context,store.wall_clock(),restart=True)
+                assert 'synthetic-pending' not in store.problems._startup_pending
+                raise ValueError('rollback')
+        assert 'synthetic-pending' in store.problems._startup_pending
+        assert store.problems.command_record('synthetic-pending').result=='unknown'
+    finally:
+        store.db.close()
+
+
+def test_telegram_profile_problem_is_saved_before_status_read(tmp_path):
+    from tests.support.telegram import Telegram
+    class Account(Telegram):
+        user=101
+        async def accounts(self):
+            return ['one']
+        async def identity(self,account):
+            return self.user
+        async def history_page(self,account,peer,upper,before,since):
+            return dict(messages=(await self.page(account,peer,0,since))['messages'],upper=11,next_before=11,more=False)
+    network=Account()
+    app=traced_app(tmp_path,telegram_client=network)
+    with TestClient(app,headers=HEADERS) as client:
+        tracing(client,app)
+        assert client.put('/api/v3/telegram/profiles/personal',json={'configuration_ref':'one'}).status_code==200
+        body=dict(source_locator='@fixture',folder='Inbox',access={'kind':'client','profile':'personal'})
+        assert client.post('/api/v3/telegram/connect',json=body).status_code==200
+        network.user=202
+        assert client.post('/api/v3/telegram/connect',json=dict(body,source_locator='@different')).status_code==409
+        def profile_row():
+            row=app.state.host.require_store().db.execute("SELECT id,finished,outcome,xmin::text FROM reader_problems WHERE identity='profile:personal' ORDER BY created DESC LIMIT 1").fetchone()
+            return row[:] if row else None
+        before=client.portal.call(profile_row)
+        assert before and before[1] is None
+        status=client.get('/api/v3/status/details')
+        assert status.status_code==200
+        assert any(p['id']==before[0] and p['code']=='account_identity_mismatch' for p in status.json()['problems']['current'])
+        assert client.portal.call(profile_row)==before
+        network.user=101
+        assert client.put('/api/v3/telegram/profiles/personal',json={'configuration_ref':'one'}).status_code==200
+        resolved=client.portal.call(profile_row)
+        assert resolved and resolved[0]==before[0] and resolved[2]=='resolved'
+        status=client.get('/api/v3/status/details')
+        assert not any(p['id']==before[0] for p in status.json()['problems']['current'])
+        assert client.portal.call(profile_row)==resolved
+
+
+def test_telegram_profile_restart_problem_is_saved_before_status_read(tmp_path):
+    from tests.support.telegram import Telegram
+    class Account(Telegram):
+        async def accounts(self):
+            return ['one']
+        async def identity(self,account):
+            return 101
+        async def history_page(self,account,peer,upper,before,since):
+            return dict(messages=(await self.page(account,peer,0,since))['messages'],upper=11,next_before=11,more=False)
+    options=dict(telegram_client=Account())
+    app=traced_app(tmp_path,**options)
+    with TestClient(app,headers=HEADERS) as client:
+        assert client.put('/api/v3/telegram/profiles/personal',json={'configuration_ref':'one'}).status_code==200
+        connected=client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox','access':{'kind':'client','profile':'personal'}})
+        assert connected.status_code==200
+        feed_id=connected.json()['feed_id']
+        assert client.put('/api/v3/power',json={'enabled':False}).status_code==200
+    restarted=traced_app(tmp_path,**options)
+    with TestClient(restarted,headers=HEADERS) as client:
+        tracing(client,restarted)
+        status=client.get('/api/v3/status/details')
+        assert status.status_code==200
+        problem=next(p for p in status.json()['problems']['current'] if p['code']=='profile_unavailable')
+        assert not any(q.lstrip().upper().startswith(('INSERT','UPDATE','DELETE')) for q in restarted.state.last_sql)
+        assert client.delete('/api/v3/feeds/'+feed_id).status_code==200
+        status=client.get('/api/v3/status/details')
+        assert not any(p['id']==problem['id'] for p in status.json()['problems']['current'])
+        assert any(p['id']==problem['id'] and p['outcome']=='irrelevant' for p in status.json()['problems']['recent'])
+        assert not any(q.lstrip().upper().startswith(('INSERT','UPDATE','DELETE')) for q in restarted.state.last_sql)

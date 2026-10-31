@@ -1,13 +1,16 @@
 from oko.storage.database import INTEGRITY_ERRORS
 from oko.storage.database import expect_row, Connection, Row
 from oko.storage.reading import reading_value
-from oko.storage.settings_cache import SettingsCache
-from oko.storage.feed_facts import feed_facts
+from oko.storage.settings_repository import SettingsRepository
+from oko.storage.source_configuration import changed as source_changed
+from oko.storage.reader_status import changed as status_changed
+from oko.storage.feed_facts import feed_facts, READER_FEED_COLUMNS
 import json
 import re
 import secrets
 from uuid import uuid4
 from oko.storage.transaction import begin_write
+from oko.storage import memberships
 import time
 from collections.abc import Callable
 from typing import Any
@@ -23,9 +26,9 @@ class SubscriptionRepository:
         self.db = db
         self.history = History(db)
 
-        self.settings = SettingsCache(db)
+        self.settings = SettingsRepository(db)
         self.details = FeedDetails(db, wall_clock)
-        self.telegram = TelegramAccess(db, lambda feed: self.details.record(feed, 'modified'))
+        self.telegram = TelegramAccess(db, lambda feed: self.details.record(feed, 'modified'), wall_clock=wall_clock)
 
 
     def source_revision(self) -> int:
@@ -35,9 +38,9 @@ class SubscriptionRepository:
     def ensure_demo(self) -> None:
         with self.db:
             self.db.execute("INSERT INTO folders VALUES ( 'demo' , 'Тестовый источник' , - 1 ) ON CONFLICT DO NOTHING")
-            inserted = self.db.execute("INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport ) VALUES ( 'demo' , 'demo' , 'Тестовый источник' , 'demo' , 'demo' , '[]' , 'connected' , 'demo' ) ON CONFLICT DO NOTHING")
+            inserted = self.db.execute("INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport ) VALUES ( 'demo' , 'demo' , 'Тестовый источник' , 'demo' , 'demo' , ARRAY[]::text[] , 'connected' , 'demo' ) ON CONFLICT DO NOTHING")
             if inserted.rowcount:
-                self.settings.refresh_feed('demo')
+                source_changed(self.db)
                 self.details.created('demo')
 
     @reading_value
@@ -88,7 +91,7 @@ class SubscriptionRepository:
         if transport is not None:
             conditions.append('transport = %s')
             parameters.append(transport)
-        query = 'SELECT * FROM feeds' + (' WHERE ' + ' AND '.join(conditions) if conditions else '') + ' ORDER BY rowid'
+        query = 'SELECT ' + ','.join(READER_FEED_COLUMNS) + ' FROM feeds' + (' WHERE ' + ' AND '.join(conditions) if conditions else '') + ' ORDER BY sort_order'
         return self._feeds(list(self.db.execute(query,parameters)))
 
     def feeds_many(self, identities: set[str]) -> list[dict[str, Any]]:
@@ -96,7 +99,7 @@ class SubscriptionRepository:
         ids = sorted(identities)
         for start in range(0, len(ids), 400):
             batch = ids[start:start+400]
-            rows.extend(self.db.execute(f"SELECT * FROM feeds WHERE id IN ( {','.join(('%s' for _ in batch))} ) ORDER BY rowid", batch))
+            rows.extend(self.db.execute(f"SELECT {','.join(READER_FEED_COLUMNS)} FROM feeds WHERE id IN ( {','.join(('%s' for _ in batch))} ) ORDER BY sort_order", batch))
         return self._feeds(rows)
 
     def _feeds(self, rows: list[Row]) -> list[dict[str, Any]]:
@@ -110,12 +113,11 @@ class SubscriptionRepository:
         bindings=self.telegram.bindings(identities)
         profiles=self.telegram.profiles() if any(b['kind']=='client' for b in bindings.values()) else {}
         histories=self.history.statuses(identities)
-        avatars={row['feed']:row['digest'] for row in self.db.execute('SELECT feed , digest FROM telegram_avatars WHERE feed IN ( SELECT value FROM oko_json_each ( %s ) )',(json.dumps(identities),))}
         batch={}
         for row in rows:
             binding=bindings.get(row['id'])
             profile=profiles.get(binding['role']) if binding and binding['kind']=='client' else None
-            batch[row['id']]=self._feed_value(row,binding,histories.get(row['id']),avatars.get(row['id']),profile)
+            batch[row['id']]=self._feed_value(row,binding,histories.get(row['id']),row['avatar_digest'],profile)
         previous=self._feed_batch
         self._feed_batch=batch
         try:
@@ -129,13 +131,12 @@ class SubscriptionRepository:
     def _feed(self, identity: str) -> dict[str, Any]:
         if self._feed_batch is not None and identity in self._feed_batch:
             return self._feed_batch[identity]
-        row=self.db.execute('SELECT * FROM feeds WHERE id = %s',(identity,)).fetchone()
+        row=self.db.execute('SELECT '+','.join(READER_FEED_COLUMNS)+' FROM feeds WHERE id = %s',(identity,)).fetchone()
         if row is None:
             raise LookupError('Фид не найден')
         binding=self.telegram.binding(identity)
-        avatar=self.db.execute('SELECT digest FROM telegram_avatars WHERE feed = %s',(identity,)).fetchone() if row['kind']=='telegram' else None
         profile=self.telegram.profile(binding['role']) if binding and binding['kind']=='client' else None
-        return self._feed_value(row,binding,self.history.status(identity),avatar[0] if avatar else None,profile)
+        return self._feed_value(row,binding,self.history.status(identity),row['avatar_digest'],profile)
 
     @staticmethod
     def _feed_value(row: Row, binding: dict[str,Any] | None, history: dict[str,Any] | None,
@@ -159,11 +160,14 @@ class SubscriptionRepository:
         title = body.title or urlsplit(body.url).hostname or 'RSS'
         identity_id = self.new_feed_id()
         with self.db:
-            begin_write(self.db)
+            from oko.storage import memberships
+            memberships.lock_graph(self.db)
             folder = self.ensure_folder(body.folder)
             self.db.execute('INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport , public_ai ) VALUES ( %s , %s , %s , %s , %s , %s , %s , %s , %s )',
-                            (identity_id, identity, title, kind, folder, json.dumps([body.url]), connection, kind, kind == 'youtube'))
-            self.settings.refresh_feed(identity_id)
+                            (identity_id, identity, title, kind, folder, [body.url], connection, kind, kind == 'youtube'))
+            marker=getattr(self.db,'youtube_admission_feed_mark',None)
+            if marker is not None and kind=='youtube':marker(identity_id)
+            source_changed(self.db)
             self.details.created(identity_id)
             self.history.configure(identity_id, body.initial_history)
         return next(feed for feed in self.feeds() if feed['identity'] == identity)
@@ -217,9 +221,19 @@ class SubscriptionRepository:
         return self._effective_value(scope,owner,feed)
 
     def effective_feeds(self) -> dict[str,dict[str,Any]]:
-        return {feed['id']:self._effective_value('feed',feed['id'],feed) for feed in self.feeds()}
+        # This settings projection needs only inheritance owners and source kind.
+        # Loading reader details would also decode unrelated history and profiles.
+        feeds = [dict(row) for row in self.db.execute('SELECT id,kind,folder_id FROM feeds ORDER BY sort_order')]
+        settings: dict[tuple[str,str],dict[str,Any]] = {}
+        for row in self.db.execute("""SELECT CASE WHEN feed_id IS NOT NULL THEN 'feed' WHEN folder_id IS NOT NULL THEN 'folder' ELSE 'oko' END AS scope,
+                COALESCE(feed_id,folder_id,'global') AS owner,field,value FROM settings
+            WHERE (folder_id IS NULL AND feed_id IS NULL) OR feed_id=ANY(%s) OR folder_id=ANY(%s)""",
+            ([feed['id'] for feed in feeds], list({feed['folder_id'] for feed in feeds}))):
+            settings.setdefault((row['scope'],row['owner']), {})[row['field']] = row['value']
+        return {feed['id']:self._effective_value('feed',feed['id'],feed,settings) for feed in feeds}
 
-    def _effective_value(self, scope: str, owner: str, feed: dict[str,Any] | Row | None) -> dict[str,Any]:
+    def _effective_value(self, scope: str, owner: str, feed: dict[str,Any] | Row | None,
+                         settings: dict[tuple[str,str],dict[str,Any]] | None = None) -> dict[str,Any]:
         chain = [('oko', 'global')]
         if scope == 'feed':
             assert feed is not None
@@ -233,12 +247,18 @@ class SubscriptionRepository:
             values['theses']['value'] = True
         overrides = {}
         for level, identity in chain:
-            for field, value in self._settings(level,identity).items():
+            source = settings.get((level,identity), {}) if settings is not None else self._settings(level,identity)
+            for field, value in source.items():
                 if field not in defaults:
                     continue
                 values[field] = dict(value=value, scope=level, owner=identity)
                 if (level, identity) == (scope, owner):
                     overrides[field] = value
+        # Existing libraries have only prompt overrides. Derive the old setting
+        # until the migration writes explicit switches at each saved scope.
+        if values['filter_enabled']['scope'] == 'default' and values['prompt_filters']['scope'] != 'default':
+            prompt = values['prompt_filters']
+            values['filter_enabled'] = dict(value=bool(prompt['value'].strip()), scope=prompt['scope'], owner=prompt['owner'])
         result: dict[str,Any] = dict(effective=values, overrides=overrides)
         if scope == 'feed':
             assert feed is not None
@@ -249,6 +269,8 @@ class SubscriptionRepository:
         self.check_owner(scope, owner)
         self.validate_retry_settings(patch.model_dump(exclude_unset=True))
         with self.db:
+            if patch.model_fields_set & {'filter_enabled','prompt_filters','theses','prompt_theses','processor'}:
+                memberships.lock_graph(self.db)
             before = self.settings.values(scope, owner)
             self.settings.patch(scope, owner, patch.model_dump(exclude_unset=True))
             after = self.settings.values(scope, owner)
@@ -293,19 +315,26 @@ class SubscriptionRepository:
         if transport == 'rss' and feed['kind'] in ('youtube', 'demo'):
             raise ValueError('Для этого источника нет RSS-подключения')
         with self.db:
+            if patch.model_fields_set & {'folder_id','new_folder','importance','public_ai','transport'}:
+                memberships.lock_graph(self.db)
             if folder_title is not None:
                 begin_write(self.db)
                 if self.db.execute('SELECT 1 FROM folders WHERE title = %s', (folder_title,)).fetchone():
                     raise ValueError('A folder with this name already exists.')
                 values['folder_id'] = self.ensure_folder(folder_title)
             changed = any(feed.get(field) != value for field, value in values.items())
+            source_fields = ('folder_id','kind','identity','original_urls','connection','transport','importance',
+                             'initial_days','public_ai','read_history','auto_read','telegram_peer','telegram_account','telegram_username')
+            source_modified = any(field in source_fields and feed.get(field) != value for field,value in values.items())
             for field, value in values.items():
                 self.db.execute(f'UPDATE feeds SET {field} = %s WHERE id = %s', (value, feed_id))
-            if {'folder_id', 'importance', 'public_ai', 'transport'}.intersection(values):
-                self.settings.refresh_feed(feed_id)
             if 'transport' in values and values['transport'] != feed['transport']:
                 connection = 'ambiguous' if feed['kind'] == 'unresolved' and transport is None else 'needs_connection'
                 self.db.execute('UPDATE feeds SET connection = %s WHERE id = %s', (connection, feed_id))
             if changed:
                 self.details.record(feed_id, 'modified')
+            if 'title' in values and feed.get('title') != values['title']:
+                status_changed(self.db)
+            if source_modified:
+                source_changed(self.db)
         return next(f for f in self.feeds() if f['id'] == feed_id)

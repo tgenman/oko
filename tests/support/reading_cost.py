@@ -1,8 +1,10 @@
 from tests.support.collection_acceptance import discovered
 """Bound HTTP reading work independently of machine speed and background work."""
 from contextvars import ContextVar
+import time
 
 from oko.collection.contracts import Material, Publication
+from oko.storage.publication_owners import owner_expr, owned_ids
 from tests.support.storage import Store
 from oko.subscriptions.subscriptions import AddFeed
 from tests.support.app import create_app
@@ -11,6 +13,13 @@ from tests.support.source import publication_packet
 
 
 request_sql: ContextVar[list[str] | None] = ContextVar('reading_sql', default=None)
+
+
+def wait_for_recovery(app):
+    deadline = time.monotonic() + 60
+    while app.state.host.require_store().processing.recovering:
+        assert time.monotonic() < deadline, 'Initial PostgreSQL recovery did not finish'
+        time.sleep(.02)
 
 
 def library(root, counts):
@@ -33,7 +42,7 @@ def build_library(root, counts):
             discovered(store,[publication_packet(Publication(str(n), f'https://example.org/{index}/{n}', n),
                               Material(f'Video {n}', '', captions='not_requested', description='Synthetic video'),needs_fetch=True)
                               for n in range(count)], '{}', job, feed)
-            items.append(store.db.execute('SELECT id FROM items_read WHERE feed_id=%s ORDER BY id', (feed,)).fetchone()[0])
+            items.append(store.db.execute(owned_ids('= %s')+' ORDER BY id', (feed,feed)).fetchone()[0])
         store.set_work_enabled(False)
     finally:
         store.db.close()

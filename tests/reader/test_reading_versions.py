@@ -4,7 +4,7 @@ from tests.support.processing_jobs import reconcile
 import time
 from fastapi.testclient import TestClient
 from tests.support.reader import HEADERS
-from tests.support.reading_cost import library, traced_app, tracing
+from tests.support.reading_cost import library, traced_app, tracing, wait_for_recovery
 
 
 def changed_within_background_interval(client, url, etag):
@@ -33,7 +33,7 @@ def test_unchanged_navigation_and_cards_return_no_body(tmp_path):
         unchanged=client.get('/api/v3/cards',params={'feed':feeds[0]},headers={'If-None-Match':page.headers['ETag']})
         assert unchanged.status_code==304 and not unchanged.content
         assert int(unchanged.headers['X-Test-SQL']) < 35
-        assert not any('FROM settings' in q or 'SELECT * FROM items' in q for q in app.state.last_sql)
+        assert not any('FROM settings' in q or 'SELECT * FROM publications' in q for q in app.state.last_sql)
 
 
 def test_publication_etag_survives_restart_and_viewed_is_explicit(tmp_path):
@@ -58,6 +58,7 @@ def test_noop_write_and_other_folder_leave_publication_etag_unchanged(tmp_path):
     feeds, items = library(tmp_path,[1,1])
     app=traced_app(tmp_path)
     with TestClient(app,headers=HEADERS) as client:
+        wait_for_recovery(app)
         first=client.get('/api/v3/publication/'+items[0])
         page=client.get('/api/v3/cards',params={'feed':feeds[0]})
         assert client.patch('/api/v3/feeds/'+feeds[0],json={'title':'Synthetic 0'}).status_code==200
@@ -87,6 +88,121 @@ def test_feed_rename_changes_navigation_and_sql_rollback_keeps_it(tmp_path):
             client.portal.call(rollback)
         response=client.get('/api/v3/navigation',headers={'If-None-Match':renamed.headers['ETag']})
         assert response.status_code==304 and not response.content
+
+
+def test_originals_inheritance_changes_publication_etag(tmp_path):
+    feeds, items = library(tmp_path, [1])
+    app = traced_app(tmp_path)
+    with TestClient(app, headers=HEADERS) as client:
+        wait_for_recovery(app)
+        first = client.get('/api/v3/publication/'+items[0])
+        assert first.json()['originals'] is True
+        assert client.patch('/api/v3/settings/oko/global', json={'originals':False}).status_code == 200
+        changed = client.get('/api/v3/publication/'+items[0], headers={'If-None-Match':first.headers['ETag']})
+        assert changed.status_code == 200 and changed.json()['originals'] is False
+        assert client.patch('/api/v3/settings/feed/'+feeds[0], json={'originals':True}).status_code == 200
+        override = client.get('/api/v3/publication/'+items[0], headers={'If-None-Match':changed.headers['ETag']})
+        assert override.status_code == 200 and override.json()['originals'] is True
+
+
+def test_status_etag_tracks_settings_without_status_trigger(tmp_path):
+    library(tmp_path,[1])
+    app=traced_app(tmp_path)
+    with TestClient(app,headers=HEADERS) as client:
+        wait_for_recovery(app)
+        first=client.get('/api/v3/status/details')
+        assert client.patch('/api/v3/settings/oko/global',json={'originals':False}).status_code==200
+        changed=client.get('/api/v3/status/details',headers={'If-None-Match':first.headers['ETag']})
+        assert changed.status_code==200 and changed.headers['ETag']!=first.headers['ETag']
+
+
+def test_status_etag_tracks_history_progress_without_source_revision_change(tmp_path):
+    feeds,_ = library(tmp_path,[1])
+    app = traced_app(tmp_path)
+    with TestClient(app,headers=HEADERS) as client:
+        wait_for_recovery(app)
+        first = client.get('/api/v3/status/details')
+        def change():
+            store=app.state.host.require_store()
+            before=store.subscriptions.source_revision()
+            with store.db:
+                store.subscriptions.history.warnings(feeds[0],['Synthetic history warning'])
+            return before,store.subscriptions.source_revision()
+        before,after = client.portal.call(change)
+        assert before == after
+        changed = client.get('/api/v3/status/details',headers={'If-None-Match':first.headers['ETag']})
+        assert changed.status_code==200
+        assert any('Synthetic history warning' in history['history']['progress']['warnings'] for history in changed.json()['initial_histories'])
+
+
+def test_status_etag_tracks_history_member_outcome_without_source_change(tmp_path):
+    feeds, items = library(tmp_path,[1])
+    app = traced_app(tmp_path)
+    with TestClient(app,headers=HEADERS) as client:
+        wait_for_recovery(app)
+        def seed():
+            store=app.state.host.require_store()
+            with store.db:
+                store.db.execute("INSERT INTO history_members(feed,item,outcome) VALUES (%s,%s,'loaded') ON CONFLICT(feed,item) DO UPDATE SET outcome='loaded'", (feeds[0],items[0]))
+        client.portal.call(seed)
+        first = client.get('/api/v3/status/details')
+        def change():
+            store=app.state.host.require_store()
+            before=store.subscriptions.source_revision()
+            with store.db:
+                store.subscriptions.history.saved(items[0],False)
+            return before,store.subscriptions.source_revision()
+        before,after=client.portal.call(change)
+        assert before==after
+        changed=client.get('/api/v3/status/details',headers={'If-None-Match':first.headers['ETag']})
+        assert changed.status_code==200
+        history=next(h for h in changed.json()['initial_histories'] if h['feed_id']==feeds[0])
+        assert history['history']['progress']['incomplete']==1
+
+
+def test_folder_rename_changes_navigation_without_changing_status(tmp_path):
+    library(tmp_path,[1])
+    app=traced_app(tmp_path)
+    with TestClient(app,headers=HEADERS) as client:
+        wait_for_recovery(app)
+        navigation=client.get('/api/v3/navigation')
+        status=client.get('/api/v3/status/details')
+        folder=navigation.json()['folders'][0]['id']
+        client.portal.call(lambda: app.state.host.require_store().subscriptions.rename_folder(folder,'Renamed folder'))
+        assert client.get('/api/v3/navigation',headers={'If-None-Match':navigation.headers['ETag']}).status_code==200
+        assert client.get('/api/v3/status/details',headers={'If-None-Match':status.headers['ETag']}).status_code==304
+
+
+def test_feed_rename_updates_status_without_source_revision_change(tmp_path):
+    from oko.subscriptions.subscriptions import FeedPatch
+    feeds,_=library(tmp_path,[1])
+    app=traced_app(tmp_path)
+    with TestClient(app,headers=HEADERS) as client:
+        wait_for_recovery(app)
+        first=client.get('/api/v3/status/details')
+        def rename():
+            store=app.state.host.require_store()
+            before=store.subscriptions.source_revision()
+            store.subscriptions.update_feed(feeds[0],FeedPatch(title='Renamed feed'))
+            return before,store.subscriptions.source_revision()
+        before,after=client.portal.call(rename)
+        assert before==after
+        assert client.get('/api/v3/status/details',headers={'If-None-Match':first.headers['ETag']}).status_code==200
+
+
+def test_status_etag_tracks_saved_runtime_facts_without_status_trigger(tmp_path):
+    library(tmp_path,[1])
+    app=traced_app(tmp_path)
+    with TestClient(app,headers=HEADERS) as client:
+        wait_for_recovery(app)
+        first=client.get('/api/v3/status/details')
+        def change():
+            store=app.state.host.require_store()
+            with store.db:
+                store.db.execute("INSERT INTO state(key,value) VALUES ('feed-status:synthetic','{\"error\":\"temporary\"}')")
+        client.portal.call(change)
+        changed=client.get('/api/v3/status/details',headers={'If-None-Match':first.headers['ETag']})
+        assert changed.status_code==200 and changed.headers['ETag']!=first.headers['ETag']
 
 
 def test_due_fetch_changes_publication_etag_without_dispatch(tmp_path):
@@ -252,6 +368,7 @@ def test_failed_viewed_write_keeps_the_card_page_unchanged(tmp_path):
     library(tmp_path,[2])
     app=traced_app(tmp_path)
     with TestClient(app,headers=HEADERS) as client:
+        wait_for_recovery(app)
         initial=client.get('/api/v3/cards')
         identity=initial.json()['items'][0]['id']
         def install():
@@ -271,3 +388,166 @@ def test_failed_viewed_write_keeps_the_card_page_unchanged(tmp_path):
         after=client.get('/api/v3/cards',headers={'If-None-Match':initial.headers['ETag']})
         assert after.status_code==304
         assert client.get('/api/v3/cards').json()==initial.json()
+
+
+def test_card_etag_changes_when_retry_becomes_due_without_background_write(tmp_path):
+    _, items = library(tmp_path, [1])
+    clock = [0.0]
+    app = traced_app(tmp_path, clock=lambda: clock[0], wall_clock=lambda: 1800000000 + clock[0])
+    with TestClient(app, headers=HEADERS) as client:
+        async def hold():
+            await app.state.host.execution._actions.acquire()
+        client.portal.call(hold)
+        try:
+            def schedule():
+                store = app.state.host.require_store()
+                app.state.host.execution.reader_advance = None
+                with store.db:
+                    store.db.execute("UPDATE jobs SET next=10,error='Synthetic wait',problem_code='source-connection' WHERE kind='fetch' AND item=%s", (items[0],))
+            client.portal.call(schedule)
+            first = client.get('/api/v3/cards')
+            assert first.status_code == 200 and first.json()['items'][0]['loading'] is False
+            assert client.get('/api/v3/cards', headers={'If-None-Match':first.headers['ETag']}).status_code == 304
+            clock[0] = 11.0
+            after = client.get('/api/v3/cards', headers={'If-None-Match':first.headers['ETag']})
+            assert after.status_code == 200 and after.json()['items'][0]['loading'] is True
+        finally:
+            client.portal.call(app.state.host.execution._actions.release)
+
+
+def test_card_etag_changes_when_media_retry_becomes_due_without_background_write(tmp_path):
+    _, items = library(tmp_path, [1])
+    clock = [0.0]
+    app = traced_app(tmp_path, clock=lambda: clock[0], wall_clock=lambda: 1800000000 + clock[0])
+    with TestClient(app, headers=HEADERS) as client:
+        async def hold():
+            await app.state.host.execution._actions.acquire()
+        client.portal.call(hold)
+        try:
+            def schedule():
+                store = app.state.host.require_store()
+                app.state.host.execution.reader_advance = None
+                with store.db:
+                    store.db.execute("UPDATE jobs SET status='done' WHERE kind='fetch' AND item=%s", (items[0],))
+                    store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('media',%s,'image','https://fixture.test/image','image','pending_download')", (items[0],))
+                    store.db.execute("INSERT INTO jobs(kind,item,status,next) VALUES ('download_media','media','pending',10)")
+            client.portal.call(schedule)
+            first = client.get('/api/v3/cards')
+            assert first.status_code == 200 and first.json()['items'][0]['loading'] is False
+            assert client.get('/api/v3/cards', headers={'If-None-Match':first.headers['ETag']}).status_code == 304
+            clock[0] = 11.0
+            after = client.get('/api/v3/cards', headers={'If-None-Match':first.headers['ETag']})
+            assert after.status_code == 200 and after.json()['items'][0]['loading'] is True
+        finally:
+            client.portal.call(app.state.host.execution._actions.release)
+
+
+def test_card_etag_tracks_linked_content_without_parent_version_write(tmp_path):
+    _, items = library(tmp_path, [1])
+    app = traced_app(tmp_path)
+    with TestClient(app, headers=HEADERS) as client:
+        async def hold():
+            await app.state.host.execution._actions.acquire()
+        client.portal.call(hold)
+        try:
+            def add_link():
+                store = app.state.host.require_store()
+                with store.db:
+                    store.db.execute("""INSERT INTO publications(id,source_id,url,platform,external_id,complete,content,title)
+                        SELECT 'linked','linked-source','https://example.org/linked','other_web','linked',1,content,title FROM publications WHERE id=%s""", (items[0],))
+                    store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES (%s,'linked')", (items[0],))
+            client.portal.call(add_link)
+            first = client.get('/api/v3/cards')
+            assert first.status_code == 200 and first.json()['items'][0]['changed'] is False
+            def change_child():
+                store = app.state.host.require_store()
+                with store.db:
+                    store.db.execute("UPDATE publications SET content=jsonb_set(content::jsonb,'{extra,_reader,changed}','true'::jsonb)::text WHERE id='linked'")
+            client.portal.call(change_child)
+            after = client.get('/api/v3/cards', headers={'If-None-Match':first.headers['ETag']})
+            assert after.status_code == 200 and after.json()['items'][0]['changed'] is True
+        finally:
+            client.portal.call(app.state.host.execution._actions.release)
+
+
+def test_status_etag_changes_when_retry_becomes_due_without_background_write(tmp_path):
+    _, items = library(tmp_path, [1])
+    clock = [0.0]
+    app = traced_app(tmp_path, clock=lambda: clock[0], wall_clock=lambda: 1800000000 + clock[0])
+    with TestClient(app, headers=HEADERS) as client:
+        async def hold():
+            await app.state.host.execution._actions.acquire()
+        client.portal.call(hold)
+        try:
+            def schedule():
+                store = app.state.host.require_store()
+                app.state.host.execution.reader_advance = None
+                with store.db:
+                    store.db.execute("UPDATE jobs SET next=10,error='Synthetic wait',problem_code='source-connection' WHERE kind='fetch' AND item=%s", (items[0],))
+            client.portal.call(schedule)
+            first = client.get('/api/v3/status/details')
+            assert first.status_code == 200, first.text
+            assert client.get('/api/v3/status/details', headers={'If-None-Match':first.headers['ETag']}).status_code == 304
+            clock[0] = 11.0
+            after = client.get('/api/v3/status/details', headers={'If-None-Match':first.headers['ETag']})
+            assert after.status_code == 200
+        finally:
+            client.portal.call(app.state.host.execution._actions.release)
+
+
+def test_status_etag_changes_when_youtube_wait_expires_without_background_write(tmp_path):
+    library(tmp_path, [1])
+    clock = [0.0]
+    app = traced_app(tmp_path, clock=lambda: clock[0], wall_clock=lambda: 1800000000 + clock[0])
+    with TestClient(app, headers=HEADERS) as client:
+        async def hold():
+            await app.state.host.execution._actions.acquire()
+        client.portal.call(hold)
+        try:
+            def schedule():
+                store = app.state.host.require_store()
+                app.state.host.execution.reader_advance = None
+                with store.db:
+                    store.db.execute('UPDATE youtube_access SET blocked_until=%s WHERE id=1', (1800000010,))
+            client.portal.call(schedule)
+            first = client.get('/api/v3/status/details')
+            assert first.status_code == 200 and first.json()['youtube']['admission'] == 'paused'
+            assert client.get('/api/v3/status/details', headers={'If-None-Match':first.headers['ETag']}).status_code == 304
+            clock[0] = 11.0
+            after = client.get('/api/v3/status/details', headers={'If-None-Match':first.headers['ETag']})
+            assert after.status_code == 200 and after.json()['youtube']['admission'] != 'paused'
+        finally:
+            client.portal.call(app.state.host.execution._actions.release)
+
+
+def test_status_etag_tracks_youtube_admission_without_status_trigger(tmp_path):
+    app=traced_app(tmp_path,clock=lambda:0,wall_clock=lambda:1800000000)
+    with TestClient(app,headers=HEADERS) as client:
+        first=client.get('/api/v3/status/details')
+        client.portal.call(lambda: app.state.host.require_store().youtube.start(1800000000))
+        changed=client.get('/api/v3/status/details',headers={'If-None-Match':first.headers['ETag']})
+        assert changed.status_code==200 and changed.json()['youtube']['admission']=='waiting'
+
+
+def test_status_etag_expires_finished_problem_without_background_write(tmp_path):
+    from tests.support.codex import CodexService, configure_codex
+    wall = [1800000000.0]
+    app = traced_app(tmp_path, codex_client=CodexService(), wall_clock=lambda: wall[0])
+    with TestClient(app, headers=HEADERS) as client:
+        assert client.patch('/api/v3/settings/oko/global', json={'theses':True}).status_code == 200
+        assert client.get('/api/v3/status/details').json()['problems']['current']
+        configure_codex(client)
+        finished = client.get('/api/v3/status/details')
+        assert finished.json()['problems']['recent']
+        async def hold():
+            await app.state.host.execution._actions.acquire()
+        client.portal.call(hold)
+        try:
+            client.portal.call(lambda: setattr(app.state.host.execution, 'reader_advance', None))
+            stable = client.get('/api/v3/status/details')
+            assert client.get('/api/v3/status/details', headers={'If-None-Match':stable.headers['ETag']}).status_code == 304
+            wall[0] += 86400
+            expired = client.get('/api/v3/status/details', headers={'If-None-Match':stable.headers['ETag']})
+            assert expired.status_code == 200 and expired.json()['problems']['recent'] == []
+        finally:
+            client.portal.call(app.state.host.execution._actions.release)

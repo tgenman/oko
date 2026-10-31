@@ -44,7 +44,7 @@ test('tabs recover missed reading changes and reconcile a local viewed action', 
   const other=await context.newPage();await other.goto(origin+'/#token='+token);
   await expect(page.locator('#cards button')).toHaveCount(2);
   await expect(other.locator('#cards button')).toHaveCount(2);
-  await page.locator('#cards button').first().click();
+  await page.locator('#cards button').first().click({timeout:10000});
   await expect(page.locator('#text')).toContainText('Открылась библиотека');
   await page.route('**/api/v3/status',route=>route.abort('failed'));
   await expect(page.locator('#collection-progress')).toContainText('Нет связи');

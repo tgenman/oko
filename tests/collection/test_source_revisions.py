@@ -66,7 +66,7 @@ def test_confirmed_remote_deletion_keeps_local_copy_but_absence_is_not_deletion(
         from tests.support.storage import database
         def article_deleted():
             with database(tmp_path) as db:
-                return db.execute('SELECT 1 FROM source_deleted d JOIN publication_links l ON l . target_publication_id = d . item WHERE l . source_publication_id = %s',(item,)).fetchone()
+                return db.execute('SELECT 1 FROM publications d JOIN publication_links l ON l.target_publication_id=d.id WHERE d.source_deleted AND l.source_publication_id=%s',(item,)).fetchone()
         wait_for(client,article_deleted)
         retained=client.get('/api/v3/publication/'+item).json()
         assert retained['text'].endswith('Локальная копия')

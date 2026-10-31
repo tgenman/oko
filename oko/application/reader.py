@@ -199,10 +199,10 @@ class ReaderApplication:
                 return self.commands.report(identity, context, result)
 
 
-    async def abandon_problem(self, identity: str) -> None:
+    async def abandon_problem(self, identity: str, validate_context: Callable[[Any,str,Any],bool] | None = None) -> None:
         async with self._actions:
             with transaction(self.require_store().db):
-                self.commands.abandon(identity)
+                self.commands.abandon(identity,validate_context)
 
 
     async def collect(self, feed: str | None = None, *, folder: str | None = None) -> None:
@@ -237,7 +237,11 @@ class ReaderApplication:
 
 
     def youtube_status(self) -> dict[str, Any]:
-        return self.connections.youtube_status(self._wall_clock())
+        result=self.connections.youtube_status(self._wall_clock())
+        from oko.storage.problems import _readable_timestamp
+        if not _readable_timestamp(result['next_at']):
+            result=dict(result,next_at=None,time_unknown=True)
+        return result
 
 
     async def configure_youtube(self, body: Any) -> dict[str, Any]:
@@ -452,12 +456,10 @@ class ReaderApplication:
                 current = self.require_store()
                 with transaction(current.db):
                     change = self.subscriptions.update_settings(scope, owner, body)
-                    if change.changed:
-                        self.jobs.invalidate(change.affected)
                     current.fault('settings_after_jobs')
                 self._interval_changed(change.interval)
                 if change.changed:
-                    await self.jobs.cancel(change.affected, invalidate=False)
+                    await self.jobs.cancel_stale_ai()
                 return change.value
             except LookupError as error:
                 record_caught('runtime.update_settings')
@@ -471,10 +473,8 @@ class ReaderApplication:
         async with self._actions:
             with transaction(self.require_store().db):
                 changed = self.connections.configure_processor(config)
-                if changed:
-                    self.jobs.invalidate()
             if changed:
-                await self.jobs.cancel(invalidate=False)
+                await self.jobs.cancel_stale_ai()
 
 
     async def check_processor(self) -> dict[str, Any]:

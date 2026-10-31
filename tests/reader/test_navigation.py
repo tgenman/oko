@@ -74,3 +74,39 @@ def test_new_arrival_makes_completed_feed_unviewed_again(tmp_path):
         client.post('/api/v3/collect')
         wait_for(client,lambda: client.get('/api/v3/reading-composition').json()['feeds'][0]['has_unviewed'])
         assert client.get('/api/v3/subscriptions').json()['feeds'][0]['id'] == feed
+
+
+def test_navigation_counts_are_consistent_during_concurrent_membership_change(tmp_path, postgres_url):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    import psycopg
+    from tests.support.worker_library import worker_library
+
+    store, item, _, _ = worker_library(tmp_path, database_url=postgres_url)
+    store.set_work_enabled(False)
+    store.db.close()
+    app = create_app(tmp_path, token='test', api_only=True, database_url=postgres_url)
+    with TestClient(app, headers=HEADERS) as client, psycopg.connect(postgres_url) as writer:
+        initial = client.get('/api/v3/navigation')
+        assert initial.status_code == 200, initial.text
+        assert initial.json()['total'] == 1
+        entered, release = threading.Event(), threading.Event()
+        def trace(query):
+            if 'SELECT m.feed_id AS feed' in query and not entered.is_set():
+                entered.set()
+                assert release.wait(5)
+        client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(trace))
+        try:
+            with ThreadPoolExecutor() as pool:
+                pending = pool.submit(client.get, '/api/v3/navigation')
+                assert entered.wait(5)
+                writer.execute('DELETE FROM feed_publications WHERE publication_id=%s', (item,))
+                writer.commit()
+                release.set()
+                result = pending.result(5)
+            assert result.status_code == 200, result.text
+            assert result.json() == initial.json()
+        finally:
+            release.set()
+            client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))
+        assert client.get('/api/v3/navigation').json()['total'] == 0

@@ -8,6 +8,8 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import wraps
 from copy import deepcopy
+from datetime import datetime,timezone
+import math
 import json
 from pathlib import Path
 from typing import Any, ParamSpec, TypeVar, cast
@@ -78,10 +80,15 @@ def stable_reader_time(offset: float, now: float, wall: float) -> Iterator[None]
 
 
 def retry_time(deadline: float, now: float, wall: float) -> float | None:
+    if not math.isfinite(deadline):return None
     stable = _clock.get()
     if stable is not None:
-        return stable[0] + deadline if deadline > stable[1] else None
-    return wall + max(0, deadline - now)
+        value=stable[0]+deadline if deadline>stable[1] else None
+    else:value=wall+max(0,deadline-now)
+    if value is None or not math.isfinite(value):return None
+    try:datetime.fromtimestamp(value,timezone.utc)
+    except (ValueError,OverflowError,OSError):return None
+    return value
 
 
 def reader_now(fallback: float) -> float:

@@ -39,7 +39,7 @@ def coordinated_transport(calls):
 
 def stored(root,item):
     with database(root) as db:
-        row=dict(db.execute('SELECT * FROM items WHERE id = %s',(item,)).fetchone())
+        row=dict(db.execute('SELECT * FROM publications WHERE id = %s',(item,)).fetchone())
     for key in ('content','filtered_content','summarized_content','processing_metadata'):
         row[key]=json.loads(row[key])
     return row
@@ -431,7 +431,7 @@ def test_failed_regeneration_retains_only_current_results_across_restart(tmp_pat
         assert client.get('/api/v3/publication/'+item).json()['theses']['result'] is None
 
 
-def test_feed_rules_are_saved_and_disabled_stages_are_skipped(tmp_path):
+def test_disabling_stages_preserves_results_and_reenable_reuses_them(tmp_path):
     root=publication_root(tmp_path)
     calls=[]
     source=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'Useful text')])) )
@@ -439,26 +439,21 @@ def test_feed_rules_are_saved_and_disabled_stages_are_skipped(tmp_path):
         setup(client)
         card=wait_for(client,lambda:next((c for c in read_publications_for_cards(client, '/api/v3/cards') if c['theses']['result']),None))
         item,feed=card['id'],card['feed_id']
-        client.patch('/api/v3/settings/feed/'+feed,json={'theses':False,'prompt_filters':''})
-        assert client.get('/api/v3/publication/'+item).json()['theses']['result'] is None
-        row=wait_for(client,lambda:r if (r:=stored(root,item))['status']=='ready' and r['filtered_content']=={} and r['summarized_content']=={} else None)
-        assert row['status']=='ready' and row['filtered_content']=={} and row['summarized_content']=={}
+        accepted=stored(root,item)
         count=len(calls)
-        client.patch('/api/v3/settings/feed/'+feed,json={'prompt_filters':'Убери рекламу.','theses':True})
-        wait_for(client,lambda:client.get('/api/v3/publication/'+item).json()['theses']['result'])
-        assert [c['operation'] for c in calls[count:]]==['filter','theses']
-        client.patch('/api/v3/settings/feed/'+feed,json={'theses':False,'prompt_filters':''})
-        count=len(calls)
-        client.patch('/api/v3/settings/feed/'+feed,json={'prompt_filters':'Only filtering'})
-        wait_for(client,lambda:any(card['id']==item and card['filter']['state']=='ready'
-                                   for card in read_publications_for_cards(client, '/api/v3/cards')))
-        assert [c['operation'] for c in calls[count:]]==['filter']
-        assert stored(root,item)['summarized_content']=={}
-        count=len(calls)
-        client.patch('/api/v3/settings/feed/'+feed,json={'prompt_filters':'','theses':True})
-        wait_for(client,lambda:client.get('/api/v3/publication/'+item).json()['theses']['result'])
-        assert [c['operation'] for c in calls[count:]]==['theses']
-        assert stored(root,item)['filtered_content']=={}
+        response=client.patch('/api/v3/settings/feed/'+feed,json={'filter_enabled':False,'theses':False})
+        assert response.status_code==200, response.text
+        disabled=client.get('/api/v3/publication/'+item).json()
+        assert disabled['filter']['result'] is not None
+        assert disabled['theses']['result']==card['theses']['result']
+        row=stored(root,item)
+        assert row['filtered_content']==accepted['filtered_content']
+        assert row['summarized_content']==accepted['summarized_content']
+        response=client.patch('/api/v3/settings/feed/'+feed,json={'filter_enabled':True,'theses':True})
+        assert response.status_code==200, response.text
+        assert client.get('/api/v3/publication/'+item).json()['theses']['result']==card['theses']['result']
+        time.sleep(.2)
+        assert len(calls)==count
 
 
 def test_codex_future_choices_preserve_results_and_explicit_regeneration_uses_new_choice(tmp_path):
@@ -504,10 +499,9 @@ def test_persisted_empty_job_completes_without_a_model_after_restart(tmp_path):
         item=settled(client)[0]['id']
         wait_for(client,lambda:stored(root,item)['status']=='ready')
     with database(root) as db:
-        db.execute("UPDATE items SET filtered_content = '{}' , summarized_content = '{}' , processing_metadata = '{}' , status = 'pending_filtering' WHERE id = %s",(item,))
+        db.execute("UPDATE publications SET filtered_content = '{}' , summarized_content = '{}' , processing_metadata = '{}' , status = 'pending_filtering' WHERE id = %s",(item,))
         db.execute("UPDATE jobs SET status = 'pending' , generation = generation + 1 WHERE kind = 'filter' AND item = %s",(item,))
         db.execute("DELETE FROM jobs WHERE kind = 'theses' AND item = %s",(item,))
-        db.execute('DELETE FROM thesis_inputs WHERE item = %s',(item,))
     with TestClient(create_app(root,**options),headers=HEADERS) as client:
         row=wait_for(client,lambda:row if (row:=stored(root,item))['status']=='ready' else None)
         assert row['processing_metadata']['filter']['reason']=='no_input'

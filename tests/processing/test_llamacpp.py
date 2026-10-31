@@ -26,7 +26,7 @@ def test_invalid_model_response_is_a_safe_processing_error(reply, label):
         return httpx.Response(200, json=reply)
     processor = LlamaCpp(ProcessorConfig(endpoint='http://127.0.0.1:8080', model='local:latest'), httpx.MockTransport(respond))
     request = ProcessingRequest(sources=(InputSource(id='post', version='1', url='https://source.test/post', title='Post', text='Source text'),),
-                                settings_version=1, prompt='Тезисы', processor='llamacpp', generation=1)
+                                prompt='Тезисы', processor='llamacpp', generation=1)
     with pytest.raises(ProcessingError) as failure:
         asyncio.run(processor.generate(request))
     assert str(failure.value) == label
@@ -39,7 +39,7 @@ def test_valid_model_response_returns_attributed_theses():
     calls = []
     processor = LlamaCpp(ProcessorConfig(endpoint='http://127.0.0.1:8080', model='local:latest'), model_transport(calls))
     request = ProcessingRequest(sources=(InputSource(id='post', version='1', url='https://source.test/post', title='Post', text='Source text'),),
-                                settings_version=1, prompt='Тезисы', processor='llamacpp', generation=1)
+                                prompt='Тезисы', processor='llamacpp', generation=1)
     result = asyncio.run(processor.generate(request))
     assert result.points[0].sources[0].id == 'post'
     assert result.points[0].sources[0].url == 'https://source.test/post'

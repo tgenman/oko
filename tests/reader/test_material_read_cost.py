@@ -95,7 +95,7 @@ def source_library(root, kind, complete):
             ('telegram' if telegram else kind,'telegram' if telegram else kind,
              'synthetic-account' if kind=='telegram-legacy' else None,123 if kind=='telegram-legacy' else None,feeds[0]))
         store.db.execute("UPDATE feeds SET connection = 'connected' WHERE id = %s",(feeds[0],))
-        store.db.execute('UPDATE items SET complete = %s WHERE id = %s',(int(complete),items[0]))
+        store.db.execute('UPDATE publications SET complete = %s WHERE id = %s',(int(complete),items[0]))
         binding={'kind':'web','username':'synthetic_channel','preview_url':'https://t.me/s/synthetic_channel'} if kind=='telegram-web' else {'kind':'client','role':'personal','account_user_id':'123','peer_id':'456'} if kind=='telegram-client' else None
         if binding:store.db.execute('INSERT INTO telegram_bindings VALUES ( %s , %s )',(feeds[0],json.dumps(binding)))
     store.db.close()

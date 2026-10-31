@@ -14,7 +14,7 @@ from oko.reader.wire import WireModel, boolean_constant, integer_constant
 class AI(WireModel):
     model_config = ConfigDict(extra='forbid')
     error: StrictStr | None = Field(..., title='Error')
-    status: Literal['pending', 'running', 'done', 'cancelled'] = Field(..., title='Status')
+    status: Literal['off', 'pending', 'running', 'done', 'cancelled'] = Field(..., title='Status')
 
 class Attachment(WireModel):
     model_config = ConfigDict(extra='forbid')
@@ -102,6 +102,7 @@ class EffectiveValues(WireModel):
     feed_refresh_minutes: FeedRefreshMinutes | MISSING = MISSING
     processor: Processor
     prompt_filters: PromptFilters
+    filter_enabled: Theses
     prompt_theses: PromptTheses
     theses: Theses
 
@@ -187,6 +188,7 @@ class SettingOverrides(WireModel):
     originals: StrictBool | MISSING = MISSING
     processor: StrictStr | MISSING = MISSING
     prompt_filters: StrictStr | MISSING = MISSING
+    filter_enabled: StrictBool | MISSING = MISSING
     prompt_theses: StrictStr | MISSING = MISSING
     theses: StrictBool | MISSING = MISSING
 
@@ -243,10 +245,11 @@ class YouTube(WireModel):
     has_password: StrictBool = Field(..., title='Has Password')
     has_username: StrictBool = Field(..., title='Has Username')
     mode: Literal['direct', 'proxy'] = Field(..., title='Mode')
-    next_at: StrictFloat = Field(..., title='Next At')
+    next_at: StrictFloat | None = Field(..., title='Next At')
+    time_unknown: StrictBool = False
     paused: StrictBool = Field(..., title='Paused')
     reason: StrictStr = Field(..., title='Reason')
-    strikes: StrictInt = Field(..., title='Strikes')
+    strikes: StrictInt | None = Field(..., title='Strikes')
 
 class CodexState(WireModel):
     model_config = ConfigDict(extra='forbid')
@@ -300,7 +303,7 @@ class Problem(WireModel):
     model_config = ConfigDict(extra='ignore')
     code: StrictStr = Field(..., title='Code')
     consequence: StrictStr = Field(..., title='Consequence')
-    created_at: StrictFloat = Field(..., title='Created At')
+    created_at: StrictFloat | None = Field(..., title='Created At')
     finished_at: StrictFloat | None = Field(..., title='Finished At')
     id: StrictStr = Field(..., title='Id')
     next_at: StrictFloat | None = Field(..., title='Next At')

@@ -50,7 +50,7 @@ def test_restart_does_not_rewrite_identical_materials(postgres_url, tmp_path):
           BEGIN IF NEW IS NOT DISTINCT FROM OLD THEN
             RAISE EXCEPTION 'synthetic unchanged material write';
           END IF; RETURN NEW; END $$""")
-        db.execute('CREATE TRIGGER reject_unchanged_material BEFORE UPDATE ON items FOR EACH ROW EXECUTE FUNCTION reject_unchanged_material()')
+        db.execute('CREATE TRIGGER reject_unchanged_material BEFORE UPDATE ON publications FOR EACH ROW EXECUTE FUNCTION reject_unchanged_material()')
     requests = []
     def response(request):
         requests.append(request.url.path)
@@ -80,7 +80,7 @@ def test_recovery_reuses_material_reads_within_each_read_phase(postgres_url, tmp
     original_execute = psycopg.Connection.execute
     reads = []
     def execute(connection, query, parameters=None, **kwargs):
-        if (isinstance(query, str) and re.search(r'^SELECT\s+\*\s+FROM\s+items(?:_read)?\s+WHERE\s+id\s*=', query, re.IGNORECASE)
+        if (isinstance(query, str) and (re.search(r'^SELECT\s+\*\s+FROM\s+items(?:_read)?\s+WHERE\s+id\s*=', query, re.IGNORECASE) or re.search(r'^SELECT\s+i\.\*,[\s\S]+?\sFROM\s+publications\s+i\s+WHERE\s+i\.id\s*=', query, re.IGNORECASE))
                 and parameters and parameters[0] == item):
             reads.append(query)
         return original_execute(connection, query, parameters, **kwargs)
@@ -97,3 +97,14 @@ def test_recovery_reuses_material_reads_within_each_read_phase(postgres_url, tmp
         wait_for(client, lambda: bool(requests))
         assert reads, 'The database observer must see the material reads'
         assert len(reads) <= 12, f'{len(reads)} repeated point reads for one recovered material'
+
+
+def test_startup_recovery_keyset_uses_unviewed_id_index(postgres_url):
+    import psycopg
+    with psycopg.connect(postgres_url, autocommit=True) as db:
+        db.execute("INSERT INTO publications(id,viewed) SELECT 'archive-' || lpad(n::text,6,'0'),1 FROM generate_series(1,20000) n")
+        db.execute("INSERT INTO publications(id,viewed) SELECT 'live-' || lpad(n::text,6,'0'),0 FROM generate_series(1,400) n")
+        db.execute('ANALYZE publications')
+        plan = '\n'.join(row[0] for row in db.execute("EXPLAIN SELECT id FROM publications WHERE viewed=0 AND id>'live-000200' ORDER BY id LIMIT 1"))
+        assert 'items_unviewed_id' in plan, plan
+        assert db.execute("SELECT id FROM publications WHERE viewed=0 AND id>'live-000200' ORDER BY id LIMIT 1").fetchone() == ('live-000201',)

@@ -107,7 +107,8 @@ def test_storage_precondition_rejects_other_library_and_etag_tracks_identity(tmp
         replacement=str(uuid4())
         def replace_identity():
             store=app.state.host.require_store()
-            with store.db:store.db.execute('UPDATE reader_identity SET value=%s WHERE id=1',(replacement,))
+            import json
+            with store.db:store.db.execute("UPDATE state SET value=%s WHERE key='storage-id'",(json.dumps(replacement),))
             store.read_versions.identity=replacement
         client.portal.call(replace_identity)
         changed=client.get('/api/v3/publication/'+items[0],headers={'X-Oko-Storage-Id':storage,'If-None-Match':old.headers['ETag']})
@@ -116,3 +117,57 @@ def test_storage_precondition_rejects_other_library_and_etag_tracks_identity(tmp
         assert fresh.status_code==200 and fresh.headers['ETag']!=old.headers['ETag']
         assert client.get('/api/v3/publication/'+items[0],headers={'X-Oko-Storage-Id':replacement}).status_code==200
         assert client.get('/api/v3/publication/unknown',headers={'X-Oko-Storage-Id':storage}).status_code==409
+
+
+def test_open_publication_keeps_parent_and_linked_article_in_one_snapshot(tmp_path, postgres_url):
+    import json
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    import psycopg
+    from tests.support.worker_library import worker_library
+
+    store, parent, _, _ = worker_library(tmp_path, text='Parent before', database_url=postgres_url)
+    try:
+        store.set_work_enabled(False)
+        with store.db:
+            row = dict(store.db.execute('SELECT * FROM publications WHERE id = %s', (parent,)).fetchone())
+            row.pop('source_deleted')  # New synthetic publications start as present.
+            child_content = json.loads(row['content'])
+            child_content['blocks'][0]['text'] = 'Child before'
+            child = dict(row, id='snapshot-child', source_id='snapshot-child', external_id='snapshot-child',
+                         platform='other_web', content=json.dumps(child_content))
+            fields = list(child)
+            marks = ['%s::integer::boolean' if isinstance(child[field], bool) else '%s' for field in fields]
+            store.db.execute('INSERT INTO publications('+','.join(fields)+') VALUES ('+','.join(marks)+')', [child[f] for f in fields])
+            store.db.execute('INSERT INTO publication_links VALUES (%s,%s)', (parent, 'snapshot-child'))
+    finally:
+        store.db.close()
+    app = traced_app(tmp_path, database_url=postgres_url)
+    with TestClient(app, headers=HEADERS) as client, psycopg.connect(postgres_url) as writer:
+        path = '/api/v3/publication/' + parent
+        initial = client.get(path)
+        assert initial.status_code == 200, initial.text
+        old = initial.json()['text']
+        assert 'Parent before' in old and 'Child before' in old
+        entered, release = threading.Event(), threading.Event()
+        def trace(query):
+            if 'SELECT l . source_publication_id AS reader_source' in query and not entered.is_set():
+                entered.set()
+                assert release.wait(5)
+        client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(trace))
+        try:
+            with ThreadPoolExecutor() as pool:
+                pending = pool.submit(client.get, path)
+                assert entered.wait(5)
+                for identity, text in ((parent, 'Parent after'), ('snapshot-child', 'Child after')):
+                    writer.execute("UPDATE publications SET content=jsonb_set(content::jsonb,'{blocks,0,text}',to_jsonb(%s::text))::text WHERE id=%s", (text, identity))
+                writer.commit()
+                release.set()
+                result = pending.result(5)
+            assert result.status_code == 200, result.text
+            assert result.json()['text'] == old
+        finally:
+            release.set()
+            client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))
+        updated = client.get(path).json()['text']
+        assert 'Parent after' in updated and 'Child after' in updated

@@ -21,11 +21,11 @@ class SummaryResults:
 
     def request(self,item: str) -> tuple[ProcessingRequest,str,bool] | None:
         signature=self.signature(item)
-        row=self.store.db.execute('SELECT signature FROM thesis_inputs WHERE item = %s',(item,)).fetchone()
+        row=self.store.db.execute("SELECT input_snapshot->>'signature' FROM jobs WHERE kind='theses' AND item=%s",(item,)).fetchone()
         if not signature or not row or row[0]!=signature:
             return None
-        values,public_ai,version=publication_input.request_settings(self.store,item)
-        request=ProcessingRequest(sources=publication_input.sources(self.store,item,'theses'),settings_version=version,
+        values,public_ai=publication_input.request_settings(self.store,item)
+        request=ProcessingRequest(sources=publication_input.sources(self.store,item,'theses'),
             prompt=values['prompt_theses']['value'],processor=values['processor']['value'],generation=0)
         return request,signature,public_ai
 
@@ -35,13 +35,17 @@ class SummaryResults:
         if not self.signature(item):
             return None
         job=material_read.jobs(self.store.db,item).get('theses')
-        return dict(status=job['status'],error=job['error']) if job else dict(status='pending',error=None)
+        if not publication_input.stage_enabled(self.store, item, 'theses') and (not job or job['status'] != 'running'):
+            if job and job['error']:
+                return dict(status='off', error=job['error'])
+            return dict(status='done', error=None) if self.read(item) is not None else None
+        return dict(status='pending' if job['status']=='blocked' else job['status'],error=job['error']) if job else dict(status='pending',error=None)
 
     @reading_value
     def read(self,item: str) -> dict[str,Any] | None:
         row=material_read.item(self.store.db,item)
         metadata=json.loads(row['processing_metadata']).get('summary',{}) if row else {}
-        if not metadata or metadata.get('signature')!=self.signature(item):
+        if not metadata or metadata.get('signature')!=self.signature(item) or metadata.get('source_url_stale') or metadata.get('source_title_stale'):
             return None
         assert row is not None
         result=json.loads(row['summarized_content'])

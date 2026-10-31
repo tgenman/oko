@@ -22,6 +22,34 @@ def accept_material(store,service,item,material):
         store.jobs.apply_collection(effects)
 
 
+def test_retry_does_not_overwrite_a_file_left_by_an_uncommitted_download(tmp_path):
+    store,item,execution,tasks=worker_library(tmp_path)
+    try:
+        service=CollectionService(execution.require_store)
+        source=StructuredSource(None)
+        accept_material(store,service,item,image_material(source,store,item))
+        job=store.jobs.next_job(store.clock(),feeds=['demo'],media_only=True)
+        first=store.media.begin(job.item,'first',False)
+        first.temporary.write_bytes(b'abandoned')
+        store.media.stage(job.item,first,replace(first.media,size_bytes=9))
+        store.media.release(first)
+
+        retry=store.media.begin(job.item,'retry',False)
+        retry.temporary.write_bytes(b'new bytes')
+        actual=replace(retry.media,size_bytes=9)
+        staged=store.media.stage(job.item,retry,actual)
+        with store.jobs.transaction(lambda:True):
+            store.media.accept(job.item,retry,actual,staged)
+            store.jobs.finish(job)
+        store.media.release(retry)
+
+        assert first.final.read_bytes()==b'abandoned'
+        saved_file=store.media.file(item,job.item)
+        assert saved_file is not None and saved_file[0].read_bytes()==b'new bytes'
+    finally:
+        store.db.close()
+
+
 @pytest.mark.parametrize('failed',[False,True])
 def test_old_download_success_or_error_cannot_replace_a_refreshed_locator(tmp_path,failed):
     async def scenario():
@@ -173,4 +201,219 @@ def test_two_workers_ready_to_write_commit_sequentially_on_one_connection(tmp_pa
         assert store.db.execute('SELECT status FROM media_files').fetchone()[0]=='ready'
         assert store.db.execute("SELECT count(*) FROM jobs WHERE kind IN ('filter','download_media') AND status='done'").fetchone()[0]==2
         store.db.close()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('kind', ['absolute', 'parent', 'symlink', 'internal'])
+def test_media_key_cannot_read_outside_library(tmp_path, kind):
+    store,item,execution,tasks=worker_library(tmp_path/'library')
+    try:
+        service=CollectionService(execution.require_store)
+        source=StructuredSource(None)
+        accept_material(store,service,item,image_material(source,store,item))
+        job=store.jobs.next_job(store.clock(),feeds=['demo'],media_only=True)
+        external=tmp_path/'outside.txt'
+        external.write_text('private')
+        if kind == 'absolute':
+            key = str(external)
+        elif kind == 'parent':
+            key = '../outside.txt'
+        elif kind == 'symlink':
+            (store.root/'media'/'escape').symlink_to(tmp_path, target_is_directory=True)
+            key = 'media/escape/outside.txt'
+        else:
+            external = store.root/'private.txt'
+            external.write_text('private')
+            key = 'private.txt'
+        with store.jobs.transaction(lambda:True):
+            store.db.execute("UPDATE media_files SET status='ready',storage_key=%s WHERE id=%s", (key,job.item))
+        assert store.media.file(item,job.item) is None
+        assert external.read_text() == 'private'
+    finally:
+        store.db.close()
+
+
+def test_reader_http_does_not_serve_a_media_key_outside_the_library(tmp_path):
+    from tests.support.app import create_app
+    from tests.support.reader import HEADERS
+    from tests.support.v3 import TestClient
+    root = tmp_path/'library'
+    store,item,execution,tasks=worker_library(root)
+    try:
+        service=CollectionService(execution.require_store)
+        source=StructuredSource(None)
+        accept_material(store,service,item,image_material(source,store,item))
+        job=store.jobs.next_job(store.clock(),feeds=['demo'],media_only=True)
+        secret=tmp_path/'outside.txt'
+        secret.write_text('private')
+        with store.jobs.transaction(lambda:True):
+            store.db.execute("UPDATE media_files SET status='ready',storage_key=%s WHERE id=%s", (str(secret),job.item))
+    finally:
+        store.db.close()
+    with TestClient(create_app(root,token='test',api_only=True),headers=HEADERS) as client:
+        response=client.get('/api/v3/materials/'+item+'/media/'+job.item)
+        assert response.status_code == 404
+        assert 'private' not in response.text
+        assert client.get('/api/v3/publication/'+item).status_code == 200
+
+
+def test_failed_media_attempt_and_diagnostic_roll_back_together(tmp_path, monkeypatch):
+    class Failing(StructuredSource):
+        def publication_adapter(self):
+            class Provider:
+                async def download_media(self,publication,media,output):
+                    raise AdapterException(AdapterIssue('synthetic-failure','Synthetic failure',AdapterErrorKind.temporary))
+            return Provider()
+    store,item,execution,tasks=worker_library(tmp_path)
+    try:
+        source=Failing(None)
+        worker=collection_worker(tmp_path,store,source)
+        accept_material(store,worker.service,item,image_material(source,store,item))
+        job=store.jobs.next_job(store.clock(),feeds=['demo'],media_only=True)
+        def fail_diagnostic(*args, **kwargs):
+            raise RuntimeError('diagnostic failure')
+        monkeypatch.setattr(worker,'_finish_collection',fail_diagnostic)
+        with pytest.raises(RuntimeError, match='diagnostic failure'):
+            asyncio.run(worker._execute(job))
+        row=store.db.execute('SELECT status,error FROM jobs WHERE id=%s',(job.id,)).fetchone()
+        assert row[:] == ('running',None)
+        media=store.db.execute('SELECT status,reason FROM media_files WHERE id=%s',(job.item,)).fetchone()
+        assert media[:] == ('pending_download','')
+    finally:
+        store.db.close()
+
+
+def test_caption_slot_remains_occupied_until_result_is_committed(tmp_path):
+    from oko.collection.youtube.access import CaptionsDeferred
+    from oko.storage.job_types import Job
+    from oko.workers.collection import CaptionAttempt
+    async def scenario():
+        store,item,execution,tasks=worker_library(tmp_path)
+        try:
+            calls=[]
+            class Captions:
+                async def fetch(self,video):
+                    calls.append(video)
+                    return 'Synthetic captions'
+            worker=collection_worker(tmp_path,store,StructuredSource(None))
+            clock=[1800000000.0]
+            worker._wall_clock=lambda:clock[0]
+            worker._clock=lambda:clock[0]
+            store.wall_clock=lambda:clock[0]
+            worker._youtube_captions=Captions()
+            with store.db:
+                for identity in ('caption-one','caption-two'):
+                    store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES (%s,%s,%s,'synthetic','caption.txt','pending_download')",(identity,item,identity))
+                    store.db.execute("INSERT INTO jobs(kind,item,status) VALUES ('download_media',%s,'running')",(identity,))
+            def job(identity):
+                row=store.db.execute("SELECT id,kind,item,generation FROM jobs WHERE kind='download_media' AND item=%s",(identity,)).fetchone()
+                return Job(row['id'],row['kind'],row['item'],row['generation'])
+            first=CaptionAttempt(worker,store,job('caption-one'))
+            second=CaptionAttempt(worker,store,job('caption-two'))
+            assert await first.fetch('first')=='Synthetic captions'
+            clock[0]+=11
+            with pytest.raises(CaptionsDeferred):
+                await second.fetch('second')
+            assert calls==['first']
+        finally:
+            store.db.close()
+    asyncio.run(scenario())
+
+
+def test_cancelled_caption_attempt_cannot_block_or_release_new_owner(tmp_path):
+    from oko.collection.youtube.access import CaptionsDeferred
+    from oko.storage.job_types import Job
+    from oko.workers.collection import CaptionAttempt
+    async def scenario():
+        store,item,execution,tasks=worker_library(tmp_path)
+        try:
+            calls=[]
+            class Captions:
+                async def fetch(self,video):
+                    calls.append(video)
+                    return 'Synthetic captions'
+            worker=collection_worker(tmp_path,store,StructuredSource(None))
+            clock=[1800000000.0]
+            worker._wall_clock=lambda:clock[0]
+            worker._clock=lambda:clock[0]
+            store.wall_clock=lambda:clock[0]
+            worker._youtube_captions=Captions()
+            with store.db:
+                for identity in ('caption-one','caption-two','caption-three'):
+                    store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES (%s,%s,%s,'synthetic','caption.txt','pending_download')",(identity,item,identity))
+                    store.db.execute("INSERT INTO jobs(kind,item,status) VALUES ('download_media',%s,'running')",(identity,))
+            def job(identity):
+                row=store.db.execute("SELECT id,kind,item,generation FROM jobs WHERE kind='download_media' AND item=%s",(identity,)).fetchone()
+                return Job(row['id'],row['kind'],row['item'],row['generation'])
+            old_job=job('caption-one')
+            old=CaptionAttempt(worker,store,old_job)
+            assert await old.fetch('old')=='Synthetic captions'
+            with store.jobs.transaction(lambda:True):
+                store.jobs.cancel(old_job)
+            clock[0]+=11
+            new=CaptionAttempt(worker,store,job('caption-two'))
+            assert await new.fetch('new')=='Synthetic captions'
+            old.release()
+            clock[0]+=11
+            third=CaptionAttempt(worker,store,job('caption-three'))
+            with pytest.raises(CaptionsDeferred):
+                await third.fetch('third')
+            assert calls==['old','new']
+            new.release()
+        finally:
+            store.db.close()
+    asyncio.run(scenario())
+
+
+def test_cancelled_caption_network_call_keeps_slot_until_it_returns(tmp_path):
+    from oko.collection.youtube.access import CaptionsDeferred
+    from oko.storage.job_types import Job
+    from oko.workers.collection import CaptionAttempt
+    async def scenario():
+        store,item,execution,tasks=worker_library(tmp_path)
+        release=asyncio.Event()
+        old_task=None
+        try:
+            entered=asyncio.Event()
+            calls=[]
+            class Captions:
+                async def fetch(self,video):
+                    calls.append(video)
+                    if video=='old':
+                        entered.set()
+                        await release.wait()
+                    return 'Synthetic captions'
+            worker=collection_worker(tmp_path,store,StructuredSource(None))
+            clock=[1800000000.0]
+            worker._wall_clock=lambda:clock[0]
+            worker._clock=lambda:clock[0]
+            store.wall_clock=lambda:clock[0]
+            worker._youtube_captions=Captions()
+            with store.db:
+                for identity in ('caption-one','caption-two'):
+                    store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES (%s,%s,%s,'synthetic','caption.txt','pending_download')",(identity,item,identity))
+                    store.db.execute("INSERT INTO jobs(kind,item,status) VALUES ('download_media',%s,'running')",(identity,))
+            def job(identity):
+                row=store.db.execute("SELECT id,kind,item,generation FROM jobs WHERE kind='download_media' AND item=%s",(identity,)).fetchone()
+                return Job(row['id'],row['kind'],row['item'],row['generation'])
+            old_job=job('caption-one')
+            old=CaptionAttempt(worker,store,old_job)
+            old_task=asyncio.create_task(old.fetch('old'))
+            await asyncio.wait_for(entered.wait(),2)
+            with store.jobs.transaction(lambda:True):
+                store.jobs.cancel(old_job)
+            clock[0]+=11
+            second=CaptionAttempt(worker,store,job('caption-two'))
+            with pytest.raises(CaptionsDeferred):
+                await second.fetch('new')
+            assert calls==['old']
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await old_task
+            old.release()
+        finally:
+            release.set()
+            if old_task is not None:
+                await asyncio.gather(old_task,return_exceptions=True)
+            store.db.close()
     asyncio.run(scenario())

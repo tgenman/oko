@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 from oko.storage.read_sync import ReadPlan
 from typing import Any
+from oko.storage.publication_owners import owner_expr
 from oko.storage.store import Store
 from oko.collection.sources import SourceSettings, TelegramAccess
 from oko.collection.telegram.contracts import ClientReadBinding
@@ -108,12 +109,12 @@ class CollectionState:
 
     def startup(self, injected: bool, source_feed: str) -> float:
         store=self.store
-        if injected and source_feed=='demo' or store.db.execute("SELECT 1 FROM unviewed_items_by_feed WHERE feed_id = 'demo' AND viewed = 0 LIMIT 1").fetchone():
-            store.subscriptions.ensure_demo()
+        if injected and source_feed=='demo' or store.db.execute("SELECT 1 FROM feed_publications m JOIN publications p ON p.id=m.publication_id WHERE m.feed_id = 'demo' AND m.is_primary AND m.is_unviewed AND p.viewed = 0 LIMIT 1").fetchone():
+            store.ensure_demo()
         if injected:store.subscriptions.check_owner('feed',source_feed)
         return store.subscriptions.feed_refresh_minutes()*60
 
     def publication_revision(self, item: str) -> str:
         from oko.storage.processing_input import digest
-        row=self.store.db.execute("SELECT i . platform , i . external_id , i . url , i . members , i . feed_id , f . adapter , coalesce ( oko_json_extract ( i . content , '$.extra._collection_revision' ) , oko_json_extract ( i . content , '$.extra._input_hash' ) ) FROM items_read i LEFT JOIN feeds f ON f . id = i . feed_id WHERE i . id = %s AND i . viewed = 0",(item,)).fetchone()
+        row=self.store.db.execute("SELECT i . platform , i . external_id , i . url , i . members , i . feed_id , f . adapter , coalesce ( i.content::jsonb#>>'{extra,_collection_revision}' , i.content::jsonb#>>'{extra,_input_hash}' ) FROM publications i LEFT JOIN feeds f ON f . id = i . feed_id WHERE i . id = %s AND i . viewed = 0".replace('i . feed_id', owner_expr('i')),(item,)).fetchone()
         return digest(list(row) if row else None)

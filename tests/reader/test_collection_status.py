@@ -1,7 +1,9 @@
 """Collection progress and original request diagnostics through the reader HTTP interface."""
+from oko.storage.publication_owners import owner_expr, owned_ids
 from tests.support.cards import read_all_cards
 import threading
 import asyncio
+import pytest
 from fastapi.testclient import TestClient
 from oko.collection.demo import DemoSource
 from tests.support.app import create_app
@@ -161,15 +163,15 @@ def test_collection_summary_batches_attempts_and_details_ignore_other_feeds(tmp_
         with store.db:
             jobs = store.db.execute("SELECT id,item,generation FROM jobs WHERE kind='fetch'").fetchall()
             for job in jobs:
-                feed = store.db.execute('SELECT feed_id FROM items_read WHERE id = %s', (job['item'],)).fetchone()[0]
+                feed = store.db.execute(f"SELECT {owner_expr('i')} AS feed_id FROM publications i WHERE i.id = %s", (job['item'],)).fetchone()[0]
                 error = dict(attempt_id=f"{job['id']}:{job['generation']}", operation_id='fetch:'+job['item'],
                              occurred_at='2026-01-01T00:00:00Z', error_type='SourceError', message='Synthetic failure',
                              traceback='Synthetic traceback\n' * 1000, source='server', message_truncated=False,
                              traceback_truncated=False, resolved=False, requests=[], request_count=0)
                 store.db.execute("UPDATE jobs SET status = 'failed' , error = 'Synthetic failure' WHERE id = %s", (job['id'],))
-                store.db.execute('INSERT INTO collection_attempts ( job , feed , data ) VALUES ( %s , %s , %s )',
-                    (job['id'], feed, json.dumps(dict(attempt_id=error['attempt_id'], started_at=1800000000.,
-                        finished_at=1800000001., elapsed_seconds=1., last_error=error))))
+                store.db.execute('UPDATE jobs SET feed_id=%s, collection_attempt=%s::jsonb WHERE id=%s',
+                    (feed, json.dumps(dict(attempt_id=error['attempt_id'], started_at=1800000000.,
+                        finished_at=1800000001., elapsed_seconds=1., last_error=error)), job['id']))
         store.db.close()
         app = traced_app(root)
         with TestClient(app, headers=HEADERS) as client, ReadingMeasurements(client, app, root) as measure:
@@ -229,9 +231,9 @@ def test_postgres_collection_details_are_bounded_and_keep_diagnostics(postgres_u
                              traceback='Synthetic traceback\n' * 1000, source='server', message_truncated=False,
                              traceback_truncated=False, resolved=False, requests=[], request_count=0)
                 store.db.execute("UPDATE jobs SET status = 'failed' , error = 'Synthetic failure' WHERE id = %s", (job['id'],))
-                store.db.execute('INSERT INTO collection_attempts ( job , feed , data ) VALUES ( %s , %s , %s )',
-                    (job['id'], feed, json.dumps(dict(attempt_id=error['attempt_id'], started_at=1800000000.,
-                        finished_at=1800000001., elapsed_seconds=1., last_error=error))))
+                store.db.execute('UPDATE jobs SET feed_id=%s, collection_attempt=%s::jsonb WHERE id=%s',
+                    (feed, json.dumps(dict(attempt_id=error['attempt_id'], started_at=1800000000.,
+                        finished_at=1800000001., elapsed_seconds=1., last_error=error)), job['id']))
         store.db.close()
         app = traced_app(tmp_path, database_url=postgres_url, **clock.options())
         with TestClient(app, headers=HEADERS) as client:
@@ -254,3 +256,36 @@ def test_postgres_collection_details_are_bounded_and_keep_diagnostics(postgres_u
     assert costs[-1][1] <= costs[0][1] + 2, costs
     assert costs[-1][2] < 150_000, costs
     assert costs[-1][3] <= costs[0][3] + 1000, costs
+
+
+@pytest.mark.parametrize('patch', [
+    {'importance':'high'},
+    {'public_ai':True},
+    {'new_folder':'Other'},
+    {'importance':'high', 'initial_days':'unchanged'},
+])
+def test_feed_rules_change_does_not_interrupt_collection(tmp_path, patch):
+    started, release = threading.Event(), threading.Event()
+    class SlowSource(DemoSource):
+        async def discover(self, cursor):
+            started.set()
+            while not release.is_set():
+                await asyncio.sleep(.01)
+            return await super().discover(cursor)
+    with TestClient(create_app(tmp_path, token='test', source=SlowSource(), api_only=True), headers=HEADERS) as client:
+        try:
+            presence(client, 'reader')
+            assert started.wait(3)
+            before = client.get('/api/v3/collection-status').json()['sources'][0]['operation']['attempt_id']
+            if patch.get('initial_days') == 'unchanged':
+                feed = next(f for f in client.get('/api/v3/subscriptions').json()['feeds'] if f['id']=='demo')
+                patch = dict(patch, initial_days=feed['initial_days'])
+            response = client.patch('/api/v3/feeds/demo', json=patch)
+            assert response.status_code == 200, response.text
+            state = client.get('/api/v3/collection-status').json()['sources'][0]
+            assert state['state'] == 'collecting'
+            assert state['operation']['attempt_id'] == before
+            release.set()
+            wait_for(client, lambda: client.get('/api/v3/collection-status').json()['sources'][0]['state'] == 'complete')
+        finally:
+            release.set()

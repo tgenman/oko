@@ -1,0 +1,6 @@
+DROP TRIGGER reader_v_reader_action_results_status_delete ON reader_action_results;
+DROP TRIGGER reader_v_reader_action_results_status_insert ON reader_action_results;
+DROP TRIGGER reader_v_reader_action_results_status_update ON reader_action_results;
+DROP FUNCTION oko_trigger_reader_v_reader_action_results_status_delete();
+DROP FUNCTION oko_trigger_reader_v_reader_action_results_status_insert();
+DROP FUNCTION oko_trigger_reader_v_reader_action_results_status_update();

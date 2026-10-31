@@ -13,7 +13,7 @@ HEADERS = {'Authorization': 'Bearer test-token'}
 
 def retained(root, identity):
     with database(root) as db:
-        return db.execute('SELECT 1 FROM items WHERE id = %s',(identity,)).fetchone() is not None
+        return db.execute('SELECT 1 FROM publications WHERE id = %s',(identity,)).fetchone() is not None
 
 
 

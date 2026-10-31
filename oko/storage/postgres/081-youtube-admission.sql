@@ -1,0 +1,16 @@
+ALTER TABLE reader_problems ADD COLUMN youtube_admission_due double precision;
+CREATE INDEX reader_youtube_admission_due ON reader_problems(youtube_admission_due,id COLLATE "C") WHERE finished IS NULL AND youtube_admission_due IS NOT NULL;
+ALTER TABLE jobs ADD COLUMN youtube_admission_candidate boolean NOT NULL DEFAULT false;
+CREATE INDEX jobs_youtube_admission_candidate ON jobs(id) WHERE youtube_admission_candidate;
+CREATE INDEX jobs_youtube_admission_recovery ON jobs(id) WHERE kind IN ('fetch','download_media') AND status IN ('pending','running');
+ALTER TABLE youtube_access ADD COLUMN youtube_admission_problem_id text;
+ALTER TABLE jobs ADD COLUMN youtube_admission_objects jsonb NOT NULL DEFAULT '[]'::jsonb;
+CREATE INDEX jobs_youtube_admission_objects ON jobs USING gin (youtube_admission_objects jsonb_path_ops) WHERE youtube_admission_candidate;
+ALTER TABLE jobs ADD COLUMN youtube_admission_unknown boolean NOT NULL DEFAULT false;
+CREATE INDEX jobs_youtube_admission_unknown ON jobs(id) WHERE youtube_admission_unknown;
+
+DROP INDEX jobs_unmanaged_problems;
+CREATE INDEX jobs_unmanaged_problems ON jobs(kind,item) WHERE kind IS DISTINCT FROM 'read' AND kind IS DISTINCT FROM 'discover' AND problem_code IS DISTINCT FROM 'processor-config' AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL AND problem_code NOT LIKE 'source-%' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') AND NOT fetch_null_ambiguous) AND (problem_code IS NOT NULL OR error IS NOT NULL) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL AND problem_code NOT LIKE 'source-%' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) AND NOT ((kind IS NOT DISTINCT FROM 'filter' OR kind IS NOT DISTINCT FROM 'theses') AND item IS NOT NULL AND item<>'' AND (((problem_code='' OR (problem_code IS NULL AND error IS NOT NULL))) OR (problem_code IS NOT NULL AND problem_code<>'' AND problem_code NOT LIKE 'source-%' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')))) AND NOT (kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code IS NOT NULL AND problem_code LIKE 'source-%' AND source_event_owned) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND problem_code IS NULL AND error IS NOT NULL AND fetch_null_owned) AND problem_code IS DISTINCT FROM 'youtube-admission';
+CREATE INDEX jobs_youtube_admission_feed ON jobs((md5(feed_id)),id) WHERE feed_id IS NOT NULL AND kind IN ('fetch','download_media') AND (status IN ('pending','running') OR youtube_admission_candidate);
+ALTER TABLE jobs ADD COLUMN youtube_admission_forgotten_item text;
+ALTER TABLE youtube_access ADD COLUMN youtube_admission_recovered boolean NOT NULL DEFAULT false;

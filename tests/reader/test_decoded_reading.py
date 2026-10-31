@@ -17,13 +17,15 @@ def test_card_and_opened_read_decode_each_saved_content_once(tmp_path, monkeypat
     store.set_work_enabled(False)
     store.processing.background = True
     with store.db:
-        row = dict(store.db.execute('SELECT * FROM items WHERE id = %s', (parent,)).fetchone())
+        row = dict(store.db.execute('SELECT * FROM publications WHERE id = %s', (parent,)).fetchone())
+        for derived in ('source_deleted','incomplete_group_ready','incomplete_group_unknown','incomplete_group_conflict'):
+            row.pop(derived)
         content = json.loads(row['content'])
         content['blocks'][0]['text'] = 'decoded-reading-linked'
         linked = dict(row, id='linked', source_id='linked', external_id='linked',
                       platform='other_web', content=json.dumps(content))
         fields = list(linked)
-        store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', [linked[f] for f in fields])
+        store.db.execute('INSERT INTO publications('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', [linked[f] for f in fields])
         store.db.execute('INSERT INTO publication_links VALUES ( %s , %s )', (parent, 'linked'))
     store.db.close()
     loads = json.loads
@@ -65,16 +67,18 @@ def test_derived_youtube_and_linked_content_does_not_mutate_saved_facts(tmp_path
     store, parent, _, _ = worker_library(tmp_path, text='Own text')
     try:
         with store.db:
-            row = dict(store.db.execute('SELECT * FROM items WHERE id = %s', (parent,)).fetchone())
+            row = dict(store.db.execute('SELECT * FROM publications WHERE id = %s', (parent,)).fetchone())
+            for derived in ('source_deleted','incomplete_group_ready','incomplete_group_unknown','incomplete_group_conflict'):
+                row.pop(derived)
             content = json.loads(row['content'])
             content['extra']['youtube'] = dict(captions='available', captions_digest='synthetic')
             content['blocks'].append(dict(type='media', role='subtitles', media_id='captions'))
-            store.db.execute('UPDATE items SET content = %s , platform = %s WHERE id = %s', (json.dumps(content), 'youtube', parent))
+            store.db.execute('UPDATE publications SET content = %s , platform = %s WHERE id = %s', (json.dumps(content), 'youtube', parent))
             (tmp_path/'media'/'captions').write_text('Subtitle body')
             store.db.execute("INSERT INTO media_files ( id , publication_id , resource_key , source_locator , name , storage_key , status ) VALUES ( 'captions' , %s , 'captions' , 'synthetic' , 'captions.txt' , 'media/captions' , 'ready' )", (parent,))
             linked = dict(row, id='linked', source_id='linked', external_id='linked', platform='other_web')
             fields = list(linked)
-            store.db.execute('INSERT INTO items('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', [linked[f] for f in fields])
+            store.db.execute('INSERT INTO publications('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', [linked[f] for f in fields])
             store.db.execute('INSERT INTO publication_links VALUES ( %s , %s )', (parent, 'linked'))
         expected = store.content_version(parent)
         for reverse in (False, True):
@@ -95,7 +99,7 @@ def test_derived_youtube_and_linked_content_does_not_mutate_saved_facts(tmp_path
             assert store.content_version(parent) == expected
         with store.db:
             content['blocks'][0]['text'] = 'Updated source'
-            store.db.execute('UPDATE items SET content = %s WHERE id = %s', (json.dumps(content), parent))
+            store.db.execute('UPDATE publications SET content = %s WHERE id = %s', (json.dumps(content), parent))
         with reading_snapshot():
             assert store.content_version(parent) != expected
             assert 'Updated source' in store.original(parent)[1]

@@ -144,12 +144,17 @@ def test_refresh_restores_previously_unavailable_publication(tmp_path):
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
         cards=wait_for(client,lambda:(c if len(c:=read_all_cards(client, '/api/v3/cards'))==3 and all(not x['loading'] for x in c) else None))
         item=cards[0]['id']
+        initial = client.get('/api/v3/publication/'+item)
         source.unavailable=True
         assert client.post('/api/v3/materials/'+item+'/retry').status_code==200
         wait_for(client,lambda:client.get('/api/v3/publication/'+item).json()['source_deleted'])
+        removed = client.get('/api/v3/publication/'+item, headers={'If-None-Match':initial.headers['ETag']})
+        assert removed.status_code == 200 and removed.json()['source_deleted'] is True
         source.unavailable=False
         assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'demo'}).status_code==200
         wait_for(client,lambda:not client.get('/api/v3/publication/'+item).json()['source_deleted'])
+        restored = client.get('/api/v3/publication/'+item, headers={'If-None-Match':removed.headers['ETag']})
+        assert restored.status_code == 200 and restored.json()['source_deleted'] is False
 
 
 def test_refresh_keeps_forced_source_wait_but_advances_ordinary_retries(tmp_path):

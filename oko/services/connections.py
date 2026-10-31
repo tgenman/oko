@@ -22,11 +22,11 @@ class ConnectionService:
 
     @repository_access
     def save_profile(self, role: str, account: str, user_id: int, generation: int, checked: float) -> None:
-        self._storage().subscriptions.telegram.save_profile(role, account, user_id, generation, checked)
+        self._storage().save_telegram_profile(role, account, user_id, generation, checked)
 
     @repository_access
     def checked(self, role: str, generation: int, user_id: int | None, checked: float) -> bool:
-        return self._storage().subscriptions.telegram.checked(role, generation, user_id, checked)
+        return self._storage().check_telegram_profile(role, generation, user_id, checked)
 
     @repository_access
     def owners(self, claims: list[tuple[str, str]]) -> list[str]:
@@ -46,8 +46,7 @@ class ConnectionService:
 
     @repository_access
     def connect(self, binding: dict[str, Any], info: dict[str, Any], source: str, folder: str, history: InitialHistory | None, auto_read: bool) -> dict[str, Any]:
-        repository = self._storage()
-        return repository.subscriptions.telegram.connect(binding, info, source, folder, history, auto_read, repository.subscriptions)
+        return self._storage().connect_telegram(binding,info,source,folder,history,auto_read)
 
     @repository_access
     def configure_processor(self, config: ProcessorConfig) -> bool:

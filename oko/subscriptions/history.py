@@ -1,5 +1,7 @@
 """Durable initial-history selection, independent from processing and reading."""
 from oko.storage.database import expect_row, Database, Row
+from oko.storage.source_configuration import changed as source_changed
+from oko.storage.reader_status import changed as status_changed
 from datetime import date, datetime, time
 import json
 import secrets
@@ -45,7 +47,18 @@ class History:
         return self.db.execute('SELECT 1 FROM history_members WHERE item = %s', (item,)).fetchone() is not None
 
     def failed(self, item: str, unavailable: bool = False) -> None:
-        self.db.execute("UPDATE history_members SET outcome = %s WHERE item = %s AND outcome NOT IN ( 'loaded' , 'incomplete' , 'viewed' , 'unavailable' )", ('unavailable' if unavailable else 'retrying', item))
+        outcome = 'unavailable' if unavailable else 'retrying'
+        if self.db.execute("UPDATE history_members SET outcome = %s WHERE item = %s AND outcome NOT IN ( 'loaded' , 'incomplete' , 'viewed' , 'unavailable' ) AND outcome IS DISTINCT FROM %s", (outcome,item,outcome)).rowcount:
+            status_changed(self.db)
+
+    def _add_members(self, feed: str, items: list[str]) -> None:
+        ordered = sorted(set(items))
+        changed = False
+        for start in range(0,len(ordered),400):
+            changed = bool(self.db.execute("""INSERT INTO history_members(feed,item)
+                SELECT %s,unnest(%s::text[]) ON CONFLICT DO NOTHING""", (feed,ordered[start:start+400])).rowcount) or changed
+        if changed:
+            status_changed(self.db)
 
     def warnings(self, feed: str, warnings: list[str]) -> None:
         row = self.db.execute('SELECT selection FROM initial_history WHERE feed = %s', (feed,)).fetchone()
@@ -78,15 +91,18 @@ class History:
 
     def configure(self, feed: str, selection: InitialHistory) -> None:
         self.db.execute('INSERT INTO initial_history ( feed , selection ) VALUES ( %s , %s )', (feed, json.dumps(dict(selection.selection(),run=secrets.token_hex(16)))))
+        source_changed(self.db)
 
     def start(self, feed: str, selection: InitialHistory) -> dict[str, Any]:
         current = self.status(feed)
         if current and current['state'] not in ('done', 'cancelled'):
             raise ValueError('Сначала остановите текущую загрузку истории')
-        self.db.execute('DELETE FROM history_members WHERE feed = %s', (feed,))
+        if self.db.execute('DELETE FROM history_members WHERE feed = %s', (feed,)).rowcount:
+            status_changed(self.db)
         value = dict(**selection.selection(), run=secrets.token_hex(16), resume=0)
         self.db.execute('INSERT INTO initial_history ( feed , selection ) VALUES ( %s , %s ) ON CONFLICT ( feed ) DO UPDATE SET selection = excluded . selection , frozen = 0 , paused = 0 , scan_complete = 0',
             (feed, json.dumps(value)))
+        source_changed(self.db)
         result = self.status(feed)
         assert result is not None
         return result
@@ -99,6 +115,8 @@ class History:
         value = json.loads(row['selection'])
         value.update(cancelled=True, waiting=False, stop_reason='cancelled')
         self.db.execute('UPDATE initial_history SET selection = %s , paused = 1 WHERE feed = %s', (json.dumps(value), feed))
+        if not current.get('cancelled') or not current['paused']:
+            source_changed(self.db)
         result = self.status(feed)
         assert result is not None
         return result
@@ -107,12 +125,14 @@ class History:
         row = self.db.execute('SELECT frozen FROM initial_history WHERE feed = %s', (feed,)).fetchone()
         if not row or row['frozen']:
             return
-        self.db.executemany('INSERT INTO history_members ( feed , item ) VALUES ( %s , %s ) ON CONFLICT DO NOTHING', ((feed, item) for item in items))
+        self._add_members(feed,items)
         self.db.execute('UPDATE initial_history SET frozen = 1 WHERE feed = %s', (feed,))
+        source_changed(self.db)
 
     def enroll(self, feed: str, items: list[str], complete: bool) -> None:
-        self.db.executemany('INSERT INTO history_members ( feed , item ) VALUES ( %s , %s ) ON CONFLICT DO NOTHING', ((feed, item) for item in items))
-        self.db.execute('UPDATE initial_history SET frozen = 1 , scan_complete = %s WHERE feed = %s', (complete, feed))
+        self._add_members(feed,items)
+        if self.db.execute('UPDATE initial_history SET frozen = 1 , scan_complete = %s WHERE feed = %s AND (frozen IS DISTINCT FROM 1 OR scan_complete IS DISTINCT FROM %s)', (complete, feed, complete)).rowcount:
+            source_changed(self.db)
 
     def pause(self, feed: str, paused: bool) -> dict[str, Any]:
         status = self.status(feed)
@@ -120,22 +140,29 @@ class History:
             raise ValueError('Начальная история не настроена')
         if status.get('cancelled'):
             raise ValueError('История остановлена; начните новый подбор')
+        changed = False
         if not paused and not status.get('stop_reason'):
             row = expect_row(self.db.execute('SELECT selection FROM initial_history WHERE feed = %s', (feed,)).fetchone())
             selection = json.loads(row['selection'])
             selection.update(resume=selection.get('resume', 0) + 1, waiting=False, discovery_error=None)
             self.db.execute('UPDATE initial_history SET selection = %s WHERE feed = %s', (json.dumps(selection), feed))
+            changed = True
         if status['state'] != 'done':
-            self.db.execute('UPDATE initial_history SET paused = %s WHERE feed = %s', (paused, feed))
+            changed = bool(self.db.execute('UPDATE initial_history SET paused = %s WHERE feed = %s AND paused IS DISTINCT FROM %s', (paused, feed, paused)).rowcount) or changed
+        if changed:
+            source_changed(self.db)
         result = self.status(feed)
         assert result is not None
         return result
 
     def saved(self, item: str, full: bool) -> None:
-        self.db.execute('UPDATE history_members SET outcome = %s WHERE item = %s', ('loaded' if full else 'incomplete', item))
+        outcome = 'loaded' if full else 'incomplete'
+        if self.db.execute('UPDATE history_members SET outcome = %s WHERE item = %s AND outcome IS DISTINCT FROM %s', (outcome,item,outcome)).rowcount:
+            status_changed(self.db)
 
     def viewed(self, item: str) -> None:
-        self.db.execute("UPDATE history_members SET outcome = 'viewed' WHERE item = %s AND outcome IN ( 'pending' , 'retrying' )", (item,))
+        if self.db.execute("UPDATE history_members SET outcome = 'viewed' WHERE item = %s AND outcome IN ( 'pending' , 'retrying' )", (item,)).rowcount:
+            status_changed(self.db)
 
     def status(self, feed: str) -> dict[str, Any] | None:
         row = self.db.execute('SELECT * FROM initial_history WHERE feed = %s', (feed,)).fetchone()
@@ -148,14 +175,19 @@ class History:
     def statuses(self, feeds: list[str]) -> dict[str,dict[str,Any]]:
         if not feeds:
             return {}
-        selected=json.dumps(feeds)
-        rows=self.db.execute('SELECT * FROM initial_history WHERE feed IN ( SELECT value FROM oko_json_each ( %s ) )',(selected,)).fetchall()
+        selected=feeds
+        rows=self.db.execute('SELECT * FROM initial_history WHERE feed = ANY(%s)',(selected,)).fetchall()
+        if not rows:
+            return {}
         counts: dict[str,dict[str,int]]={}
-        for row in self.db.execute('SELECT feed , outcome , count ( * ) n FROM history_members WHERE feed IN ( SELECT value FROM oko_json_each ( %s ) ) GROUP BY feed , outcome',(selected,)):
-            counts.setdefault(row['feed'],{})[row['outcome']]=row['n']
         errors: dict[str,list[dict[str,Any]]]={}
-        for row in self.db.execute("SELECT h . feed , h . item , j . error FROM history_members h JOIN jobs j ON j . item = h . item AND j . kind = 'fetch' WHERE h . feed IN ( SELECT value FROM oko_json_each ( %s ) ) AND h . outcome IN ( 'retrying' , 'unavailable' ) AND j . error IS NOT NULL",(selected,)):
-            errors.setdefault(row['feed'],[]).append(dict(item=row['item'],message=row['error']))
+        for row in self.db.execute("""SELECT h.feed, h.outcome, count(*) AS n,
+            jsonb_agg(jsonb_build_object('item',h.item,'message',j.error))
+              FILTER (WHERE h.outcome IN ('retrying','unavailable') AND j.error IS NOT NULL) AS errors
+            FROM history_members h LEFT JOIN jobs j ON j.item=h.item AND j.kind='fetch'
+            WHERE h.feed = ANY(%s) GROUP BY h.feed,h.outcome""", (selected,)):
+            counts.setdefault(row['feed'],{})[row['outcome']]=row['n']
+            errors.setdefault(row['feed'],[]).extend(row['errors'] or [])
         return {row['feed']:self._status(row,counts.get(row['feed'],{}),errors.get(row['feed'],[])) for row in rows}
 
     @staticmethod

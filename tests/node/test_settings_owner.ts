@@ -12,7 +12,7 @@ function harness(fail=false){
  const sent=deferred(),release=deferred();
  function snapshot(path:string):EffectiveSettingsSnapshot{
   const patch=patches.get(path)||{},origin={scope:'default'} as const;
-  const effective:EffectiveSettingsValues={originals:{value:patch.originals??true,origin},theses:{value:patch.theses??true,origin},processor:{value:patch.processor??'codex',origin},prompt_filters:{value:patch.prompt_filters??'',origin},prompt_theses:{value:patch.prompt_theses??'Saved prompt',origin}};
+  const effective:EffectiveSettingsValues={originals:{value:patch.originals??true,origin},theses:{value:patch.theses??true,origin},filter_enabled:{value:patch.filter_enabled??false,origin},processor:{value:patch.processor??'codex',origin},prompt_filters:{value:patch.prompt_filters??'',origin},prompt_theses:{value:patch.prompt_theses??'Saved prompt',origin}};
   const owner=path.split('/')[1]!;
   if(path.startsWith('oko/'))return {scope:'oko',owner:'global',effective,overrides:{}};
   if(path.startsWith('folder/'))return {scope:'folder',owner,effective,overrides:{}};

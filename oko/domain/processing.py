@@ -10,7 +10,6 @@ class ProcessingInput:
     item: str
     kind: Kind
     signature: str
-    revision: str
     request: ProcessingRequest
     public_ai: bool
     no_input: bool

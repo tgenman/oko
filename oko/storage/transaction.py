@@ -48,3 +48,25 @@ def _transaction(db: Connection) -> Iterator[None]:
     finally:
         db.transaction_depth = 0
         db.transaction_failed = False
+
+
+@contextmanager
+def read_snapshot(db: Connection) -> Iterator[None]:
+    """Read a consistent, database-enforced read-only snapshot."""
+    with db.access_lock:
+        if db.transaction_depth:
+            raise RuntimeError('Pass the existing transaction to nested services')
+        db.begin_read()
+        db.transaction_depth = 1
+        db.transaction_failed = False
+        try:
+            yield
+            if db.transaction_failed:
+                raise TransactionAborted('A repository aborted this transaction')
+            db.finish_read(success=True)
+        except BaseException:
+            db.finish_read(success=False)
+            raise
+        finally:
+            db.transaction_depth = 0
+            db.transaction_failed = False

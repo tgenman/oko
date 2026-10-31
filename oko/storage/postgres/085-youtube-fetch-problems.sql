@@ -1,0 +1,13 @@
+ALTER TABLE jobs ADD COLUMN fetch_youtube_sensitive boolean NOT NULL DEFAULT false;
+ALTER TABLE reader_problems ADD COLUMN youtube_fetch_due double precision;
+ALTER TABLE reader_problems ADD COLUMN youtube_fetch_reserved_owned boolean NOT NULL DEFAULT false;
+CREATE INDEX jobs_youtube_fetch_sensitive ON jobs(id) WHERE kind='fetch' AND fetch_youtube_sensitive;
+CREATE INDEX reader_youtube_fetch_due ON reader_problems(youtube_fetch_due,id COLLATE "C") WHERE youtube_fetch_due IS NOT NULL AND youtube_fetch_reserved_owned;
+CREATE INDEX reader_youtube_fetch_reservation_job ON reader_problems ((md5(body::jsonb->>'fetch_job_id')),(md5(body::jsonb->>'fetch_youtube_canonical'))) WHERE youtube_fetch_due IS NOT NULL AND youtube_fetch_reserved_owned AND identity LIKE 'youtube-fetch:reservation:%';
+CREATE INDEX state_youtube_fetch_reservation ON state(key COLLATE "C") WHERE key COLLATE "C">='youtube-fetch:reservation:' AND key COLLATE "C"<'youtube-fetch:reservation;';
+CREATE INDEX reader_youtube_fetch_isolated_paged ON reader_problems ((md5(body::jsonb->>'fetch_job_identity')),(md5(id))) WHERE finished IS NULL AND body::jsonb->>'operation'='producer:fetch' AND body::jsonb->>'fetch_job_identity' IS NOT NULL;
+CREATE INDEX reader_youtube_fetch_status_paged ON reader_problems ((md5(body::jsonb->>'status_job_identity')),(md5(id))) WHERE finished IS NULL AND body::jsonb->>'operation'='producer:fetch' AND body::jsonb->>'status_job_identity' IS NOT NULL;
+CREATE INDEX jobs_youtube_null_item ON jobs ((md5(item)),id) WHERE kind='fetch' AND item IS NOT NULL AND item<>'' AND status IN ('pending','running','failed','unavailable','blocked') AND problem_code IS NULL AND error IS NOT NULL;
+CREATE INDEX jobs_youtube_null_feed ON jobs ((md5(feed_id)),id) WHERE kind='fetch' AND item IS NOT NULL AND item<>'' AND feed_id IS NOT NULL AND status IN ('pending','running','failed','unavailable','blocked') AND problem_code IS NULL AND error IS NOT NULL;
+CREATE INDEX feeds_youtube_recovery ON feeds(id) WHERE kind='youtube';
+CREATE INDEX jobs_youtube_fetch_sensitive_item ON jobs ((md5(item)),id) WHERE kind='fetch' AND fetch_youtube_sensitive;

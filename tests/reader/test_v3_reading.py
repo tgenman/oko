@@ -169,6 +169,23 @@ def test_hidden_filter_theses_restoration_and_processing_receipts(tmp_path):
         assert client.get('/api/v3/commands/restore-hidden').json()['outcome']=='unknown'
 
 
+def test_hidden_result_stays_hidden_during_filter_regeneration(tmp_path):
+    from tests.support.filters import FilterSource, transport, setup_filters
+    from tests.support.reader import wait_for
+    app = create_app(tmp_path, token='test', api_only=True, source=FilterSource(), ai_transport=transport([], theses=True))
+    with TestClient(app, headers=HEADERS) as client:
+        setup_filters(client)
+        cards = wait_for(client, lambda: (v if len(v := read_publications_for_cards(client, '/api/v3/cards?show_hidden=true')) == 3 and all(c['filter']['state'] == 'ready' for c in v) else None))
+        item = next(c['id'] for c in cards if c['filter']['result']['hidden'])
+        async def schedule():
+            async with app.state.host.execution._actions:
+                store = app.state.host.require_store()
+                with store.db:
+                    assert app.state.host.jobs.retry_filter(item)
+                    return store.db.execute('SELECT status FROM publications WHERE id=%s', (item,)).fetchone()[0]
+        assert client.portal.call(schedule) == 'filter_out'
+
+
 def test_waiting_reasons_and_previous_theses_during_failed_regeneration(tmp_path):
     import asyncio
     import httpx

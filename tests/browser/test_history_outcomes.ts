@@ -1,6 +1,7 @@
 import {feedOptions} from './settings-actions.ts';
 import {test} from 'node:test';
 import {reader, expect} from './support.ts';
+import {artifactPath} from './artifacts.ts';
 
 test('initial history shows partial, retry and unavailable outcomes with errors', async () => {
   const r = await reader();
@@ -21,6 +22,7 @@ test('initial history shows partial, retry and unavailable outcomes with errors'
     await expect(r.page.locator('#feed-options')).toContainText('1 awaiting retry');
     await expect(r.page.locator('#feed-options')).toContainText('1 permanently unavailable');
     await expect(r.page.locator('#feed-options')).toContainText('Источник недоступен');
+    await r.page.screenshot({path: artifactPath('history-outcomes.png')});
   } finally {await r.close();}
 });
 

@@ -194,6 +194,11 @@ export type EffectiveValues = {
         scope: 'default' | 'oko' | 'folder' | 'feed';
         value: string;
     };
+    filter_enabled: {
+        owner: string | null;
+        scope: 'default' | 'oko' | 'folder' | 'feed';
+        value: boolean;
+    };
     prompt_theses: {
         owner: string | null;
         scope: 'default' | 'oko' | 'folder' | 'feed';
@@ -897,6 +902,7 @@ export type SettingOverrides = {
     originals?: boolean;
     processor?: string;
     prompt_filters?: string;
+    filter_enabled?: boolean;
     prompt_theses?: string;
     theses?: boolean;
 };
