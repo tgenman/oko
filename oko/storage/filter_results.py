@@ -42,9 +42,9 @@ class FilterResults:
         row=self.store.db.execute("SELECT input_snapshot->>'signature' FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()
         if not signature or not row or row[0]!=signature:
             return None
-        values,public_ai,version=publication_input.request_settings(self.store,item)
+        values,public_ai=publication_input.request_settings(self.store,item)
         request=ProcessingRequest(operation='filter',sources=publication_input.sources(self.store,item,'filter'),
-            settings_version=version,prompt=values['prompt_filters']['value'],processor=values['processor']['value'],generation=0)
+            prompt=values['prompt_filters']['value'],processor=values['processor']['value'],generation=0)
         return request,signature,public_ai
 
 

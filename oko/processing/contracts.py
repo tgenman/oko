@@ -22,7 +22,6 @@ class ProcessingRequest(BaseModel):
     operation: Literal['theses', 'filter'] = 'theses'
     codex_choice: CodexChoice | None = None
     sources: tuple[InputSource, ...]
-    settings_version: int
     prompt: str
     processor: str
     generation: int

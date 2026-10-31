@@ -1371,3 +1371,13 @@ transaction rolls back and retry starts from the beginning, without a page
 checkpoint. The integrated source/fetch/incomplete/status/YouTube suite passed
 231 PostgreSQL tests, mypy for eight modules and 16 Playwright status scenarios;
 a screenshot was inspected. No working database was migrated.
+
+
+The internal model request no longer carries settings_version, and the unused
+runtime ProcessingInput revision is removed. The saved settings counter,
+legacy pass metadata and persisted input_revision remain in place. This changes
+the model input JSON by removing that field. Integrated synthetic processing,
+worker and HTTP checks passed 67 tests with two Linux bubblewrap-only tests
+skipped; both model adapters, A-to-B-to-A, late answers and restart were
+covered. Mypy passed on 163 files; one Playwright processing scenario passed
+and its screenshot was inspected. No real model or working database was used.

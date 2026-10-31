@@ -195,18 +195,14 @@ def snapshot(store: 'Store', item: str) -> None:
     rules=live_settings(store,item)
     current_revision=revision(store,item)
     if metadata.get('_pass',{}).get('settings')!=rules or metadata.get('_pass',{}).get('revision')!=current_revision:
-        metadata['_pass']=dict(feed_id=rules['feed_id'],settings=deepcopy(rules),settings_version=store.settings_version(rules['feed_id']),revision=current_revision)
+        metadata['_pass']=dict(feed_id=rules['feed_id'],settings=deepcopy(rules),revision=current_revision)
         with store.db:
             store.db.execute('UPDATE publications SET processing_metadata = %s WHERE id = %s',(json.dumps(metadata,ensure_ascii=False),item))
 
 
-def request_settings(store: 'Store', item: str) -> tuple[dict[str, Any], bool, int]:
+def request_settings(store: 'Store', item: str) -> tuple[dict[str, Any], bool]:
     chosen=settings(store,item)
-    record=material_read.item(store.db,item)
-    assert record is not None
-    metadata=json.loads(record['processing_metadata'])
-    version=metadata.get('_pass',{}).get('settings_version',store.settings_version(chosen['feed_id']))
-    return {key:dict(value=value) for key,value in chosen['values'].items()},chosen['public_ai'] and live_settings(store,item)['public_ai'],version
+    return {key:dict(value=value) for key,value in chosen['values'].items()},chosen['public_ai'] and live_settings(store,item)['public_ai']
 
 
 def filtered(content: dict[str, Any], item: str, result: dict[str, Any]) -> dict[str, Any]:

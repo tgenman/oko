@@ -42,7 +42,7 @@ class ProcessingRepository:
         prepared=operation.request(item)
         if prepared is None:return ProcessingPreparation('waiting',reason='input_not_reconciled')
         request,signature,public_ai=prepared
-        value=ProcessingInput(item,kind,signature,publication_input.revision(self.store,item),request,public_ai,
+        value=ProcessingInput(item,kind,signature,request,public_ai,
             not any(source.text.strip() or source.reply_preview and source.reply_preview.text.strip() for source in request.sources))
         return ProcessingPreparation('no_input' if value.no_input else 'model',value)
 

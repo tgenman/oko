@@ -24,8 +24,8 @@ class SummaryResults:
         row=self.store.db.execute("SELECT input_snapshot->>'signature' FROM jobs WHERE kind='theses' AND item=%s",(item,)).fetchone()
         if not signature or not row or row[0]!=signature:
             return None
-        values,public_ai,version=publication_input.request_settings(self.store,item)
-        request=ProcessingRequest(sources=publication_input.sources(self.store,item,'theses'),settings_version=version,
+        values,public_ai=publication_input.request_settings(self.store,item)
+        request=ProcessingRequest(sources=publication_input.sources(self.store,item,'theses'),
             prompt=values['prompt_theses']['value'],processor=values['processor']['value'],generation=0)
         return request,signature,public_ai
 
