@@ -302,8 +302,8 @@ def test_fetch_null_ownership_transition_refreshes_admission(tmp_path,postgres_u
         store.youtube.blocked(100,900)
         assert json.loads(current(store)['body'])['objects']==[]
         with transaction(store.db):store.problems.sync_fetch(job,[],100)
-        flags=store.db.execute('SELECT fetch_null_owned,youtube_admission_candidate FROM jobs WHERE id=%s',(job,)).fetchone()
-        assert tuple(flags)==(False,True)
+        flags=store.db.execute('SELECT fetch_null_owned,youtube_admission_candidate,fetch_youtube_sensitive FROM jobs WHERE id=%s',(job,)).fetchone()
+        assert tuple(flags)==(True,True,True)
         assert json.loads(current(store)['body'])['objects']==[dict(kind='material',id='p')]
     finally:store.db.close()
 

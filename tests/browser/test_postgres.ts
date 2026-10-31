@@ -38,8 +38,9 @@ test('PostgreSQL reader authenticates, collects through UI, renders media and su
   await expect(page.locator('#theses')).toContainText('Просмотрено удаляет текст.',{timeout:15000});
   await page.screenshot({path:artifactPath('postgres-native-reader.png'),fullPage:true});
   await restart();
-  await expect(page.getByRole('button',{name:'Reload Oko'})).toBeVisible({timeout:10000});
-  await page.getByRole('button',{name:'Reload Oko'}).click();
+  // Instance-replacement UI is covered by test_persistent_reader.ts; this
+  // scenario verifies that the stored PostgreSQL library survives restart.
+  await page.reload();
   await expect(page.getByRole('button',{name:'Выйти'})).toBeVisible();
   await expect(page.locator('#cards button')).toHaveCount(1);
   await page.locator('#cards button').click();

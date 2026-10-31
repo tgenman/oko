@@ -66,7 +66,7 @@ def test_selected_feed_stage_capture_ignores_foreign_jobs(tmp_path,postgres_url)
         trace=[];store.db.set_trace_callback(trace.append)
         try:store.remove_feed('a')
         finally:store.db.set_trace_callback(None)
-        query=next(q for q in trace if q.startswith('SELECT id FROM jobs j WHERE kind=ANY(%s) AND item=ANY(%s)'))
+        query=next(q for q in trace if q.startswith('SELECT id,kind,identity_event_owned FROM jobs j WHERE kind=ANY(%s) AND item=ANY(%s)'))
         plan=store.db._db.execute('EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) '+query,(['filter','theses'],['p'])).fetchone()[0][0]['Plan']
         assert scan_rows(plan)<1000,plan
     finally:store.db.close()

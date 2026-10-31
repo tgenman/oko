@@ -3,16 +3,6 @@ from oko.storage.postgres_migrations import migrate
 from oko.storage.postgres_schema import MIGRATIONS
 from tests.support.storage import Store
 
-def test_nullable_legacy_blocked_until_does_not_prevent_startup(tmp_path,postgres_database_url):
-    with psycopg.connect(postgres_database_url,autocommit=True) as db:
-        migrate(db,MIGRATIONS[:80])
-        db.execute('UPDATE youtube_access SET blocked_until=NULL WHERE id=1')
-        migrate(db,MIGRATIONS)
-    store=Store(tmp_path,lambda _:None,database_url=postgres_database_url,wall_clock=lambda:100)
-    try:
-        assert store.db.execute('SELECT blocked_until FROM youtube_access WHERE id=1').fetchone()[0] is None
-    finally:store.db.close()
-
 def test_nan_blocked_until_never_launches_caption_network(tmp_path,postgres_url):
     import asyncio
     from types import SimpleNamespace

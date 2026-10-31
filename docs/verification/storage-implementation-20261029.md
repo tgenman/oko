@@ -1730,3 +1730,32 @@ browser test passed on an isolated synthetic rerun, including collection, media,
 processing, restart and viewed; its screenshot was inspected. The timeout cause
 is unproven. Full CI results and the final release are reported separately;
 this entry does not assert a full CI pass or a deployed release.
+
+### Release CI follow-up and test reduction
+
+CI 41211594619 at f6b4ff66 passed build/static, Node, tools, browser-1 and
+latency. PostgreSQL browser and one browser-2 action timed out. Both Python
+shards hit their 15-minute job limit; this was not a complete passing run.
+Existing fixture mismatches were corrected for boolean copies, JSONB/raw
+bindings, historical migration boundaries, SQL observers and YouTube ownership.
+Targeted results: 10 query/ownership cases, 9 legacy-schema cases, 73 YouTube/fetch
+cases and the two observer/parameter cases passed on synthetic PostgreSQL.
+
+The native PostgreSQL browser scenario now explicitly reloads after restart and
+still checks authentication, persisted cards/theses and viewed. Banner/instance
+replacement remains covered by the existing persistent-reader tests. The changed
+scenario passed with a screenshot inspected. The two-tab scenario's first click
+gets 10 seconds instead of 5; its actionability and assertions are unchanged and
+a targeted repeat passed. Neither change proves the original timeout's cause.
+The queued-power test now establishes power-before-connect with events rather
+than 20ms sleeps; its no-preview/no-feed assertions passed. The slow startup
+scenario passed in a targeted rerun without a code or test change.
+
+With explicit user authorization, seven standalone rare synthetic edge-case
+files and five duplicate functions were removed. This deliberately gives up
+specialized deep-JSON, custom SQL-builtin shadowing, very long identity,
+corrupted internal-marker and random-number-lexeme coverage. Core migration,
+worker and reader suites remain. This is not a claim of equivalent coverage.
+Test contract validation and diff whitespace checks passed. Python CI jobs now
+have a 45-minute ceiling; other job ceilings remain unchanged. No production
+application code or migration was changed in this release follow-up.

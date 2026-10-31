@@ -32,7 +32,7 @@ def test_payload_migration_restores_search_path_before_following_migration(postg
   try:
    db.execute(sql.SQL('CREATE TABLE {}.synthetic_probe(value integer)').format(sql.Identifier(foreign)))
    db.execute(sql.SQL('SET search_path TO {},{}').format(sql.Identifier(own),sql.Identifier(foreign)))
-   target=(*MIGRATIONS,Migration(91,'synthetic-next','INSERT INTO synthetic_probe VALUES(1)'))
+   target=(*MIGRATIONS[:90],Migration(91,'synthetic-next','INSERT INTO synthetic_probe VALUES(1)'))
    migrate(db,target);verify(db,target)
    assert db.execute(sql.SQL('SELECT value FROM {}.synthetic_probe').format(sql.Identifier(foreign))).fetchone()[0]==1
   finally:
@@ -59,7 +59,7 @@ def test_payload_migration_never_alters_shadowing_temp_jobs(postgres_database_ur
   migrate(db,MIGRATIONS[:89]);own=db.execute('SELECT current_schema()').fetchone()[0]
   db.execute("INSERT INTO jobs(kind,item,payload) VALUES ('delete','p','{\"saved\":true}')")
   db.execute("CREATE TEMP TABLE jobs(payload text NOT NULL DEFAULT '{}')")
-  migrate(db,MIGRATIONS);verify(db,MIGRATIONS)
+  migrate(db,MIGRATIONS[:90]);verify(db,MIGRATIONS[:90])
   assert db.execute("SELECT data_type FROM information_schema.columns WHERE table_schema=%s AND table_name='jobs' AND column_name='payload'",(own,)).fetchone()[0]=='jsonb'
   assert db.execute("SELECT data_type FROM information_schema.columns WHERE table_schema=pg_my_temp_schema()::regnamespace::text AND table_name='jobs' AND column_name='payload'").fetchone()[0]=='text'
   assert db.execute(sql.SQL("SELECT payload FROM {}.jobs WHERE item='p'").format(sql.Identifier(own))).fetchone()[0]=={'saved':True}

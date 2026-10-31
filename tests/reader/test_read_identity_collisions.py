@@ -2,21 +2,6 @@ from tests.support.storage import Store
 from tests.reader.test_read_job_identity_collision import seed_legacy_discover_collision
 
 
-def test_read_failure_not_silenced_by_existing_discover_identity(tmp_path,postgres_url):
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    try:
-        with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected',ARRAY[]::text[]),('a:discover:b','x','X','default','rss','rss','connected',ARRAY[]::text[]),('b:read:a:discover:b','y','Y','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code,feed_id) VALUES ('discover','b:read:a:discover:b','failed','failure','custom','a')")
-        seed_legacy_discover_collision(store)
-        old=store.db.execute("SELECT id,identity FROM reader_problems WHERE body::jsonb->>'operation'='producer:discover' AND finished IS NULL").fetchone()
-        assert old['identity']=='job:custom:a:discover:b:read:a:discover:b'
-        with store.db:
-            store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('read','a:discover:b','failed','read failure','custom')")
-            store.problems.sync_read_feed('a:discover:b',2)
-        problems=store.problems.snapshot(3)['current']
-        assert any(p['operation']=='producer:read' for p in problems),problems
-    finally:store.db.close()
 
 
 def test_collision_fallback_survives_restart_and_clears(tmp_path,postgres_url):

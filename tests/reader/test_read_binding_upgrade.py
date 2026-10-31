@@ -10,7 +10,7 @@ def test_guarded_release_migrates_v64_orphan(postgres_database_url):
         db.execute("INSERT INTO telegram_bindings(feed,binding) VALUES ('orphan','not-json')")
         migrate(db,MIGRATIONS)
         verify(db,MIGRATIONS)
-        assert db.execute("SELECT binding FROM telegram_bindings WHERE feed='orphan'").fetchone()==('not-json',)
+        assert db.execute("SELECT binding,binding_raw FROM telegram_bindings WHERE feed='orphan'").fetchone()==(None,'not-json')
 
 
 def test_jsonb_unrepresentable_orphans_survive_upgrade(postgres_database_url):
@@ -20,7 +20,7 @@ def test_jsonb_unrepresentable_orphans_survive_upgrade(postgres_database_url):
         for index,value in enumerate(values):
             db.execute('INSERT INTO telegram_bindings(feed,binding) VALUES (%s,%s)',(str(index),value))
         migrate(db,MIGRATIONS)
-        assert [row[0] for row in db.execute('SELECT binding FROM telegram_bindings ORDER BY feed')]==values
+        assert [row[0] for row in db.execute('SELECT binding_raw FROM telegram_bindings ORDER BY feed')]==values
 
 
 def test_active_binding_with_jsonb_invalid_extra_is_indexed_at_startup(tmp_path,postgres_database_url):
@@ -32,7 +32,7 @@ def test_active_binding_with_jsonb_invalid_extra_is_indexed_at_startup(tmp_path,
         migrate(db,MIGRATIONS)
     store=Store(tmp_path,lambda _:None,database_url=postgres_database_url)
     try:
-        assert store.db.execute("SELECT binding,indexed_role FROM telegram_bindings WHERE feed='a'").fetchone()==(original,'personal')
+        assert tuple(store.db.execute("SELECT binding,binding_raw,indexed_role FROM telegram_bindings WHERE feed='a'").fetchone())==(None,original,'personal')
         assert store.subscriptions.telegram.dependents('personal')==['a']
     finally:
         store.db.close()
@@ -52,6 +52,6 @@ def test_valid_orphan_role_keeps_dependents_after_upgrade(tmp_path,postgres_data
     store=Store(tmp_path,lambda _:None,database_url=postgres_database_url)
     try:
         assert store.subscriptions.telegram.dependents('personal')==['orphan']
-        assert store.db.execute("SELECT binding FROM telegram_bindings WHERE feed='orphan'").fetchone()[0]==original
+        assert store.db.execute("SELECT binding FROM telegram_bindings WHERE feed='orphan'").fetchone()[0]=={'kind':'client','role':'personal'}
     finally:
         store.db.close()

@@ -108,7 +108,7 @@ def test_compact_cards_batch_links_and_processing_permissions(postgres_url, tmp_
         for n in range(1, count):
             identity = f'{n:032x}'
             row = dict(template, id=identity, source_id=identity, external_id=identity)
-            store.db.execute('INSERT INTO publications('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', tuple(row[f] for f in fields))
+            store.db.execute('INSERT INTO publications('+','.join(fields)+') VALUES ('+','.join('%s::integer::boolean' if field in ('incomplete_group_ready','incomplete_group_unknown','incomplete_group_conflict') else '%s' for field in fields)+')', tuple(row[f] for f in fields))
             store.db.execute('INSERT INTO feed_publications (feed_id,publication_id,is_primary) VALUES ( %s , %s , true )', ('demo', identity))
     store.db.close()
     queries = request_queries(monkeypatch)
@@ -145,7 +145,7 @@ def test_saved_summary_sources_reuse_batched_related_rows(postgres_url, tmp_path
             identity = f'{n+1:032x}'
             children.append(identity)
             row = dict(template, id=identity, source_id=identity, external_id=identity)
-            store.db.execute('INSERT INTO publications('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', [row[f] for f in fields])
+            store.db.execute('INSERT INTO publications('+','.join(fields)+') VALUES ('+','.join('%s::integer::boolean' if field in ('incomplete_group_ready','incomplete_group_unknown','incomplete_group_conflict') else '%s' for field in fields)+')', [row[f] for f in fields])
             store.db.execute('INSERT INTO publication_links VALUES ( %s , %s )', (parent, identity))
         signature = store.processing.theses.signature(parent)
         assert signature
@@ -200,7 +200,7 @@ def test_saved_subtitles_batch_paths_but_recheck_files(postgres_url, tmp_path, m
             content['blocks'].append(dict(type='media', role='subtitles', media_id=media))
             if n:
                 row = dict(template, id=identity, source_id=identity, external_id=identity, platform='youtube', content=json.dumps(content))
-                store.db.execute('INSERT INTO publications('+','.join(fields)+') VALUES ('+','.join('%s' for _ in fields)+')', [row[f] for f in fields])
+                store.db.execute('INSERT INTO publications('+','.join(fields)+') VALUES ('+','.join('%s::integer::boolean' if field in ('incomplete_group_ready','incomplete_group_unknown','incomplete_group_conflict') else '%s' for field in fields)+')', [row[f] for f in fields])
                 store.db.execute('INSERT INTO feed_publications (feed_id,publication_id,is_primary) VALUES ( %s , %s , true )', ('demo', identity))
             else:
                 store.db.execute('UPDATE publications SET content = %s , platform = %s WHERE id = %s', (json.dumps(content), 'youtube', identity))
