@@ -120,17 +120,29 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
     @read_locked(runtime.execution)
     async def navigation_view(request: Request) -> Response:
         with read_snapshot(runtime.require_store().db), reading_snapshot():
-            snapshot = composition().model_dump(mode='json')
+            current = runtime.queries
+            snapshot = current.navigation()
             groups = [dict(id=folder['id'],title=folder['title'],count=folder['count'],feeds=[])
                       for folder in snapshot['folders']]
             by_id = {folder['id']:folder for folder in groups}
-            for entry in snapshot['feeds']:
-                feed = entry['feed']
+            bindings = current.bindings([feed['id'] for feed in snapshot['feeds'] if feed['kind']=='telegram'])
+            for feed in snapshot['feeds']:
                 group = by_id.get(feed['folder_id'])
-                if group is not None:
-                    group['feeds'].append(dict(id=feed['id'],title=feed['title'],avatar_url=feed.get('avatar_url'),
-                        count=entry['count'],kind=feed['kind'],has_unviewed=entry['has_unviewed'],connection=feed['connection'],
-                        telegram_access=feed.get('access',{}).get('kind')))
+                if group is None:
+                    continue
+                connection = 'ready' if feed.get('connection')=='connected' else feed.get('connection','unavailable')
+                access = None
+                if feed['kind']=='telegram':
+                    binding = bindings.get(feed['id'])
+                    if binding and binding['kind'] in ('web','client'):
+                        access = binding['kind']
+                    else:
+                        access = 'unconfigured'
+                        if connection!='deleting':
+                            connection = 'needs_profile_confirmation' if feed.get('transport')=='telegram' and isinstance(feed.get('telegram_account'),str) else 'needs_connection'
+                group['feeds'].append(dict(id=feed['id'],title=feed['title'],avatar_url=feed.get('avatar_url'),
+                    count=feed['count'],kind=feed['kind'],has_unviewed=feed['has_unviewed'],connection=connection,
+                    telegram_access=access))
             for group in groups:
                 group['feeds'].sort(key=lambda feed:(feed['title'].casefold(),feed['id']))
             body = wire.NavigationResponse.model_validate(dict(total=snapshot['count'],folders=groups)).model_dump(mode='json')
