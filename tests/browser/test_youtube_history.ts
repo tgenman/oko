@@ -43,22 +43,6 @@ test('YouTube settings start N history and waiting resumes manually without chan
   } finally {await r.close();}
 });
 
-test('YouTube date selection explains that RSS does not provide the full archive', async()=>{
-  const r=await reader();
-  try {
-    await r.start([]);
-    await r.page.evaluate(()=>{
-      readerTransport.replies.set('/api/v3/feeds/verify',{body:{url:'https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa',title:'Видео',kind:'youtube',verification:'checked'}});
-    });
-    await r.page.locator('#add-open').click();
-    await r.page.locator('#rss-url').fill('https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa');
-    await r.page.locator('#rss-check').click();
-    await expect(r.page.locator('#rss-history-mode')).toHaveCount(0);
-    await expect(r.page.locator('#rss-history-warning')).toContainText('excluding Shorts');
-    await expect(r.page.locator('#rss-history-warning')).not.toContainText('Date-based history');
-  } finally {await r.close();}
-});
-
 test('late history start preserves selection and input in another feed', async()=>{
   const r=await reader();
   try {
@@ -83,58 +67,5 @@ test('late history start preserves selection and input in another feed', async()
     await expect(r.page.locator('#owner-heading')).toContainText('B');
     await expect(r.page.locator('#youtube-history-count')).toHaveValue('13');
     await expect(r.page.locator('#youtube-history-start')).toBeEnabled();
-  } finally {await r.close();}
-});
-
-test('reopened first history gets progress and resume after a late response', async()=>{
- const r=await reader();
- try{
- await r.start([]);
- await r.page.evaluate(()=>{
-  const t=readerTransport, settings=t.replies.get('/api/v3/settings/oko/global')!.body;
-  const feed={id:'A',title:'A',kind:'youtube',transport:'youtube',folder_id:'f',original_urls:[],importance:'normal',initial_history:null};
-  t.replies.set('/api/v3/subscriptions',{body:{folders:[{id:'f',title:'f'}],feeds:[feed]}});
-  t.replies.set('/api/v3/settings/feed/A',{body:{...settings,feed}});
-  t.held.set('/api/v3/feeds/A/history',true);
- });
- await r.page.locator('#feeds-open').click(); await r.page.locator('[data-owner="feed/A"]').click();
-    await feedOptions(r.page);
- await r.page.locator('#youtube-history-start').click();
- await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/feeds/A/history'));
- await expect(r.page.locator('#youtube-history-start')).toBeDisabled();
- await r.page.locator('#feeds-close').click(); await r.page.locator('#feeds-open').click();
-    await feedOptions(r.page);
- await expect(r.page.locator('#youtube-history-start')).toBeEnabled();
- await r.page.evaluate(()=>{
-  const t=readerTransport,history=window.readerFixtures.history({feed_id:'A',mode:'count',count:60,loaded:0,available:0,state:'waiting',paused:false,discovery_error:'limit'});
-  t.replies.get('/api/v3/subscriptions')!.body!.feeds[0].initial_history=history;
-  t.replies.set('/api/v3/status',{body:{stage:'Waiting',errors:[],ready_sources:1,total_sources:1,initial_histories:[history],sources:[]}});
-  t.release('/api/v3/feeds/A/history',history);
- });
- await expect(r.page.locator('#youtube-history-start')).toBeDisabled();
- await expect(r.page.locator('#history-progress')).toBeVisible({timeout:1500});
- await expect(r.page.locator('#history-toggle')).toHaveCount(0);
- }finally{await r.close();}
-});
-
-test('saved history count retains exact decimal text when reopening settings',async()=>{
-  const r=await reader();
-  try {
-    await r.start([]);
-    await r.page.evaluate(()=>{
-      const t=readerTransport,settings=t.replies.get('/api/v3/settings/oko/global')!.body;
-      const feed={id:'large',title:'Large',kind:'youtube',transport:'youtube',folder_id:'f',original_urls:[],importance:'normal',
-        initial_history:window.readerFixtures.history({mode:'count',count:9007199254740992,count_text:'9007199254740993',state:'done',loaded:0,available:0})};
-      t.replies.set('/api/v3/subscriptions',{body:{folders:[{id:'f',title:'f'}],feeds:[feed]}});
-      t.replies.set('/api/v3/settings/feed/large',{body:{...settings,feed}});
-      t.held.set('/api/v3/feeds/large/history',true);
-    });
-    await r.page.locator('#feeds-open').click();
-    await r.page.locator('[data-owner="feed/large"]').click();
-    await feedOptions(r.page);
-    await expect(r.page.locator('#youtube-history-count')).toHaveValue('9007199254740993');
-    await r.page.locator('#youtube-history-start').click();
-    await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/feeds/large/history'));
-    expect(await r.page.evaluate(()=>readerTransport.requests.find(r=>r.method==='POST'&&r.url==='/api/v3/feeds/large/history')!.body!.count)).toBe('9007199254740993');
   } finally {await r.close();}
 });

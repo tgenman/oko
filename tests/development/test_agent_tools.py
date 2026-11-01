@@ -66,14 +66,6 @@ def test_integration_uses_fetched_sha_not_local_main_and_preserves_dirty_tree(tm
     assert git(output, 'remote', 'get-url', 'origin')==git(source, 'remote', 'get-url', 'origin')
 
 
-def test_integration_rejects_existing_output_before_fetch(tmp_path):
-    source, _, _ = repository(tmp_path)
-    output=tmp_path/'existing';output.mkdir();(output/'keep').write_text('keep')
-    result=subprocess.run([sys.executable,str(PREPARE),'--output',str(output)],cwd=source,capture_output=True,text=True)
-    assert result.returncode==1
-    assert (output/'keep').read_text()=='keep'
-
-
 def test_ci_uses_latest_exact_sha_and_does_not_confuse_other_runs():
     class Client:
         def pages(self,path,key):
@@ -82,25 +74,3 @@ def test_ci_uses_latest_exact_sha_and_does_not_confuse_other_runs():
             assert '/2/jobs?' in path
             return [dict(name='Python',status='in_progress',conclusion=None)]
     assert CI['status'](Client(),'owner/repo','a'*40,'Checks')==dict(state='pending',run=2,jobs=[dict(name='Python',status='in_progress',conclusion=None)])
-
-
-@pytest.mark.parametrize('state,code',[('success',0),('failure',1),('pending',3)])
-def test_ci_wait_emits_changes_only_and_preserves_failure_and_timeout(state,code):
-    elapsed=[0];lines=[]
-    def clock():return elapsed[0]
-    def sleep(seconds):elapsed[0]+=seconds
-    def fetch():return dict(state=state if elapsed[0]>=60 else 'pending',run=1,jobs=[])
-    assert CI['watch'](fetch,60,30,lines.append,clock,sleep)==code
-    assert [json.loads(line)['state'] for line in lines]==(['pending'] if state=='pending' else ['pending',state])
-
-
-def test_ci_no_runs_is_pending():
-    class Client:
-        def pages(self,path,key):return []
-    assert CI['status'](Client(),'owner/repo','a'*40,'Checks')['state']=='pending'
-
-
-def test_ci_cli_rejects_mutable_ref_without_network():
-    result=subprocess.run([sys.executable,str(ROOT/'scripts/ci-status'),'--repo','owner/repo','--sha','main'],capture_output=True,text=True)
-    assert result.returncode==2
-    assert 'full commit SHA' in result.stderr

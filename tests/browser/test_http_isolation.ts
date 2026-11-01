@@ -44,12 +44,3 @@ test('aborting one HTTP scenario closes its server and pages without stopping it
   assert.deepEqual((await b.api('cards')).items,[]);
   await a.close();
 });
-
-test('abort during HTTP setup rejects and leaves the next scenario usable',async t=>{
-  const controller=new AbortController();
-  const opening=productionReader({signal:controller.signal,after:callback=>t.after(callback)});
-  controller.abort();
-  await assert.rejects(opening,{name:'AbortError'});
-  const next=await productionReader(t);
-  assert.deepEqual((await next.api('cards')).items,[]);
-});

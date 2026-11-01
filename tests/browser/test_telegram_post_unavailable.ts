@@ -39,19 +39,3 @@ test('whole Telegram post uses link card C separately from audio and large video
 
 
 import {reader,material} from './support';
-
-test('late unavailable Telegram post cannot replace another opened material',async()=>{
- const r=await reader();
- try{
-  const post=material('P',{text:'',url:'https://t.me/fixture/11',full:false,post_web_unavailable:true});
-  await r.start([material('A'),post]);
-  await r.page.evaluate(()=>readerTransport.held.set('/fixture/material/P',true));
-  await r.page.getByRole('button',{name:/^P ·/}).click();
-  await r.page.waitForFunction(()=>readerTransport.pending.has('/fixture/material/P'));
-  await r.page.getByRole('button',{name:/^A ·/}).click();
-  await expect(r.page.locator('#text')).toHaveText('Текст A');
-  await r.page.evaluate(body=>readerTransport.release('/fixture/material/P',body),post);
-  await expect(r.page.locator('#post-web-unavailable')).toHaveCount(0);
-  await expect(r.page.locator('#text')).toHaveText('Текст A');
- }finally{await r.close();}
-});

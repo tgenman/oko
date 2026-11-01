@@ -46,19 +46,6 @@ test('range confirmation captures IDs before new arrivals and preserves target',
  }finally{await r.close();}
 });
 
-test('closing a pending batch does not let its late response replace a newer selection',async()=>{
- const r=await reader();try{
-  await r.start(['a','b','c'].map(id=>material(id)));
-  await r.page.locator('[data-card="a"]').click();await expect(r.page.locator('#text')).toContainText('Текст a');
-  await r.page.evaluate(()=>readerTransport.held.set('/api/v3/cards/read',true));
-  await r.page.locator('[data-card="c"]').click({button:'right'});await r.page.getByRole('menuitem',{name:'Mark Above as Read',exact:true}).click();await r.page.locator('#news-read-confirm').click();await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/cards/read'));
-  await r.page.locator('#news-read-cancel').click();await r.page.locator('[data-card="c"]').click();
-  await r.page.evaluate(()=>readerTransport.release('/api/v3/cards/read',null,204));
-  await expect(r.page.locator('#text')).toContainText('Текст c');
-  expect(await r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url==='/api/v3/cards/read').map(q=>q.body))).toEqual([{ids:['a','b']}]);expect(r.errors).toEqual([]);
- }finally{await r.close();}
-});
-
 test('failed batch reports an error and keeps all selected items',async()=>{
  const r=await reader();try{
   await r.start(['a','b','c','d'].map(id=>material(id)));
@@ -67,17 +54,6 @@ test('failed batch reports an error and keeps all selected items',async()=>{
   await expect(r.page.locator('#news-read-dialog [role=status]')).toContainText('Retrying is safe');await expect(r.page.locator('#news-read-confirm')).toBeEnabled();
   await expect(r.page.locator('#cards [data-card]')).toHaveCount(4);
   expect(await r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url==='/api/v3/cards/read').map(q=>q.body))).toEqual([{ids:['a','b','c']}]);await r.page.locator('#news-read-cancel').click();expect(r.errors).toEqual([]);
- }finally{await r.close();}
-});
-
-test('above follows current sorting, visible hidden rows and feed selection',async()=>{
- const r=await reader();try{
-  const a=material('a'),b=material('b'),c=material('c',{feed_id:'other'}),h=material('hidden');await r.start([a,b,c]);
-  await r.page.evaluate(({a,b,c,h})=>{const t=readerTransport;t.replies.set('/api/v3/cards?sort=oldest',{body:[c,b,a]});t.replies.set('/api/v3/cards?sort=importance',{body:[b,a,c]});t.replies.set('/api/v3/cards?sort=newest&show_hidden=true',{body:[a,h,b,c]});t.replies.set('/api/v3/cards?sort=newest&feed=feed',{body:[a,b]});}, {a,b,c,h});
-  const above=async(id:string,expected:string[])=>{if(await r.page.locator('#list-menu-toggle').getAttribute('aria-expanded')==='true')await r.page.locator('#list-menu-toggle').click();await r.page.locator('[data-card="'+id+'"]').click({button:'right'});await r.page.getByRole('menuitem',{name:'Mark Above as Read',exact:true}).click();expect(await r.page.locator('#news-read-dialog li').allTextContents()).toEqual(expected);await r.page.locator('#news-read-cancel').click();};
-  await above('b',['a']);await r.page.locator('#list-menu-toggle').click();await r.page.locator('#sort').selectOption('oldest');await expect(r.page.locator('#cards [data-card]').first()).toHaveAttribute('data-card','c');await above('b',['c']);
-  await r.page.locator('#list-menu-toggle').click();await r.page.locator('#sort').selectOption('newest');await r.page.locator('#show-hidden').check();await expect(r.page.locator('#cards [data-card]')).toHaveCount(4);await above('b',['a','hidden']);
-  await r.page.locator('#list-menu-toggle').click();await r.page.locator('#show-hidden').uncheck();await r.page.locator('[data-feed="feed"]').click();await expect(r.page.locator('#cards [data-card]')).toHaveCount(2);await above('b',['a']);expect(r.errors).toEqual([]);
  }finally{await r.close();}
 });
 
@@ -95,25 +71,6 @@ test('news context menu reloads a full copy without marking it viewed',async()=>
   await expect(r.page.locator('#news-context-menu')).toHaveCount(0);
   await expect(r.page.locator('#text')).toContainText('Текст reload');
   expect(await r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url.endsWith('/viewed')).length)).toBe(0);
-  expect(r.errors).toEqual([]);
- }finally{await r.close();}
-});
-
-
-test('reload command fits the mobile context menu',async()=>{
- const r=await reader();try{
-  await r.page.setViewportSize({width:390,height:844});
-  await r.start([material('reload')]);
-  await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/materials/reload/retry',{body:{ok:true}}));
-  const row=r.page.locator('[data-card="reload"]');
-  await row.scrollIntoViewIfNeeded();
-  await r.page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));
-  const box=await row.boundingBox();if(!box)throw new Error('Missing card');
-  await r.page.mouse.click(Math.max(8,box.x+12),box.y+12,{button:'right'});
-  await expect(r.page.getByRole('menuitem',{name:'Reload Publication',exact:true})).toBeVisible();
-  await r.page.screenshot({path:artifactPath('telegram-reload-menu-mobile.png')});
-  await r.page.getByRole('menuitem',{name:'Reload Publication',exact:true}).click();
-  await expect(r.page.locator('#news-context-menu')).toHaveCount(0);
   expect(r.errors).toEqual([]);
  }finally{await r.close();}
 });

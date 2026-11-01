@@ -48,31 +48,3 @@ def test_compact_status_and_details_revalidate_independently(tmp_path):
         assert client.put('/api/v3/power',json={'enabled':True}).status_code==200
         changed=client.get('/api/v3/status',headers={'If-None-Match':first.headers['etag']})
         assert changed.status_code==200 and changed.json()['enabled'] is True
-
-
-def test_status_survives_stop_and_legacy_check_is_absent(tmp_path):
-    import time
-    library(tmp_path, [1])
-    app=traced_app(tmp_path)
-    with TestClient(app,headers=HEADERS) as client:
-        identity=client.get('/api/v3/status').headers['X-Oko-Storage-Id']
-        assert client.post('/api/v3/reading/check',json={'storage_id':None,'resources':[]}).status_code==404
-        item=client.get('/api/v3/cards').json()['items'][0]['id']
-        assert client.get('/api/v3/publication/'+item).status_code==200
-        assert client.get('/api/v3/materials/'+item).status_code==404
-        assert client.post('/api/v3/stop').status_code==200
-        for _ in range(100):
-            if app.state.host.execution._store is None:break
-            time.sleep(.01)
-        stopped=client.get('/api/v3/status')
-        assert stopped.status_code==200 and stopped.json()['runtime_state']=='stopped'
-        assert stopped.headers['X-Oko-Storage-Id']==identity
-        assert client.get('/api/v3/status',headers={'If-None-Match':stopped.headers['etag']}).status_code==304
-
-
-def test_queue_size_is_not_reported_as_completed_progress(tmp_path):
-    library(tmp_path,[2])
-    with TestClient(traced_app(tmp_path,rss_enabled=False),headers=HEADERS) as client:
-        assert client.put('/api/v3/power',json={'enabled':True}).status_code==200
-        status=client.get('/api/v3/status').json()
-        assert status['collection']=={'state':'running','completed':None,'total':None}

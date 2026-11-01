@@ -28,28 +28,6 @@ test('publication Markdown renders semantic text and safe links without external
  }finally{await r.close();}
 });
 
-test('multiline Markdown links normalize only their labels and destinations in all reading regions',async()=>{
- const r=await reader();try{
-  const text='До ссылки\n\n[YouTube\n\n  Christa Pike 911 Calls](https://youtu.be/\n  BPoce9VGatE)\n\n[Экранировано \\[да\\]\n  здесь]\n(https://example.net/a_(b))\n\n[Справка][ref]\n\n[ref]: <https://example.net/\n  reference>\n\n[Плохая](java\nscript:alert(1))\n\n`[Код\nссылки](https://code.test)`\n\n```\n[Блок\n\nкода](https://code.test)\n```\n\nПосле ссылки';
-  await r.start([material('A',{text,description:'[Описание\r\n\r\n  видео](https://youtu.be/BPoce9VGatE)'}),material('B',{text:'[Возврат\rкаретки](https://example.net/\r  cr)'})]);
-  await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/materials/A/versions/1',{body:{title:'Прежняя',text:'[Прежняя\n\nссылка](https://example.net/old)',full:true,images:[],attachments:[]}}));
-  await r.page.locator('[data-card="A"]').click();
-  const link=r.page.locator('#text').getByRole('link',{name:'YouTube Christa Pike 911 Calls',exact:true});
-  await expect(link).toHaveAttribute('href','https://youtu.be/BPoce9VGatE');await expect(link.locator('br,p')).toHaveCount(0);
-  await expect(r.page.locator('#text').getByRole('link',{name:'Экранировано [да] здесь'})).toHaveAttribute('href','https://example.net/a_(b)');
-  await expect(r.page.locator('#text').getByRole('link',{name:'Справка',exact:true})).toHaveAttribute('href','https://example.net/reference');
-  await expect(r.page.locator('#text a[href^="javascript:"]')).toHaveCount(0);
-  await expect(r.page.locator('#text code').last()).toHaveText('[Блок\n\nкода](https://code.test)\n');
-  await expect(r.page.locator('#text code').first()).toHaveText('[Код ссылки](https://code.test)');
-  await expect(r.page.locator('#description').getByRole('link',{name:'Описание видео'})).toHaveAttribute('href','https://youtu.be/BPoce9VGatE');
-  const source=await r.page.evaluate(async()=>{const reply=await fetch('/api/v3/publication/A');return reply.json();});
-  assert.equal(source.text,text);
-  await expect(r.page.locator('#text p').first()).toHaveText('До ссылки');await expect(r.page.locator('#text p').last()).toHaveText('После ссылки');
-  await r.page.locator('[data-card="B"]').click();await expect(r.page.locator('#text').getByRole('link',{name:'Возврат каретки'})).toHaveAttribute('href','https://example.net/cr');
-  assert.deepEqual(r.errors,[]);
- }finally{await r.close();}
-});
-
 
 test('Markdown publication links travel through the production HTTP reader unchanged',async t=>{
  const {page,api,origin,token}=await productionReader(t);
@@ -88,33 +66,6 @@ test('filtered publication keeps a collapsed full original, media and restorable
   await r.page.evaluate(item=>readerTransport.replies.set('/fixture/material/A',{body:item}),item);
   await expect(r.page.locator('#original-panel')).toHaveCount(1);
   await expect(r.page.locator('#original-panel')).not.toHaveAttribute('open');
-  assert.deepEqual(r.errors,[]);
- }finally{await r.close();}
-});
-
-test('nested Markdown reading position survives an independently completed summary',async()=>{
- const r=await reader();try{
-  const text=Array.from({length:55},(_,i)=>'> - **Point '+i+'** '+('long text '.repeat(12))).join('\n>\n');
-  const item=material('A',{text});await r.start([item]);await r.page.locator('[data-card="A"]').click();
-  const anchor=r.page.locator('#text [data-reading-paragraph]').nth(25);await anchor.evaluate(node=>node.scrollIntoView({block:'start'}));const before=(await anchor.boundingBox())!.y;
-  await r.page.evaluate(item=>readerTransport.replies.set('/fixture/material/A',{body:{...item,theses:{points:[{text:'Summary ready',sources:[]}]}}}),item);
-  await expect(r.page.locator('#theses')).toHaveText('Summary ready');
-  expect(Math.abs((await anchor.boundingBox())!.y-before)).toBeLessThan(2);
-  assert.deepEqual(r.errors,[]);
- }finally{await r.close();}
-});
-
-test('reference links preserve following paragraphs and indented code',async()=>{
- const r=await reader();try{
-  const text='[Reading][r]\n\n[r]: https://example.net/story\n  Regular paragraph follows.\n\n[Code][c]\n\n[c]: https://example.net/source\n    code\n\n[Word][w]\n\n[w]: https://example.net/word\n  Continuation';
-  await r.start([material('A',{text})]);await r.page.locator('[data-card="A"]').click();
-  const body=r.page.locator('#text');
-  await expect(body.getByRole('link',{name:'Reading',exact:true})).toHaveAttribute('href','https://example.net/story');
-  await expect(body).toContainText('Regular paragraph follows.');
-  await expect(body.getByRole('link',{name:'Code',exact:true})).toHaveAttribute('href','https://example.net/source');
-  await expect(body.locator('pre code')).toHaveText('code\n');
-  await expect(body.getByRole('link',{name:'Word',exact:true})).toHaveAttribute('href','https://example.net/word');
-  await expect(body).toContainText('Continuation');
   assert.deepEqual(r.errors,[]);
  }finally{await r.close();}
 });

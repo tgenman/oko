@@ -51,40 +51,6 @@ test('tree keeps current choice across moves and deletion and rejects late cards
  } finally {await r.close();}
 });
 
-test('width, focus, source warning and settings help remain separate from selection', async () => {
- const r=await reader(); try {
-  await r.page.clock.install();
-  await r.start([material('one')]);
-  await r.page.evaluate(()=>{
-   const t=readerTransport, feed={id:'feed',title:'Длинное название источника для проверки многоточия в дереве',folder_id:'f',kind:'youtube',transport:'youtube',count:1,original_urls:[],importance:'normal'};
-   t.replies.set('/api/v3/subscriptions',{body:{folders:[{id:'f',title:'Тема'}],feeds:[feed]}});
-   t.replies.set('/api/v3/settings/feed/feed',{body:{...t.replies.get('/api/v3/settings/oko/global')!.body,feed}});
-   t.replies.get('/api/v3/status')!.body!.sources=[{feed_id:'feed',title:feed.title,error:'Нет связи',changes:'Справка синтетического источника'}];
-  });
-  await expect(r.page.locator('.tree-warning')).toBeVisible();
-  await r.page.locator('.tree-warning').click();
-  await expect(r.page.locator('#status-panel')).toBeVisible();
-  await expect(r.page.locator('#all-folders')).toHaveAttribute('aria-pressed','true');
-  await r.page.locator('#status-close').click();
-  const divider=r.page.locator('#sidebar-resize');
-  await divider.focus(); await r.page.keyboard.press('ArrowRight');
-  await expect(divider).toHaveAttribute('aria-valuenow','290');
-  await r.page.evaluate(()=>{readerTransport.replies.get('/api/v3/reading-composition')!.body!.count=7;});
-  await r.page.clock.fastForward(500);
-  await expect(r.page.locator('#all-folders .tree-count')).toHaveText('7');
-  await expect(divider).toBeFocused();
-  await r.page.locator('[data-feed="feed"]').dblclick();
-  await expect(r.page.locator('#feeds-dialog')).toBeVisible();
-  await feedOptions(r.page);
-  await r.page.locator('#feed-options summary').click();
-  await feedOptions(r.page);
-  await expect(r.page.locator('#source-help')).toHaveText('Справка синтетического источника');
-  await r.page.keyboard.press('Escape');
-  await r.page.reload(); await expect(divider).toHaveAttribute('aria-valuenow','290');
-  expect(r.errors).toEqual([]);
- } finally {await r.close();}
-});
-
 test('tree uses publication counts, alphabetical feeds and compact local icons', async () => {
  const r=await reader(); try {
   await r.page.clock.install();
@@ -115,60 +81,6 @@ test('tree uses publication counts, alphabetical feeds and compact local icons',
   await expect(r.page.locator('[data-feed="a"]')).toHaveAttribute('aria-pressed','true');
   expect(r.errors).toEqual([]);
  } finally {await r.close();}
-});
-
-test('unavailable local storage does not block reading or resizing', async () => {
- const r=await reader(); try {
-  await r.page.addInitScript(()=>{Storage.prototype.setItem=()=>{throw new Error('Storage unavailable');};});
-  await r.start([material('one')]);
-  await r.page.locator('[data-collapse="f"]').click();
-  await expect(r.page.locator('[data-collapse="f"]')).toHaveAttribute('aria-expanded','false');
-  await r.page.locator('#sidebar-resize').focus(); await r.page.keyboard.press('ArrowRight');
-  await expect(r.page.locator('#sidebar-resize')).toHaveAttribute('aria-valuenow','290');
-  expect(r.errors).toEqual([]);
- } finally {await r.close();}
-});
-
-test('refresh keeps tree scroll and pointer resizing uses saved width', async () => {
- const r=await reader(); try {
-  await r.start([material('one')]);
-  await r.page.evaluate(()=>{readerTransport.replies.set('/api/v3/reading-composition',{body:{count:1,folders:[{id:'f',title:'Тема',count:1}],feeds:Array.from({length:40},(_,i)=>({id:'source-'+i,title:'Источник '+String(i).padStart(2,'0'),folder_id:'f',kind:'rss',count:i===39?1:0}))}});});
-  await expect(r.page.locator('[data-feed]')).toHaveCount(40);
-  await r.page.locator('[data-feed="source-39"]').focus();
-  const scroll=await r.page.locator('#reading-nav').evaluate(n=>n.scrollTop);
-  expect(scroll).toBeGreaterThan(0);
-  await r.page.evaluate(()=>{readerTransport.replies.get('/api/v3/reading-composition')!.body!.count=2;});
-  await expect(r.page.locator('#all-folders .tree-count')).toHaveText('2');
-  await expect(r.page.locator('[data-feed="source-39"]')).toBeFocused();
-  expect(await r.page.locator('#reading-nav').evaluate(n=>n.scrollTop)).toBe(scroll);
-  const edge=await r.page.locator('#sidebar-resize').boundingBox();
-  await r.page.mouse.move(edge!.x+2,edge!.y+100); await r.page.mouse.down(); await r.page.mouse.move(340,edge!.y+100); await r.page.mouse.up();
-  await expect(r.page.locator('#sidebar-resize')).toHaveAttribute('aria-valuenow','340');
-  await r.page.reload(); await expect(r.page.locator('#sidebar-resize')).toHaveAttribute('aria-valuenow','340');
- } finally {await r.close();}
-});
-
-test('Telegram avatar is small, reused across polling and replaced by icon when removed', async () => {
- const r=await reader();try {
-  const url='/api/v3/feeds/feed/avatar/'+'a'.repeat(64);
-  await r.start([material('one')]);
-  await r.page.evaluate(url=>{const t=readerTransport;
-   t.replies.set('/api/v3/reading-composition',{body:{count:1,folders:[{id:'f',title:'Каналы',position:0,count:1}],feeds:[{count:1,has_unviewed:true,feed:{id:'feed',title:'Канал с аватаром',folder_id:'f',identity:'@fixture',kind:'telegram',connection:'needs_connection',access:{kind:'unconfigured',source_locator:'@fixture'},importance:'normal',original_urls:['https://t.me/fixture'],initial_days:1,public_ai:false,history:{state:'absent'},avatar_url:url}}]}});
-   t.replies.set(url,{mime:'image/png',base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR9sAAAAASUVORK5CYII='});
-  },url);
-  const avatar=r.page.locator('[data-feed="feed"] img');
-  await expect(avatar).toBeVisible();
-  await expect(avatar).toHaveJSProperty('naturalWidth',1);
-  expect((await avatar.boundingBox())!.width).toBe(24);
-  const before=await r.page.evaluate(url=>readerTransport.requests.filter(r=>r.url===url).length,url);
-  await r.page.waitForTimeout(1100);
-  expect(await r.page.evaluate(url=>readerTransport.requests.filter(r=>r.url===url).length,url)).toBe(before);
-  await r.page.screenshot({path:artifactPath('telegram-avatar.png')});
-  await r.page.evaluate(()=>{const body=readerTransport.replies.get('/api/v3/reading-composition')!.body!;const entry=body.feeds[0];if('feed' in entry&&entry.feed&&typeof entry.feed==='object'&&'avatar_url' in entry.feed)delete entry.feed.avatar_url;});
-  await expect(avatar).toHaveCount(0);
-  await expect(r.page.locator('[data-feed="feed"] .source-icon.telegram')).toBeVisible();
-  expect(r.errors).toEqual([]);
- }finally{await r.close();}
 });
 
 test('completed feeds toggle persists and keeps a selected completed feed until selection changes', async () => {

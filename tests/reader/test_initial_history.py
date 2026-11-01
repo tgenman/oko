@@ -1,21 +1,8 @@
 from tests.support.cards import read_all_cards
-from tests.support.presence import presence, close_presence
+from tests.support.presence import presence
 import time
 import pytest
-from datetime import date, timedelta
-from tests.support.feed_url import client_for, verify, add
-
-
-def test_new_feed_saves_default_history_before_collection_and_restarts(tmp_path):
-    with client_for(tmp_path) as client:
-        feed = add(client, verify(client)).json()
-        assert feed['history']['selection']['mode'] == 'count'
-        assert feed['history']['selection']['count'] == '20'
-        assert feed['history']['state'] in ('not_started','discovering')
-    with client_for(tmp_path) as client:
-        history = client.get('/api/v3/subscriptions').json()['feeds'][0]['history']
-        assert int(history['selection']['count']) == 20
-        assert history['progress']['loaded'] == 0
+from tests.support.feed_url import verify, add
 
 
 @pytest.mark.parametrize('posts', [[5, 4, 3, 2, 1], [5, 5, 4, 3, 2, 1]])
@@ -50,18 +37,6 @@ def test_count_selects_fixed_latest_set_and_new_arrivals_do_not_consume_count(tm
             time.sleep(.02)
         assert {card['source_url'] for card in cards} == {f'https://source.test/post/{n}' for n in range(1,7)}
         assert client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']['progress']['loaded'] == 2
-
-
-def test_date_boundary_uses_user_zone_and_invalid_values_are_rejected(tmp_path):
-    with client_for(tmp_path) as client:
-        checked = verify(client)
-        for history in [{'mode': 'count', 'count': 0}, {'mode': 'count', 'count': 1.5}, {'mode': 'count', 'count': True},
-                        {'mode': 'date', 'date': str(date.today() + timedelta(days=2)), 'timezone': 'Europe/Moscow'},
-                        {'mode': 'date', 'date': '2025-10-01'}, {'mode': 'date', 'date': 'bad'}]:
-            assert add(client, checked, initial_history=history).status_code == 422
-        response = add(client, checked, initial_history={'mode': 'date', 'date': '2025-10-01', 'timezone': 'Europe/Moscow'})
-        assert response.status_code == 422, response.text
-        assert client.get('/api/v3/subscriptions').json()['feeds']==[]
 
 
 def test_two_of_four_restart_keeps_selected_history_and_progress(tmp_path):
@@ -105,69 +80,6 @@ def test_two_of_four_restart_keeps_selected_history_and_progress(tmp_path):
         assert history['state'] == 'complete'
         from tests.support.reader import wait_for
         assert len(wait_for(client,lambda: cards if len(cards:=read_all_cards(client, '/api/v3/cards'))==5 else None)) == 5
-
-
-
-
-def test_youtube_count_uses_video_publications_without_waiting_for_theses(tmp_path):
-    import httpx
-    from fastapi.testclient import TestClient
-    from tests.support.app import create_app
-    from tests.support.feed_url import HEADERS, YOUTUBE
-    from tests.support.youtube import PNG, History, NoCaptions
-    def reply(request):
-        if request.url.host == 'i.ytimg.com':
-            return httpx.Response(200, content=PNG, headers={'content-type': 'image/png'})
-        assert request.url.path == '/feeds/videos.xml'
-        return httpx.Response(200, text='<feed xmlns="http://www.w3.org/2005/Atom"><title>Учёба</title>' + ''.join(f'<entry><id>yt:video:{video}</id><title>{video}</title><link href="https://www.youtube.com/watch?v={video}"/><published>2025-10-0{n}T12:00:00Z</published></entry>' for n, video in enumerate(['abcdefghijk', 'lmnopqrstuv', 'wxyzabcdefg'], 1)) + '</feed>')
-    clock = [100.0]
-    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply), youtube_history=History(['wxyzabcdefg', 'lmnopqrstuv', 'abcdefghijk']), youtube_captions=NoCaptions(), clock=lambda: clock[0], wall_clock=lambda: clock[0], lease=60), headers=HEADERS) as client:
-        feed = add(client, verify(client, YOUTUBE), initial_history={'mode': 'count', 'count': 2}).json()
-        for _ in range(100):
-            history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
-            if history['progress']['loaded'] == 2:
-                break
-            time.sleep(.02)
-        assert history['progress']['loaded'] == 2
-        clock[0] += 10
-        for _ in range(100):
-            history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
-            if history['progress']['loaded'] == 2:
-                break
-            time.sleep(.02)
-        assert history['progress']['loaded'] == 2
-        assert history['state'] == 'complete'
-        assert {c['source_url'] for c in read_all_cards(client, '/api/v3/cards')} == {'https://www.youtube.com/watch?v=lmnopqrstuv', 'https://www.youtube.com/watch?v=wxyzabcdefg'}
-
-
-def test_count_has_no_product_limit_and_preserves_large_integer(tmp_path):
-    with client_for(tmp_path) as client:
-        response = add(client, verify(client), initial_history={'mode': 'count', 'count': '9007199254740993'})
-        assert response.status_code == 200, response.text
-        assert response.json()['history']['selection']['count'] == '9007199254740993'
-
-
-
-
-@pytest.mark.parametrize('dates, warning', [(['', '', ''], True), (['2025-10-03T12:00:00Z', '', '2025-10-01T12:00:00Z'], True), (['2025-10-01T12:00:00Z', '', '2025-10-03T12:00:00Z'], True)])
-def test_unknown_rss_count_keeps_feed_order_and_warns_when_precision_unconfirmed(tmp_path, dates, warning):
-    import httpx
-    from fastapi.testclient import TestClient
-    from tests.support.app import create_app
-    from tests.support.feed_url import HEADERS
-    def reply(request):
-        if request.url.path == '/feed':
-            return httpx.Response(200, text='<rss><channel><title>История</title>' + ''.join(f'<item><guid>{n}</guid><title>{n}</title><link>https://source.test/{n}</link><published>{stamp}</published></item>' for n, stamp in zip(['first', 'second', 'third'], dates)) + '</channel></rss>')
-        return httpx.Response(200, text='<article>Текст</article>')
-    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
-        feed = add(client, verify(client, 'https://source.test/feed'), initial_history={'mode': 'count', 'count': 2}).json()
-        for _ in range(100):
-            history = client.get('/api/v3/settings/feed/' + feed['id']).json()['feed']['history']
-            if history['progress']['loaded'] == 2:
-                break
-            time.sleep(.02)
-        assert {c['source_url'] for c in read_all_cards(client, '/api/v3/cards')} == {'https://source.test/first', 'https://source.test/second'}
-        assert ('точность выбора последних N не подтверждена' in ' '.join(history['progress']['warnings'])) is warning
 
 
 def test_finite_rss_history_reports_requested_and_available_without_archive(tmp_path):

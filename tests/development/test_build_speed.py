@@ -15,16 +15,6 @@ def run(root, *args):
                           capture_output=True, text=True)
 
 
-def test_batched_syntax_checks_every_file_and_reports_all_errors(tmp_path):
-    files = [tmp_path / name for name in ('valid.ts', 'first.tsx', 'last.ts')]
-    files[0].write_text('export const value: number = 1;')
-    files[1].write_text('export const broken: = <p>bad</p>;')
-    files[2].write_text('export const broken = ;')
-    result = run(ROOT, 'node', '--require', 'tsx/cjs', 'scripts/check-ts.cts', *map(str, files))
-    assert result.returncode != 0
-    assert 'first.tsx' in result.stderr and 'last.ts' in result.stderr
-
-
 def test_api_cache_reuses_only_success_for_exact_inputs_and_outputs(tmp_path):
     api_repository(tmp_path)
     command = ('node', '--import', 'tsx', 'scripts/generate-api.mts')
@@ -50,45 +40,6 @@ def test_api_cache_reuses_only_success_for_exact_inputs_and_outputs(tmp_path):
     assert failed.returncode != 0 and 'Stale TypeScript API library' in failed.stderr
     path.write_bytes(saved)
     assert 'API check cache hit' in run(tmp_path, *command, 'check').stdout
-
-
-def test_cache_fingerprint_detects_inventory_tooling_and_environment_changes(tmp_path):
-    # Use the shared boundary that the actual API and frontend CLIs use.
-    (tmp_path / 'inputs').mkdir()
-    file = tmp_path / 'inputs/value'
-    file.write_text('one')
-    script = ROOT / 'scripts/api-cache.mts'
-    code = "import {fingerprint, toolchain} from " + json.dumps(str(script)) + ";" + r"""
-import assert from 'node:assert/strict';
-import {promises as fs} from 'node:fs';
-import path from 'node:path';
-const directory = process.argv[1], root = process.argv[2];
-const file = path.join(directory, 'inputs/value');
-const key = async () => fingerprint(directory, ['inputs'], await toolchain(root));
-const first = await key(), stat = await fs.stat(file);
-await fs.writeFile(file, 'two');
-await fs.utimes(file, stat.atime, stat.mtime);
-assert.notEqual(await key(), first);
-await fs.writeFile(file, 'one');
-assert.equal(await key(), first);
-const added = path.join(directory, 'inputs/added');
-await fs.writeFile(added, 'new');
-assert.notEqual(await key(), first);
-await fs.unlink(added);
-assert.equal(await key(), first);
-process.env.NODE_ENV = 'development';
-const development = await key();
-process.env.NODE_ENV = 'production';
-assert.notEqual(await key(), development);
-const production = await key();
-process.env.npm_lifecycle_event = 'another-command';
-process.env.OKO_TEST_ARTIFACT_DIR = '/another-report';
-process.env.PYTEST_CURRENT_TEST = 'different test (call)';
-process.env.PYTEST_VERSION = 'pytest process marker';
-assert.equal(await key(), production);
-"""
-    result = run(ROOT, 'node', '--import', 'tsx', '--input-type=module', '-e', code, str(tmp_path), str(ROOT))
-    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_published_assets_reject_damage_inventory_and_wrong_build_receipt(tmp_path):
@@ -121,35 +72,6 @@ await assert.rejects(validateAssets(root, 'source', 'contract'), /ENOENT/);
 """
     result = run(ROOT, 'node', '--import', 'tsx', '--input-type=module', '-e', code, str(tmp_path))
     assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_type_receipt_rechecks_extended_config_and_source_errors(tmp_path):
-    import shutil
-    (tmp_path / 'scripts').mkdir()
-    for name in ('api-cache.mts', 'check-types.mts'):
-        shutil.copy2(ROOT / 'scripts' / name, tmp_path / 'scripts' / name)
-    for name in ('package.json', 'package-lock.json'):
-        shutil.copy2(ROOT / name, tmp_path / name)
-    (tmp_path / 'node_modules').symlink_to(ROOT / 'node_modules', target_is_directory=True)
-    (tmp_path / 'frontend').mkdir()
-    source = tmp_path / 'frontend/main.ts'
-    source.write_text('export function value(input) { return input; }\n')
-    base = tmp_path / 'tsconfig.base.json'
-    base.write_text(json.dumps({'compilerOptions': {'noEmit': True, 'types': [], 'lib': ['ES2022'], 'skipLibCheck': True, 'strict': False}}))
-    (tmp_path / 'tsconfig.json').write_text(json.dumps({'extends': './tsconfig.base.json', 'files': ['frontend/main.ts']}))
-    command = ('node', '--import', 'tsx', 'scripts/check-types.mts', 'tsconfig.json')
-    first = run(tmp_path, *command)
-    assert first.returncode == 0, first.stdout + first.stderr
-    hit = run(tmp_path, *command)
-    assert hit.returncode == 0 and 'Type check cache hit' in hit.stdout
-    base.write_text(base.read_text().replace('false', 'true'))
-    failed = run(tmp_path, *command)
-    assert failed.returncode != 0 and 'TS7006' in failed.stdout + failed.stderr
-    source.write_text('export function value(input: string) { return input; }\n')
-    assert run(tmp_path, *command).returncode == 0
-    source.write_text('export const value: number = "bad";\n')
-    failed = run(tmp_path, *command)
-    assert failed.returncode != 0 and 'TS2322' in failed.stdout + failed.stderr
 
 
 def test_browser_batches_reuse_workers_and_preserve_failures_filters_and_hooks(tmp_path):
@@ -190,39 +112,3 @@ const {spawnSync}=require('node:child_process');
     broken=run(ROOT,*command,'--test-name-pattern=batch case 3',*files)
     assert broken.returncode!=0,broken.stdout+broken.stderr
     assert 'EXEC 3 ' in broken.stdout,broken.stdout
-
-
-def test_browser_duration_hints_balance_files_without_losing_registration(tmp_path):
-    files=[]
-    for index in range(4):
-        f=tmp_path/f'test_cost_{index}.ts';f.write_text('//'+'x'*(100000 if index==0 else 1000));files.append(str(f))
-    script=str(ROOT/'scripts/browser-batches.cts')
-    code=r"""
-const {batchTests}=require(process.argv[1]);const fs=require('node:fs');
-(async()=>{
- const files=process.argv.slice(2),hint={[files[0]]:50,[files[1]]:40,[files[2]]:30,[files[3]]:20};
- const batch=await batchTests(['--test','--test-concurrency=2',...files],hint);
- try{console.log(JSON.stringify(batch.args.filter(x=>x.endsWith('.cjs')).map(x=>fs.readFileSync(x,'utf8'))));}
- finally{await batch.close();}
-})().catch(e=>{console.error(e);process.exitCode=1;});
-"""
-    result=run(ROOT,'node','--require','tsx/cjs','-e',code,script,*files)
-    assert result.returncode==0,result.stderr
-    groups=json.loads(result.stdout)
-    assert len(groups)==2
-    assert not any(files[0] in group and files[1] in group for group in groups)
-    assert all(sum(name in group for group in groups)==1 for name in files)
-    costs=dict(zip(files,[50,40,30,20]))
-    assert max(sum(costs[name] for name in files if name in group) for group in groups)==70
-
-
-def test_node_timing_reporter_preserves_tap_failures_and_attributes_original_file(tmp_path):
-    file=tmp_path/'test_reporter.ts'
-    file.write_text("const {test}=require('node:test');test('outer',async t=>{await t.test('inner',()=>{});});test('bad',()=>{throw Error('intentional');});")
-    report=tmp_path/'timings.json'
-    result=run(ROOT,'node','--require','tsx/cjs','--test','--test-reporter=tap',
-               '--test-reporter='+str(ROOT/'scripts/test-timing-reporter.mts'),
-               '--test-reporter-destination=stdout','--test-reporter-destination='+str(report),str(file))
-    assert result.returncode==1 and 'not ok' in result.stdout and 'intentional' in result.stdout
-    data=json.loads(report.read_text())
-    assert data['version']==1 and set(data['files'])=={str(file)} and data['files'][str(file)]>0

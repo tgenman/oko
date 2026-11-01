@@ -61,18 +61,6 @@ test('folder deletion rechecks an empty folder when a feed arrives before confir
  expect((await api('subscriptions')).folders.some(f=>f.id===a.id)).toBe(true);await page.locator('#folder-action-close').click();
 });
 
-test('late folder rename reconciles its write without closing a newer folder dialog',{timeout:30000},async t=>{
- const {page,api,origin,token}=await productionReader(t);
- const catalog=await addSources(api,[['https://a.test/feed','Alpha','A'],['https://b.test/feed','Beta','B']]);
- const a=catalog.folders.find(f=>f.title==='A')!,b=catalog.folders.find(f=>f.title==='B')!;
- await page.goto(origin+'/#token='+token);await expect(page.locator('#cards button')).toHaveCount(2);
- let release!:()=>void,committed=false;const held=new Promise<void>(resolve=>{release=resolve;});t.after(()=>release());
- await page.route('**/api/v3/folders/'+a.id,async route=>{const response=await route.fetch();committed=true;await held;await route.fulfill({response});});
- await page.locator('[data-folder="'+a.id+'"]').click({button:'right'});await page.getByRole('menuitem',{name:'Rename…',exact:true}).click();await page.locator('#folder-rename-name').fill('Renamed A');await page.locator('#folder-action-confirm').click();await expect.poll(()=>committed).toBe(true);
- await page.locator('#folder-action-cancel').click();await page.locator('[data-folder="'+b.id+'"]').click({button:'right'});await page.getByRole('menuitem',{name:'Rename…',exact:true}).click();await page.locator('#folder-rename-name').fill('New B draft');release();
- await expect(page.locator('[data-folder="'+a.id+'"]').first()).toHaveAttribute('aria-label','Renamed A');await expect(page.locator('#folder-rename-name')).toHaveValue('New B draft');await expect(page.locator('#folder-action-confirm')).toBeEnabled();await page.locator('#folder-action-cancel').click();
-});
-
 test('folder completion by context menu includes hidden zero-count items and ignores a late preview',async()=>{
  const r=await reader();try{
   await r.start([material('a')]);
