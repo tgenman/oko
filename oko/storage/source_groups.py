@@ -125,9 +125,6 @@ def group_snapshot(store: 'Store', identity: str, kind: str, now: float, *, excl
     seen_objects: set[tuple[str,str | None]]=set()
     result['_source_codes']={row['problem_code'] for row,_ in selected}
     for row,owner in selected:
-        legacy_feed=row['feed_id'] or row['item'] or 'demo'
-        legacy='job:'+row['problem_code']+':'+legacy_feed+':'+kind
-        if legacy!=identity:result.setdefault('_legacy_ids',set()).add(legacy)
         obj=dict(kind='feed' if kind=='feed-delete' else 'material',id=owner if kind=='feed-delete' else row['affected'])
         key=(obj['kind'],obj['id'])
         if kind!='delete' and key not in seen_objects:
@@ -211,71 +208,27 @@ def sync(store: 'Store', kind: str, keys: set[str], now: float, *, exclude: set[
         else:
             occupied=store.db.execute('SELECT id,identity,body FROM reader_problems WHERE identity=%s AND finished IS NULL',(canonical,)).fetchone()
             actual=canonical
+            fallback=False
             if occupied is not None:
-                try:body=json.loads(occupied['body'])
-                except (TypeError,ValueError):body={}
-                compatible=isinstance(body,dict) and body.get('operation') in (None,'producer:status','producer:'+kind) and (current is None or body.get('code')==current['code']) and all(isinstance(body.get(field),str) for field in ('title','section','consequence','next_step')) and body.get('state') in ('current','retrying') and (body.get('next_at') is None or isinstance(body.get('next_at'),(int,float)))
-                if compatible:
-                    protected_key='source-legacy-protected:'+hashlib.sha256(canonical.encode()).hexdigest()
-                    protected=store.db.execute('SELECT value FROM state WHERE key=%s',(protected_key,)).fetchone()
-                    if protected:
-                        try:protected_value=json.loads(protected['value'])
-                        except (TypeError,ValueError):protected_value=None
-                        if not isinstance(protected_value,list) or len(protected_value)!=3 or protected_value[:2]!=['oko-source-legacy-v1',canonical] or not isinstance(protected_value[2],str) or protected_value[2]==occupied['id']:
-                            compatible=False
-                if compatible and current is not None:
-                    allowed={(o.get('kind'),o.get('id')) for o in current['objects']} | set((evidence or {}).get(canonical,set()))
-                    old=body.get('objects')
-                    compatible=isinstance(old,list) and ((bool(old) and all(isinstance(o,dict) and (o.get('kind'),o.get('id')) in allowed for o in old)) or (not old and kind=='delete' and body.get('operation')=='producer:delete' and body.get('code')==current['code']))
-                if not compatible:
-                    for _ in range(3):
-                        actual='job:source-isolated:'+hashlib.sha256(canonical.encode()).hexdigest()+':'+uuid4().hex
-                        if not store.db.execute('SELECT 1 FROM reader_problems WHERE identity=%s AND finished IS NULL',(actual,)).fetchone():break
-                    else:raise RuntimeError('Unable to allocate source group identity')
+                body=json.loads(occupied['body'])
+                allowed={(category,value) for category,value in (evidence or {}).get(canonical,set()) if category in ('material','feed')}
+                if current is not None:allowed.update((obj['kind'],obj['id']) for obj in current['objects'])
+                # Current fallback records use the exact producer operation.
+                # No adoption of old producer:status records or former owner keys.
+                fallback=(isinstance(body,dict) and body.get('operation')=='producer:'+kind
+                    and body.get('code') in actual_codes and isinstance(body.get('objects'),list)
+                    and bool(body['objects'] or kind=='delete')
+                    and all(isinstance(obj,dict) and set(obj)=={'kind','id'} and (obj.get('kind'),obj.get('id')) in allowed for obj in body['objects']))
+            if fallback:row=occupied
+            if occupied is not None and not fallback:
+                # A current group may occupy the same textual key. Keep its
+                # occurrence separate; old diagnostic records are removed at release.
+                for _ in range(3):
+                    actual='job:source-isolated:'+hashlib.sha256(canonical.encode()).hexdigest()+':'+uuid4().hex
+                    if not store.db.execute('SELECT 1 FROM reader_problems WHERE identity=%s AND finished IS NULL',(actual,)).fetchone():break
+                else:raise RuntimeError('Unable to allocate source group identity')
         if current is not None:
             current.pop('_source_codes',None)
-            legacy_ids=current.pop('_legacy_ids',set())
-            moved_legacy: str | None=None
-            active_legacy: set[str]=set()
-            if row is None and len(legacy_ids)==1 and (actual!=canonical or occupied is None):
-                legacy=next(iter(legacy_ids))
-                previous=store.db.execute('SELECT id,body FROM reader_problems WHERE identity=%s AND finished IS NULL',(legacy,)).fetchone()
-                legacy_current=project(store,legacy,kind,now) if previous and manageable(legacy,kind) else None
-                if legacy_current is not None:active_legacy.add(legacy)
-                if previous and manageable(legacy,kind) and legacy_current is None:
-                    try:previous_body=json.loads(previous['body'])
-                    except (TypeError,ValueError):previous_body={}
-                    allowed={(o.get('kind'),o.get('id')) for o in current['objects']}
-                    objects=previous_body.get('objects') if isinstance(previous_body,dict) else None
-                    valid=isinstance(previous_body,dict) and previous_body.get('code')==current['code'] and previous_body.get('operation') in (None,'producer:status','producer:'+kind) and all(isinstance(previous_body.get(field),str) for field in ('title','section','consequence','next_step')) and previous_body.get('state') in ('current','retrying')
-                    if valid and isinstance(objects,list) and bool(objects) and all(isinstance(obj,dict) and (obj.get('kind'),obj.get('id')) in allowed for obj in objects):
-                        store.db.execute('UPDATE reader_problems SET identity=%s WHERE id=%s AND finished IS NULL',(actual,previous['id']))
-                        moved_legacy=legacy
-            remaining=sorted(legacy_ids-({moved_legacy} if moved_legacy else set())-active_legacy)
-            for start in range(0,len(remaining),400):
-                legacy_rows=store.db.execute('SELECT id,identity,body FROM reader_problems WHERE finished IS NULL AND identity=ANY(%s)',(remaining[start:start+400],)).fetchall()
-                protected_rows: list[tuple[str,str]]=[]
-                for legacy_row in legacy_rows:
-                    try:legacy_body=json.loads(legacy_row['body'])
-                    except (TypeError,ValueError):continue
-                    if not isinstance(legacy_body,dict) or isinstance(legacy_body.get('source_group_identity'),str) or not isinstance(legacy_body.get('code'),str) or not legacy_body['code'].startswith('source-') or legacy_body.get('operation') not in (None,'producer:status','producer:'+kind):continue
-                    identity=legacy_row['identity']
-                    protected_rows.append(('source-legacy-protected:'+hashlib.sha256(identity.encode()).hexdigest(),json.dumps(['oko-source-legacy-v1',identity,legacy_row['id']])))
-                if protected_rows:
-                    if len(dict(protected_rows))!=len(protected_rows):raise RuntimeError('Source legacy identity collision')
-                    store.db.execute("INSERT INTO state(key,value) SELECT key,value FROM unnest(%s::text[],%s::text[]) batch(key,value) ON CONFLICT DO NOTHING",([p[0] for p in protected_rows],[p[1] for p in protected_rows]))
-                    saved=store.db.execute('SELECT key,value FROM state WHERE key=ANY(%s)',([p[0] for p in protected_rows],)).fetchall()
-                    expected=dict(protected_rows)
-                    for marker in saved:
-                        wanted=expected[marker['key']]
-                        if marker['value']==wanted:continue
-                        try:old_value=json.loads(marker['value']);new_value=json.loads(wanted)
-                        except (TypeError,ValueError):raise RuntimeError('Source legacy identity collision')
-                        if not isinstance(old_value,list) or len(old_value)!=3 or not all(isinstance(v,str) for v in old_value) or old_value[:2]!=new_value[:2]:
-                            raise RuntimeError('Source legacy identity collision')
-                        changed=store.db.execute("""UPDATE state SET value=%s WHERE key=%s AND value=%s AND NOT EXISTS
-                            (SELECT 1 FROM reader_problems WHERE id=%s AND identity=%s AND finished IS NULL) RETURNING key""",(wanted,marker['key'],marker['value'],old_value[2],old_value[1])).fetchone()
-                        if changed is None:raise RuntimeError('Source legacy identity collision')
             current['source_group_identity']=canonical
         if row is not None or current is not None:
             store.problems.sync_candidate(actual,current,now)
@@ -479,30 +432,6 @@ def sync_changed_rows(store: 'Store', rows: list[Any], now: float) -> None:
     for start in range(0,len(ineligible),400):
         store.db.execute("UPDATE jobs SET source_event_owned=false WHERE id=ANY(%s) AND source_event_owned",(ineligible[start:start+400],))
     notify_admission(store,eligible+ineligible)
-
-
-def cleanup_legacy_protected(store: 'Store', cursor: str | None) -> tuple[str | None,bool]:
-    """Remove at most one page of stale markers, leaving foreign values untouched."""
-    import hashlib
-    import json
-    query="SELECT key,value FROM state WHERE key LIKE 'source-legacy-protected:%%'"
-    if cursor is not None:query+=' AND key COLLATE "C">%s'
-    markers=store.db.execute(query+' ORDER BY key COLLATE "C" LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
-    if not markers:return None,True
-    parsed=[]
-    for marker in markers:
-        try:value=json.loads(marker['value'])
-        except (TypeError,ValueError):continue
-        if not isinstance(value,list) or len(value)!=3 or value[0]!='oko-source-legacy-v1' or not all(isinstance(v,str) for v in value):continue
-        if marker['key']!='source-legacy-protected:'+hashlib.sha256(value[1].encode()).hexdigest():continue
-        parsed.append((marker['key'],marker['value'],value[1],value[2]))
-    if parsed:
-        rows=store.db.execute('SELECT id,identity,finished FROM reader_problems WHERE id=ANY(%s)',([row[3] for row in parsed],)).fetchall()
-        records={row['id']:row for row in rows}
-        stale=[(key,value) for key,value,identity,record_id in parsed if record_id not in records or records[record_id]['finished'] is not None or records[record_id]['identity']!=identity]
-        if stale:
-            store.db.execute('DELETE FROM state s USING unnest(%s::text[],%s::text[]) AS v(key,value) WHERE s.key=v.key AND s.value=v.value',([r[0] for r in stale],[r[1] for r in stale]))
-    return markers[-1]['key'],False
 
 
 def job_evidence_many(store: 'Store', rows: Sequence[tuple[int,str | None]]) -> dict[str,set[tuple[str,str]]]:

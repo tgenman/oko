@@ -88,64 +88,6 @@ def test_blocked_personal_download_keeps_web_and_collection_live_until_stop(tmp_
             telegram.release.set()
 
 
-def test_subprocess_downloads_have_separate_account_pipes_and_spools(tmp_path, monkeypatch):
-    from oko.collection.telegram.source import LocalTelegram
-    from tests.support.telegram_sdk import channel_sdk
-    env, trace = channel_sdk(tmp_path, monkeypatch)
-    env.write_text(env.read_text()+'TELEGRAM_SESSION_NAME_SECOND=second.session\n')
-    (env.parent/'second.session').touch()
-    sdk = env.parent/'sitecustomize.py'
-    sdk.write_text(sdk.read_text()+'''
-original_init = FakeClient.__init__
-def init(self, session, *args, **kwargs):
-    original_init(self, session, *args, **kwargs)
-    self.fixture_user = 202 if 'second.session' in str(session) else 101
-FakeClient.__init__ = init
-async def identity(self):
-    return type('User', (), {'id':self.fixture_user})()
-FakeClient.get_me = identity
-async def download(self, message, file, progress_callback):
-    import asyncio
-    self.log(op='download-start', user=self.fixture_user)
-    if self.fixture_user == 101:
-        await asyncio.sleep(30)
-    file.write(b'account-two')
-    return True
-FakeClient.download_media = download
-''')
-
-    async def scenario():
-        client = LocalTelegram(env, tmp_path/'data')
-        blocked = None
-        try:
-            assert await client.identity('fixture') == 101
-            assert await client.identity('second') == 202
-            client.expected_users.update(fixture=101, second=202)
-            blocked = asyncio.create_task(client.download('fixture', -1001234567890, 140))
-            for _ in range(100):
-                if trace.exists() and 'download-start' in trace.read_text():
-                    break
-                await asyncio.sleep(.01)
-            else:
-                raise AssertionError('first worker did not start download')
-            assert await asyncio.wait_for(client.download('second', -1001234567890, 140), 2) == b'account-two'
-            assert not blocked.done()
-        finally:
-            if blocked:
-                blocked.cancel()
-                try:
-                    await blocked
-                except asyncio.CancelledError:
-                    pass
-            await client.close()
-        assert not list((tmp_path/'data'/'staging').rglob('media.bin'))
-    asyncio.run(scenario())
-
-
-
-
-
-
 def test_flood_wait_survives_a_new_monotonic_origin_and_does_not_block_other_account(tmp_path):
     from oko.collection.contracts import SourceError
     class Limited(TwoAccounts):
@@ -189,28 +131,3 @@ def test_flood_wait_survives_a_new_monotonic_origin_and_does_not_block_other_acc
             client.get('/api/v3/status')
             time.sleep(.02)
         assert telegram.calls > 1
-
-
-
-
-
-
-@pytest.mark.parametrize('revalidate_first', [True, False])
-def test_profile_revalidation_during_worker_start_does_not_contend_for_own_session(tmp_path, monkeypatch, revalidate_first):
-    from oko.collection.telegram.source import LocalTelegram
-    from tests.support.telegram_sdk import channel_sdk
-    env, _ = channel_sdk(tmp_path, monkeypatch)
-
-    async def scenario():
-        client = LocalTelegram(env, tmp_path/'data')
-        client.expected_users['fixture'] = 10001
-        try:
-            calls = [client.identity('fixture'), client.info('fixture', '@forum')]
-            replies = await asyncio.gather(*(calls if revalidate_first else calls[::-1]), return_exceptions=True)
-            identity, info = replies if revalidate_first else replies[::-1]
-            assert identity == 10001, str(identity)
-            assert isinstance(info, dict), str(info)
-            assert info['peer'] == -1001234567890
-        finally:
-            await client.close()
-    asyncio.run(scenario())

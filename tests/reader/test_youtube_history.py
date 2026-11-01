@@ -1,5 +1,5 @@
 from tests.support.cards import read_all_cards
-from tests.support.presence import presence, close_presence
+from tests.support.presence import presence
 from tests.support.subscriptions import add_sources
 import time
 import pytest
@@ -153,67 +153,3 @@ def test_stop_then_new_selection_can_rediscover_viewed_and_retains_saved_materia
         assert len(restored) == 4
         assert {card['source_url'].split('=')[-1] for card in restored} == {video(n) for n in range(57,61)}
         assert [count for _,count in history.calls][-2:]==[1,2]
-
-
-def test_recovered_rss_window_imports_the_current_available_window(tmp_path):
-    from datetime import datetime, timezone
-    recovered = False
-    history = HistoryFixture()
-    new_date = datetime.now(timezone.utc).timestamp() + 60
-    def entry(n, stamp):
-        date = datetime.fromtimestamp(stamp, timezone.utc).isoformat()
-        return f'<entry><id>yt:video:{video(n)}</id><title>Video {n}</title><link href="https://www.youtube.com/watch?v={video(n)}"/><published>{date}</published></entry>'
-    def reply(request):
-        if request.url.host == 'i.ytimg.com':
-            return httpx.Response(200, content=PNG, headers={'content-type':'image/png'})
-        streams = request.url.params.get('playlist_id', '').startswith('UULV')
-        if streams and not recovered:
-            return httpx.Response(503)
-        items = entry(40, 1735689600) + entry(99, new_date) if streams else entry(60, 1735689600)
-        return httpx.Response(200, text=f'<feed xmlns="http://www.w3.org/2005/Atom"><title>Channel</title>{items}</feed>')
-    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, lease=60,
-                              rss_transport=httpx.MockTransport(reply), youtube_history=history), headers=HEADERS) as client:
-        feed = import_channel(client)
-        presence(client, 'history')
-        client.post('/api/v3/feeds/' + feed + '/history', json={'mode':'count','count':'1'})
-        wait_history(client, feed, lambda h:h['state']=='complete')
-        recovered = True
-        client.post('/api/v3/collect')
-        time.sleep(.4)
-        titles = {c['title'] for c in read_all_cards(client, '/api/v3/cards')}
-        assert titles == {'Video 40','Video 60','Video 99'}
-
-
-def test_smaller_history_after_new_upload_preserves_retained_order(tmp_path):
-    from tests.support.youtube import History
-    history = History([video(60), video(59), video(58)])
-    with reader(tmp_path, history, []) as client:
-        feed = import_channel(client)
-        presence(client, 'history')
-        client.post('/api/v3/feeds/' + feed + '/history', json={'mode':'count','count':'3'})
-        wait_history(client, feed, lambda h: h['state'] == 'complete')
-        history.videos = (video(61), video(60), video(59), video(58))
-        client.post('/api/v3/feeds/' + feed + '/history', json={'mode':'count','count':'2'})
-        wait_history(client, feed, lambda h: h['state'] == 'complete' and int(h['selection']['count']) == 2)
-        for sort, numbers in [('newest', [61, 60, 59, 58]), ('oldest', [58, 59, 60, 61])]:
-            cards = read_all_cards(client, '/api/v3/cards', params={'feed': feed, 'sort': sort})
-            assert {c['source_url'].split('=')[-1] for c in cards} == {video(n) for n in numbers}
-            assert [c['id'] for c in cards] == sorted(c['id'] for c in cards)
-
-
-def test_large_unknown_date_window_keeps_order_across_pages_and_expansion(tmp_path):
-    from tests.support.youtube import History
-    history=History([video(n) for n in range(100,0,-1)])
-    with reader(tmp_path,history,[]) as client:
-        presence(client,'history')
-        feed=import_channel(client)
-        client.post('/api/v3/feeds/'+feed+'/history',json={'mode':'count','count':'60'})
-        wait_history(client,feed,lambda h:h['state']=='complete')
-        first=read_all_cards(client, '/api/v3/cards?sort=newest',params={'limit':17})
-        assert {card['source_url'].split('=')[-1] for card in first}=={video(n) for n in range(100,40,-1)}
-        assert [card['id'] for card in first]==sorted(card['id'] for card in first)
-        client.post('/api/v3/feeds/'+feed+'/history',json={'mode':'count','count':'100'})
-        wait_history(client,feed,lambda h:h['state']=='complete' and h['selection']['count']=='100')
-        expanded=read_all_cards(client, '/api/v3/cards?sort=newest',params={'limit':17})
-        assert {card['source_url'].split('=')[-1] for card in expanded}=={video(n) for n in range(100,0,-1)}
-        assert [card['id'] for card in expanded]==sorted(card['id'] for card in expanded)

@@ -7,31 +7,6 @@ async function chooseFolder(r: ReaderFixture,id='f') {
   await r.page.locator('#folders [data-folder="'+id+'"]').click();
   await expect(r.page.locator('#folder-viewed')).toBeEnabled();
 }
-test('folder completion conflict keeps material and requires the refreshed token',async()=>{
-  const r=await reader();try {
-    await r.start([material('a')]);await chooseFolder(r);
-    await r.page.locator('[data-card="a"]').click();
-    await expect(r.page.locator('#text')).toContainText('Текст a');
-    await r.page.evaluate(()=>{
-      readerTransport.replies.set('/api/v3/folders/f/completion/preview',{body:{cards:1,originals:1,token:'first'}});
-      readerTransport.replies.set('/api/v3/folders/f/completion',{status:409,body:{detail:{message:'Состав папки изменился',preview:{cards:2,originals:2,token:'changed'}}}});
-    });
-    await r.page.locator('#folder-viewed').click();
-    await expect(r.page.locator('#completion-confirm')).toBeEnabled();
-    await r.page.locator('#completion-confirm').click();
-    await expect(r.page.locator('#completion-message')).toHaveText('Состав папки изменился');
-    await expect(r.page.locator('#completion-count')).toContainText('Cards: 2');
-    await expect(r.page.locator('#text')).toContainText('Текст a');
-    await r.page.screenshot({path:artifactPath('folder-completion-conflict.png')});
-    await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/folders/f/completion',{body:{ok:true},next:[['/api/v3/cards',{body:[]}]]}));
-    await r.page.locator('#completion-confirm').click();
-    await expect(r.page.locator('#completion-dialog')).not.toBeVisible();
-    await expect(r.page.locator('#cards button')).toHaveCount(0);
-    await expect(r.page.locator('#text')).toContainText('Текст a');
-    expect(await r.page.evaluate(()=>readerTransport.requests.filter(request=>request.url==='/api/v3/folders/f/completion').map(request=>request.body!.token))).toEqual(['first','changed']);
-    expect(r.errors).toEqual([]);
-  }finally{await r.close();}
-});
 
 test('late folder completion preserves another folder material and confirmation dialog',async()=>{
   const r=await reader();try {

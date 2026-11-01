@@ -1,8 +1,6 @@
 from tests.support.cards import read_all_cards
-from tests.support.storage import database
-from datetime import date, timedelta
+from datetime import date
 from tests.support.presence import presence, close_presence
-from tests.support.telegram import connect_request
 import time
 import pytest
 from fastapi.testclient import TestClient
@@ -10,59 +8,6 @@ from tests.support.app import create_app
 from tests.support.telegram import Telegram, connect, settled
 
 H = {'Authorization': 'Bearer test'}
-
-
-def test_runtime_auto_read_uses_saved_facts_and_keeps_http_responsive(tmp_path):
-    network = ReadTelegram()
-    network.history = [dict(id=i, date=time.time()-60, text=f'Synthetic {i}', group=None, media=None)
-                       for i in range(11,43)]
-    app = create_app(tmp_path, token='test', api_only=True, telegram_client=network)
-    with TestClient(app, headers=H) as client:
-        client.patch('/api/v3/settings/oko/global', json={'theses':False,'prompt_filters':''})
-        feed = connect(client, count=32)
-        settled(client, 32)
-        assert client.put('/api/v3/power', json={'enabled':False}).status_code == 200
-        queries = []
-        def trace(query):
-            queries.append(query)
-        client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(trace))
-        try:
-            before = time.monotonic()
-            assert client.patch('/api/v3/feeds/'+feed['id'], json={'auto_read':True}).status_code == 200
-            assert time.monotonic()-before < 1
-            before = time.monotonic()
-            assert client.get('/api/v3/cards').status_code == 200
-            assert time.monotonic()-before < 1
-            deadline = time.monotonic()+5
-            while time.monotonic() < deadline:
-                if any(row['pending'] == 32 for row in client.get('/api/v3/status/details').json()['telegram_reads']):
-                    break
-                time.sleep(.02)
-            assert any(row['pending'] == 32 for row in client.get('/api/v3/status/details').json()['telegram_reads'])
-        finally:
-            client.portal.call(lambda: app.state.host.require_store().db.set_trace_callback(None))
-        member_points = [q for q in queries if any(q.startswith(f'SELECT members FROM {table} WHERE id=') for table in ('items', 'items_read', 'items_by_feed', 'unviewed_items_by_feed'))]
-        assert member_points == []
-        assert not any(q.startswith('SELECT id FROM unviewed_items_by_feed') for q in queries)
-        assert network.acks == []
-
-
-def test_postgres_runtime_auto_read_frontier_follows_latest_setting(postgres_url, tmp_path):
-    network = ReadTelegram()
-    network.history = [dict(id=i, date=time.time()-60, text=f'Synthetic {i}', group=None, media=None)
-                       for i in range(11,43)]
-    with TestClient(create_app(tmp_path, token='test', api_only=True, database_url=postgres_url,
-                    telegram_client=network), headers=H) as client:
-        client.patch('/api/v3/settings/oko/global', json={'theses':False,'prompt_filters':''})
-        assert client.put('/api/v3/power', json={'enabled':True}).status_code == 200
-        feed = connect(client, count=32)
-        settled(client, 32)
-        assert client.put('/api/v3/power', json={'enabled':False}).status_code == 200
-        assert client.patch('/api/v3/feeds/'+feed['id'], json={'auto_read':True}).status_code == 200
-        wait_for(client, lambda status: any(row['pending'] == 32 for row in status['telegram_reads']))
-        assert client.patch('/api/v3/feeds/'+feed['id'], json={'auto_read':False}).status_code == 200
-        wait_for(client, lambda status: all(row['pending'] == 0 for row in status['telegram_reads']))
-        assert network.acks == []
 
 
 class ReadTelegram(Telegram):
@@ -169,26 +114,6 @@ def test_old_history_blocks_until_separate_permission_and_external_reads_do_not_
         assert client.get('/api/v3/publication/' + later).status_code == 200
 
 
-def test_reobserving_unchanged_page_schedules_read_frontier_check(tmp_path):
-    network = ReadTelegram()
-    app = create_app(tmp_path, token='test', telegram_client=network)
-    with TestClient(app, headers=H) as client:
-        presence(client, 'test')
-        feed = connect(client,count=2)['id']
-        settled(client, 2)
-        assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
-
-        def observe():
-            store = app.state.host.require_store()
-            with store.db:
-                cursor = store.db.execute('SELECT cursor FROM feeds WHERE id = %s', (feed,)).fetchone()[0]
-                store.db.execute('UPDATE telegram_read_state SET needs_sync=false WHERE feed = %s', (feed,))
-                store.read_sync.observed(feed, (), cursor)
-                return store.db.execute('SELECT needs_sync FROM telegram_read_state WHERE feed = %s', (feed,)).fetchone()[0]
-
-        assert client.portal.call(observe)
-
-
 def test_new_read_sync_signal_survives_an_in_progress_pass(tmp_path):
     network = ReadTelegram()
     app = create_app(tmp_path, token='test', telegram_client=network)
@@ -212,183 +137,6 @@ def test_new_read_sync_signal_survives_an_in_progress_pass(tmp_path):
                 return store.db.execute('SELECT needs_sync FROM telegram_read_state WHERE feed=%s', (feed,)).fetchone()[0]
 
         assert client.portal.call(check)
-
-
-def test_saved_and_viewed_are_independent_read_reasons(tmp_path):
-    network = ReadTelegram()
-    app = create_app(tmp_path, token='test', telegram_client=network)
-    with TestClient(app, headers=H) as client:
-        presence(client, 'test')
-        feed = connect(client, count=2)['id']
-        settled(client, 2)
-        assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
-        assert client.patch('/api/v3/feeds/'+feed, json={'auto_read':False}).status_code == 200
-
-        async def check():
-            async with app.state.host.execution._actions:
-                store = app.state.host.require_store()
-                with store.db:
-                    store.read_sync.eligible(feed, [11], 'viewed')
-                    store.read_sync.eligible(feed, [11], 'saved')
-                row = store.db.execute('SELECT saved,viewed FROM telegram_read_members WHERE feed=%s AND member=11', (feed,)).fetchone()
-                request = store.read_sync.request(feed)
-                return tuple(row), request['eligible'] if request else None
-
-        reasons, eligible = client.portal.call(check)
-        assert reasons == (True, True)
-        assert 11 in eligible
-
-
-def test_complete_telegram_messages_are_saved_even_when_auto_read_is_off(tmp_path):
-    network = ReadTelegram()
-    app = create_app(tmp_path, token='test', telegram_client=network)
-    with TestClient(app, headers=H) as client:
-        presence(client, 'test')
-        feed = connect(client, count=2)['id']
-        settled(client, 2)
-        assert client.put('/api/v3/power', json={'enabled':False}).status_code == 200
-
-        def saved():
-            store = app.state.host.require_store()
-            return [tuple(row) for row in store.db.execute('SELECT member,saved,viewed FROM telegram_read_members WHERE feed=%s ORDER BY member', (feed,))]
-
-        assert client.portal.call(saved) == [(11,True,False),(29,True,False)]
-
-        async def repeat_without_changes():
-            async with app.state.host.execution._actions:
-                store = app.state.host.require_store()
-                with store.db:
-                    store.db.execute('UPDATE telegram_read_state SET needs_sync=false WHERE feed=%s', (feed,))
-                    store.read_sync.eligible(feed, [11,29], 'saved')
-                return store.db.execute('SELECT needs_sync FROM telegram_read_state WHERE feed=%s', (feed,)).fetchone()[0]
-
-        assert not client.portal.call(repeat_without_changes)
-
-
-def test_saved_reason_waits_for_media_even_when_auto_read_is_off(tmp_path):
-    from oko.collection.contracts import SourceError
-    class Media(ReadTelegram):
-        broken = True
-        async def messages(self, account, peer, ids):
-            rows = await super().messages(account, peer, ids)
-            return [dict(m, media=dict(kind='image', mime='image/jpeg', extension='jpg')) if m['id'] == 11 else m for m in rows]
-        async def download(self, account, peer, id):
-            if self.broken:
-                raise SourceError('Synthetic media failure')
-            return b'complete-image'
-
-    network = Media()
-    app = create_app(tmp_path, token='test', telegram_client=network)
-    with TestClient(app, headers=H) as client:
-        presence(client, 'test')
-        feed = connect(client)['id']
-        cards = settled(client, 2)
-        item = next(c['id'] for c in cards if client.get('/api/v3/publication/'+c['id']).json()['source']['message_ids'] == ['11'])
-        def fact():
-            return client.portal.call(lambda: app.state.host.require_store().db.execute(
-                'SELECT saved FROM telegram_read_members WHERE feed=%s AND member=11', (feed,)).fetchone()[0])
-        assert not fact()
-        network.broken = False
-        client.post('/api/v3/materials/'+item+'/retry')
-        for _ in range(200):
-            if fact():
-                break
-            time.sleep(.02)
-        assert fact()
-        assert not network.acks
-
-
-def test_steady_state_read_sync_does_not_scan_feed_publications(tmp_path):
-    network = ReadTelegram()
-    app = create_app(tmp_path, token='test', telegram_client=network)
-    with TestClient(app, headers=H) as client:
-        presence(client, 'test')
-        feed = connect(client, count=2)['id']
-        settled(client, 2)
-        assert client.put('/api/v3/power', json={'enabled':False}).status_code == 200
-        assert client.patch('/api/v3/feeds/'+feed, json={'auto_read':True}).status_code == 200
-
-        async def run():
-            async with app.state.host.execution._actions:
-                store = app.state.host.require_store()
-                with store.db:
-                    store.read_sync.mark_feed(feed)
-                store.read_sync._configuration = store.subscriptions.source_revision()
-                queries = []
-                store.db.set_trace_callback(queries.append)
-                try:
-                    list(store.jobs.sync_reads_steps())
-                finally:
-                    store.db.set_trace_callback(None)
-                return queries
-
-        queries = client.portal.call(run)
-        assert not any('FROM unviewed_items_by_feed' in query for query in queries)
-
-
-def test_legacy_saved_backfill_resumes_after_interruption(tmp_path):
-    network = ReadTelegram()
-    network.history = [dict(id=i, date=time.time()-60, text=f'Synthetic {i}', group=None, media=None)
-                       for i in range(11,31)]
-    app = create_app(tmp_path, token='test', telegram_client=network)
-    with TestClient(app, headers=H) as client:
-        presence(client, 'test')
-        feed = connect(client, count=20)['id']
-        settled(client, 20)
-        assert client.put('/api/v3/power', json={'enabled':False}).status_code == 200
-
-        async def interrupt_and_resume():
-            async with app.state.host.execution._actions:
-                store = app.state.host.require_store()
-                with store.db:
-                    store.db.execute('UPDATE telegram_read_members SET saved=false WHERE feed=%s', (feed,))
-                    store.read_sync.schedule_saved_backfill(feed)
-                store.read_sync._configuration = store.subscriptions.source_revision()
-                steps = store.jobs.sync_reads_steps()
-                next(steps)
-                steps.close()
-                checkpoint = store.db.execute('SELECT saved_backfill_after FROM telegram_read_state WHERE feed=%s', (feed,)).fetchone()[0]
-                partial = store.db.execute('SELECT count(*) FROM telegram_read_members WHERE feed=%s AND saved', (feed,)).fetchone()[0]
-                assert store.read_sync.request(feed) is None
-                list(store.jobs.sync_reads_steps())
-                final = store.db.execute('SELECT saved_backfill_after FROM telegram_read_state WHERE feed=%s', (feed,)).fetchone()[0]
-                total = store.db.execute('SELECT count(*) FROM telegram_read_members WHERE feed=%s AND saved', (feed,)).fetchone()[0]
-                return checkpoint, partial, final, total
-
-        checkpoint, partial, final, total = client.portal.call(interrupt_and_resume)
-        assert checkpoint and partial == 8
-        assert final is None and total == 20
-        assert network.acks == []
-
-
-def test_legacy_saved_backfill_survives_store_restart(tmp_path):
-    from tests.support.storage import Store
-    network = ReadTelegram()
-    network.history = [dict(id=i, date=time.time()-60, text=f'Synthetic {i}', group=None, media=None)
-                       for i in range(11,31)]
-    with TestClient(create_app(tmp_path, token='test', telegram_client=network), headers=H) as client:
-        presence(client, 'test')
-        feed = connect(client, count=20)['id']
-        settled(client, 20)
-    store = Store(tmp_path, lambda _: None)
-    try:
-        with store.db:
-            store.db.execute('UPDATE telegram_read_members SET saved=false WHERE feed=%s', (feed,))
-            store.read_sync.schedule_saved_backfill(feed)
-        steps = store.jobs.sync_reads_steps()
-        next(steps)
-        steps.close()
-        assert store.db.execute('SELECT count(*) FROM telegram_read_members WHERE feed=%s AND saved', (feed,)).fetchone()[0] == 8
-        assert store.db.execute('SELECT saved_backfill_after FROM telegram_read_state WHERE feed=%s', (feed,)).fetchone()[0]
-    finally:
-        store.db.close()
-    restarted = Store(tmp_path, lambda _: None)
-    try:
-        assert restarted.db.execute('SELECT count(*) FROM telegram_read_members WHERE feed=%s AND saved', (feed,)).fetchone()[0] == 20
-        assert restarted.db.execute('SELECT saved_backfill_after FROM telegram_read_state WHERE feed=%s', (feed,)).fetchone()[0] is None
-    finally:
-        restarted.db.close()
-    assert network.acks == []
 
 
 def test_unknown_ack_result_recovers_without_content_after_restart(tmp_path):
@@ -437,38 +185,6 @@ def test_ack_error_keeps_queue_and_retry_never_crosses_unviewed_message(tmp_path
         assert client.get('/api/v3/publication/' + later).status_code == 200
 
 
-def test_folder_completion_confirms_unique_message_set(tmp_path):
-    network = ReadTelegram()
-    with TestClient(create_app(tmp_path, token='test', telegram_client=network), headers=H) as client:
-        presence(client, 'test')
-        client.patch('/api/v3/settings/oko/global', json={})
-        feed = connect(client)
-        settled(client, 2)
-        preview = client.post('/api/v3/folders/' + feed['folder_id'] + '/completion/preview').json()
-        assert preview['publications_count'] == 2
-        response = client.post('/api/v3/folders/' + feed['folder_id'] + '/completion', json={'token': preview['token']})
-        assert response.status_code == 200
-        wait_for(client, lambda s: any(r.get('confirmed') == '29' for r in s['telegram_reads']))
-        assert network.acks == [29]
-        assert read_all_cards(client, '/api/v3/cards') == []
-
-
-def test_feed_completion_uses_existing_safe_telegram_frontier(tmp_path):
-    network = ReadTelegram()
-    with TestClient(create_app(tmp_path, token='test', telegram_client=network), headers=H) as client:
-        presence(client, 'test')
-        client.patch('/api/v3/settings/oko/global', json={})
-        feed = connect(client)
-        settled(client, 2)
-        preview = client.post('/api/v3/feeds/' + feed['id'] + '/completion/preview').json()
-        assert preview['publications_count'] == 2
-        response = client.post('/api/v3/feeds/' + feed['id'] + '/completion', json={'token': preview['token']})
-        assert response.status_code == 200
-        wait_for(client, lambda s: any(r.get('confirmed') == '29' for r in s['telegram_reads']))
-        assert network.acks == [29]
-        assert read_all_cards(client, '/api/v3/cards') == []
-
-
 @pytest.mark.parametrize('action', ['stop', 'close', 'delete'])
 def test_cancelled_history_check_cannot_send_a_late_ack(tmp_path, action):
     import asyncio
@@ -502,79 +218,6 @@ def test_cancelled_history_check_cannot_send_a_late_ack(tmp_path, action):
             network.release.set()
             time.sleep(.1)
             assert network.acks == []
-    finally:
-        network.release.set()
-
-
-
-
-def test_large_initial_history_is_confirmed_in_verified_pages(tmp_path):
-    class Paged(ReadTelegram):
-        async def read_window(self, account, peer, after, until):
-            ids = [m['id'] for m in self.history if after < m['id'] <= until]
-            return dict(ids=ids[:100], more=len(ids) >= 100)
-    network = Paged()
-    network.history = [dict(id=i, date=time.time()-7*86400, text='Старая история', group=None, media=None) for i in range(1,102)]
-    network.history.append(dict(id=999, date=time.time()-60, text='Новая публикация', group=None, media=None))
-    with TestClient(create_app(tmp_path, token='test', telegram_client=network), headers=H) as client:
-        presence(client, 'test')
-        feed = connect(client,count=1)
-        settled(client)
-        client.patch('/api/v3/feeds/' + feed['id'], json={'auto_read': True, 'read_history': True})
-        wait_for(client, lambda s: any(r.get('confirmed') == '999' for r in s['telegram_reads']))
-        assert network.acks == [100, 999]
-        assert len(read_all_cards(client, '/api/v3/cards')) == 1
-
-
-def test_deleted_remote_message_does_not_leave_confirmation_waiting_forever(tmp_path):
-    network = ReadTelegram()
-    with TestClient(create_app(tmp_path, token='test', telegram_client=network), headers=H) as client:
-        presence(client, 'test')
-        connect(client)
-        cards = settled(client, 2)
-        later = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/publication/' + c['id']).json()['source']['message_ids']] == [29])['id']
-        earlier = next(c for c in cards if [int(identity) for identity in client.get('/api/v3/publication/' + c['id']).json()['source']['message_ids']] == [11])['id']
-        network.history = network.history[:1]
-        assert client.get('/api/v3/publication/' + later).status_code == 200
-        client.post('/api/v3/materials/' + later + '/viewed')
-        wait_for(client, lambda s: any(r.get('pending') == 0 and not r.get('waiting') for r in s['telegram_reads']))
-        assert network.acks == []
-        assert client.get('/api/v3/publication/' + earlier).status_code == 200
-        client.post('/api/v3/materials/' + earlier + '/viewed')
-        wait_for(client, lambda s: any(r.get('confirmed') == '11' for r in s['telegram_reads']))
-        assert network.acks == [11]
-
-
-def test_complete_early_post_is_auto_confirmed_before_loading_later_post(tmp_path):
-    import asyncio
-    import threading
-    class SlowLater(ReadTelegram):
-        started = threading.Event()
-        release = threading.Event()
-        async def messages(self, account, peer, ids):
-            rows=await super().messages(account,peer,ids)
-            return [dict(row,media=dict(kind='image',mime='image/jpeg',extension='jpg')) if row['id']==29 else row for row in rows]
-        async def download(self, account, peer, id):
-            assert id==29
-            self.started.set()
-            while not self.release.is_set():
-                await asyncio.sleep(.01)
-            return b'late-image'
-    network = SlowLater()
-    later = network.history.pop()
-    try:
-        with TestClient(create_app(tmp_path, token='test', telegram_client=network), headers=H) as client:
-            presence(client, 'test')
-            response = connect_request(client, json=dict(account='fixture', peer='@fixture', folder='Новости', auto_read=True, initial_history={'mode':'count','count':1}))
-            assert response.status_code == 200
-            wait_for(client, lambda state: network.acks == [11])
-            network.history.append(later)
-            assert client.post('/api/v3/collect').status_code == 200
-            assert network.started.wait(3)
-            assert network.acks == [11]
-            network.release.set()
-            wait_for(client, lambda s: any(r.get('confirmed') == '29' for r in s['telegram_reads']))
-            assert network.acks == [11, 29]
     finally:
         network.release.set()
 

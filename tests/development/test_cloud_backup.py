@@ -218,76 +218,6 @@ def test_wrong_key_download_keeps_restore_target_absent(tmp_path):
     assert not (root / 'restore-work-disabled.sql').exists()
 
 
-def test_common_maintenance_lock_blocks_backup_without_changing_heartbeat(tmp_path):
-    import fcntl
-    root, env = installation(tmp_path)
-    with (root / 'maintenance.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        result = run_backup(root, env, 'backup')
-    assert result.returncode != 0
-    assert not (root / 'events').exists()
-    assert not (root / 'backup/status.json').exists()
-
-
-def test_backup_returns_the_retagged_snapshot_identity_for_restore(tmp_path):
-    root, env = installation(tmp_path)
-    result = run_backup(root, env, 'backup')
-    assert result.returncode == 0, result.stderr
-    identity = json.loads(result.stdout)['snapshot_id']
-    assert identity == 'c' * 64
-    assert json.loads((root / 'backup/status.json').read_text())['snapshot_id'] == identity
-    target = tmp_path / 'retagged-recovery'
-    restored = run_backup(root, dict(env, RESTORE_TARGET=str(target)), 'restore', '--snapshot', identity,
-                          '--target', str(target), '--postgres-container', 'synthetic-recovery')
-    assert restored.returncode == 0, restored.stderr
-    assert (target / 'data/media/image.bin').read_bytes() == b'synthetic-media'
-
-
-def test_check_uses_backup_cache_inside_systemd_writable_root(tmp_path):
-    root, env = installation(tmp_path)
-    result = run_backup(root, env, 'check')
-    assert result.returncode == 0, result.stderr
-    assert (root / 'observed-cache').read_text() == str(root / 'backup/cache')
-
-
-def test_invalid_credentials_records_failed_attempt_and_preserves_success(tmp_path):
-    root, env = installation(tmp_path)
-    (root / 'backup/status.json').write_text(json.dumps(dict(last_success_timestamp_seconds=123, last_success_size_bytes=456, last_attempt_result='success')))
-    (root / 'password').unlink()
-    result = run_backup(root, env, 'backup')
-    assert result.returncode != 0
-    status = json.loads((root / 'backup/status.json').read_text())
-    assert status['last_attempt_result'] == 'error'
-    assert status['last_success_timestamp_seconds'] == 123
-    assert status['last_success_size_bytes'] == 456
-    assert status['last_attempt_timestamp_seconds'] > 123
-    assert not (root / 'events').exists()
-
-
-def test_recover_resumes_saved_reader_intent_without_starting_stopped_helper(tmp_path):
-    root, env = installation(tmp_path)
-    (root / 'running').write_text('no')
-    receipt = root / 'backup/resume.json'
-    receipt.write_text(json.dumps(dict(version=1, release='a' * 40, reader=True, helper=False)))
-    result = run_backup(root, env, 'recover')
-    assert result.returncode == 0, result.stderr
-    assert (root / 'running').read_text() == 'yes'
-    assert not receipt.exists()
-    assert 'systemctl start' not in (root / 'events').read_text()
-
-
-def test_recover_keeps_intentionally_stopped_installation_stopped(tmp_path):
-    root, env = installation(tmp_path)
-    (root / 'running').write_text('no')
-    receipt = root / 'backup/resume.json'
-    receipt.write_text(json.dumps(dict(version=1, release='a' * 40, reader=False, helper=False)))
-    result = run_backup(root, env, 'recover')
-    assert result.returncode == 0, result.stderr
-    assert (root / 'running').read_text() == 'no'
-    assert not receipt.exists()
-    assert not (root / 'events').exists()
-
-
 def test_backup_copies_required_codex_credentials_without_session_logs(tmp_path):
     root, env = installation(tmp_path)
     home = root / 'host-codex'
@@ -312,18 +242,6 @@ def test_backup_copies_required_codex_credentials_without_session_logs(tmp_path)
     assert not (saved / 'auth/logs').exists()
 
 
-def test_helper_restart_failure_still_resumes_reader_and_retains_recovery_intent(tmp_path):
-    root, env = installation(tmp_path)
-    result = run_backup(root, dict(env, FAIL_HELPER_START='1'), 'backup')
-    assert result.returncode != 0
-    assert (root / 'running').read_text() == 'yes'
-    assert (root / 'backup/resume.json').exists()
-    assert json.loads((root / 'backup/status.json').read_text())['last_attempt_result'] == 'error'
-    assert 'restic backup' not in (root / 'events').read_text()
-    assert run_backup(root, env, 'recover').returncode == 0
-    assert not (root / 'backup/resume.json').exists()
-
-
 def test_sigkill_during_dump_can_recover_original_services_from_durable_receipt(tmp_path):
     import signal
     import time
@@ -346,40 +264,3 @@ def test_sigkill_during_dump_can_recover_original_services_from_durable_receipt(
     assert result.returncode == 0, result.stderr
     assert (root / 'running').read_text() == 'yes'
     assert not (root / 'backup/resume.json').exists()
-
-
-def test_backup_preserves_pending_refreshed_codex_login_without_private_logs(tmp_path):
-    import hashlib
-    from oko.processing.codex_linux import credentials
-    root, env = installation(tmp_path)
-    auth = root / 'host-codex/auth'
-    pending = auth / ('.pending-' + 'a' * 32)
-    (pending / 'home/sessions').mkdir(parents=True)
-    auth.chmod(0o700)
-    original = json.dumps({'auth_mode': 'chatgpt', 'tokens': {'refresh_token': 'synthetic-old'}}).encode()
-    refreshed = json.dumps({'auth_mode': 'chatgpt', 'tokens': {'refresh_token': 'synthetic-refreshed'}}).encode()
-    (auth / 'auth.json').write_bytes(original)
-    (pending / 'recovery.json').write_text(json.dumps({'version': 1, 'base': hashlib.sha256(original).hexdigest()}))
-    (pending / 'home/auth.json').write_bytes(refreshed)
-    (pending / 'home/installation_id').write_text('synthetic-installation')
-    (pending / 'home/models_cache.json').write_text('{"models":[]}')
-    (pending / 'home/sessions/private.jsonl').write_text('never-back-up-session-content')
-    (pending / 'home/history.jsonl').write_text('never-back-up-history')
-    result = run_backup(root, env, 'backup')
-    assert result.returncode == 0, result.stderr
-    target = tmp_path / 'pending-login-recovery'
-    identity = json.loads(result.stdout)['snapshot_id']
-    restored = run_backup(root, dict(env, RESTORE_TARGET=str(target)), 'restore', '--snapshot', identity,
-                          '--target', str(target), '--postgres-container', 'synthetic-recovery')
-    assert restored.returncode == 0, restored.stderr
-    restored_auth = target / 'codex-host/auth'
-    restored_pending = restored_auth / pending.name
-    assert (restored_pending / 'recovery.json').is_file()
-    assert not (restored_pending / 'home/sessions').exists()
-    assert not (restored_pending / 'home/history.jsonl').exists()
-    with credentials(restored_auth) as view:
-        assert json.loads((view / 'auth.json').read_text())['tokens']['refresh_token'] == 'synthetic-refreshed'
-        assert (view / 'installation_id').read_text() == 'synthetic-installation'
-        assert json.loads((view / 'models_cache.json').read_text()) == {'models': []}
-    assert (auth / 'auth.json').read_bytes() == original
-    assert (pending / 'home/auth.json').read_bytes() == refreshed

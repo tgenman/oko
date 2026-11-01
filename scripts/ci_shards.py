@@ -10,7 +10,10 @@ import sys
 
 ROOT=Path(__file__).resolve().parents[1]
 TIMINGS=Path('.scratch/check-cache/ci-timings.json')
-JOBS={'python-1':'python-tests','python-2':'python-tests','browser-1':'browser','browser-2':'browser','latency':'browser'}
+JOBS={'python-1':'python-tests','python-2':'python-tests','postgres':'python-tests','browser-1':'browser','browser-2':'browser','latency':'browser'}
+POSTGRES_FILES=('tests/reader/test_postgres_migrations.py','tests/reader/test_postgres_transactions.py',
+                'tests/reader/test_postgres_processing.py','tests/reader/test_postgres_cli.py',
+                'tests/processing/test_codex_linux.py','tests/processing/test_codex_bridge.py')
 PERFORMANCE='tests/browser/test_reading_performance_http.ts'
 
 
@@ -55,8 +58,12 @@ def make_plan(root,scope,workers):
             old=scope['TimingHistory'](scope['timing_history_path'](root,[group]),workers)
             history.samples[group]=old.samples.get(group,{})
     hints=history.estimates();jobs={};balance={}
+    postgres=[name for name in POSTGRES_FILES if name in files['python-tests']]
+    if not postgres:raise ValueError('PostgreSQL integration requires its test files')
+    jobs['postgres']={'group':'python-tests','files':postgres}
     for group,prefix in (('python-tests','python'),('browser','browser')):
-        buckets,balance[group]=scope['timed_buckets'](files[group],2,root,hints.get(group,{}))
+        selected=[name for name in files[group] if name not in postgres]
+        buckets,balance[group]=scope['timed_buckets'](selected,2,root,hints.get(group,{}))
         for index,bucket in enumerate(buckets,1):jobs[f'{prefix}-{index}']={'group':group,'files':bucket}
     jobs['latency']={'group':'browser','files':[PERFORMANCE]}
     plan=dict(version=1,revision=revision(root),browser_workers=workers,inventory=files,
@@ -81,8 +88,10 @@ def load_plan(path,root,tools):
         if not isinstance(entry,dict) or entry.get('group')!=group or not isinstance(entry.get('files'),list) or not entry['files'] or not all(isinstance(n,str) for n in entry['files']):
             raise ValueError('Invalid or empty CI shard: '+job)
     for group,prefix in (('python-tests','python'),('browser','browser')):
-        selected=[name for job,entry in plan['jobs'].items() if job.startswith(prefix+'-') for name in entry['files']]
+        selected=[name for job,entry in plan['jobs'].items() if job.startswith(prefix+'-') or (group=='python-tests' and job=='postgres') for name in entry['files']]
         if sorted(selected)!=files[group]:raise ValueError('Missing or duplicated '+group+' files')
+    if plan['jobs']['postgres']['files']!=[name for name in POSTGRES_FILES if name in files['python-tests']]:
+        raise ValueError('PostgreSQL integration assignment differs')
     if plan['jobs']['latency']['files']!=[PERFORMANCE]:raise ValueError('Latency must run exactly once, alone')
     return plan
 

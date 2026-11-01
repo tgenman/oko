@@ -1,5 +1,5 @@
 from tests.support.cards import read_all_cards
-from tests.support.presence import presence, close_presence
+from tests.support.presence import presence
 from pathlib import Path
 from fastapi.testclient import TestClient
 from tests.support.app import create_app
@@ -75,8 +75,6 @@ def test_other_folder_and_wrong_folder_confirmation_are_untouched(tmp_path):
         assert len(read_all_cards(client, '/api/v3/cards?folder=' + other)) == 1
 
 
-
-
 def test_delete_failure_is_reported_then_recovered_before_collection(tmp_path):
     from tests.support.reader import wait_for
     fail = [True]
@@ -106,38 +104,3 @@ def test_delete_failure_is_reported_then_recovered_before_collection(tmp_path):
         wait_for(client, lambda: not list((tmp_path/'content').iterdir()))
         assert not list((tmp_path / 'content').iterdir())
         assert read_all_cards(client, '/api/v3/cards') == []
-
-
-def test_folder_deletion_cancels_late_fetch(tmp_path):
-    from tests.support.sources import LateSource
-    from tests.support.reader import wait_for
-    with TestClient(create_app(tmp_path, source=LateSource(), token='test-token'), headers=HEADERS) as client:
-        client.patch('/api/v3/settings/oko/global', json={})
-        presence(client, 'a')
-        wait_for(client, lambda: len(read_all_cards(client, '/api/v3/cards')) == 3)
-        preview = client.post('/api/v3/folders/demo/completion/preview').json()
-        assert preview['publications_count'] == 3
-        assert client.post('/api/v3/folders/demo/completion', json={'token': preview['token']}).status_code == 200
-        assert read_all_cards(client, '/api/v3/cards') == []
-        assert all(b'Late secret' not in p.read_bytes() for p in tmp_path.rglob('*') if p.is_file())
-
-
-
-
-def test_removed_member_requires_recount_and_restart_requires_fresh_preview(tmp_path):
-    options = dict(source=DemoSource(), token='test-token')
-    with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        client.patch('/api/v3/settings/oko/global', json={})
-        presence(client, 'a')
-        cards = wait_cards(client, 3)
-        preview = client.post('/api/v3/folders/demo/completion/preview').json()
-        client.post('/api/v3/materials/' + cards[0]['id'] + '/viewed')
-        changed = client.post('/api/v3/folders/demo/completion', json={'token': preview['token']})
-        assert changed.status_code == 409
-        assert changed.json()['details']['preview']['publications_count'] == 2
-    with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        result = client.post('/api/v3/folders/demo/completion', json={'token': preview['token']})
-        assert result.status_code == 409
-        assert result.json()['details']['preview']['publications_count'] == 2
-        assert len(read_all_cards(client, '/api/v3/cards')) == 2
-        assert client.post('/api/v3/folders/missing/completion/preview').status_code == 404

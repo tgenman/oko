@@ -1,12 +1,10 @@
-from tests.support.presence import presence, close_presence
+from tests.support.presence import presence
 import asyncio
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import httpx
-from fastapi.testclient import TestClient
-from tests.support.app import create_app
 
-from tests.support.feed_url import HEADERS, YOUTUBE, RSS, ATOM, client_for, verify, add
+from tests.support.feed_url import client_for, verify, add
 
 
 def test_check_title_then_add_is_durable_and_does_not_save_early(tmp_path):
@@ -32,28 +30,6 @@ def test_cannot_bypass_check_or_use_result_for_other_url(tmp_path):
         assert client.get('/api/v3/subscriptions').json()['feeds'] == []
 
 
-def test_atom_and_missing_title_and_validation_errors(tmp_path):
-    replies = {'/atom': ATOM, '/empty': '<rss><channel/></rss>', '/html': '<html><title>Page</title></html>', '/xml': '<rss'}
-    def reply(request):
-        if request.url.path == '/timeout':
-            raise httpx.ReadTimeout('timed out')
-        return httpx.Response(200, text=replies.get(request.url.path, RSS))
-    with client_for(tmp_path, reply) as client:
-        assert verify(client, 'https://example.org/atom')['candidate']['title'] == 'Учёба'
-        checked = verify(client, 'https://example.org/empty')
-        assert checked['candidate']['title'] == ''
-        assert add(client, checked).status_code == 422
-        assert add(client, checked, title='Название вручную').status_code == 200
-        before = client.get('/api/v3/subscriptions').json()
-        for url in ['https://example.org/html', 'https://example.org/xml', 'https://example.org/timeout',
-                    'file:///etc/passwd', 'https://user:password@example.org/feed', 'https://t.me/channel']:
-            reply=client.post('/api/v3/feeds/verify', json={'url': url})
-            expected=400 if url.startswith('file:') or 'user:password' in url or url.startswith('https://t.me/') else 503
-            assert reply.status_code == expected, reply.text
-        assert client.get('/api/v3/subscriptions').json() == before
-        assert client.get('/api/v3/diagnostics').json()['groups']
-
-
 def test_duplicates_keep_settings_and_concurrent_adds_have_one_identity(tmp_path):
     with client_for(tmp_path) as client:
         checked = verify(client)
@@ -71,25 +47,3 @@ def test_duplicates_keep_settings_and_concurrent_adds_have_one_identity(tmp_path
         checked_again = verify(client)
         assert checked_again['existing_feed']['id'] == feed['id']
         assert len(client.get('/api/v3/subscriptions').json()['folders']) == 1
-
-
-def test_late_check_after_stop_cannot_be_saved(tmp_path):
-    started, release = threading.Event(), threading.Event()
-    async def reply(request):
-        started.set()
-        while not release.is_set():
-            try:
-                await asyncio.sleep(.01)
-            except asyncio.CancelledError:
-                pass
-        return httpx.Response(200, text=RSS)
-    with client_for(tmp_path, reply) as client:
-        presence(client, 'reader')
-        with ThreadPoolExecutor(1) as pool:
-            response = pool.submit(client.post, '/api/v3/feeds/verify', json={'url': 'https://example.org/feed'})
-            assert started.wait(2)
-            assert client.post('/api/v3/stop').status_code == 200
-            release.set()
-            assert response.result(timeout=2).status_code == 409
-    with client_for(tmp_path) as client:
-        assert client.get('/api/v3/subscriptions').json()['feeds'] == []

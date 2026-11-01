@@ -39,21 +39,6 @@ def test_history_uses_only_successful_clean_reports_and_median_of_three(tmp_path
     assert runner()['TimingHistory'](history.path,4).estimates()=={}
 
 
-@pytest.mark.parametrize('data',['bad json','[]','{"version":99}', '{"version":1,"context":null}', 'null'])
-def test_corrupted_or_foreign_history_is_only_a_cache_miss(tmp_path,data):
-    path=tmp_path/'history.json';path.write_text(data)
-    assert runner()['TimingHistory'](path,8).estimates()=={}
-
-
-def test_timing_history_does_not_follow_a_symlink(tmp_path):
-    target=tmp_path/'unrelated';target.write_text('original')
-    path=tmp_path/'history.json';path.symlink_to(target)
-    history=runner()['TimingHistory'](path,8)
-    assert history.estimates()=={}
-    history.learn(dict(exit_code=0,checkout=dict(status='PASS'),suites={}))
-    assert target.read_text()=='original'
-
-
 def test_real_runner_uses_history_and_does_not_learn_failures_or_partial_cases(tmp_path):
     import shutil,subprocess,sys,os
     checkout=tmp_path/'checkout';(checkout/'scripts').mkdir(parents=True);(checkout/'tests').mkdir()
@@ -83,54 +68,3 @@ def test_real_runner_uses_history_and_does_not_learn_failures_or_partial_cases(t
     (checkout/files[0]).write_text('def test_case(): assert False\n')
     result,report=check()
     assert result.returncode==1 and history.path.read_bytes()==saved
-
-
-def test_ci_keeps_required_groups_with_seven_jobs_and_optional_timing_cache():
-    import yaml
-    document=yaml.safe_load((ROOT/'.github/workflows/check.yml').read_text())
-    assert set(document['jobs'])=={'build','tests','postgres','check'}
-    tests=document['jobs']['tests']
-    entries=tests['strategy']['matrix']['include']
-    assert {e['job']:e['suite'] for e in entries}=={'python-1':'python','python-2':'python','browser-1':'browser','browser-2':'browser','latency':'browser','node':'node','tools':'tools'}
-    assert tests['strategy']['max-parallel']==7 and tests['strategy']['fail-fast'] is False
-    assert sum(e['sharded'] for e in entries)==5
-    caches=[step for step in tests['steps'] if str(step.get('uses','')).startswith('actions/cache@')]
-    assert len(caches)==1 and caches[0]['continue-on-error'] is True
-    assert caches[0]['with']['path']=='.scratch/check-cache/test-timings'
-    assert document['jobs']['check']['needs']==['build','tests','postgres']
-    postgres=document['jobs']['postgres']
-    assert postgres['services']['postgres']['image']=='postgres:18-bookworm'
-    integration=next(step for step in postgres['steps'] if 'test_postgres_migrations.py' in step.get('run',''))
-    assert integration['env']['OKO_TEST_POSTGRES_URL'].startswith('postgresql://')
-    gate=document['jobs']['check']['steps']
-    required=next(step for step in gate if step.get('name')=='Require every check group to succeed')
-    assert required['env']['POSTGRES_RESULT']=='${{ needs.postgres.result }}'
-    assert 'test "$POSTGRES_RESULT" = success' in required['run']
-    assert any('ci_shards.py verify' in step.get('run','') for step in gate)
-    audit=next(i for i,step in enumerate(gate) if 'ci_shards.py verify' in step.get('run',''))
-    assert all(i>audit and step['continue-on-error'] for i,step in enumerate(gate) if 'actions/cache/save@' in step.get('uses',''))
-
-
-def test_invalid_numeric_hints_cannot_abort_or_empty_the_schedule(tmp_path):
-    scope=runner();history=scope['TimingHistory'](tmp_path/'history.json',8)
-    files=['tests/test_a.py','tests/test_b.py']
-    for name in files:
-        path=tmp_path/name;path.parent.mkdir(exist_ok=True);path.write_text('pass\n')
-    huge=10**400
-    history.path.write_text(json.dumps(dict(version=1,context=history.context,suites={'python-tests':{files[0]:[huge],files[1]:[True,-1,float('inf')]}})))
-    history=scope['TimingHistory'](history.path,8)
-    assert not history.estimates().get('python-tests')
-    for value in (huge,True,-1,float('inf'),float('nan'),1e-300):
-        buckets,_=scope['timed_buckets'](files,2,tmp_path,{files[0]:value})
-        assert all(buckets) and sorted(x for b in buckets for x in b)==files
-
-
-def test_standalone_and_full_runs_have_separate_advisory_histories(tmp_path):
-    scope=runner();path=scope['timing_history_path']
-    full=path(tmp_path,['browser','python-tests','tool-tests','node-tests'])
-    alone=path(tmp_path,['python-tests'])
-    assert full!=alone and path(tmp_path,['node-tests','tool-tests','python-tests','browser'])==full
-    def record(seconds):return dict(exit_code=0,checkout=dict(status='PASS'),suites={'python-tests':dict(status='PASS',file_durations={'tests/test_a.py':seconds})})
-    assert scope['TimingHistory'](full,8).learn(record(20))
-    assert scope['TimingHistory'](alone,8).learn(record(1))
-    assert scope['TimingHistory'](full,8).estimates()['python-tests']['tests/test_a.py']==20

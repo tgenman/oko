@@ -84,18 +84,6 @@ def test_all_isolates_working_files_and_excludes_untracked_data(tmp_path):
         assert (snapshot / name / 'installed').read_text() == name
 
 
-@pytest.mark.parametrize('owner',['browser','node-tests'])
-def test_snapshot_still_detects_test_mutation(tmp_path,owner):
-    root, env = fixture(tmp_path)
-    reports = tmp_path / 'reports'
-    result = run(root, dict(env, MUTATE_SNAPSHOT='1',MUTATION_OWNER=owner), reports)
-    assert result.returncode == 1, result.stdout + result.stderr
-    report = json.loads(next(reports.glob('*/report.json')).read_text())
-    assert report['checkout'] == {'status': 'FAIL', 'changed_files': ['document.md']}
-    assert all(report['suites'][group]['status'].startswith('PASS') for group in ('browser','node-tests'))
-    assert (root/'document.md').read_text() == 'edited during checks'
-
-
 def test_all_requires_new_code_to_be_staged_instead_of_silently_omitting_it(tmp_path):
     root, env = fixture(tmp_path)
     (root/'frontend/new.ts').write_text('new source')

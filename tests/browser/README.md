@@ -193,7 +193,7 @@ node --require tsx/cjs --require ./scripts/register-browser-typescript.cts --tes
 ## Быстрый повторный цикл
 
 Начинайте с затронутого файла: `./scripts/check browser --files tests/browser/test_material_list.ts`
-или `./scripts/check python --files tests/reader/test_http_contracts.py`. После изменения фронтенда
+или `./scripts/check python --files tests/api/test_contract.py`. После изменения фронтенда
 сначала выполните `npm run build`; `npm run dev` публикует готовые поколения при редактировании.
 `ui` и `all` по-прежнему включают сборку, но не входят в каждую локальную итерацию.
 Завершение ограниченной задачи подтверждают затронутые сценарии и проверки её границ.

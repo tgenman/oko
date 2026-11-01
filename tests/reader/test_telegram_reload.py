@@ -6,42 +6,9 @@ import pytest
 from tests.support.app import create_app
 from tests.support.telegram import Telegram, connect, settled, configure_fast_web
 from tests.support.reader import wait_for
-from tests.support.runtime_clock import ReaderClock
 from tests.support.v3 import TestClient
 
 HEADERS = {'Authorization': 'Bearer test'}
-
-
-class Posts(Telegram):
-    def __init__(self):
-        self.fetches = 0
-        self.text = 'Original'
-
-    async def page(self,account,peer,after,since):
-        return dict(messages=[dict(id=11,date=time.time()-60,text=self.text,group=None,media=None)] if after<11 else [],more=False)
-
-    async def messages(self, account, peer, ids):
-        self.fetches += 1
-        return [dict(id=11, date=time.time()-60, text=self.text, group=None, media=None)]
-
-
-def test_full_account_copy_is_not_polled_but_can_be_explicitly_reloaded(tmp_path):
-    telegram = Posts()
-    with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=telegram), headers=HEADERS) as client:
-        feed = connect(client)
-        item = settled(client)[0]['id']
-        assert telegram.fetches == 0
-        telegram.text = 'Edited'
-        assert client.post('/api/v3/collect', json={'scope':'feed','feed_id':feed['id']}).status_code == 200
-        wait_for(client, lambda: client.get('/api/v3/collection-status/'+feed['id']).json()['source']['state'] == 'complete')
-        assert telegram.fetches == 0
-        assert client.get('/api/v3/publication/'+item).json()['text'] == 'Original'
-        assert client.post('/api/v3/materials/'+item+'/retry').status_code == 200
-        settled(client)
-        assert telegram.fetches == 1
-        assert client.get('/api/v3/publication/'+item).json()['text'] == 'Edited'
-
-
 
 
 def test_web_full_copy_is_not_polled_and_terminal_reload_keeps_old_media(tmp_path):

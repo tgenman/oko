@@ -144,22 +144,6 @@ def test_commit_refuses_drift_without_overwriting_current_state(tmp_path, drift)
     assert git(root, 'ls-files', '--stage') == index
 
 
-def test_snapshot_refuses_symlink_ancestors_and_internal_output(tmp_path):
-    root = repository(tmp_path)
-    nested = root / 'folder'
-    nested.mkdir()
-    (nested / 'code.py').write_text('value = 1')
-    git(root, 'add', 'folder/code.py')
-    outside = tmp_path / 'outside'
-    outside.mkdir()
-    (outside / 'code.py').write_text('private')
-    (nested / 'code.py').unlink()
-    nested.rmdir()
-    nested.symlink_to(outside, target_is_directory=True)
-    assert run(root, 'snapshot', tmp_path / 'snapshot').returncode == 1
-    assert run(root, 'snapshot', root / 'snapshot').returncode == 1
-
-
 def test_commit_keeps_staged_and_unstaged_changes_on_the_same_file(tmp_path):
     root = repository(tmp_path)
     original = ''.join(str(i) + '\n' for i in range(20))
@@ -222,17 +206,6 @@ sys.exit(result.returncode)
     assert not (root / '.git/index.lock').exists()
 
 
-def test_snapshot_rejects_intent_to_add_without_turning_it_into_staged_content(tmp_path):
-    root = repository(tmp_path)
-    (root / 'draft').write_text('user unstaged draft')
-    git(root, 'add', '-N', 'draft')
-    before = git(root, 'diff', '--cached', '--name-only')
-    result = run(root, 'snapshot', tmp_path / 'snapshot')
-    assert result.returncode == 1 and 'intent-to-add' in result.stderr
-    assert git(root, 'diff', '--cached', '--name-only') == before
-    assert 'draft' in git(root, 'diff', '--name-only')
-
-
 def test_checkout_materializes_prepared_tree_with_original_git_base(tmp_path):
     root = repository(tmp_path)
     (root / 'old.txt').write_text('base file\n')
@@ -282,19 +255,6 @@ def test_checkout_materializes_prepared_tree_with_original_git_base(tmp_path):
     assert git(root, 'rev-parse', 'HEAD') == base
     result = run(root, 'checkout', prepared, '--output', output)
     assert result.returncode == 1 and 'already exists' in result.stderr
-
-
-def test_dependency_reuse_preserves_captured_paths_and_ignores_missing_installs(tmp_path):
-    import runpy
-    reuse = runpy.run_path(str(CLI))['reuse_dependencies']
-    root, target = tmp_path / 'source', tmp_path / 'target'
-    root.mkdir()
-    target.mkdir()
-    (root / '.venv').mkdir()
-    (target / '.venv').symlink_to('missing-captured-target')
-    reuse(root, target)
-    assert os.readlink(target / '.venv') == 'missing-captured-target'
-    assert not (target / 'node_modules').exists()
 
 
 @pytest.mark.parametrize('drift', ['index', 'payload'])

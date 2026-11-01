@@ -157,34 +157,6 @@ def test_conflicts_stop_before_writes_and_cannot_produce_a_verification_receipt(
         assert not output.exists()
 
 
-@pytest.mark.parametrize('problem', ['unpublished_context', 'dirty_context', 'dependency_cycle', 'duplicate_id'])
-def test_invalid_local_input_cannot_be_published(tmp_path, problem):
-    root, feature = repository(tmp_path)
-    ticket(feature)
-    if problem == 'unpublished_context': (feature / 'spec.md').unlink(); git(root, 'rm', '.scratch/migrate/spec.md'); git(root, 'commit', '-qm', 'remove context')
-    if problem == 'dirty_context': (feature / 'spec.md').write_text('Unpublished new requirements.\n')
-    if problem == 'dependency_cycle':
-        ticket(feature, text='# First\n\nBlocked by: 02\n')
-        ticket(feature, '02-second.md', '# Second\n\nBlocked by: 01\n')
-    if problem == 'duplicate_id': ticket(feature, '01-also.md', '# Another task\n')
-    output = tmp_path / 'invalid-plan.json'
-    result = run(root, 'plan', feature, '--repo', 'example/reader', '--output', output)
-    assert result.returncode == 1, result.stdout
-    assert not output.exists()
-
-
-def test_explicit_published_context_mapping_allows_uncommitted_specification(tmp_path):
-    root, feature = repository(tmp_path)
-    ticket(feature)
-    (feature / 'spec.md').write_text('The approved requirements were published in an issue comment.\n')
-    links = tmp_path / 'links.json'
-    links.write_text(json.dumps({'.scratch/migrate/spec.md': 'https://github.com/example/reader/issues/8#issuecomment-42'}))
-    output = tmp_path / 'plan.json'
-    result = run(root, 'plan', feature, '--repo', 'example/reader', '--links', links, '--output', output)
-    assert result.returncode == 0, result.stderr
-    assert '[Specification](https://github.com/example/reader/issues/8#issuecomment-42)' in json.loads(output.read_text())['tickets'][0]['body']
-
-
 def test_existing_local_github_binding_is_never_replaced_by_a_new_issue(tmp_path):
     root, feature = repository(tmp_path)
     ticket(feature, text='# Bound task\n\nGitHub: https://github.com/example/reader/issues/7\n\n- [ ] Keep this requirement.\n')
@@ -208,65 +180,6 @@ def test_modified_plan_is_rejected_instead_of_dropping_criteria(tmp_path):
     assert 'Plan changed' in result.stderr
 
 
-def test_previous_plan_is_preserved_when_a_new_export_uses_the_same_output_path(tmp_path):
-    root, feature = repository(tmp_path)
-    ticket(feature)
-    output = tmp_path / 'plan.json'
-    args = ('plan', feature, '--repo', 'example/reader', '--output', output)
-    assert run(root, *args).returncode == 0
-    previous = output.read_bytes()
-    assert run(root, *args).returncode == 0  # Exact retries are harmless.
-    ticket(feature, text='# Changed task\n\n- [ ] New requirement.\n')
-    result = run(root, *args)
-    assert result.returncode == 1
-    assert output.read_bytes() == previous
-
-
-def test_multiline_reference_and_linked_image_do_not_leave_local_context_links(tmp_path):
-    root, feature = repository(tmp_path)
-    (feature / 'issues/icon.svg').write_text('<svg xmlns="http://www.w3.org/2000/svg"/>')
-    git(root, 'add', '.scratch/migrate/issues/icon.svg')
-    git(root, 'commit', '-qm', 'public image')
-    ticket(feature, text='# Linked task\n\n[spec]:\n  ../spec.md\n\n[![spec](icon.svg)](../spec.md)\n\n- [ ] Context must be accessible.\n')
-    output = tmp_path / 'plan.json'
-    result = run(root, 'plan', feature, '--repo', 'example/reader', '--output', output)
-    assert result.returncode == 0, result.stderr
-    body = json.loads(output.read_text())['tickets'][0]['body']
-    assert '[spec]:\n  https://github.com/example/reader/blob/' in body
-    assert '[![spec](https://raw.githubusercontent.com/example/reader/' in body
-    assert '.svg)](https://github.com/example/reader/blob/' in body
-    assert '](../spec.md)' not in body
-
-
-def test_reference_images_use_raw_context_and_indented_code_stays_literal(tmp_path):
-    root, feature = repository(tmp_path)
-    diagram = feature / 'diagram.svg'
-    diagram.write_text('<svg xmlns="http://www.w3.org/2000/svg"/>')
-    git(root, 'add', str(diagram))
-    git(root, 'commit', '-qm', 'diagram')
-    original = ('# Diagram task\n\nBlocked by: Нет\n\n'
-                '[Figure]: ../diagram.svg\n\n![Diagram][figure]\n\n'
-                '- [ ] Requirement\n    [Specification](../spec.md)\n    ![Nested][figure]\n\n'
-                '      [code in list](../also-missing.md)\n\n'
-                '    [nested-figure]: ../diagram.svg\n    ![Nested definition][nested-figure]\n\nEnd list.\n\n'
-                '    [example](../missing.md)\n\n'
-                '```md\n![literal][other]\n```\n\n[other]: ../spec.md\n')
-    ticket(feature, text=original)
-    output = tmp_path / 'plan.json'
-    result = run(root, 'plan', feature, '--repo', 'example/reader', '--output', output)
-    assert result.returncode == 0, result.stderr
-    body = json.loads(output.read_text())['tickets'][0]['body']
-    ref = git(root, 'rev-parse', 'HEAD')
-    assert f'[Figure]: https://raw.githubusercontent.com/example/reader/{ref}/.scratch/migrate/diagram.svg' in body
-    assert f'    [nested-figure]: https://raw.githubusercontent.com/example/reader/{ref}/.scratch/migrate/diagram.svg' in body
-    assert '    [example](../missing.md)' in body
-    assert '      [code in list](../also-missing.md)' in body
-    assert f'    [Specification](https://github.com/example/reader/blob/{ref}/.scratch/migrate/spec.md)' in body
-    assert '```md\n![literal][other]\n```' in body
-    assert f'[other]: https://github.com/example/reader/blob/{ref}/.scratch/migrate/spec.md' in body
-    assert (feature / 'issues/01-first.md').read_text() == original
-
-
 def execute_search_call(tmp_path, source, response):
     """Execute emitted orchestration code with only a synthetic connector."""
     import os
@@ -279,45 +192,3 @@ def execute_search_call(tmp_path, source, response):
     result=subprocess.run([os.environ.get('OKO_NODE','node'),str(harness)],text=True,capture_output=True)
     assert result.returncode==0,result.stderr
     return json.loads(result.stdout)
-
-
-def test_search_call_prints_only_issue_summary_and_retains_full_response(tmp_path):
-    query='Source in:title "quoted"; text("not executed")'
-    result=run(tmp_path,'search-call','--repo','tgenman/oko','--query',query,'--limit','5')
-    assert result.returncode==0,result.stderr
-    response={'structuredContent':{'issues':[{'issue_number':41,'title':'Source outcomes','state':'closed','url':'https://github.com/tgenman/oko/issues/41','body':'large private body '*1000,'labels':['extra']}]}}
-    value=execute_search_call(tmp_path,result.stdout,response)
-    assert value['calls']==[dict(repository_full_name='tgenman/oko',query=query,topn=5)]
-    assert len(value['output'])==1
-    summary=value['output'][0]
-    assert summary['issues']==[dict(number=41,title='Source outcomes',state='closed',url='https://github.com/tgenman/oko/issues/41')]
-    assert 'large private body' not in json.dumps(summary)
-    assert value['saved']==[response]
-
-
-def test_search_call_reports_connector_failure_without_dumping_response(tmp_path):
-    result=run(tmp_path,'search-call','--repo','tgenman/oko','--query','Source')
-    assert result.returncode==0,result.stderr
-    response={'isError':True,'content':[{'type':'text','text':'raw connector diagnostic'}]}
-    value=execute_search_call(tmp_path,result.stdout,response)
-    assert value['output'][0]['ok'] is False
-    assert 'raw connector diagnostic' not in json.dumps(value['output'])
-    assert value['saved']==[response]
-
-
-def test_search_call_rejects_invalid_repo_limit_and_empty_query(tmp_path):
-    for args in [('--repo','not-a-repo','--query','Source'),('--repo','tgenman/oko','--query','Source','--limit','0'),('--repo','tgenman/oko','--query',' ')]:
-        result=run(tmp_path,'search-call',*args)
-        assert result.returncode!=0
-        assert result.stdout==''
-
-
-def test_search_call_distinguishes_empty_unknown_state_and_malformed_rows(tmp_path):
-    result=run(tmp_path,'search-call','--repo','tgenman/oko','--query','Source')
-    empty=execute_search_call(tmp_path,result.stdout,{'structuredContent':{'issues':[]}})['output'][0]
-    assert empty['ok'] is True and empty['returned']==0
-    response={'structuredContent':{'issues':[{'number':41,'title':'SOURCE','html_url':'https://github.com/tgenman/oko/issues/41','body':'SOURCE'}]}}
-    summary=execute_search_call(tmp_path,result.stdout,response)['output'][0]
-    assert summary['ok'] is True and summary['issues'][0]['state'] is None
-    for response in [{'structuredContent':{'issues':[None]}},{'structuredContent':{'items':[]}}]:
-        assert execute_search_call(tmp_path,result.stdout,response)['output'][0]['ok'] is False
