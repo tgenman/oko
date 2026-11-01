@@ -119,3 +119,22 @@ HTTP tests and 3 collection/privacy tests; the new async-callback regression and
 type checks passed. Independent source review found no blocker. No frontend poll
 interval change was selected. Live improvement with collection re-enabled remains
 an explicit post-deployment acceptance step, not a conclusion of microbenchmarks.
+
+
+## Combined release and initial browser connection queue
+
+Main f858f376 includes PRs #191 and #192. Full Checks 41309122039 and
+Publish 41309615392 passed. Deploy 41309806169 succeeded with verified
+pre-migration backup and schema 94. Background work was restored to enabled=true
+and runtime_state=running through the normal API; reader health was healthy.
+
+With collection running, fresh-browser first publication requests still took
+11.1–11.9 seconds, subsequent requests 0.3–1.45 seconds. Resource Timing
+separated the first 11.884 seconds into 11.350 seconds before requestStart and
+0.532 seconds to responseStart over HTTP/1.1. FeedAvatar eagerly fetched every
+mounted source avatar, including sources outside the viewport. Blocking only
+avatar requests in a diagnostic browser reduced the first open to 0.989 seconds
+with collection still running. This is a causal control, not deployed-fix evidence.
+The follow-up limits avatar loading to visible elements; post-deployment timing
+remains to be measured. No publication/read/subscription data were changed by
+the probes.

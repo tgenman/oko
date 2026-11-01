@@ -1,4 +1,4 @@
-import {useLayoutEffect,useEffect,useState} from 'react';
+import {useLayoutEffect,useEffect,useState,useRef} from 'react';
 import type {NavigationEntry} from '../api/generated/types.gen';
 import type {SourceState} from '../api/generated/types.gen';
 export type Navigation={folders:{id:string;title:string;count:number}[];feeds:(NavigationEntry&{folder_id:string})[];count:number};
@@ -12,12 +12,15 @@ export function SourceIcon({kind}:{kind:string}) {
 }
 type MediaFetch=(path:string,signal?:AbortSignal)=>Promise<Response>;
 export function FeedAvatar({url,fetchMedia,kind}:{url:string;fetchMedia:MediaFetch;kind:string}) {
-  const [image,setImage]=useState<string|null>(null);
-  useEffect(()=>{const controller=new AbortController();let active=true,objectUrl:string|null=null;setImage(null);
-    void(async()=>{try{const response=await fetchMedia(url,controller.signal);if(!active||!response.ok)return;const blob=await response.blob();if(!active)return;objectUrl=URL.createObjectURL(blob);setImage(objectUrl);}catch{/* Optional source artwork falls back to the source icon. */}})();
-    return()=>{active=false;controller.abort();if(objectUrl)URL.revokeObjectURL(objectUrl);};
+  const [image,setImage]=useState<string|null>(null),target=useRef<HTMLSpanElement>(null);
+  useEffect(()=>{const controller=new AbortController();let active=true,started=false,objectUrl:string|null=null;setImage(null);
+    const observer=new IntersectionObserver(entries=>{if(!active||started||!entries.some(entry=>entry.isIntersecting))return;started=true;observer.disconnect();
+      void(async()=>{try{const response=await fetchMedia(url,controller.signal);if(!active||!response.ok)return;const blob=await response.blob();if(!active)return;objectUrl=URL.createObjectURL(blob);setImage(objectUrl);}catch{/* Optional source artwork falls back to the source icon. */}})();
+    });
+    if(target.current)observer.observe(target.current);
+    return()=>{active=false;observer.disconnect();controller.abort();if(objectUrl)URL.revokeObjectURL(objectUrl);};
   },[url,fetchMedia]);
-  return image?<img className="source-avatar" src={image} alt="" aria-hidden="true" onError={()=>setImage(null)}/>:<SourceIcon kind={kind}/>;
+  return <span ref={target} style={{display:'inline-flex',flex:'none'}} aria-hidden="true">{image?<img className="source-avatar" src={image} alt="" onError={()=>setImage(null)}/>:<SourceIcon kind={kind}/>}</span>;
 }
 function Title({title,kind,count,avatar,fetchMedia,completed=false}:{title:string;kind:string;count?:number;avatar?:string;fetchMedia?:MediaFetch;completed?:boolean}) {return <>{avatar&&fetchMedia?<FeedAvatar url={avatar} fetchMedia={fetchMedia} kind={kind}/>:<SourceIcon kind={kind}/> }<span className="tree-title">{title}{completed&&<small className="feed-completed-label">All Read</small>}</span>{count!==undefined&&<span className="tree-count">{count||''}</span>}</>;}
 const feedIcon=(feed:Navigation['feeds'][number])=>['youtube','telegram'].includes(feed.kind)?feed.kind:'rss';
