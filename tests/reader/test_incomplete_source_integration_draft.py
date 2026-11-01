@@ -37,19 +37,14 @@ def test_source_owned_failure_suppresses_incomplete_and_finish_restores_it(tmp_p
     finally:store.db.close()
 
 
-def test_source_and_incomplete_cursors_both_restore_on_rollback(tmp_path,postgres_url,monkeypatch):
-    from oko.storage import source_groups
+def test_incomplete_cursor_restores_on_rollback(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         versions=store.read_versions
-        versions._source_legacy_gc_cursor='source-before'
         versions._incomplete_due_cursor=(42.,'incomplete-before')
-        versions._next_source_legacy_gc=float('-inf')
-        monkeypatch.setattr(source_groups,'cleanup_legacy_protected',lambda *_:('source-next',False))
         with pytest.raises(RuntimeError):
             with transaction(store.db):
                 versions.advance(now=100,wall=100)
                 raise RuntimeError('rollback')
-        assert versions._source_legacy_gc_cursor=='source-before'
         assert versions._incomplete_due_cursor==(42.,'incomplete-before')
     finally:store.db.close()

@@ -1631,7 +1631,6 @@ def test_resurrected_publication_closes_failed_delete_problem_atomically(tmp_pat
         store.db.close()
 
 
-
 @pytest.mark.parametrize('kind', ['delete','feed-delete'])
 @pytest.mark.parametrize('status', ['pending','running','failed','unavailable','blocked'])
 @pytest.mark.parametrize('code,error', [(None,'synthetic failure'),('delete','synthetic failure'),('',None),(None,'')])
@@ -1796,74 +1795,6 @@ def test_delete_problem_prefetch_ignores_unrelated_jobs(tmp_path, postgres_url):
         store.db.close()
 
 
-def test_grouping_correction_preserves_an_existing_problem_occurrence(tmp_path, postgres_url):
-    from tests.support.storage import Store
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    try:
-        with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('item','rss','item',0)")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','item',true,true)")
-            store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','item','failed','failure','source-connection')")
-            old=dict(id='job:source-connection:item:fetch',code='source-connection',section='object',title='Не удалось загрузить материал',consequence='Сохранённое содержимое остаётся доступным.',next_step='Повторите загрузку вручную.',objects=[dict(kind='material',id='item')],action=None,operation='producer:fetch',created_at=1,state='current',finished_at=None,outcome=None,next_at=None,reason='failure')
-            store.problems.sync_candidate(old['id'],old,1)
-        original=store.db.execute("SELECT id FROM reader_problems WHERE identity='job:source-connection:item:fetch' AND finished IS NULL").fetchone()[0]
-        result=store.problems.snapshot(2)
-        current=next(p for p in result['current'] if p['code']=='source-connection')
-        assert current['id']==original
-        assert not [p for p in result['recent'] if p['id']==original]
-    finally:
-        store.db.close()
-
-
-def test_grouping_correction_merges_old_problems_without_losing_history(tmp_path, postgres_url):
-    from oko.storage.transaction import transaction
-    from tests.support.storage import Store
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    try:
-        with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('one','rss','one',0),('two','rss','two',0)")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','one',true,true),('feed','two',true,true)")
-            store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','one','failed','failure','source-connection'),('fetch','two','failed','failure','source-connection')")
-            for index,item in enumerate(('one','two'),1):
-                old=dict(id='job:source-connection:'+item+':fetch',code='source-connection',section='object',title='Не удалось загрузить материал',consequence='Сохранённое содержимое остаётся доступным.',next_step='Повторите загрузку вручную.',objects=[dict(kind='material',id=item)],action=None,operation='producer:fetch',created_at=index,state='current',finished_at=None,outcome=None,next_at=None,reason='failure')
-                store.problems.sync_candidate(old['id'],old,index)
-        originals=store.db.execute("SELECT id FROM reader_problems WHERE identity LIKE 'job:source-connection:%%' ORDER BY created").fetchall()
-        with pytest.raises(ValueError,match='rollback'):
-            with transaction(store.db):
-                result=store.problems.snapshot(3)
-                assert len(result['current'])==1 and result['current'][0]['id']==originals[0][0]
-                raise ValueError('rollback')
-        assert store.db.execute("SELECT count(*) FROM reader_problems WHERE identity LIKE 'job:source-connection:%%' AND finished IS NULL").fetchone()[0]==2
-        result=store.problems.snapshot(3)
-        assert len(result['current'])==1 and result['current'][0]['id']==originals[0][0]
-        merged=next(p for p in result['recent'] if p['id']==originals[1][0])
-        assert merged['outcome']=='irrelevant'
-        assert {obj['id'] for obj in result['current'][0]['objects']}=={'one','two'}
-    finally:
-        store.db.close()
-
-
-def test_grouping_correction_splits_one_occurrence_without_false_resolution(tmp_path, postgres_url):
-    from tests.support.storage import Store
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    try:
-        def candidate(identity):
-            return dict(id=identity,code='source-connection',section='object',title='Ошибка',consequence='Сохранено',next_step='Повторите',objects=[dict(kind='material',id='item')],action=None,operation='producer:fetch',created_at=1,state='current',finished_at=None,outcome=None,next_at=None)
-        old=candidate('job:source-connection:item:fetch')
-        with store.db:store.problems.sync_candidate(old['id'],old,1)
-        original=store.db.execute('SELECT id FROM reader_problems WHERE identity=%s',(old['id'],)).fetchone()[0]
-        first=candidate('job:source-connection:a:fetch');first['_legacy_ids']={old['id']}
-        second=candidate('job:source-connection:b:fetch');second['_legacy_ids']={old['id']}
-        result=store.problems.reconcile([first,second],2,{})
-        assert len(result['current'])==2
-        assert original in {problem['id'] for problem in result['current']}
-        assert not [problem for problem in result['recent'] if problem['id']==original]
-    finally:
-        store.db.close()
-
-
 def test_grouping_correction_does_not_merge_distinct_jobs_sharing_root(tmp_path, postgres_url):
     from tests.support.storage import Store
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
@@ -1926,46 +1857,6 @@ def test_delete_problem_owner_lookup_ignores_unrelated_links(tmp_path, postgres_
         query=next(q for q in statements if 'FROM jobs j LEFT JOIN publications p' in q)
         plan=store.db._db.execute('EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) '+query,(job_id,)).fetchone()[0][0]['Plan']
         assert scan_rows(plan)<100,plan
-    finally:
-        store.db.close()
-
-
-def test_grouping_correction_preserves_legacy_problem_without_operation(tmp_path, postgres_url):
-    import json
-    from tests.support.storage import Store
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    try:
-        with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('item','rss','item',0)")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','item',true,true)")
-            store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','item','failed','failure','source-connection')")
-            old=dict(id='job:source-connection:item:fetch',code='source-connection',section='object',title='Ошибка',consequence='Сохранено',next_step='Повторите',objects=[dict(kind='material',id='item')],action=None,created_at=1,state='current',finished_at=None,outcome=None,next_at=None)
-            store.problems.sync_candidate(old['id'],old,1)
-            row=store.db.execute('SELECT id,body FROM reader_problems WHERE identity=%s',(old['id'],)).fetchone()
-            body=json.loads(row['body']);body.pop('operation')
-            store.db.execute('UPDATE reader_problems SET body=%s WHERE id=%s',(json.dumps(body),row['id']))
-        result=store.problems.snapshot(2)
-        assert len(result['current'])==1 and result['current'][0]['id']==row['id']
-        assert not [p for p in result['recent'] if p['id']==row['id']]
-    finally:
-        store.db.close()
-
-
-def test_regroup_does_not_rekey_unrelated_problem_with_same_material(tmp_path, postgres_url):
-    from tests.support.storage import Store
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    try:
-        def candidate(identity):
-            return dict(id=identity,code='source-connection',section='object',title='Ошибка',consequence='Сохранено',next_step='Повторите',objects=[dict(kind='material',id='item')],action=None,operation='producer:fetch',created_at=1,state='current',finished_at=None,outcome=None,next_at=None)
-        old=candidate('job:source-connection:other-feed:fetch')
-        with store.db:store.problems.sync_candidate(old['id'],old,1)
-        original=store.db.execute('SELECT id FROM reader_problems WHERE identity=%s',(old['id'],)).fetchone()[0]
-        current=candidate('job:source-connection:feed:fetch')
-        current['_legacy_ids']={'job:source-connection:item:fetch'}
-        result=store.problems.reconcile([current],2,{})
-        assert len(result['current'])==1 and result['current'][0]['id']!=original
-        assert next(p for p in result['recent'] if p['id']==original)['outcome']=='resolved'
     finally:
         store.db.close()
 

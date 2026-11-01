@@ -3782,7 +3782,7 @@ class Problems:
                     groups[group_key].update(section='action', next_step='Проверьте привязку источника; доступ не изменяется автоматически.', action=None)
             legacy_feed = job['feed_id'] or job['item'] or 'demo'
             legacy_identity = 'job:' + code + ':' + legacy_feed + ':' + job['kind'] + ('' if shared else ':' + job['item'])
-            if identity.startswith('job:') and legacy_identity != identity:
+            if identity.startswith('job:') and legacy_identity != identity and not code.startswith('source-'):
                 groups[group_key].setdefault('_legacy_ids',set()).add(legacy_identity)
             if job['kind'] != 'delete' and obj is not None and obj not in groups[group_key]['objects']:
                 groups[group_key]['objects'].append(obj)
@@ -4100,35 +4100,6 @@ class Problems:
             body=proven_fetch.get(future['id'])
             occupied=existing.get(body['fetch_youtube_canonical']) if body else None
             if occupied is not None:protected_fetch_null.add(occupied['id'])
-        owned_source_identities: set[str]=set()
-        source_legacy: dict[str,str]={}
-        for row in existing.values():
-            try:body=json.loads(row['body'])
-            except (TypeError,ValueError):continue
-            if not isinstance(body,dict):continue
-            if isinstance(body.get('source_group_identity'),str):owned_source_identities.add(body['source_group_identity'])
-            elif isinstance(body.get('code'),str) and body['code'].startswith('source-'):source_legacy[row['identity']]=row['id']
-        protected_source_legacy: set[str]=set()
-        ordered_legacy=sorted(source_legacy)
-        for start in range(0,len(ordered_legacy),400):
-            legacy_id_batch=ordered_legacy[start:start+400]
-            markers={'source-legacy-protected:'+hashlib.sha256(identity.encode()).hexdigest():(identity,source_legacy[identity]) for identity in legacy_id_batch}
-            for marker in self.db.execute('SELECT key,value FROM state WHERE key=ANY(%s)',(list(markers),)):
-                expected=markers[marker['key']]
-                try:value=json.loads(marker['value'])
-                except (TypeError,ValueError):value=None
-                if not isinstance(value,list) or len(value)!=3 or value[0]!='oko-source-legacy-v1' or value[1]!=expected[0] or not isinstance(value[2],str):
-                    protected_source_legacy.add(expected[1])
-                elif value[2]==expected[1]:protected_source_legacy.add(value[2])
-        # A legacy source Job without a target cannot prove that a matching
-        # saved occurrence belongs to it. Preserve that record byte-for-byte.
-        for job in self.db.execute("""SELECT kind,item,feed_id,problem_code FROM jobs
-            WHERE (item IS NULL OR item='') AND kind IN ('fetch','filter','theses','download_media','delete','feed-delete')
-            AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))
-            AND (status IN ('pending','running','failed','unavailable','blocked') OR (status='done' AND kind='fetch' AND error IS NOT NULL))
-            AND problem_code LIKE 'source-%%' AND NOT source_event_owned"""):
-            identity='job:'+job['problem_code']+':'+(job['feed_id'] or job['item'] or 'demo')+':'+job['kind']
-            if identity in existing:protected_source_legacy.add(existing[identity]['id'])
         managed_incomplete=bool(self.db.execute("SELECT 1 FROM state WHERE key='experimental-incomplete-problems-v1'").fetchone())
         uncertain_materials: set[str]=set()
         uncertain_refs: list[tuple[str,str,set[str]]]=[]
@@ -4335,12 +4306,7 @@ class Problems:
                     if isinstance(body,dict) and body.get('code')=='processor-config' and body.get('processor_group_identity')=='processor:configuration':
                         continue
                     if isinstance(body.get('source_group_identity'),str):continue
-                    if row['identity'] in owned_source_identities and isinstance(body.get('code'),str) and body['code'].startswith('source-'):continue
-                    if row['id'] in protected_source_legacy:continue
                     code=body.get('code')
-                    # Legacy source status rows without a proven event owner
-                    # remain untouched even after their Job disappears.
-                    if isinstance(code,str) and code.startswith('source-') and body.get('operation') in (None,'producer:status'):continue
                     if row['id'] in protected_fetch_null:continue
                     if getattr(self.store,'youtube_admission_ready',False) and code=='youtube-admission':
                         from oko.storage.youtube_admission import valid as valid_admission

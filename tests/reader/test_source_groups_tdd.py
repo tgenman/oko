@@ -272,7 +272,7 @@ def test_adding_link_updates_source_group_before_get(tmp_path,postgres_url):
     finally:store.db.close()
 
 @pytest.mark.parametrize('kind',['fetch','download_media','filter','theses','delete','feed-delete'])
-def test_startup_recovers_legacy_source_job_without_get(kind,tmp_path,postgres_url):
+def test_startup_recovers_source_job_without_get(kind,tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
@@ -329,25 +329,25 @@ def test_source_recovery_resumes_after_interrupted_page(tmp_path,postgres_url):
         assert not store.db.execute("SELECT 1 FROM state WHERE key LIKE 'source-recovery-seen:%%'").fetchone()
     finally:store.db.close()
 
-def test_ambiguous_legacy_source_code_is_not_overwritten(tmp_path,postgres_url):
-    import json
+def test_source_collision_finishes_fallback_when_only_one_error_remains(tmp_path,postgres_url):
     from oko.storage.job_types import Job
+    from oko.storage.source_groups import sync_jobs
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('b:c','b:c','F','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id) VALUES ('p')")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('b:c','p',true)")
-            job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','p','running',1) RETURNING id").fetchone()[0]
-            legacy=dict(code='source-a:b',operation='producer:status',objects=[dict(kind='material',id='p')],section='object',title='legacy',consequence='saved',next_step='retry',state='current',next_at=None,action=None)
-            store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('legacy','job:source-a:b:c:fetch','background',%s,1)",(json.dumps(legacy),))
-        store.jobs.retry(Job(job,'fetch','p',1),1,'failure',code='source-a')
-        row=store.db.execute("SELECT body,finished FROM reader_problems WHERE id='legacy'").fetchone()
-        assert row['finished'] is None and json.loads(row['body'])==legacy
-        assert store.db.execute("SELECT 1 FROM reader_problems WHERE body::jsonb->>'source_group_identity'='job:source-a:b:c:fetch' AND id!='legacy' AND finished IS NULL").fetchone()
-        store.problems.snapshot(2)
-        row=store.db.execute("SELECT body,finished FROM reader_problems WHERE id='legacy'").fetchone()
-        assert row['finished'] is None and json.loads(row['body'])==legacy
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('b:c','b:c','F','default','rss','rss','connected',ARRAY[]::text[]),('c','c','G','default','rss','rss','connected',ARRAY[]::text[])")
+            store.db.execute("INSERT INTO publications(id) VALUES ('p'),('q')")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('b:c','p',true),('c','q',true)")
+            first=store.db.execute("INSERT INTO jobs(kind,item,status,generation,error,problem_code) VALUES ('fetch','p','running',1,'failure','source-a') RETURNING id").fetchone()[0]
+            second=store.db.execute("INSERT INTO jobs(kind,item,status,generation,error,problem_code) VALUES ('fetch','q','running',1,'failure','source-a:b') RETURNING id").fetchone()[0]
+            sync_jobs(store,[first,second],1)
+        before=[p for p in store.problems.snapshot(2)['current'] if p['code'].startswith('source-')]
+        assert before and {o['id'] for p in before for o in p['objects']}=={'p','q'}
+        store.jobs.finish(Job(second,'fetch','q',1))
+        store.jobs.retry(Job(first,'fetch','p',1),4,'failure again',code='source-a')
+        current=[p for p in store.problems.snapshot(3)['current'] if p['code'].startswith('source-')]
+        assert len(current)==1
+        assert current[0]['code']=='source-a' and current[0]['objects']==[dict(kind='material',id='p')]
     finally:store.db.close()
 
 def test_ambiguous_long_identity_falls_back_without_aborting_job(tmp_path,postgres_url):
@@ -567,21 +567,6 @@ def test_viewing_material_finishes_source_group_without_get(tmp_path,postgres_ur
         old=store.db.execute("SELECT id FROM reader_problems WHERE body::jsonb->>'source_group_identity'='job:source-network:f:fetch' AND finished IS NULL").fetchone()[0]
         store.viewed('p')
         assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s',(old,)).fetchone()[0] is not None
-    finally:store.db.close()
-
-def test_finishing_unproven_legacy_source_job_preserves_old_occurrence(tmp_path,postgres_url):
-    from oko.storage.job_types import Job
-    from oko.storage.transaction import transaction
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    try:
-        with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id) VALUES ('p')")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
-            job=store.db.execute("INSERT INTO jobs(kind,item,status,generation,error,problem_code) VALUES ('fetch','p','running',1,'failure','source-network') RETURNING id").fetchone()[0]
-        old=next(p['id'] for p in store.problems.snapshot(1)['current'] if p['code']=='source-network')
-        with transaction(store.db):store.jobs.finish(Job(job,'fetch','p',1))
-        assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s',(old,)).fetchone()[0] is None
     finally:store.db.close()
 
 def test_finish_feed_deletion_closes_source_group_before_get(tmp_path,postgres_url):
@@ -899,213 +884,8 @@ def test_remove_feed_job_control_refreshes_shared_source_state(tmp_path,postgres
         assert row and row['id']==old and json.loads(row['body'])['state']=='current'
     finally:store.db.close()
 
-def test_recovery_preserves_provable_legacy_owner_occurrence(tmp_path,postgres_url):
-    import json
-    from oko.storage.source_groups import recover
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    try:
-        with store.db:
-            store.db.execute("DELETE FROM state WHERE key='source-problems-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('new','new','New','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id) VALUES ('p')")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('new','p',true)")
-            store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) VALUES ('fetch','p','old','failed','failure','source-network')")
-            body=dict(code='source-network',operation='producer:status',objects=[dict(kind='material',id='p')],section='object',title='old',consequence='saved',next_step='retry',state='current',next_at=None,action=None)
-            store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('legacy','job:source-network:old:fetch','background',%s,1)",(json.dumps(body),))
-        recover(store)
-        row=store.db.execute("SELECT id FROM reader_problems WHERE body::jsonb->>'source_group_identity'='job:source-network:new:fetch' AND finished IS NULL").fetchone()
-        assert row and row[0]=='legacy'
-    finally:store.db.close()
-
-def test_recovery_does_not_steal_active_legacy_source_group(tmp_path,postgres_url):
-    import json
-    from oko.storage.source_groups import recover
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    try:
-        with store.db:
-            store.db.execute("DELETE FROM state WHERE key='source-problems-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('old','old','Old','default','rss','rss','connected',ARRAY[]::text[]),('new','new','New','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id) VALUES ('p'),('q')")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('new','p',true),('old','q',true)")
-            store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) VALUES ('fetch','p','old','failed','failure','source-network'),('fetch','q','old','failed','failure','source-network')")
-            body=dict(code='source-network',operation='producer:status',objects=[dict(kind='material',id='q')],section='object',title='old',consequence='saved',next_step='retry',state='current',next_at=None,action=None)
-            store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('legacy','job:source-network:old:fetch','background',%s,1)",(json.dumps(body),))
-        recover(store)
-        old=store.db.execute("SELECT id FROM reader_problems WHERE body::jsonb->>'source_group_identity'='job:source-network:old:fetch' AND finished IS NULL").fetchone()
-        new=store.db.execute("SELECT id FROM reader_problems WHERE body::jsonb->>'source_group_identity'='job:source-network:new:fetch' AND finished IS NULL").fetchone()
-        assert old and old[0]=='legacy' and new and new[0]!='legacy'
-    finally:store.db.close()
-
-def test_recovery_preserves_multiple_ambiguous_legacy_groups_after_get(tmp_path,postgres_url):
-    import json
-    from oko.storage.source_groups import recover
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    try:
-        with store.db:
-            store.db.execute("DELETE FROM state WHERE key='source-problems-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('new','new','New','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id) VALUES ('p'),('q')")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('new','p',true),('new','q',true)")
-            store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) VALUES ('fetch','p','old-a','failed','failure','source-network'),('fetch','q','old-b','failed','failure','source-network')")
-            bodies=[]
-            for item,owner in [('p','old-a'),('q','old-b')]:
-                body=dict(code='source-network',operation='producer:status',objects=[dict(kind='material',id=item)],section='object',title='old',consequence='saved',next_step='retry',state='current',next_at=None,action=None)
-                bodies.append((owner,json.dumps(body)))
-                store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES (%s,%s,'background',%s,1)",(owner,'job:source-network:'+owner+':fetch',json.dumps(body)))
-        recover(store)
-        store.problems.snapshot(2)
-        for name,body in bodies:
-            row=store.db.execute('SELECT body,finished FROM reader_problems WHERE id=%s',(name,)).fetchone()
-            assert row['finished'] is None and row['body']==body
-    finally:store.db.close()
-
-def test_protected_legacy_group_is_not_claimed_by_later_source_job(tmp_path,postgres_url):
-    import json
-    from oko.storage.source_groups import recover
-    from oko.storage.job_types import Job
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    try:
-        with store.db:
-            store.db.execute("DELETE FROM state WHERE key='source-problems-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('new','new','New','default','rss','rss','connected',ARRAY[]::text[]),('old-a','old-a','Old','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id) VALUES ('p'),('q')")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('new','p',true),('new','q',true)")
-            store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) VALUES ('fetch','p','old-a','failed','failure','source-network'),('fetch','q','old-b','failed','failure','source-network')")
-            body=dict(code='source-network',operation='producer:status',objects=[dict(kind='material',id='p')],section='object',title='old',consequence='saved',next_step='retry',state='current',next_at=None,action=None)
-            store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('legacy','job:source-network:old-a:fetch','background',%s,1)",(json.dumps(body),))
-        recover(store)
-        with store.db:
-            store.db.execute("UPDATE feed_publications SET is_primary=false WHERE feed_id='new' AND publication_id='p'")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('old-a','p',true)")
-            job=store.db.execute("UPDATE jobs SET status='running',generation=1 WHERE kind='fetch' AND item='p' RETURNING id").fetchone()[0]
-        store.jobs.retry(Job(job,'fetch','p',1),2,'failure',code='source-network')
-        store.problems.snapshot(3)
-        row=store.db.execute("SELECT body,finished FROM reader_problems WHERE id='legacy'").fetchone()
-        assert row['finished'] is None and json.loads(row['body'])==body
-    finally:store.db.close()
-
-def test_existing_canonical_and_legacy_source_rows_do_not_collide(tmp_path,postgres_url):
-    import json
-    from oko.storage.source_groups import recover
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    try:
-        body=dict(code='source-network',operation='producer:status',objects=[dict(kind='material',id='p')],section='object',title='old',consequence='saved',next_step='retry',state='current',next_at=None,action=None)
-        with store.db:
-            store.db.execute("DELETE FROM state WHERE key='source-problems-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('new','new','New','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id) VALUES ('p')")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('new','p',true)")
-            store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) VALUES ('fetch','p','old','failed','failure','source-network')")
-            store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('canonical','job:source-network:new:fetch','background',%s,2),('legacy','job:source-network:old:fetch','background',%s,1)",(json.dumps(body),json.dumps(body)))
-        recover(store)
-        assert store.db.execute("SELECT 1 FROM reader_problems WHERE id='legacy' AND finished IS NULL").fetchone()
-        assert store.db.execute("SELECT 1 FROM reader_problems WHERE body::jsonb->>'source_group_identity'='job:source-network:new:fetch' AND finished IS NULL").fetchone()
-    finally:store.db.close()
-
-def test_stale_legacy_marker_does_not_protect_new_occurrence(tmp_path,postgres_url):
-    import hashlib,json
-    from oko.storage.job_types import Job
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    identity='job:source-network:p:fetch';key='source-legacy-protected:'+hashlib.sha256(identity.encode()).hexdigest()
-    try:
-        body=dict(code='source-network',operation='producer:status',objects=[dict(kind='material',id='p')],section='object',title='old',consequence='saved',next_step='retry',state='current',next_at=None,action=None)
-        with store.db:
-            store.db.execute("INSERT INTO publications(id) VALUES ('p')")
-            job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','p','running',1) RETURNING id").fetchone()[0]
-            store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created,finished,outcome) VALUES ('old',%s,'background',%s,1,2,'resolved'),('new',%s,'background',%s,3,NULL,NULL)",(identity,json.dumps(body),identity,json.dumps(body)))
-            store.db.execute('INSERT INTO state(key,value) VALUES (%s,%s)',(key,json.dumps(['oko-source-legacy-v1',identity,'old'])))
-        store.jobs.retry(Job(job,'fetch','p',1),4,'failure',code='source-network')
-        row=store.db.execute("SELECT id FROM reader_problems WHERE body::jsonb->>'source_group_identity'=%s AND finished IS NULL",(identity,)).fetchone()
-        assert row and row[0]=='new'
-    finally:store.db.close()
-
-def test_legacy_marker_gc_is_guarded_and_transactional(tmp_path,postgres_url):
-    import hashlib,json
-    from oko.storage.source_groups import cleanup_legacy_protected
-    from oko.storage.transaction import transaction
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    identity='job:source-network:p:fetch';key='source-legacy-protected:'+hashlib.sha256(identity.encode()).hexdigest()
-    try:
-        with transaction(store.db):
-            store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created,finished,outcome) VALUES ('old',%s,'background','{}',1,2,'resolved')",(identity,))
-            store.db.execute('INSERT INTO state(key,value) VALUES (%s,%s)',(key,json.dumps(['oko-source-legacy-v1',identity,'old'])))
-            store.db.execute("INSERT INTO state(key,value) VALUES ('source-legacy-protected:foreign','do-not-touch')")
-        with pytest.raises(RuntimeError,match='rollback'):
-            with transaction(store.db):
-                cleanup_legacy_protected(store,None)
-                assert not store.db.execute('SELECT 1 FROM state WHERE key=%s',(key,)).fetchone()
-                raise RuntimeError('rollback')
-        assert store.db.execute('SELECT 1 FROM state WHERE key=%s',(key,)).fetchone()
-        with transaction(store.db):cleanup_legacy_protected(store,None)
-        assert not store.db.execute('SELECT 1 FROM state WHERE key=%s',(key,)).fetchone()
-        assert store.db.execute("SELECT value FROM state WHERE key='source-legacy-protected:foreign'").fetchone()[0]=='do-not-touch'
-    finally:store.db.close()
-
-def test_legacy_marker_gc_cursor_rolls_back(tmp_path,postgres_url):
-    import hashlib,json
-    from oko.storage.transaction import transaction
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    identity='job:source-network:p:fetch';key='source-legacy-protected:'+hashlib.sha256(identity.encode()).hexdigest()
-    try:
-        with store.db:store.db.execute('INSERT INTO state(key,value) VALUES (%s,%s)',(key,json.dumps(['oko-source-legacy-v1',identity,'missing'])))
-        with pytest.raises(RuntimeError,match='rollback'):
-            with transaction(store.db):
-                store.read_versions.advance(now=0,wall=10)
-                raise RuntimeError('rollback')
-        assert store.read_versions._source_legacy_gc_cursor is None
-        assert store.db.execute('SELECT 1 FROM state WHERE key=%s',(key,)).fetchone()
-    finally:store.db.close()
-
-def test_new_legacy_occurrence_replaces_only_stale_matching_marker(tmp_path,postgres_url):
-    import hashlib,json
-    from oko.storage.source_groups import recover
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    identity='job:source-network:old-a:fetch';marker='source-legacy-protected:'+hashlib.sha256(identity.encode()).hexdigest()
-    try:
-        body=dict(code='source-network',operation='producer:status',objects=[dict(kind='material',id='p')],section='object',title='old',consequence='saved',next_step='retry',state='current',next_at=None,action=None)
-        with store.db:
-            store.db.execute("DELETE FROM state WHERE key='source-problems-recovered-v1'")
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('new','new','New','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id) VALUES ('p'),('q')")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('new','p',true),('new','q',true)")
-            store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,error,problem_code) VALUES ('fetch','p','old-a','failed','failure','source-network'),('fetch','q','old-b','failed','failure','source-network')")
-            store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created,finished,outcome) VALUES ('old',%s,'background',%s,1,2,'resolved'),('new',%s,'background',%s,3,NULL,NULL)",(identity,json.dumps(body),identity,json.dumps(body)))
-            store.db.execute('INSERT INTO state(key,value) VALUES (%s,%s)',(marker,json.dumps(['oko-source-legacy-v1',identity,'old'])))
-        recover(store)
-        assert json.loads(store.db.execute('SELECT value FROM state WHERE key=%s',(marker,)).fetchone()[0])==['oko-source-legacy-v1',identity,'new']
-        store.problems.snapshot(4)
-        row=store.db.execute("SELECT body,finished FROM reader_problems WHERE id='new'").fetchone()
-        assert row['finished'] is None and json.loads(row['body'])==body
-    finally:store.db.close()
-
-def test_legacy_marker_gc_is_bounded_with_foreign_state(tmp_path,postgres_url):
-    import hashlib,json
-    from oko.storage.source_groups import cleanup_legacy_protected
-    from oko.storage.transaction import transaction
-    from tests.support.postgres_work import scan_rows
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    try:
-        with transaction(store.db):
-            store.db.execute("INSERT INTO state(key,value) SELECT 'foreign-'||n,'value' FROM generate_series(1,10000)n")
-            entries=[]
-            for n in range(250):
-                identity='job:source-network:p-'+str(n)+':fetch'
-                entries.append(('source-legacy-protected:'+hashlib.sha256(identity.encode()).hexdigest(),json.dumps(['oko-source-legacy-v1',identity,'missing-'+str(n)])))
-            store.db.executemany('INSERT INTO state(key,value) VALUES (%s,%s)',entries)
-            store.db._db.execute('ANALYZE state')
-        trace=[];store.db.set_trace_callback(trace.append)
-        try:
-            with transaction(store.db):cursor,done=cleanup_legacy_protected(store,None)
-        finally:store.db.set_trace_callback(None)
-        assert cursor and not done
-        assert store.db.execute("SELECT count(*) FROM state WHERE key LIKE 'source-legacy-protected:%%'").fetchone()[0]==150
-        query=next(q for q in trace if q.startswith("SELECT key,value FROM state WHERE key LIKE 'source-legacy-protected:"))
-        plan=store.db._db.execute('EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) '+query,()).fetchone()[0][0]['Plan']
-        assert scan_rows(plan)<1000,scan_rows(plan)
-    finally:store.db.close()
-
-
-def test_group_remains_until_last_job_finishes_without_get(tmp_path,postgres_url):
+@pytest.mark.parametrize('members',[1,2])
+def test_group_remains_until_last_job_finishes_without_get(members,tmp_path,postgres_url):
     from oko.storage.job_types import Job
     from oko.storage.transaction import transaction
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
@@ -1114,13 +894,13 @@ def test_group_remains_until_last_job_finishes_without_get(tmp_path,postgres_url
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('owner','owner','Owner','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,viewed) VALUES ('a',0),('b',0)")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('owner','a',true),('owner','b',true)")
-            rows=store.db.execute("INSERT INTO jobs(kind,item,status,generation,error,problem_code) VALUES ('feed-delete','a','running',1,'failure','source-network'),('feed-delete','b','running',1,'failure','source-network') RETURNING id,item").fetchall()
+            rows=store.db.execute("INSERT INTO jobs(kind,item,status,generation,error,problem_code) SELECT 'feed-delete',id,'running',1,'failure','source-network' FROM publications ORDER BY id LIMIT %s RETURNING id,item",(members,)).fetchall()
         current=store.problems.snapshot(1)['current']
         old=next(p['id'] for p in current if p['code']=='source-network')
         for index,row in enumerate(rows):
             with transaction(store.db):store.jobs.finish(Job(row['id'],'feed-delete',row['item'],1))
             saved=store.db.execute('SELECT finished FROM reader_problems WHERE id=%s',(old,)).fetchone()
-            assert (saved['finished'] is None)==(index==0)
+            assert (saved['finished'] is None)==(index<members-1)
     finally:store.db.close()
 
 def test_restart_after_youtube_pause_reopens_source_group_before_get(tmp_path,postgres_url):
