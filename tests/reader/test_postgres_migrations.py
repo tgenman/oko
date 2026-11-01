@@ -286,18 +286,23 @@ def test_feed_details_migration_preserves_missing_empty_and_saved_values(connect
     from oko.storage.postgres_schema import MIGRATIONS
     with connections() as db:
         migrate(db, MIGRATIONS[:9])
-        db.execute("INSERT INTO feeds(id,description,created_at) VALUES ('missing','',NULL),('empty','',10),('saved','Saved',20),('detail-only','',NULL)")
-        db.execute("INSERT INTO feed_details(feed,created,modified,updated,marked_read,description) VALUES ('missing',NULL,NULL,NULL,NULL,NULL),('empty',10,11,12,13,''),('saved',20,21,22,23,'Saved'),('detail-only',30,31,32,33,'Only in details')")
+        db.execute("INSERT INTO feeds(id,description,created_at) VALUES ('missing','',NULL),('empty','',10),('saved','Saved',20),('detail-only','',NULL),('legacy-created','',40)")
+        db.execute("INSERT INTO feed_details(feed,created,modified,updated,marked_read,description) VALUES ('missing',NULL,NULL,NULL,NULL,NULL),('empty',10,11,12,13,''),('saved',20,21,22,23,'Saved'),('detail-only',30,31,32,33,'Only in details'),('legacy-created',NULL,41,42,43,NULL)")
         # This historical fixture does not test URL data; supply an explicit empty list.
         db.execute("UPDATE feeds SET original_urls='[]' WHERE original_urls IS NULL")
+        broken = Migration(11, 'deliberate-failure', 'SELECT missing_column FROM feeds')
+        with pytest.raises(psycopg.errors.UndefinedColumn):
+            migrate(db, (*MIGRATIONS[:10], broken))
+        assert db.execute("SELECT created FROM feed_details WHERE feed='legacy-created'").fetchone() == (None,)
+        verify(db, MIGRATIONS[:9])
         migrate(db, MIGRATIONS)
         rows = db.execute('SELECT id,description,created_at,modified_at,last_discovery_at,last_viewed_at FROM feeds ORDER BY id').fetchall()
-        assert rows == [('detail-only','Only in details',30,31,32,33), ('empty','',10,11,12,13), ('missing',None,None,None,None,None), ('saved','Saved',20,21,22,23)]
+        assert rows == [('detail-only','Only in details',30,31,32,33), ('empty','',10,11,12,13), ('legacy-created',None,40,41,42,43), ('missing',None,None,None,None,None), ('saved','Saved',20,21,22,23)]
         assert db.execute("SELECT to_regclass('feed_details')").fetchone() == (None,)
         verify(db, MIGRATIONS)
 
 
-@pytest.mark.parametrize('conflict', ['orphan', 'description', 'created', 'missing-description', 'missing-created', 'nonfinite'])
+@pytest.mark.parametrize('conflict', ['orphan', 'description', 'created', 'missing-description', 'nonfinite'])
 def test_feed_details_migration_rejects_conflicting_data(connections, conflict):
     from oko.storage.postgres_schema import MIGRATIONS
     with connections() as db:
@@ -311,8 +316,6 @@ def test_feed_details_migration_rejects_conflicting_data(connections, conflict):
             db.execute("INSERT INTO feed_details(feed,created,description) VALUES ('feed',20,'old')")
         elif conflict == 'missing-description':
             db.execute("INSERT INTO feed_details(feed,created,description) VALUES ('feed',10,NULL)")
-        elif conflict == 'missing-created':
-            db.execute("INSERT INTO feed_details(feed,created,description) VALUES ('feed',NULL,'old')")
         else:
             db.execute("INSERT INTO feed_details(feed,created,modified,description) VALUES ('feed',10,'NaN'::float8,'old')")
         with pytest.raises(psycopg.errors.RaiseException, match='conflicting feed details'):
@@ -1000,15 +1003,31 @@ def test_empty_feed_processing_copies_are_removed(connections):
 
 
 @pytest.mark.parametrize('column', ['filter_config','summary_config'])
-def test_feed_processing_copy_migration_rejects_nonempty_legacy_data(connections, column):
+def test_feed_processing_copy_migration_archives_nonempty_legacy_data(connections, column):
     from oko.storage.postgres_schema import MIGRATIONS
+    archive = 'migration:053:feed-processing-config-archive-v1'
     with connections() as db:
         migrate(db, MIGRATIONS[:52])
-        db.execute(f"INSERT INTO feeds(id,{column}) VALUES ('feed',%s)", ('{"prompt":"saved"}',))
-        with pytest.raises(psycopg.errors.RaiseException, match='nonempty feed processing config'):
-            migrate(db, MIGRATIONS)
-        assert db.execute(f"SELECT {column} FROM feeds WHERE id='feed'").fetchone() == ('{"prompt":"saved"}',)
+        raw = ' {"prompt":"saved"} '
+        db.execute(f"INSERT INTO feeds(id,{column}) VALUES ('feed',%s)", (raw,))
+        db.execute('INSERT INTO state(key,value) VALUES (%s,%s)', (archive,'occupied'))
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            migrate(db, MIGRATIONS[:53])
+        assert db.execute('SELECT value FROM state WHERE key=%s',(archive,)).fetchone() == ('occupied',)
+        assert db.execute(f"SELECT {column} FROM feeds WHERE id='feed'").fetchone() == (raw,)
+        db.execute('DELETE FROM state WHERE key=%s',(archive,))
+        broken = Migration(54, 'deliberate-failure', 'SELECT missing_column FROM feeds')
+        with pytest.raises(psycopg.errors.UndefinedColumn):
+            migrate(db, (*MIGRATIONS[:53],broken))
+        assert db.execute(f"SELECT {column} FROM feeds WHERE id='feed'").fetchone() == (raw,)
+        assert db.execute('SELECT value FROM state WHERE key=%s',(archive,)).fetchone() is None
         verify(db, MIGRATIONS[:52])
+        migrate(db, MIGRATIONS[:53])
+        saved = json.loads(db.execute('SELECT value FROM state WHERE key=%s',(archive,)).fetchone()[0])
+        assert saved == [dict(feed='feed',filter_config=raw if column=='filter_config' else '{}',
+                              summary_config=raw if column=='summary_config' else '{}')]
+        assert db.execute("SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='feeds' AND column_name IN ('filter_config','summary_config')").fetchone() == (0,)
+        verify(db, MIGRATIONS[:53])
 
 
 def test_stage_queue_migration_preserves_pending_work(connections):

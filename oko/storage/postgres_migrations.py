@@ -72,6 +72,29 @@ def migrate(db: psycopg.Connection[Any], migrations: Sequence[Migration]) -> Non
                 applied_at timestamptz NOT NULL DEFAULT clock_timestamp())''')
             installed = _installed(db, migrations)
             for migration in migrations[installed:]:
+                if (migration.version, migration.name) == (10, 'feed-details'):
+                    # Older writers could populate feeds.created_at before details.created.
+                    schema = db.execute('SELECT current_schema()').fetchone()
+                    if not schema or schema[0] is None:
+                        raise SchemaMismatch('Migration 10 requires a current schema')
+                    db.execute(sql.SQL('''UPDATE {}.feed_details d SET created=f.created_at
+                        FROM {}.feeds f WHERE d.feed=f.id AND d.created IS NULL
+                        AND f.created_at IS NOT NULL''').format(sql.Identifier(schema[0]), sql.Identifier(schema[0])))
+                if (migration.version, migration.name) == (53, 'feed-processing-copies'):
+                    # Preserve unused legacy copies verbatim before the old DDL drops them.
+                    schema = db.execute('SELECT current_schema()').fetchone()
+                    if not schema or schema[0] is None:
+                        raise SchemaMismatch('Migration 53 requires a current schema')
+                    owner = sql.Identifier(schema[0])
+                    db.execute(sql.SQL('LOCK TABLE {}.feeds IN ACCESS EXCLUSIVE MODE').format(owner))
+                    db.execute(sql.SQL('''INSERT INTO {}.state(key,value)
+                        SELECT 'migration:053:feed-processing-config-archive-v1',
+                            json_agg(json_build_object('feed',id,'filter_config',filter_config,
+                                'summary_config',summary_config) ORDER BY id)::text
+                        FROM {}.feeds WHERE filter_config IS DISTINCT FROM '{{}}'
+                            OR summary_config IS DISTINCT FROM '{{}}' HAVING count(*) > 0''').format(owner, owner))
+                    db.execute(sql.SQL('''UPDATE {}.feeds SET filter_config='{{}}',summary_config='{{}}'
+                        WHERE filter_config IS DISTINCT FROM '{{}}' OR summary_config IS DISTINCT FROM '{{}}' ''').format(owner))
                 if (migration.version, migration.name) == (89, 'feeds-config-jsonb'):
                     # Its preflight and ALTER must see the same feed values, even
                     # when an external writer does not use our advisory lease.
