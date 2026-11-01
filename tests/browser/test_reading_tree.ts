@@ -126,17 +126,17 @@ test('feed avatars outside the viewport wait until the source is scrolled into v
   await r.page.setViewportSize({width:1280,height:700});
   await r.start([material('one',{feed_id:'feed-00'})]);
   await r.page.evaluate(()=>{
-   const feeds=Array.from({length:60},(_,n)=>{const id='feed-'+String(n).padStart(2,'0');const avatar='/api/v3/feeds/'+id+'/avatar/fixture';
+   const feeds=Array.from({length:60},(_,n)=>{const id='feed-'+String(n).padStart(2,'0');const avatar='/api/v3/feeds/'+id+'/avatar/'+'a'.repeat(64);
     readerTransport.replies.set(avatar,{base64:btoa('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><rect width="24" height="24" fill="red"/></svg>'),mime:'image/svg+xml'});
-    return {count:1,has_unviewed:true,feed:{id,title:'Source '+String(n).padStart(2,'0'),kind:'rss' as const,folder_id:'f',identity:id,importance:'normal' as const,connection:'ready' as const,history:{state:'absent' as const},initial_days:30,original_urls:[],public_ai:null,transport:'rss' as const,avatar_url:avatar}};});
+    return {count:1,has_unviewed:true,feed:{id,title:'Source '+String(n).padStart(2,'0'),kind:'telegram' as const,folder_id:'f',identity:id,importance:'normal' as const,connection:'ready' as const,history:{state:'absent' as const},initial_days:30,original_urls:[],public_ai:null,access:{kind:'web' as const,username:'fixture'+n,preview_url:'https://t.me/s/fixture'+n},avatar_url:avatar}};});
    readerTransport.replies.set('/api/v3/reading-composition',{body:{count:60,folders:[{id:'f',title:'Sources',position:0,count:60}],feeds}});
   });
   await expect(r.page.locator('[data-feed]')).toHaveCount(60);
   await expect(r.page.locator('[data-feed="feed-00"] img.source-avatar')).toBeVisible();
-  expect(await r.page.evaluate(()=>readerTransport.requests.some(r=>r.url==='/api/v3/feeds/feed-59/avatar/fixture'))).toBe(false);
+  expect(await r.page.evaluate(()=>readerTransport.requests.some(r=>r.url==='/api/v3/feeds/feed-59/avatar/'+'a'.repeat(64)))).toBe(false);
   await r.page.locator('[data-feed="feed-59"]').scrollIntoViewIfNeeded();
   await expect(r.page.locator('[data-feed="feed-59"] img.source-avatar')).toBeVisible();
-  expect(await r.page.evaluate(()=>readerTransport.requests.some(r=>r.url==='/api/v3/feeds/feed-59/avatar/fixture'))).toBe(true);
+  expect(await r.page.evaluate(()=>readerTransport.requests.some(r=>r.url==='/api/v3/feeds/feed-59/avatar/'+'a'.repeat(64)))).toBe(true);
   await r.page.screenshot({path:artifactPath('feed-avatar-lazy-scroll.png')});
   expect(r.errors).toEqual([]);
  }finally{await r.close();}
