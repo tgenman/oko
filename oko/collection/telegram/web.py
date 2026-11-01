@@ -6,6 +6,7 @@ text/local media, bounded pagination, no route switches, RSS or account fallback
 See docs/licenses/RSSHub-AGPL-3.0.txt and docs/licenses/RSSHub-NOTICE.md.
 """
 from dataclasses import dataclass
+import asyncio
 import hashlib
 import base64
 from datetime import datetime
@@ -301,7 +302,7 @@ async def load(username: str, before: int, transport: httpx.AsyncBaseTransport |
                             data.extend(part)
                             if len(data)>2*1024*1024:
                                 raise ValueError('preview too large')
-                page = parse_page(bytes(data),username,partial=partial)
+                page = await asyncio.to_thread(parse_page,bytes(data),username,partial=partial)
                 if before and any(int(post.publication.id)>=before for post in page.posts):
                     raise SourceError('Telegram вернул страницу вне запрошенной границы')
                 if before and page.next_before is not None and page.next_before>=before:

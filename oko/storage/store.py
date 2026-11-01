@@ -8,7 +8,7 @@ from oko.storage.collection_status import CollectionStatus
 from oko.storage import material_read, collection_jobs, publication_links, youtube_media
 from oko.storage import memberships as membership_graph
 from oko.storage import processing_input as publication_input
-from oko.storage.reading import reading_value, retry_time, reader_now, saved_content
+from oko.storage.reading import reading_snapshot, reading_value, retry_time, reader_now, saved_content
 from oko.diagnostics import record_caught
 from dataclasses import dataclass, replace
 import json
@@ -460,6 +460,7 @@ class Store:
             self.db.execute('INSERT INTO state VALUES ( %s , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value',
                             ('telegram-http:'+group, json.dumps(state)))
 
+    @reading_snapshot()
     def _needs_collection(self, item: str, observed: Material | None = None) -> bool:
         material = self.material(item)
         if not material or not material.get('complete',True):

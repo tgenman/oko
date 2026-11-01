@@ -387,3 +387,30 @@ def test_malformed_web_record_does_not_discard_valid_neighbor_and_is_diagnosed(t
         assert client.get('/api/v3/publication/'+card['id']).json()['text'] == 'Valid text'
         state = client.get('/api/v3/status/details').json()
         assert any(history['history']['progress']['warnings'] for history in state['initial_histories'])
+
+
+def test_web_parsing_does_not_hold_up_an_unrelated_async_callback(monkeypatch):
+    import asyncio
+    import threading
+    from oko.collection.telegram import web
+
+    async def check():
+        loop = asyncio.get_running_loop()
+        release, callbacks = threading.Event(), []
+        original = web.parse_page
+        def parsing(*args, **kwargs):
+            loop.call_soon_threadsafe(callbacks.append, True)
+            loop.call_soon_threadsafe(release.set)
+            fallback = threading.Timer(2, release.set)
+            fallback.start()
+            try:
+                assert release.wait(3)
+                assert callbacks, 'Unrelated callback could not run while parsing was held'
+                return original(*args, **kwargs)
+            finally:
+                fallback.cancel()
+                fallback.join()
+        monkeypatch.setattr(web, 'parse_page', parsing)
+        result, _ = await web.load('fixture', 0, httpx.MockTransport(lambda _: httpx.Response(200, text=page([(11, 'Text')]))))
+        assert len(result.posts) == 1
+    asyncio.run(check())

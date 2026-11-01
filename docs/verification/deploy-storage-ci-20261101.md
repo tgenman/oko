@@ -86,3 +86,36 @@ preserved by the planned fallback, all 184 raw config pairs archived exactly and
 canonical settings unchanged. Temporary database/container were removed. Working
 production data were not modified by these probes; successful deployment remains
 a separate step.
+
+## Post-deployment reading latency incident
+
+A later user report reproduced blocked reading despite the initial successful
+smoke. Live reader was unhealthy (TLS handshake timeouts), about 75–94% CPU;
+PostgreSQL had no blocking sessions. A 12-second stack sample attributed 155 of
+267 application samples to collection execution. After the normal power-off API
+paused background work, HTTP recovered but the first measured click still took
+2643 ms (fetch began after 3 ms); subsequent clicks were 82–320 ms. Work was
+originally enabled and must be restored after the fix is verified.
+
+The paused profile also found repeated collection-status and navigation work.
+Four bounded changes address measured paths without schema or API changes:
+
+- One existing reading_snapshot scope around the read-only _needs_collection:
+  84 → 13 SQL/call; median 35.95 → 4.33 ms; same decision. The mutable discovery
+  transaction is not cached.
+- Pure, size-limited Telegram HTML parsing runs via asyncio.to_thread. On a
+  50-post synthetic page, event-loop max gap 463.5 → 29.9 ms; parsed result and
+  total parse time unchanged. One existing-file behavioral regression passes
+  the new code and fails the old synchronous version without a timing budget.
+- Navigation constructs its compact response directly. On 185 synthetic feeds,
+  JSON and ETag match exactly; median GET 35.52 → 13.08 ms, conditional GET
+  32.84 → 19.69 ms.
+- Collection redaction reuses strings only within one call: 5180 → 567 cleaner
+  calls, median 43.84 → 6.29 ms. Output/input preservation, URL redaction and a
+  changed secret between calls were checked.
+
+Existing targeted scopes passed: 12 source/material/linked tests, 9 navigation
+HTTP tests and 3 collection/privacy tests; the new async-callback regression and
+type checks passed. Independent source review found no blocker. No frontend poll
+interval change was selected. Live improvement with collection re-enabled remains
+an explicit post-deployment acceptance step, not a conclusion of microbenchmarks.

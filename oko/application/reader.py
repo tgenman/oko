@@ -773,13 +773,19 @@ class ReaderApplication:
 
 
     def _clean_collection(self, value: Any) -> Any:
-        if isinstance(value, str):
-            return self.diagnostics.clean(value) if self.diagnostics else value
-        if isinstance(value, list):
-            return [self._clean_collection(item) for item in value]
-        if isinstance(value, dict):
-            result = {key: self._clean_collection(item) for key, item in value.items()}
-            if 'url' in value and result['url'] != value['url']:
-                result['redacted'] = True
-            return result
-        return value
+        diagnostics = self.diagnostics
+        strings: dict[str, str] = {}
+        def clean(value: Any) -> Any:
+            if isinstance(value, str):
+                if value not in strings:
+                    strings[value] = diagnostics.clean(value) if diagnostics else value
+                return strings[value]
+            if isinstance(value, list):
+                return [clean(item) for item in value]
+            if isinstance(value, dict):
+                result = {key: clean(item) for key, item in value.items()}
+                if 'url' in value and result['url'] != value['url']:
+                    result['redacted'] = True
+                return result
+            return value
+        return clean(value)
