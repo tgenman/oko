@@ -524,11 +524,12 @@ test('a replacement library cannot update the shown publication before its statu
 test('a late old-library publication response cannot cross an accepted storage reset',async()=>{
  const r=await reader();try{
   await r.page.addInitScript(()=>{
-   const original=window.fetch.bind(window),state={enabled:false,reset:false,oldHeld:false,release:undefined as undefined|(()=>void)};
+   const original=window.fetch.bind(window),state={enabled:false,reset:false,oldHeld:false,release:undefined as undefined|(()=>void),cardsOpen:false,releaseCards:[] as (()=>void)[],oldDelivered:false,newOpen:false,releaseNew:[] as (()=>void)[]};
    Object.assign(window,{publicationLateRestore:state});
    const replacement='2d879353-68a3-4919-831c-32cb82c3d55f';
    window.fetch=async(url,options)=>{
     const path=String(url);
+    if(state.enabled&&!state.cardsOpen&&new URL(path,window.location.origin).pathname==='/api/v3/cards')await new Promise<void>(resolve=>{state.releaseCards.push(resolve);});
     if(state.enabled&&['/api/v3/status','/api/v3/navigation'].includes(path)){
      const headers=new Headers(options?.headers);headers.delete('If-None-Match');
      const reply=await original(url,{...options,headers});
@@ -541,7 +542,8 @@ test('a late old-library publication response cannot cross an accepted storage r
      const response=await original(url,{...options,headers}),body=await response.json();
      const reason=identity===replacement?'NEW LIBRARY':'OLD LIBRARY';
      body.filter={state:'ready',result:{hidden:true,reason,text:'Original text',removed:[],provenance:{kind:'unknown',reason:'not_recorded'}},error:null};
-     if(identity!==replacement&&!state.oldHeld){state.oldHeld=true;await new Promise<void>(resolve=>{state.release=resolve;});}
+     if(identity!==replacement&&!state.oldHeld){state.oldHeld=true;await new Promise<void>(resolve=>{state.release=resolve;});state.oldDelivered=true;}
+     if(identity===replacement&&!state.newOpen)await new Promise<void>(resolve=>{state.releaseNew.push(resolve);});
      return new Response(JSON.stringify(body),{headers:{'Content-Type':'application/json',ETag:'"'+reason+'"','X-Oko-Storage-Id':identity||response.headers.get('X-Oko-Storage-Id')!}});
     }
     return original(url,options);
@@ -551,7 +553,14 @@ test('a late old-library publication response cannot cross an accepted storage r
   await r.page.locator('[data-card="A"]').click();await expect(r.page.locator('#text')).toHaveText('Original text');
   await r.page.evaluate(()=>{(window as unknown as {publicationLateRestore:{enabled:boolean}}).publicationLateRestore.enabled=true;});
   await r.page.waitForFunction(()=>{const r=(window as unknown as {publicationLateRestore:{reset:boolean;oldHeld:boolean}}).publicationLateRestore;return r.reset&&r.oldHeld;});
+  // The response hook only proves delivery. An empty list proves the reader
+  // accepted the new storage ID; pending card responses keep that state observable.
+  await expect(r.page.locator('#cards button')).toHaveCount(0);
   await r.page.evaluate(()=>{(window as unknown as {publicationLateRestore:{release?:()=>void}}).publicationLateRestore.release?.();});
+  await r.page.waitForFunction(()=>(window as unknown as {publicationLateRestore:{oldDelivered:boolean}}).publicationLateRestore.oldDelivered);
+  await r.page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));
+  await expect(r.page.locator('#material-update-button')).toBeHidden();
+  await r.page.evaluate(()=>{const state=(window as unknown as {publicationLateRestore:{cardsOpen:boolean;releaseCards:(()=>void)[];newOpen:boolean;releaseNew:(()=>void)[]}}).publicationLateRestore;state.cardsOpen=true;state.newOpen=true;state.releaseCards.forEach(release=>release());state.releaseNew.forEach(release=>release());});
   await expect(r.page.locator('#material-update-button')).toBeVisible();
   await expect(r.page.locator('#filter-status')).not.toContainText('OLD LIBRARY');
   await expect(r.page.locator('#text')).toHaveText('Original text');

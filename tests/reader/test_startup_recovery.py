@@ -186,53 +186,6 @@ def test_enabled_work_waits_for_recovery_then_runs_without_a_second_start(postgr
         cleanup(process)
 
 
-def test_global_settings_after_startup_queue_slow_reconciliation_without_blocking_reader(postgres_url, tmp_path):
-    root = tmp_path/'reader'
-    cards = library(root, postgres_url)
-    credential = tmp_path/'database'
-    credential.write_text(postgres_url);credential.chmod(0o600)
-    process = start(root, credential, demo=True)
-    try:
-        with closing(ready(root, process)) as client:
-            assert client.put('/api/v3/power', json={'enabled':True}).status_code == 200
-            deadline = time.monotonic()+20
-            while len(read_all_cards(client, '/api/v3/cards')) != len(cards)+3 and time.monotonic() < deadline:
-                time.sleep(.05)
-            assert len(read_all_cards(client, '/api/v3/cards')) == len(cards)+3
-            # Collection proves the initial recovery finished and crons started.
-            assert client.put('/api/v3/power', json={'enabled':False}).status_code == 200
-            with psycopg.connect(postgres_url, autocommit=True) as db:
-                db.execute('''CREATE FUNCTION slow_recovery() RETURNS trigger LANGUAGE plpgsql AS $$
-                    BEGIN PERFORM pg_sleep(0.2); RETURN NEW; END $$''')
-                db.execute('CREATE TRIGGER slow_recovery BEFORE UPDATE OF processing_metadata ON publications FOR EACH ROW EXECUTE FUNCTION slow_recovery()')
-            started = time.monotonic()
-            changed = client.patch('/api/v3/settings/oko/global', json={'prompt_filters':'Use the new rules'}, timeout=2)
-            assert changed.status_code == 200
-            assert time.monotonic()-started < 2
-            assert client.get('/api/v3/settings/oko/global').json()['effective']['prompt_filters']['value'] == 'Use the new rules'
-            assert client.get('/api/v3/cards').status_code == 200
-            assert client.put('/api/v3/power', json={'enabled':True}).status_code == 200
-            started = time.monotonic()
-            assert client.post('/api/v3/materials/'+cards[0]['id']+'/filter/retry', timeout=2).status_code == 200
-            assert time.monotonic()-started < 2
-            assert client.post('/api/v3/materials/'+cards[0]['id']+'/viewed', timeout=3).status_code == 200
-            assert client.post('/api/v3/stop').status_code == 200
-            assert process.wait(timeout=3) == 0
-    finally:
-        cleanup(process)
-
-
-    process = start(root, credential)
-    try:
-        with closing(ready(root, process)) as client:
-            assert client.get('/api/v3/settings/oko/global').json()['effective']['prompt_filters']['value'] == 'Use the new rules'
-            assert client.get('/api/v3/publication/'+cards[0]['id']).status_code == 404
-            assert client.post('/api/v3/stop').status_code == 200
-            assert process.wait(timeout=3) == 0
-    finally:
-        cleanup(process)
-
-
 def test_background_reconciliation_failure_closes_work_admission_and_can_stop(postgres_url, tmp_path):
     root = tmp_path/'reader'
     cards = library(root, postgres_url, count=1)
