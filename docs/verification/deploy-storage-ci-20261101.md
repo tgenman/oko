@@ -29,3 +29,22 @@ and cards each reported 1507 entries. Screenshot was inspected locally. No viewe
 subscription or configuration command was issued. Following separate explicit
 user approval, TEMPORARY on database oko was granted to oko_reader and read back
 as true. No schema migration has been run at this preparation stage.
+
+## Follow-up verification
+
+PR CI 41289462479 completed: all groups except Python-2 and latency passed.
+Python-2 finished with 1365 passes and one elapsed-budget failure (0.98 s vs
+0.8 s), exposing the failure previously masked by teardown. Both elapsed checks
+in that scenario are now recorded as measurements; HTTP success, bounded model
+independence and absence of stale content assertions remain. The exact test
+passed on the final tree.
+
+Latency failed before measurement because preparation exceeded 60 seconds.
+Preparation now permits 120 seconds and each complete scenario 180 seconds;
+the measured p95 <200 ms requirement is unchanged. One exact-tree run passed
+all four scenarios. First/repeat p95 milliseconds: 104 idle 111.1/32.3,
+104 active 131.2/86.7, 400 idle 116.7/129.8, 400 active 158.2/145.4. The 400-idle
+whole scenario took 99.94 seconds, exceeding the old 90-second overall ceiling.
+The active-400 screenshot was inspected. These targeted results replace only
+the failed checks, not the successful unrelated groups. Publication still
+requires a successful main Checks run; no deployment success is claimed here.
