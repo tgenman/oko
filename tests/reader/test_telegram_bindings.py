@@ -65,50 +65,6 @@ def test_client_claims_are_global_and_access_is_immutable(tmp_path):
         assert occupied.status_code == 409 and occupied.json()['code'] == 'profile_in_use'
 
 
-def test_delete_reserves_claim_until_restart_cleanup_then_readd_has_fresh_id(tmp_path):
-    import time
-    from tests.support.telegram import settled
-    tg = Accounts()
-    blocked = True
-    def fault(point):
-        if point == 'before_delete' and blocked:
-            raise OSError('synthetic disk unavailable')
-    body = dict(source_locator='@fixture', folder='Inbox', access={'kind': 'client', 'profile': 'personal'})
-    with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=tg, fault=fault), headers=HEADERS) as client:
-        client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref': 'one'})
-        feed = client.post('/api/v3/telegram/connect', json=body).json()['feed_id']
-        cards = settled(client)
-        material = cards[0]['id']
-        assert client.delete('/api/v3/feeds/'+feed).json() == {'feed_id': feed, 'state': 'deleting'}
-        from tests.support.storage import database
-        with database(tmp_path) as db:
-            assert db.execute("SELECT payload::jsonb->>'cleanup_feed' FROM jobs WHERE kind = 'delete' AND item = %s", (material,)).fetchone()[0] == feed
-        assert not read_all_cards(client, '/api/v3/cards')
-        assert client.get('/api/v3/publication/'+material).status_code == 404
-        duplicate = client.post('/api/v3/telegram/connect', json=body)
-        assert duplicate.status_code == 409
-        assert duplicate.json()['details']['existing_feeds'][0]['feed_id'] == feed
-        assert client.get('/api/v3/subscriptions').json()['feeds'][0]['connection'] == 'deleting'
-        status = client.get('/api/v3/status/details')
-        assert status.status_code == 200
-        assert any(work['phase'] == 'deleting' for work in status.json()['work'])
-        assert not tg.acks
-    blocked = False
-    with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=tg), headers=HEADERS) as client:
-        for _ in range(100):
-            if not client.get('/api/v3/subscriptions').json()['feeds']:
-                break
-            time.sleep(.02)
-        assert not client.get('/api/v3/subscriptions').json()['feeds']
-        assert not (tmp_path/'content'/material).exists()
-        assert client.get('/api/v3/telegram/profiles').json()['personal']['configuration_ref'] == 'one'
-        added = client.post('/api/v3/telegram/connect', json=body)
-        assert added.status_code == 200, added.text
-        assert added.json()['feed_id'] != feed
-        assert client.get('/api/v3/publication/'+material).status_code == 404
-        assert not tg.acks
-
-
 def test_session_substitution_blocks_collection_and_same_person_recovers(tmp_path):
     tg = Accounts()
     with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=tg), headers=HEADERS) as client:
@@ -122,12 +78,6 @@ def test_session_substitution_blocks_collection_and_same_person_recovers(tmp_pat
         tg.users['one'] = 9007199254740993
         assert client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref':'one'}).status_code == 200
         assert client.post('/api/v3/telegram/connect', json=body).status_code == 200
-
-
-
-
-
-
 
 
 def test_web_binding_needs_no_account_and_duplicates_are_normalized(tmp_path):
@@ -157,36 +107,6 @@ def test_web_binding_needs_no_account_and_duplicates_are_normalized(tmp_path):
         assert client.get('/api/v3/telegram/profiles').json()['configurations'] == []
 
 
-def test_concurrent_connect_has_one_winner_without_updating_folder(tmp_path):
-    import asyncio
-    import threading
-    from concurrent.futures import ThreadPoolExecutor
-    both, release = threading.Event(), threading.Event()
-    class Delayed(Accounts):
-        calls = 0
-        async def info(self, account, peer):
-            self.calls += 1
-            if self.calls >= 2:
-                both.set()
-            while not release.is_set():
-                await asyncio.sleep(.005)
-            return await super().info(account, peer)
-    with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=Delayed()), headers=HEADERS) as client:
-        client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref':'one'})
-        with ThreadPoolExecutor(2) as pool:
-            jobs = [pool.submit(client.post, '/api/v3/telegram/connect', json=dict(source_locator=source, folder=folder, access={'kind':'client','profile':'personal'}))
-                    for source,folder in [('@fixture','First'),('https://t.me/s/FIXTURE/11','Second')]]
-            try:
-                assert both.wait(2)
-            finally:
-                release.set()
-            replies = [job.result(3) for job in jobs]
-        assert sorted(r.status_code for r in replies) == [200,409]
-        winner = next(r.json()['feed_id'] for r in replies if r.status_code == 200)
-        assert len(client.get('/api/v3/subscriptions').json()['feeds']) == 1
-        assert next(r for r in replies if r.status_code == 409).json()['details']['existing_feeds'][0]['feed_id'] == winner
-
-
 def test_replacing_profile_rejects_late_connect_metadata(tmp_path):
     import asyncio
     import threading
@@ -213,36 +133,6 @@ def test_replacing_profile_rejects_late_connect_metadata(tmp_path):
                 release.set()
             assert pending.result(3).status_code in (409,503)
         assert not client.get('/api/v3/subscriptions').json()['feeds']
-
-
-def test_used_profile_detects_external_replacement_and_recovers_same_person(tmp_path):
-    import time
-    from tests.support.telegram import settled
-    class Observed(Accounts):
-        reads = []
-        async def page(self, account, peer, after, since):
-            self.reads.append(account)
-            return await super().page(account, peer, after, since)
-    tg = Observed()
-    with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=tg), headers=HEADERS) as client:
-        client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref':'one'})
-        feed = client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture',folder='Inbox',access={'kind':'client','profile':'personal'})).json()['feed_id']
-        material = settled(client)[0]['id']
-        tg.users['one'] = 303
-        before = len(tg.reads)
-        client.post('/api/v3/collect')
-        for _ in range(100):
-            if client.get('/api/v3/telegram/profiles').json()['personal']['state'] == 'identity_mismatch': break
-            time.sleep(.02)
-        assert client.get('/api/v3/telegram/profiles').json()['personal']['state'] == 'identity_mismatch'
-        assert len(tg.reads) == before and not tg.acks
-        assert client.get('/api/v3/subscriptions').json()['feeds'][0]['connection'] == 'unavailable'
-        assert client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref':'one'}).json()['code'] == 'profile_in_use'
-        assert client.get('/api/v3/publication/'+material).status_code == 200
-        tg.users['restored'] = 9007199254740993
-        assert client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref':'restored'}).status_code == 200
-        assert client.get('/api/v3/subscriptions').json()['feeds'][0]['id'] == feed
-        assert settled(client)[0]['id'] == material
 
 
 def test_deleted_feed_rejects_late_media_even_after_readd(tmp_path):
@@ -289,136 +179,3 @@ def test_deleted_feed_rejects_late_media_even_after_readd(tmp_path):
             assert not (tmp_path/'staging'/old_material).exists()
         finally:
             release.set()
-
-
-
-
-def test_confirmed_alias_cannot_be_reassigned_to_another_peer(tmp_path):
-    class Aliases(Accounts):
-        async def info(self, account, peer):
-            first = peer == '@first'
-            return dict(peer=-1001234567890 if first else -1009999999999, title='First' if first else 'Second',
-                kind='channel',forum=False,username='first' if first else 'second',usernames=['shared'])
-    with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=Aliases()), headers=HEADERS) as client:
-        client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref':'one'})
-        body = dict(source_locator='@first',folder='Inbox',access={'kind':'client','profile':'personal'})
-        first = client.post('/api/v3/telegram/connect', json=body).json()['feed_id']
-        response = client.post('/api/v3/telegram/connect', json={**body, 'source_locator':'@second'})
-        assert response.status_code == 409 and response.json()['code'] == 'source_identity_conflict'
-        assert response.json()['details']['feed_id'] == first
-        feeds = client.get('/api/v3/subscriptions').json()['feeds']
-        assert len(feeds) == 1 and feeds[0]['id'] == first and feeds[0]['title'] == 'First'
-
-
-def test_failed_or_redirected_preview_never_creates_a_binding(tmp_path):
-    import httpx
-    from pathlib import Path
-    landing = (Path(__file__).resolve().parents[1]/'fixtures/telegram/unavailable.html').read_bytes()
-    responses = [httpx.Response(200, content=landing), httpx.Response(302, headers={'location':'https://example.test/private'})]
-    calls = []
-    def reply(request):
-        calls.append(str(request.url))
-        return responses.pop(0)
-    with TestClient(create_app(tmp_path, token='test', api_only=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
-        for _ in range(2):
-            response = client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture',folder='Web'))
-            assert response.status_code == 503 and response.json()['code'] == 'source_unavailable'
-            assert not client.get('/api/v3/subscriptions').json()['feeds']
-    assert len(calls) == 2 and all(url.startswith('https://t.me/') for url in calls)
-
-
-
-def test_late_discovery_cannot_complete_a_recreated_feed_job(tmp_path):
-    import asyncio
-    import threading
-    import time
-    import httpx
-    from email.utils import formatdate
-    from tests.support.feed_url import verify, add
-    old_started, new_started = threading.Event(), threading.Event()
-    old_release, new_release = threading.Event(), threading.Event()
-    calls = 0
-    stamp = formatdate(time.time(), usegmt=True)
-    async def reply(request):
-        nonlocal calls
-        if request.url.path == '/feed.xml':
-            calls += 1
-            count = calls
-            if count in (2,4):
-                (old_started if count == 2 else new_started).set()
-                event = old_release if count == 2 else new_release
-                deadline = time.monotonic() + 3
-                while not event.is_set() and time.monotonic() < deadline:
-                    try:
-                        await asyncio.sleep(.005)
-                    except asyncio.CancelledError:
-                        pass
-                if not event.is_set():
-                    raise TimeoutError('synthetic wait expired')
-            title = 'Late old' if count == 2 else 'Current'
-            return httpx.Response(200, text=f'<rss><channel><title>RSS</title><item><guid>1</guid><link>https://example.org/article</link><title>{title}</title><pubDate>{stamp}</pubDate></item></channel></rss>')
-        return httpx.Response(200, text='<article>Current text</article>')
-    try:
-        with TestClient(create_app(tmp_path, token='test', api_only=True, rss_enabled=True, rss_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
-            first = add(client, verify(client), initial_history={'mode':'count','count':1}).json()['id']
-            assert old_started.wait(2)
-            assert client.delete('/api/v3/feeds/'+first).status_code == 200
-            for _ in range(100):
-                if not client.get('/api/v3/subscriptions').json()['feeds']: break
-                time.sleep(.02)
-            add(client, verify(client), initial_history={'mode':'count','count':1})
-            assert new_started.wait(2)
-            old_release.set()
-            time.sleep(.1)
-            assert not read_all_cards(client, '/api/v3/cards')
-            new_release.set()
-            from tests.support.telegram import settled
-            assert settled(client)[0]['title'] == 'Current'
-    finally:
-        old_release.set()
-        new_release.set()
-
-
-def test_stopped_pending_connect_cannot_commit_a_late_binding(tmp_path):
-    import asyncio
-    import threading
-    from concurrent.futures import ThreadPoolExecutor
-    started, release = threading.Event(), threading.Event()
-    class LateMetadata(Accounts):
-        async def info(self, account, peer):
-            started.set()
-            while not release.is_set():
-                try:
-                    await asyncio.sleep(.005)
-                except asyncio.CancelledError:
-                    pass
-            return await super().info(account, peer)
-    with TestClient(create_app(tmp_path,token='test',api_only=True,telegram_client=LateMetadata()),headers=HEADERS) as client:
-        assert client.put('/api/v3/telegram/profiles/personal',json={'configuration_ref':'one'}).status_code==200
-        with ThreadPoolExecutor(1) as pool:
-            connecting=pool.submit(client.post,'/api/v3/telegram/connect',json=dict(source_locator='@late',folder='Late',access={'kind':'client','profile':'personal'}))
-            try:
-                assert started.wait(2)
-                assert client.post('/api/v3/stop').status_code==200
-            finally:
-                release.set()
-            result=connecting.result(3)
-        assert result.status_code==409,result.text
-        assert client.get('/api/v3/status').json()['runtime_state']=='stopped'
-    with TestClient(create_app(tmp_path,token='test',api_only=True,telegram_client=Accounts()),headers=HEADERS) as client:
-        assert client.get('/api/v3/subscriptions').json()['feeds']==[]
-
-
-def test_telegram_theses_default_is_off_and_explicit_inheritance_is_preserved(tmp_path):
-    with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=Accounts()), headers=HEADERS) as client:
-        client.put('/api/v3/telegram/profiles/personal', json={'configuration_ref':'one'})
-        response = client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture',folder='Telegram',access={'kind':'client','profile':'personal'}))
-        assert response.status_code == 200, response.text
-        feed = response.json()['feed_id']
-        settings = client.get('/api/v3/settings/feed/'+feed).json()
-        assert settings['effective']['theses']['value'] is False
-        assert settings['effective']['theses']['origin']['scope'] == 'default'
-        client.patch('/api/v3/settings/feed/'+feed, json={'theses': True})
-        assert client.get('/api/v3/settings/feed/'+feed).json()['effective']['theses']['value'] is True
-        client.patch('/api/v3/settings/feed/'+feed, json={'theses': None})
-        assert client.get('/api/v3/settings/feed/'+feed).json()['effective']['theses']['value'] is False

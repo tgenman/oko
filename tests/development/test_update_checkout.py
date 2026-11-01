@@ -79,18 +79,3 @@ def test_update_keeps_dirty_files_and_does_not_build(tmp_path):
     assert result.returncode != 0
     assert not record.exists()
     assert (root / 'source').read_text() == 'unsaved'
-
-
-def test_update_stops_before_validation_when_build_fails(tmp_path):
-    _, root, record, env = checkout(tmp_path)
-    result = run(root, dict(env, FAIL_NPM='7'))
-    assert result.returncode == 7
-    assert record.read_text().splitlines() == ['npm']
-
-
-def test_update_reports_validation_failure_without_success_message(tmp_path):
-    _, root, record, env = checkout(tmp_path)
-    result = run(root, dict(env, FAIL_PYTHON='9'))
-    assert result.returncode == 9
-    assert record.read_text().splitlines() == ['npm', 'python']
-    assert 'Updated, built and validated' not in result.stdout

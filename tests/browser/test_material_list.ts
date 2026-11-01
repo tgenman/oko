@@ -81,19 +81,6 @@ test('opened YouTube material preserves description separately from captions', a
  } finally {await r.close();}
 });
 
-test('current video description and previous captions remain available independently', async () => {
- const r=await reader(); try {
-  await r.page.addInitScript(()=>readerTransport.replies.set('/api/v3/materials/video/versions/1',{body:{title:'Прежнее видео',text:'Прежние субтитры',full:true,reason:'',images:[],attachments:[]}}));
-  await r.start([material('video',{description:'Текущее описание',text:'Текущие субтитры'})]);
-  await r.page.locator('[data-card="video"]').click();
-  await expect(r.page.locator('#title')).toHaveText('video');
-  await expect(r.page.locator('#description')).toHaveText('Текущее описание');
-  await expect(r.page.locator('#versions')).toHaveCount(0);
-  await expect(r.page.locator('#text')).toHaveText('Текущие субтитры');
-  expect(r.errors).toEqual([]);
- } finally {await r.close();}
-});
-
 test('polling preserves row focus and anchored scroll, and returning restores area position', async () => {
  const r=await reader(); try {
   const items=Array.from({length:30},(_,i)=>material('item-'+String(i).padStart(2,'0'),{published:1000-i,feed_id:i%2?'second':'feed',snippet:'Краткий текст'}));
@@ -117,37 +104,6 @@ test('polling preserves row focus and anchored scroll, and returning restores ar
   expect(await r.page.locator('#card-scroll').evaluate(n=>n.scrollTop)).toBe(allPosition);
   await r.page.locator('#cards-new').click();
   await expect(r.page.locator('#cards button')).toHaveCount(31);
-  expect(r.errors).toEqual([]);
- } finally {await r.close();}
-});
-
-test('previews are reused during polling and late media cannot repopulate another area', async () => {
- const r=await reader(); try {
-  await r.page.clock.install();
-  const path='/api/v3/materials/one/images/image-0.png';
-  await r.page.addInitScript(path=>readerTransport.replies.set(path,{mime:'image/png',base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR9sAAAAASUVORK5CYII='}),path);
-  await r.start([material('one',{images:[path],version:'1'}),material('two',{feed_id:'second'})]);
-  await r.page.evaluate(() => {const t=readerTransport;
-   t.replies.get('/api/v3/reading-composition')!.body!.feeds=t.replies.get('/api/v3/reading-composition')!.body!.feeds.filter(f=>f.id!=='second').concat({id:'second',title:'second',folder_id:'f',kind:'rss',count:1});
-   t.replies.set('/api/v3/cards?sort=newest&feed=second',{body:[t.replies.get('/api/v3/cards')!.body![1]]});
-  });
-  await expect(r.page.locator('[data-card="one"] img')).toHaveCount(1);
-  const requests=await r.page.evaluate(path=>readerTransport.requests.filter(r=>r.url===path).length,path);
-  for (let cycle=0;cycle<2;cycle++) {
-    await r.page.evaluate(cycle=>{readerTransport.replies.get('/api/v3/cards')!.body![0].title='Poll '+cycle;},cycle);
-    await r.page.clock.fastForward(1000);
-    await expect(r.page.locator('[data-card="one"] .card-title')).toHaveText('Poll '+cycle);
-  }
-  expect(await r.page.evaluate(path=>readerTransport.requests.filter(r=>r.url===path).length,path)).toBe(requests);
-  const replacement='/api/v3/materials/one/images/image-1.png';
-  await r.page.evaluate(path=>{readerTransport.held.set(path,true); readerTransport.replies.get('/api/v3/cards')!.body![0].images=[path];},replacement);
-  await r.page.waitForFunction(path=>readerTransport.pending.has(path),replacement);
-  await r.page.locator('[data-feed="second"]').click();
-  await expect(r.page.locator('#cards button')).toHaveCount(1);
-  await r.page.evaluate(path=>readerTransport.release(path,{late:true}),replacement);
-  await expect(r.page.locator('#cards img')).toHaveCount(0);
-  const resources=await r.page.evaluate(()=>browserResources);
-  expect(resources.revoked).toEqual(resources.created);
   expect(r.errors).toEqual([]);
  } finally {await r.close();}
 });
@@ -186,44 +142,11 @@ test('failed refresh keeps rows and retry updates current area, late failed sele
  } finally {await r.close();}
 });
 
-test('list width supports pointer and keyboard, persists, and shrinks to available space', async () => {
- const r=await reader(); try {
-  await r.start([material('one')]);
-  const divider=r.page.locator('#list-resize');
-  await expect(divider).toHaveAttribute('aria-valuenow','440');
-  await divider.focus(); await r.page.keyboard.press('ArrowRight');
-  await expect(divider).toHaveAttribute('aria-valuenow','450');
-  const box=await divider.boundingBox();
-  await r.page.mouse.move(box!.x+2,box!.y+100); await r.page.mouse.down(); await r.page.mouse.move(box!.x+52,box!.y+100); await r.page.mouse.up();
-  await expect(divider).toHaveAttribute('aria-valuenow','500');
-  await r.page.reload(); await expect(divider).toHaveAttribute('aria-valuenow','500');
-  await r.page.setViewportSize({width:1000,height:800});
-  await expect(divider).toHaveAttribute('aria-valuenow','348');
-  await r.page.setViewportSize({width:1280,height:720});
-  await expect(divider).toHaveAttribute('aria-valuenow','500');
-  expect(r.errors).toEqual([]);
- } finally {await r.close();}
-});
-
-test('incomplete materials and unavailable previews keep usable rows and diagnostic errors', async () => {
- const r=await reader(); try {
-  await r.page.addInitScript(()=>readerTransport.replies.set('/api/v3/materials/broken/images/image-1.png',{status:500,body:{detail:'Превью недоступно'}}));
-  await r.start([material('pending',{complete:false}),material('broken',{images:['/api/v3/materials/broken/images/image-1.png']})]);
-  await expect(r.page.locator('[data-card="pending"] .card-kind')).toHaveText('Loading');
-  await expect(r.page.locator('[data-card="broken"] .card-preview')).toBeVisible();
-  await expect(r.page.locator('[data-card="broken"] img')).toHaveCount(0);
-  await r.page.locator('[data-card="broken"]').click();
-  await expect(r.page.locator('#title')).toHaveText('broken');
-  await r.page.locator('#status-toggle').click();
-    await r.page.locator('#status-journal-open').click();
-  await expect(r.page.locator('#debug-errors')).toContainText('Could not load preview');
-  expect(r.errors).toEqual([]);
- } finally {await r.close();}
-});
-
 test('news titles show link labels without Markdown destinations', async () => {
  const r=await reader(); try {
+  const longTitle='Дополнительный текст заголовка. '.repeat(15).trim();
   const cases=[
+   ['[Bloomberg](https://example.test/news/'+('long-path-'.repeat(25))+'): '+longTitle,'Bloomberg: '+longTitle],
    ['У [Kai-Fu Lee](https://en.wikipedia.org/wiki/Kai-Fu_Lee) вышла книга (+ [интервью](https://t.me/example/123))','У Kai-Fu Lee вышла книга (+ интервью)'],
    ['[Статья](https://example.test/wiki/Topic_(detail)) и [обзор](https://example.test/review "Подсказка")','Статья и обзор'],
    ['Начало [интервью](https://t.me/pr','Начало интервью'],

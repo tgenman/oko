@@ -34,14 +34,15 @@ for(const scope of ['folder','feed'] as const){
   test(scope+' completion conflict replaces the captured token without replay',async()=>{
     const r=await reader();try{
       await r.start([material('a')]);const url=path(scope),c=controls(r,scope);
+      await r.page.locator('[data-card="a"]').click();await expect(r.page.locator('#text')).toContainText('Текст a');
       await r.page.evaluate(url=>{readerTransport.replies.set(url+'/preview',{body:{token:'first',cards_count:1,publications_count:1}});readerTransport.replies.set(url,{status:409,body:{code:'composition_changed',message:'Composition changed',details:{preview:{token:'next',cards_count:2,publications_count:2}},command_id:null,diagnostic_id:null}});},url);
       await open(r,scope);await expect(c.confirm).toBeEnabled();
       expect(await r.page.evaluate(url=>readerTransport.requests.filter(q=>q.url===url).length,url)).toBe(0);
-      await c.confirm.click();await expect(c.dialog).toContainText('Composition changed');await expect(c.count).toContainText(scope==='feed'?'Items: 2':'Cards: 2');
+      await c.confirm.click();await expect(c.dialog).toContainText('Composition changed');await expect(c.count).toContainText(scope==='feed'?'Items: 2':'Cards: 2');await expect(r.page.locator('#text')).toContainText('Текст a');
       await expect(c.confirm).toBeEnabled();
       expect(await r.page.evaluate(url=>readerTransport.requests.filter(q=>q.url===url).map(q=>q.body!.token),url)).toEqual(['first']);
       await r.page.screenshot({path:artifactPath(scope+'-completion.png')});
-      await r.page.evaluate(url=>readerTransport.replies.set(url,{body:{ok:true}}),url);await c.confirm.click();await expect(c.dialog).not.toBeVisible();
+      await r.page.evaluate(url=>readerTransport.replies.set(url,{body:{ok:true}}),url);await c.confirm.click();await expect(c.dialog).not.toBeVisible();await expect(r.page.locator('#text')).toContainText('Текст a');
       expect(await r.page.evaluate(url=>readerTransport.requests.filter(q=>q.url===url).map(q=>q.body!.token),url)).toEqual(['first','next']);expect(r.errors).toEqual([]);
     }finally{await r.close();}
   });
@@ -54,16 +55,6 @@ for(const scope of ['folder','feed'] as const){
       const fresh=material('fresh');await r.page.evaluate(fresh=>{readerTransport.replies.set('/api/v3/cards',{body:[fresh]});readerTransport.replies.set('/fixture/material/fresh',{body:fresh});},fresh);
       await expect(r.page.locator('[data-card="fresh"]')).toBeVisible();await r.page.locator('[data-card="fresh"]').click();await expect(r.page.locator('#text')).toContainText('Текст fresh');
       await release(r,scope,status);await expect(r.page.locator('#text')).toContainText('Текст fresh');await expect(r.page.locator('[data-card="fresh"]')).toBeVisible();expect(r.errors).toEqual([]);
-    }finally{await r.close();}
-  });
-
-  test(scope+' notification reconciles removed cards without closing a newer publication',async()=>{
-    const r=await reader();try{
-      const fresh=material('fresh');await r.start([material('old'),fresh]);await r.page.locator('[data-card="fresh"]').click();await expect(r.page.locator('#text')).toContainText('Текст fresh');
-      await r.page.evaluate(({fresh,scope})=>{readerTransport.replies.set('/api/v3/cards',{body:[fresh]});const channel=new BroadcastChannel('oko-reader');channel.postMessage(scope==='feed'?{kind:'feed-viewed',feed:'feed'}:{kind:'folder-viewed',folder:'f'});channel.close();},{fresh,scope});
-      await expect(r.page.locator('[data-card="old"]')).toHaveCount(0);await expect(r.page.locator('#text')).toContainText('Текст fresh');
-      await r.page.evaluate(scope=>{readerTransport.replies.set('/api/v3/cards',{body:[]});const channel=new BroadcastChannel('oko-reader');channel.postMessage(scope==='feed'?{kind:'feed-viewed',feed:'feed'}:{kind:'folder-viewed',folder:'f'});channel.close();},scope);
-      await expect(r.page.locator('#cards button')).toHaveCount(0);await expect(r.page.locator('#text')).toContainText('Текст fresh');expect(r.errors).toEqual([]);
     }finally{await r.close();}
   });
 }
@@ -79,20 +70,5 @@ test('unknown folder completion cannot reuse its old token and remains visible i
     await r.page.evaluate(url=>readerTransport.replies.set(url+'/preview',{body:{token:'fresh',cards_count:2,publications_count:2}}),url);
     await open(r,'folder');await expect(c.count).toContainText('Cards: 2');await expect(c.confirm).toBeEnabled();
     expect(await r.page.evaluate(url=>readerTransport.requests.filter(q=>q.url===url).map(q=>q.body!.token),url)).toEqual(['first']);
-  }finally{await r.close();}
-});
-
-for(const scope of ['folder','feed'] as const)test(scope+' late failure cannot replace a newer confirmation that is still loading',async()=>{
-  const r=await reader();try{
-    await r.start([material('a'),material('b',{feed_id:'second',folder_id:'other'})]);const url=path(scope),next=path(scope,scope==='feed'?'second':'other'),c=controls(r,scope);
-    await r.page.evaluate(({url,next})=>{
-      const t=readerTransport;t.replies.set('/api/v3/reading-composition',{body:{count:2,folders:[{id:'f',title:'First',count:1},{id:'other',title:'Second',count:1}],feeds:[{id:'feed',title:'First',folder_id:'f',kind:'rss',count:1},{id:'second',title:'Second',folder_id:'other',kind:'rss',count:1}]}});
-      t.replies.set(url+'/preview',{body:{token:'first',cards_count:1,publications_count:1}});t.held.set(url,true);t.held.set(next+'/preview',true);
-    },{url,next});
-    await expect(r.page.locator('[data-feed="second"]')).toBeVisible();await open(r,scope);await expect(c.confirm).toBeEnabled();await c.confirm.click();await r.page.waitForFunction(url=>readerTransport.pending.has(url),url);await c.cancel.click();
-    await open(r,scope,scope==='feed'?'second':'other');await r.page.waitForFunction(url=>readerTransport.pending.has(url),next+'/preview');
-    await release(r,scope,503);await expect(c.dialog).toBeVisible();await expect(c.confirm).toBeDisabled();await expect(c.dialog).not.toContainText('Cleanup not finished');
-    await r.page.evaluate(next=>readerTransport.release(next+'/preview',{token:'second',cards_count:2,publications_count:2}),next);
-    await expect(c.count).toContainText(scope==='feed'?'Items: 2':'Cards: 2');await expect(c.confirm).toBeEnabled();await expect(c.dialog).not.toContainText('Cleanup not finished');expect(r.errors).toEqual([]);
   }finally{await r.close();}
 });

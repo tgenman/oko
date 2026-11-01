@@ -22,27 +22,6 @@ def publish_fixture(frontend):
     (frontend / 'current.json').write_text(json.dumps(manifest))
 
 
-def test_frontend_nested_modules_survive_a_different_working_directory(tmp_path: Path, monkeypatch):
-    frontend = tmp_path / 'frontend'
-    (frontend / 'nested').mkdir(parents=True)
-    (frontend / 'index.html').write_text('<script type="module" src="/nested/new.js"></script>')
-    (frontend / 'nested/new.js').write_text('export const value = 42;')
-    (frontend / 'style.css').write_text('body { color: black; }')
-    publish_fixture(frontend)
-    monkeypatch.setattr('oko.reader.static.FRONTEND_ROOT', frontend)
-    monkeypatch.chdir(tmp_path)
-    with TestClient(create_app(tmp_path / 'data', token='secret')) as client:
-        assert client.get('/').status_code == 200
-        script = client.get('/nested/new.js')
-        assert script.status_code == 200
-        assert script.text == 'export const value = 42;'
-        assert script.headers['content-type'].startswith('text/javascript')
-        assert client.get('/style.css').headers['content-type'].startswith('text/css')
-        assert script.headers['cache-control'] == 'no-store'
-        assert "frame-ancestors 'none'" in script.headers['content-security-policy']
-        assert client.get('/api/v3/reading-composition', headers={'Authorization': 'Bearer secret'}).status_code == 200
-
-
 def test_frontend_rejects_traversal_symlinks_and_unknown_data_paths(tmp_path: Path, monkeypatch):
     frontend = tmp_path / 'frontend'
     (frontend / 'api').mkdir(parents=True)

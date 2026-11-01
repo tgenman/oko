@@ -47,8 +47,8 @@ const fields:{field:keyof SettingsPatch;value:string;body:SettingsPatch;global?:
  {field:'feed_refresh_minutes',value:'30',body:{feed_refresh_minutes:30},global:true},
  {field:'telegram_http_rps',value:'0.5',body:{telegram_http_rps:.5},global:true},
 ];
-for(const row of fields)for(const path of row.global?['oko/global']:['oko/global','folder/folder','feed/feed'])for(const reset of [false,true])for(const edit of ['unchanged','new','ABA']){
- test(`${path} ${row.field} ${reset?'reset':'save'} preserves ${edit} and adjacent drafts`,async()=>{
+// Lifecycle depends on context/reset/edit history, not on every field name.
+async function checkSave(row:(typeof fields)[number],path:string,reset:boolean,edit:'unchanged'|'new'|'ABA'){
   const h=harness(),{owner}=h;await owner.select(path);
   const key='setting-'+row.field,adjacent=row.field==='prompt_theses'?'setting-prompt_filters':'setting-prompt_theses';
   owner.edit(path,key,row.value);owner.edit(path,adjacent,'Adjacent draft');
@@ -64,8 +64,18 @@ for(const row of fields)for(const path of row.global?['oko/global']:['oko/global
   if(edit!=='unchanged')assert.equal(owner.draft(path)[key],edit==='ABA'?row.value:'Newer input');
   assert.equal(owner.draft(path)[adjacent],'Adjacent draft');
   assert.equal(owner.settingsMessage,'Setting saved');
- });
 }
+const prompt=fields.find(row=>row.field==='prompt_theses')!;
+for(const path of ['oko/global','folder/folder','feed/feed'])for(const reset of [false,true])for(const edit of ['unchanged','new','ABA'] as const){
+ test(`${path} prompt ${reset?'reset':'save'} preserves ${edit} and adjacent drafts`,()=>checkSave(prompt,path,reset,edit));
+}
+// Each other field checks its wire value and reset once, without repeating the
+// generic lifecycle product above for boolean, enum, text and numeric inputs.
+for(const row of fields.filter(row=>row!==prompt))test(`${row.field} sends its saved value and reset`,async()=>{
+ const path=row.global?'oko/global':row.field==='theses'?'folder/folder':'feed/feed';
+ await checkSave(row,path,false,'unchanged');
+ await checkSave(row,path,true,'unchanged');
+});
 for(const fail of [false,true])for(const next of ['oko/global','folder/other'])test(`late ${fail?'failure':'success'} cannot report into a new context ${next}`,async()=>{
  const h=harness(fail),{owner}=h;await owner.select('oko/global');owner.edit('oko/global','setting-prompt_theses','Sent');
  const saving=owner.update('prompt_theses',{prompt_theses:'Sent'},'Sent');await h.sent;

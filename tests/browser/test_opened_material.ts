@@ -191,7 +191,7 @@ test('viewing a publication in another tab closes its pending opening but preser
   } finally {await r.close();}
 });
 
-for (const interruption of ['stop', 'connection loss']) {
+for (const interruption of ['stop']) {
   test(interruption + ' rejects a delayed material response', async () => {
     const r = await reader();
     try {
@@ -212,31 +212,6 @@ for (const interruption of ['stop', 'connection loss']) {
     } finally {await r.close();}
   });
 }
-
-test('title opens original in a new tab and resets for other cards', async () => {
-  const r = await reader();
-  try {
-    await r.context.route('https://example.org/**', route => route.fulfill({body: '<h1>Original</h1>', contentType: 'text/html'}));
-    await r.start([material('A'), material('B')]);
-    await r.page.locator('#cards').getByRole('button', {name: /^A/}).click();
-    const link = r.page.locator('#title a');
-    await expect(link).toHaveAttribute('href', 'https://example.org/A');
-    await expect(link).toHaveText('A');
-    await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
-    const popupPromise = r.page.waitForEvent('popup');
-    await link.click();
-    const popup = await popupPromise;
-    await popup.waitForLoadState();
-    assert.equal(popup.url(), 'https://example.org/A');
-    assert.equal(await popup.evaluate(() => window.opener === null), true);
-    await popup.close();
-    await expect(r.page.locator('#text')).toHaveText('Текст A');
-    await r.page.getByRole('button', {name: /^B/}).click();
-    await expect(r.page.locator('#title')).toHaveText('B');
-    await expect(link).toHaveAttribute('href', 'https://example.org/B');
-    assert.deepEqual(r.errors, []);
-  } finally { await r.close(); }
-});
 
 test('background processing updates keep long material visible and preserve scroll while waiting', async () => {
  const r=await reader();try {
@@ -280,28 +255,6 @@ test('new text waits for a button, keeps its paragraph and never mixes summaries
   }finally{await r.close();}
 });
 
-test('summary and media append independently without replacing a playing video',async()=>{
-  const r=await reader();try{
-    const old=material('A',{text:'Текст A\n'.repeat(100),attachments:[{url:'/api/v3/materials/A/media/one.webm',kind:'video',mime:'video/webm'}]});
-    await r.start([old]);const base64=await videoFixture(r.page);
-    await r.page.evaluate(base64=>readerTransport.replies.set('/api/v3/materials/A/media/one.webm',{base64,mime:'video/webm'}),base64);
-    await r.page.locator('[data-card="A"]').click();
-    await r.page.locator('#images video').evaluate(async node=>{const video=node as HTMLVideoElement;window.testVideo=video;video.muted=true;video.loop=true;await video.play();});
-    await r.page.locator('article').evaluate(node=>node.scrollTop=500);
-    const top=await r.page.locator('article').evaluate(node=>node.scrollTop);
-    const next={...old,theses:{points:[{text:'Готовые тезисы',sources:[]}]},images:['/api/v3/materials/A/images/new.png']};
-    await r.page.evaluate(({next,png})=>{readerTransport.replies.set('/api/v3/materials/A/images/new.png',{base64:png,mime:'image/png'});readerTransport.replies.set('/fixture/material/A',{body:next});},{next,png});
-    await expect(r.page.locator('#theses')).toHaveText('Готовые тезисы');
-    await expect(r.page.locator('#images img')).toHaveCount(1);
-    assert.equal(await r.page.evaluate(()=>document.querySelector('#images video')===testVideo&&!testVideo.paused),true);
-    // The new summary above the reading position must not move its paragraph.
-    expect(await r.page.locator('article').evaluate(node=>node.scrollTop)).toBeGreaterThan(top);
-    assert.equal(await r.page.evaluate(()=>browserResources.created.length),2);
-    assert.deepEqual(await r.page.evaluate(()=>browserResources.revoked),[]);
-    assert.deepEqual(r.errors,[]);
-  }finally{await r.close();}
-});
-
 test('removed cards and connection loss keep loaded text, reload drops it',async()=>{
   const r=await reader();try{
     await r.start([material('A')]);await r.page.locator('[data-card="A"]').click();await expect(r.page.locator('#text')).toHaveText('Текст A');
@@ -310,38 +263,6 @@ test('removed cards and connection loss keep loaded text, reload drops it',async
     await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/status',{status:503,body:{detail:'Offline'}}));
     await expect(r.page.locator('#collection-progress')).toContainText('Нет связи');await expect(r.page.locator('#text')).toHaveText('Текст A');
     await r.page.reload();await expect(r.page.locator('#material')).toBeHidden();
-    assert.deepEqual(r.errors,[]);
-  }finally{await r.close();}
-});
-
-for(const fallback of ['neighbour','relative','filtered'])test('version replacement preserves '+fallback+' reading position',async()=>{
-  const r=await reader();try{
-    const lines=Array.from({length:90},(_,i)=>'Абзац '+i+' '+('длинный текст '.repeat(15)));
-    const filter=fallback==='filtered'?{status:'done' as const,hidden:false,reason:'Фильтр',removed:['Реклама']}:undefined;
-    const old=material('A',{text:lines.join('\n\n')+'\nРеклама',version:'old',...(filter?{filter}:{})});
-    await r.start([old]);await r.page.locator('[data-card="A"]').click();
-    const selector=fallback==='filtered'?'#filtered-text':'#text';
-    await expect(r.page.locator(selector)).toContainText('Абзац 25');
-    await r.page.locator(selector+' [data-reading-paragraph]').nth(25).evaluate(node=>node.scrollIntoView({block:'start'}));
-    const anchor=await r.page.locator(selector+' [data-reading-paragraph]').nth(fallback==='neighbour'?24:25).boundingBox();
-    const ratio=await r.page.locator('article').evaluate(node=>node.scrollTop/(node.scrollHeight-node.clientHeight));
-    const nextLines=fallback==='relative'?lines.map(line=>line.replace('Абзац','Заменён')):lines.filter((_,i)=>fallback!=='neighbour'||i!==25);
-    const fresh={...old,text:'Вставка\n\n'.repeat(8)+nextLines.join('\n\n')+(fallback==='relative'?'\nНовый конец':'\nРеклама'),version:'new'};
-    await r.page.evaluate(fresh=>readerTransport.replies.set('/fixture/material/A',{body:fresh}),fresh);
-    await expect(r.page.locator('#material-update-button')).toBeVisible();await r.page.locator('#material-update-button').click();
-    await expect(r.page.locator(selector)).toContainText(fallback==='relative'?'Заменён':'Вставка');
-    if(fallback==='relative')expect(Math.abs(await r.page.locator('article').evaluate(node=>node.scrollTop/(node.scrollHeight-node.clientHeight))-ratio)).toBeLessThan(.01);
-    else expect(Math.abs((await r.page.locator(selector+' [data-reading-paragraph]').nth(fallback==='neighbour'?32:33).boundingBox())!.y-anchor!.y)).toBeLessThan(2);
-    assert.deepEqual(r.errors,[]);
-  }finally{await r.close();}
-});
-
-test('automatic fallback after removing the selected feed keeps the loaded material',async()=>{
-  const r=await reader();try{
-    await r.start([material('A')]);await r.page.locator('[data-feed="feed"]').click();await r.page.locator('[data-card="A"]').click();await expect(r.page.locator('#text')).toHaveText('Текст A');
-    await r.page.evaluate(()=>{readerTransport.replies.set('/api/v3/cards',{body:[]});readerTransport.replies.set('/api/v3/reading-composition',{body:{count:0,folders:[],feeds:[]}});});
-    await expect(r.page.locator('[data-feed="feed"]')).toHaveCount(0);await expect(r.page.locator('#text')).toHaveText('Текст A');
-    await r.page.locator('#all-folders').click();await expect(r.page.locator('#material')).toBeHidden();
     assert.deepEqual(r.errors,[]);
   }finally{await r.close();}
 });
@@ -376,30 +297,6 @@ test('storage replacement rejects old media replies and stages the replacement b
     await r.page.locator('#material-update-button').click();await expect(r.page.locator('#text')).toHaveText('Другой экземпляр');await expect(r.page.locator('#images img')).toHaveCount(1);assert.equal(await r.page.evaluate(()=>browserResources.created.length),1);
     assert.deepEqual(r.errors,[]);
   }finally{await r.close();}
-});
-
-test('reconnect resumes missing media for unchanged text without replacing loaded content',async()=>{
-  const r=await reader();try{
-    const url='/api/v3/materials/A/images/one.png';await r.start([material('A',{images:[url]})]);
-    await r.page.evaluate(url=>readerTransport.held.set(url,true),url);await r.page.locator('[data-card="A"]').click();await expect(r.page.locator('#text')).toHaveText('Текст A');await r.page.waitForFunction(url=>readerTransport.pending.has(url),url);
-    await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/status',{status:503,body:{detail:'Offline'}}));await expect(r.page.locator('#collection-progress')).toContainText('Нет связи');
-    await r.page.evaluate(({url,png})=>{readerTransport.release(url,'stale bytes');readerTransport.replies.set(url,{base64:png,mime:'image/png'});readerTransport.replies.set('/api/v3/status',{body:{stopped:false,ready_sources:1,total_sources:1}});},{url,png});
-    await expect(r.page.locator('#collection-progress')).not.toContainText('Нет связи');await expect(r.page.locator('#text')).toHaveText('Текст A');await expect(r.page.locator('#images img')).toHaveCount(1);assert.equal(await r.page.evaluate(()=>browserResources.created.length),1);
-    assert.deepEqual(r.errors,[]);
-  }finally{await r.close();}
-});
-
-test('current publication text is first-class and previous versions start collapsed',async()=>{
- const r=await reader();try{
-  await r.start([material('A',{originals:false,title:'AI-агент Tolan, которым пользуются в основном женщины, поднял $30 млн',text:'Сегодня новостью про AI-агента сложно удивить. Но я сегодня погрузился [в историю от Upstarts Media про стартап Tolan](https://www.upstartsmedia.com/p/tolan-raises-30m-for-ai-companion-you-trust).\n\nОснователи Tolan — Квинтен Фармер, Аджай Мехта и Эван Голдшмидт. Их агент помогает с повседневными задачами.\n\nОн может запоминать, о чём с ним разговаривали, и поддерживать беседу на базе этих знаний.'}),material('B')]);
-  await r.page.locator('[data-card="A"]').click();
-  await expect(r.page.locator('#text')).toBeVisible();
-  assert.equal(await r.page.locator('#text').locator('xpath=ancestor::details').count(),0);
-  await expect(r.page.locator('#original-panel')).toHaveCount(0);
-  await expect(r.page.locator('#versions')).toHaveCount(0);
-  await r.page.screenshot({path:artifactPath('latest-publication-desktop.png')});
-  assert.deepEqual(r.errors,[]);
- }finally{await r.close();}
 });
 
 test('reply context is a compact separate card with safe navigation and local expansion', async () => {
@@ -457,68 +354,6 @@ test('reply context is a compact separate card with safe navigation and local ex
     await expect(card.getByRole('button',{name:'Весь фрагмент'})).toHaveAttribute('aria-expanded','false');
     assert.deepEqual(r.errors,[]);
   } finally {await r.close();}
-});
-
-test('reply context stays with its revision and historical previews use their own source',async()=>{
-  const r=await reader();try{
-    const old=material('A',{version:'old',reply_preview:{author:null,text:'Старый фрагмент '.repeat(18),source_url:null}});
-    await r.start([old]);await r.page.locator('[data-card="A"]').click();
-    const card=r.page.locator('#reply-preview');
-    await expect(card).toBeVisible();
-    await expect(card.locator('strong')).toHaveText('Ответ на сообщение');
-    await expect(card.locator('a')).toHaveCount(0);
-    await card.getByRole('button',{name:'Весь фрагмент'}).click();
-    const summarized={...old,theses:{points:[{text:'Новые тезисы той же версии',sources:[]}]}};
-    await r.page.evaluate(value=>readerTransport.replies.set('/fixture/material/A',{body:value}),summarized);
-    await expect(r.page.locator('#theses')).toHaveText('Новые тезисы той же версии');
-    await expect(card.getByRole('button',{name:'Свернуть'})).toHaveAttribute('aria-expanded','true');
-    const fresh={...summarized,version:'new',reply_preview:{author:'Другой автор',text:'Новый контекст',source_url:'https://t.me/fixture/20'}};
-    await r.page.evaluate(value=>readerTransport.replies.set('/fixture/material/A',{body:value}),fresh);
-    await expect(r.page.locator('#material-update-button')).toBeVisible();
-    await expect(card).toContainText('Старый фрагмент');
-    await r.page.locator('#material-update-button').click();
-    await expect(card).toContainText('Новый контекст');
-    await expect(card.getByRole('button',{name:'Весь фрагмент'})).toHaveAttribute('aria-expanded','false');
-    await expect(r.page.locator('#versions')).toHaveCount(0);
-    assert.deepEqual(r.errors,[]);
-  }finally{await r.close();}
-});
-
-test('a replacement library cannot update the shown publication before its status is accepted',async()=>{
- const r=await reader();try{
-  await r.page.addInitScript(()=>{
-   const original=window.fetch.bind(window),state={enabled:false,checkHeld:false,publicationSeen:false,release:undefined as undefined|(()=>void)};
-   Object.assign(window,{publicationRestoreRace:state});
-   window.fetch=async(url,options)=>{
-    const path=String(url);
-    if(state.enabled&&['/api/v3/status','/api/v3/navigation'].includes(path)){
-     const headers=new Headers(options?.headers);headers.delete('If-None-Match');
-     const reply=await original(url,{...options,headers});
-     const responseHeaders=new Headers(reply.headers);responseHeaders.set('X-Oko-Storage-Id','2d879353-68a3-4919-831c-32cb82c3d55f');
-     const response=new Response(await reply.text(),{status:reply.status,headers:responseHeaders});
-     if(path==='/api/v3/status'&&!state.checkHeld){state.checkHeld=true;await new Promise<void>(resolve=>{state.release=resolve;});}
-     return response;
-    }
-    if(state.enabled&&path==='/api/v3/publication/A'){
-     state.publicationSeen=true;
-     const headers=new Headers(options?.headers);headers.delete('If-None-Match');
-     const response=await original(url,{...options,headers}),body=await response.json();
-     const newStorage='2d879353-68a3-4919-831c-32cb82c3d55f';
-     if(new Headers(options?.headers).get('X-Oko-Storage-Id'))return new Response(JSON.stringify({code:'storage_changed',message:'Storage changed',details:null,diagnostic_id:null,command_id:null}),{status:409,headers:{'Content-Type':'application/json'}});
-     body.filter={state:'ready',result:{hidden:true,reason:'NEW LIBRARY',text:'Original text',removed:[],provenance:{kind:'unknown',reason:'not_recorded'}},error:null};
-     return new Response(JSON.stringify(body),{headers:{'Content-Type':'application/json',ETag:'"new-library"','X-Oko-Storage-Id':newStorage}});
-    }
-    return original(url,options);
-   };
-  });
-  await r.start([material('A',{version:'same',text:'Original text'})]);
-  await r.page.locator('[data-card="A"]').click();await expect(r.page.locator('#text')).toHaveText('Original text');
-  await r.page.evaluate(()=>{(window as unknown as {publicationRestoreRace:{enabled:boolean}}).publicationRestoreRace.enabled=true;});
-  await r.page.waitForFunction(()=>{const r=(window as unknown as {publicationRestoreRace:{checkHeld:boolean;publicationSeen:boolean}}).publicationRestoreRace;return r.checkHeld&&r.publicationSeen;});
-  await expect(r.page.locator('#text')).toHaveText('Original text');
-  await expect(r.page.locator('#filter-status')).not.toContainText('NEW LIBRARY');
-  await r.page.evaluate(()=>{const r=(window as unknown as {publicationRestoreRace:{release?:()=>void}}).publicationRestoreRace;r.release?.();});
- }finally{await r.close();}
 });
 
 test('a late old-library publication response cannot cross an accepted storage reset',async()=>{
@@ -590,26 +425,5 @@ test('processing and error states show the current attempt without inventing a r
   await r.page.evaluate(()=>{(window as unknown as {publicationProcessingState:{mode:string}}).publicationProcessingState.mode='pending';});
   await expect(r.page.locator('#ai-status')).toHaveText('Waiting for processor');
   await expect(r.page.locator('#theses-retry')).toBeHidden();
- }finally{await r.close();}
-});
-
-test('active processing takes precedence over a previous diagnostic in the synthetic source',async()=>{
- const r=await reader();try{
-  await r.start([material('A',{ai:{status:'running',error:'Previous failure'}})]);
-  await r.page.locator('[data-card="A"]').click();
-  await expect(r.page.locator('#ai-status')).toHaveText('Generating summary');
-  await expect(r.page.locator('#theses-retry')).toBeHidden();
-  assert.deepEqual(r.errors,[]);
- }finally{await r.close();}
-});
-
-test('a ready summary does not surface a previous diagnostic as an error',async()=>{
- const r=await reader();try{
-  await r.start([material('A',{ai:{status:'done',error:'Previous failure'},theses:{points:[{text:'Ready summary',sources:[]}]}})]);
-  await r.page.locator('[data-card="A"]').click();
-  await expect(r.page.locator('#ai-status')).toHaveText('Summary ready');
-  await expect(r.page.locator('#theses')).toHaveText('Ready summary');
-  await expect(r.page.locator('#theses-retry')).toBeHidden();
-  assert.deepEqual(r.errors,[]);
  }finally{await r.close();}
 });

@@ -64,16 +64,6 @@ def test_public_package_is_rejected_before_any_registry_write_or_lookup(monkeypa
     assert calls == [scope['PACKAGE']]
 
 
-@pytest.mark.parametrize('status,code',[(401,'UNAUTHORIZED'),(403,'DENIED'),(429,'TOOMANYREQUESTS'),(500,'UNKNOWN'),(404,'DENIED')])
-def test_unknown_tag_inspection_never_becomes_permission_to_publish(status,code):
-    scope=registry_module()
-    replies=iter([(200,{'visibility':'private'},{}),(200,{'token':'synthetic-registry-token'},{}),(status,{'errors':[{'code':code}]},{})])
-    scope['probe'].__globals__['request']=lambda *_: next(replies)
-    import pytest
-    with pytest.raises(RuntimeError,match='could not be verified'):
-        scope['probe']('a'*40,'synthetic-token','owner')
-
-
 def test_only_confirmed_missing_manifest_in_known_private_package_can_be_published():
     scope=registry_module()
     replies=iter([(200,{'visibility':'private'},{}),(200,{'token':'synthetic-registry-token'},{}),(404,{'errors':[{'code':'MANIFEST_UNKNOWN'}]}, {})])

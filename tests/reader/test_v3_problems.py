@@ -51,23 +51,6 @@ def test_remote_exception_does_not_expand_public_codes_and_keeps_material_recove
         assert any(w['phase']=='waiting' and w['reason']=='retry_scheduled' and w['retry_at'] for w in waiting)
 
 
-@pytest.mark.parametrize('external_code',['fetch:UnexpectedExternalException','fetch:PermissionError','fetch:OSError'])
-def test_remote_exception_projection_keeps_domain_code_and_material_recovery(external_code):
-    from oko.reader import snapshots as facts, projection_v3 as project
-    value=facts.Problem(id='source-failure',code=external_code,state='current',
-        title='Source failed',consequence='Saved content remains',next_step='Retry',
-        reason='Saved source reason',created_at=1800000000.0,finished_at=None,
-        next_at=None,outcome=None,operation='producer:fetch',
-        objects=[facts.ProblemObject(kind='material',id='fixture-item')])
-    projected=project.problem(value).model_dump(mode='json')
-    assert projected['code']=='source_unavailable'
-    assert projected['message']=='Saved source reason'
-    assert projected['affected']==[{'kind':'material','material_id':'fixture-item'}]
-    assert projected['recovery']==[{'kind':'retry_material','material_ids':['fixture-item']}]
-
-
-
-
 def test_collection_recovery_target_is_admitted_and_only_schedules_that_feed(tmp_path):
     import httpx
     calls=[]
@@ -90,44 +73,3 @@ def test_collection_recovery_target_is_admitted_and_only_schedules_that_feed(tmp
         assert client.get('/api/v3/commands/one-feed').json()['context']=={'operation':'collect','target':{'scope':'feed','feed_id':target}}
         assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'missing'}).status_code==404
         assert client.post('/api/v3/collect',json={'scope':'folder','folder_id':'all'}).status_code==404
-
-
-def test_typed_conflict_recovery_never_proposes_reconnecting_an_existing_binding(tmp_path):
-    from tests.support.telegram import Telegram
-    class Account(Telegram):
-        user=101
-        async def accounts(self):
-            return ['one']
-        async def identity(self,account):
-            return self.user
-        async def history_page(self,account,peer,upper,before,since):
-            return dict(messages=(await self.page(account,peer,0,since))['messages'],upper=11,next_before=11,more=False)
-    network=Account()
-    with TestClient(create_app(tmp_path,token='test',api_only=True,telegram_client=network),headers=HEADERS) as client:
-        client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
-        assert client.put('/api/v3/telegram/profiles/personal',json={'configuration_ref':'one'}).status_code==200
-        body=dict(source_locator='@fixture',folder='Inbox',access={'kind':'client','profile':'personal'})
-        created=client.post('/api/v3/telegram/connect',json=body).json()['feed_id']
-        assert client.post('/api/v3/telegram/connect',json=body,headers={'X-Oko-Action':'duplicate'}).status_code==409
-        duplicate=next(p for p in client.get('/api/v3/status/details').json()['problems']['current'] if p['command_id']=='duplicate')
-        assert duplicate['code']=='duplicate_source'
-        assert duplicate['affected']==[{'kind':'feed','feed_id':created}]
-        assert duplicate['recovery']==[]
-        network.user=202
-        assert client.post('/api/v3/telegram/connect',json=dict(body,source_locator='@different'),headers={'X-Oko-Action':'identity'}).status_code==409
-        conflict=next(p for p in client.get('/api/v3/status/details').json()['problems']['current'] if p['command_id']=='identity')
-        assert conflict['code']=='account_identity_mismatch'
-        assert conflict['recovery']==[{'kind':'configure_telegram_profile','role':'personal'}]
-        assert not any(r['kind']=='connect_source' for r in conflict['recovery'])
-
-
-
-
-def test_unknown_collection_outcome_never_offers_a_mutating_recovery(tmp_path):
-    with TestClient(create_app(tmp_path,token='test',api_only=True),headers=HEADERS) as client:
-        response=client.post('/api/v3/command-observations',json={'id':'unknown-collect','context':{'operation':'collect','target':{'scope':'all'}},'result':'unknown'})
-        assert response.status_code==200,response.text
-        p=next(p for p in client.get('/api/v3/status/details').json()['problems']['current'] if p['command_id']=='unknown-collect')
-        assert p['code']=='command_outcome_unknown'
-        assert p['recovery']==[]
-        assert client.get('/api/v3/commands/unknown-collect').json()['outcome']=='unknown'

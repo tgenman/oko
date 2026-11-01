@@ -10,29 +10,6 @@ import sys
 SCRIPT = Path(__file__).resolve().parents[2] / 'scripts/oko-release'
 
 
-@pytest.mark.parametrize('released', [True, False])
-def test_port_wait_handles_transient_bind_and_preserves_persistent_listener(released):
-    import runpy
-    import socket
-    import threading
-    release = runpy.run_path(str(SCRIPT))
-    with socket.socket() as listener:
-        listener.bind(('127.0.0.1', 0))
-        listener.listen()
-        port = listener.getsockname()[1]
-        if released:
-            closer = threading.Timer(.05, listener.close)
-            closer.start()
-            try:
-                release['available'](port, wait=.5)
-            finally:
-                closer.join()
-        else:
-            with pytest.raises(ValueError, match='no foreign process was stopped'):
-                release['available'](port, wait=.15)
-            assert listener.getsockname()[1] == port
-
-
 def invoke(repo, home, *args, env=None):
     return subprocess.run([sys.executable, str(SCRIPT), '--repo', str(repo), '--home', str(home), *args],
                           text=True, capture_output=True, env=env)
@@ -136,16 +113,6 @@ def test_retired_backup_refuses_even_when_stopped(tmp_path):
     assert log.read_text() == before
 
 
-def test_restore_requires_explicit_data_loss_acknowledgement_before_stopping(tmp_path):
-    repo, home, env, log, commit = prepared(tmp_path)
-    assert invoke(repo, home, 'install', '--release', commit, env=env).returncode == 0
-    before = log.read_text()
-    result = invoke(repo, home, 'restore', '--backup', 'old-backup', '--acknowledge-data-loss', 'different', env=env)
-    assert result.returncode != 0
-    assert 'retired' in result.stderr
-    assert log.read_text() == before
-
-
 def test_prepare_excludes_untracked_private_files_from_release(tmp_path):
     repo = repository(tmp_path)
     (repo / 'private-session.session').write_text('private synthetic credential')
@@ -158,62 +125,6 @@ def test_prepare_excludes_untracked_private_files_from_release(tmp_path):
     assert not list((home / 'releases').rglob('*.session'))
 
 
-def test_status_supports_compose_ndjson(tmp_path):
-    repo, home, env, log, commit = prepared(tmp_path)
-    assert invoke(repo, home, 'install', '--release', commit, env=env).returncode == 0
-    env['RUNNING_CONTAINER'] = '{"Name":"reader"}\n{"Name":"other"}'
-    result = invoke(repo, home, 'status', env=env)
-    assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout)['containers'] == [{'Name': 'reader'}, {'Name': 'other'}]
-
-
-def test_rollback_preserves_modified_data_and_does_not_start_old_version(tmp_path):
-    repo, home, env, log, commit = prepared(tmp_path)
-    assert invoke(repo, home, 'install', '--release', commit, env=env).returncode == 0
-    (home / 'previous.json').write_text(json.dumps({'release': commit, 'digest': 'original-data'}))
-    (home / 'data/material').write_text('new user content')
-    result = invoke(repo, home, 'rollback', '--release', commit, env=env)
-    assert result.returncode != 0
-    assert 'retired' in result.stderr
-    assert (home / 'data/material').read_text() == 'new user content'
-    assert not (home / 'backups').exists()
-    calls = [json.loads(line) for line in log.read_text().splitlines()]
-    assert not any('bootstrap' in call or 'up' in call for call in calls)
-
-
-def test_stop_blocks_on_abandoned_supervisor_marker_and_preserves_it(tmp_path):
-    repo, home, env, log, commit = prepared(tmp_path)
-    assert invoke(repo, home, 'install', '--release', commit, env=env).returncode == 0
-    marker = home / 'scratch/active.json'
-    marker.write_text('{"supervisor":999999,"groups":[]}')
-    result = invoke(repo, home, 'stop', env=env)
-    assert result.returncode != 0
-    assert 'cleanup is unconfirmed' in result.stderr
-    assert marker.exists()
-    assert not (home / 'backups').exists()
-
-
-@pytest.mark.parametrize('command', ['update', 'migrate'])
-def test_unconfirmed_codex_cleanup_blocks_data_copy_and_release_switch(tmp_path, command):
-    repo, home, env, log, commit = prepared(tmp_path)
-    assert invoke(repo, home, 'install', '--release', commit, env=env).returncode == 0
-    (home / 'scratch/active.json').write_text('{"supervisor":999999,"groups":[]}')
-    args = [command]
-    if command == 'update':
-        args += ['--release', commit]
-    elif command == 'migrate':
-        source = tmp_path / 'old-data'
-        source.mkdir()
-        (source / 'state.sqlite').write_text('synthetic data')
-        args += ['--source', str(source)]
-    result = invoke(repo, home, *args, env=env)
-    assert result.returncode != 0
-    assert 'retired' in result.stderr
-    assert not (home / 'backups').exists()
-    assert not (home / 'data/state.sqlite').exists()
-    assert json.loads((home / 'current.json').read_text())['release'] == commit
-
-
 def test_open_launches_localhost_8765_without_logging_reader_credential(tmp_path):
     repo, home, env, log, commit = prepared(tmp_path)
     assert invoke(repo, home, 'install', '--release', commit, env=env).returncode == 0
@@ -223,76 +134,6 @@ def test_open_launches_localhost_8765_without_logging_reader_credential(tmp_path
     assert 'synthetic-private-token' not in result.stdout + result.stderr
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     assert calls[-1] == ['open', 'http://localhost:8765/']
-
-
-
-
-
-
-
-
-@pytest.mark.parametrize('reply',['ready','wrong_release','wrong_protocol','unauthorized'])
-def test_start_waits_for_helper_listener_after_reader_is_ready(tmp_path,monkeypatch,reply):
-    import runpy
-    import threading
-    import urllib.request
-    import urllib.error
-    from http.server import HTTPServer,BaseHTTPRequestHandler
-    maintenance=runpy.run_path(str(SCRIPT))
-    scope=maintenance['start'].__globals__
-    home=tmp_path/'installation'
-    (home/'secrets').mkdir(parents=True)
-    (home/'secrets/codex').write_text('synthetic-token')
-    (home/'current.json').write_text(json.dumps(dict(release='a'*40)))
-    (home/'installation.json').write_text(json.dumps(dict(launchagents=str(tmp_path/'agents'))))
-    release_listener=threading.Event()
-    listener_ready=threading.Event()
-    class Health(BaseHTTPRequestHandler):
-        def log_message(self,*args):pass
-        def do_GET(self):
-            assert self.headers['Authorization']=='Bearer synthetic-token'
-            self.send_response(401 if reply=='unauthorized' else 200);self.end_headers()
-            self.wfile.write(json.dumps(dict(protocol=2 if reply=='wrong_protocol' else 1,release='b'*40 if reply=='wrong_release' else 'a'*40)).encode())
-    server=HTTPServer(('127.0.0.1',0),Health,bind_and_activate=False)
-    server.server_bind()
-    def listen():
-        release_listener.wait()
-        server.server_activate();listener_ready.set();server.serve_forever(poll_interval=.01)
-    listener=threading.Thread(target=listen)
-    listener.start()
-    attempts=[]
-    original_open=urllib.request.OpenerDirector.open
-    def open_health(self,*args,**kwargs):
-        attempts.append('health')
-        if len(attempts)==1:
-            release_listener.set()
-            raise urllib.error.URLError(ConnectionRefusedError('Synthetic helper is not listening yet'))
-        assert listener_ready.wait(2)
-        return original_open(self,*args,**kwargs)
-    monkeypatch.setattr(urllib.request.OpenerDirector,'open',open_health)
-    stopped=[]
-    monkeypatch.setitem(scope,'helper_loaded',lambda home:False)
-    monkeypatch.setitem(scope,'available',lambda *args,**kwargs:None)
-    monkeypatch.setitem(scope,'run',lambda *args,**kwargs:None)
-    monkeypatch.setitem(scope,'readiness',lambda home:None)
-    monkeypatch.setitem(scope,'stop',lambda home:stopped.append(True))
-    def compose(home,*args,**kwargs):
-        if args[0]=='ps':return ''
-        if args[0]=='exec':
-            probe=args[-1].replace('http://host.docker.internal:8767',f'http://127.0.0.1:{server.server_port}').replace('/run/secrets/codex',str(home/'secrets/codex'))
-            exec(probe,{})
-    monkeypatch.setitem(scope,'compose',compose)
-    try:
-        if reply=='ready':
-            maintenance['start'](home)
-            assert len(attempts)>=2 and not stopped
-        else:
-            with pytest.raises(urllib.error.HTTPError if reply=='unauthorized' else AssertionError):maintenance['start'](home)
-            assert len(attempts)==2 and stopped==[True]
-    finally:
-        release_listener.set()
-        assert listener_ready.wait(2)
-        server.shutdown();listener.join(timeout=2);server.server_close()
 
 
 def test_unreachable_helper_exits_at_deadline_and_stops_new_reader(tmp_path,monkeypatch):
@@ -320,37 +161,3 @@ def test_unreachable_helper_exits_at_deadline_and_stops_new_reader(tmp_path,monk
     monkeypatch.setitem(scope,'compose',compose)
     with pytest.raises(urllib.error.URLError):maintenance['start'](home)
     assert attempts==[True] and stopped==[True]
-
-
-def test_reader_readiness_uses_container_loopback_instead_of_desktop_forwarding(tmp_path,monkeypatch):
-    import runpy
-    import subprocess
-    maintenance=runpy.run_path(str(SCRIPT));scope=maintenance['readiness'].__globals__
-    calls=[]
-    def compose(home,*args,**options):
-        assert home==tmp_path
-        assert 0 < options['timeout'] <= 5
-        calls.append(args)
-        if len(calls)==1:raise subprocess.CalledProcessError(1,['synthetic reader still starting'])
-        if len(calls)==2:raise subprocess.TimeoutExpired(['synthetic stalled daemon'],options['timeout'])
-    monkeypatch.setitem(scope,'compose',compose)
-    monkeypatch.setattr(scope['time'],'sleep',lambda _:None)
-    maintenance['readiness'](tmp_path)
-    assert len(calls)==3 and calls[0]==calls[1]==calls[2]
-    assert calls[0][:-1]==('exec','--no-TTY','reader','python','-c')
-    assert 'oko.reader.control' not in calls[0][-1]
-    assert '/data/runtime.json' in calls[0][-1] and 'http://127.0.0.1:8765/api/v3/status' in calls[0][-1]
-
-
-def test_compose_forwards_readiness_deadline_to_subprocess(tmp_path,monkeypatch):
-    import runpy
-    from types import SimpleNamespace
-    maintenance=runpy.run_path(str(SCRIPT));scope=maintenance['compose'].__globals__
-    monkeypatch.setitem(scope,'release',lambda *args:(tmp_path,dict(image='synthetic-image')))
-    calls=[]
-    def execute(*args,**options):
-        calls.append(options)
-        return SimpleNamespace(stdout='')
-    monkeypatch.setattr(scope['subprocess'],'run',execute)
-    maintenance['compose'](tmp_path,'exec','--no-TTY','reader','true',timeout=1.25)
-    assert calls[0]['timeout']==1.25

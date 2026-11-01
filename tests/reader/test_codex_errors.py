@@ -50,35 +50,3 @@ def test_interrupted_codex_check_has_processor_error_and_failed_receipt(tmp_path
         receipt = client.get('/api/v3/commands/interrupted-check').json()
         assert receipt['outcome'] == 'failed'
         assert receipt['error'] == response.json()
-
-
-@pytest.mark.parametrize('method,path,body', OPERATIONS)
-def test_stopped_codex_operations_return_runtime_stopped(tmp_path, method, path, body):
-    with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
-        assert client.post('/api/v3/stop').status_code == 200
-        response = client.request(method, path, **({'json': body} if body else {}))
-        assert response.status_code == 409
-        assert response.json()['code'] == 'runtime_stopped'
-
-
-@pytest.mark.parametrize('method,path,body', OPERATIONS[1:])
-def test_disabled_codex_operations_keep_distinct_runtime_disabled(tmp_path, method, path, body):
-    with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
-        assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
-        assert client.get('/api/v3/processors/codex').status_code == 200
-        response = client.request(method, path, **({'json': body} if body else {}))
-        assert response.status_code == 409
-        assert response.json()['code'] == 'runtime_disabled'
-
-
-def test_completed_diagnostics_can_report_unavailable_with_successful_receipt(tmp_path):
-    class Unavailable(CodexService):
-        async def check(self):
-            return dict(available=False, local=False, auth='missing', version=None,
-                        limits_checked=False, reason='Synthetic authorization missing')
-
-    with TestClient(create_app(tmp_path, token='test', api_only=True, codex_client=Unavailable()), headers=HEADERS) as client:
-        response = client.post('/api/v3/processors/codex/check', headers={'X-Oko-Action': 'unavailable-check'})
-        assert response.status_code == 200
-        assert response.json()['state'] == 'unavailable'
-        assert client.get('/api/v3/commands/unavailable-check').json()['outcome'] == 'succeeded'

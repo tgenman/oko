@@ -16,8 +16,6 @@ class ReaderVersions:
     def __init__(self, store: 'Store') -> None:
         self.store, self.db = store, store.db
         self._next_action_cleanup = float('-inf')
-        self._source_legacy_gc_cursor: str | None = None
-        self._next_source_legacy_gc = float('-inf')
         self._fetch_null_gc_cursor: str | None = None
         self._next_fetch_null_gc = float('-inf')
         self._processor_youtube_paused = store.problems.processor_youtube_paused(store.wall_clock())
@@ -117,17 +115,6 @@ class ReaderVersions:
                 old_paused=self._processor_youtube_paused
                 self.db.after_rollback(lambda: setattr(self,'_processor_youtube_paused',old_paused))
                 self.db.after_commit(lambda: setattr(self,'_processor_youtube_paused',paused))
-            if now>=self._next_source_legacy_gc:
-                from oko.storage.source_groups import cleanup_legacy_protected
-                cursor,done=cleanup_legacy_protected(self.store,self._source_legacy_gc_cursor)
-                old_cursor=self._source_legacy_gc_cursor
-                old_next=self._next_source_legacy_gc
-                def restore_source_legacy_gc() -> None:
-                    self._source_legacy_gc_cursor=old_cursor
-                    self._next_source_legacy_gc=old_next
-                self.db.after_rollback(restore_source_legacy_gc)
-                self.db.after_commit(lambda: setattr(self,'_source_legacy_gc_cursor',cursor))
-                if done:self.db.after_commit(lambda: setattr(self,'_next_source_legacy_gc',now+60))
             if now>=self._next_subtitle_pointer_gc:
                 from oko.storage.subtitle_problems import cleanup_pointers
                 pointer_cursor,pointer_done=cleanup_pointers(self.store,self._subtitle_pointer_gc_cursor)

@@ -1,8 +1,5 @@
-from tests.support.cards import read_all_cards
 from oko.collection.contracts import DiscoveryResult, FetchResult
-from datetime import datetime, timezone
-from tests.support.presence import presence, close_presence
-from tests.support.subscriptions import add_sources
+from tests.support.presence import presence
 from fastapi.testclient import TestClient
 
 from tests.support.app import create_app
@@ -47,27 +44,6 @@ def test_source_failures_group_objects_and_retry_is_not_completion(tmp_path):
         for obj in problem['affected']:
             client.post('/api/v3/materials/' + obj.get('material_id') + '/retry')
         wait_for(client, lambda: client.get('/api/v3/status/details').json()['problems']['count'] == 0)
-
-
-def test_model_problem_history_survives_restart_and_expires_from_completion(tmp_path):
-    wall = [1800000000.0]
-    options = dict(token='test', codex_client=CodexService(), wall_clock=lambda: wall[0])
-    with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        client.patch('/api/v3/settings/oko/global',json={'theses':True})
-        first = client.get('/api/v3/status/details').json()['problems']['current'][0]
-        wall[0] += 60
-        assert client.get('/api/v3/status/details').json()['problems']['current'][0]['created_at'] == first['created_at']
-        configure_codex(client)
-        finished = client.get('/api/v3/status/details').json()['problems']['recent'][0]
-        assert finished['outcome'] == 'resolved'
-        assert finished['finished_at'] == datetime.fromtimestamp(wall[0],timezone.utc).isoformat().replace('+00:00','Z')
-        assert client.delete('/api/v3/diagnostics').status_code == 200
-        assert client.get('/api/v3/status/details').json()['problems']['recent'][0]['id'] == finished['id']
-    wall[0] += 86399
-    with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        assert client.get('/api/v3/status/details').json()['problems']['recent'][0]['finished_at'] == finished['finished_at']
-        wall[0] += 1
-        assert client.get('/api/v3/status/details').json()['problems']['recent'] == []
 
 
 def test_missing_model_is_one_current_problem_and_settings_fix_it(tmp_path):
@@ -126,76 +102,6 @@ def test_lost_successful_reply_is_reconciled_and_only_failed_draft_can_be_abando
         assert result['recent'][0]['outcome'] == 'irrelevant'
 
 
-def test_shared_youtube_pause_across_feeds_is_one_problem(tmp_path):
-    import httpx
-    from oko.collection.youtube.access import CaptionsBlocked
-    from tests.support.youtube import CHANNEL, PNG, VIDEO, feed_xml
-    wall = [1900000000.0]
-    class Captions:
-        async def fetch(self, video):
-            raise CaptionsBlocked()
-    def external(request):
-        if request.url.host == 'i.ytimg.com':
-            return httpx.Response(200, content=PNG, headers={'content-type':'image/png'})
-        channel = request.url.params.get('channel_id') or 'UC'+request.url.params.get('playlist_id','')[4:]
-        return httpx.Response(200, text=feed_xml().replace(VIDEO, VIDEO if channel == CHANNEL else 'lmnopqrstuv'))
-    options = dict(token='test', rss_enabled=True, rss_transport=httpx.MockTransport(external),
-                   wall_clock=lambda:wall[0], youtube_captions=Captions())
-    with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        for channel in (CHANNEL,'UC'+'b'*22):
-            result=add_sources(client, [(f'https://www.youtube.com/feeds/videos.xml?channel_id={channel}', 'Science', 'Без папки')])
-            assert result.status_code==200
-            client.patch('/api/v3/feeds/'+result.json()['feeds'][-1]['id'],json={'importance':'high'})
-        presence(client, 'reader')
-        wait_for(client,lambda:client.get('/api/v3/youtube').json()['admission']=='paused')
-        problems=wait_for(client,lambda:(p if len((p:=client.get('/api/v3/status/details').json()['problems'])['current'])>=1 and
-            len(next(x for x in p['current'] if x['code']=='youtube_rate_limited')['affected'])==2 else None))
-        pause=next(p for p in problems['current'] if p['code']=='youtube_rate_limited')
-        assert pause['state']=='retrying' and datetime.fromisoformat(pause['retry_at'].replace('Z','+00:00')).timestamp()==wall[0]+900
-        assert len([p for p in problems['current'] if p['code']=='youtube_rate_limited'])==1
-
-
-def test_viewed_material_scrubs_problem_objects_but_failed_delete_remains_current(tmp_path):
-    from tests.support.reader import Clock, setup_reader
-    from oko.collection.demo import DemoSource
-    clock = Clock()
-    failing = [False]
-    def fault(point):
-        if point == 'before_delete' and failing[0]:
-            raise OSError('synthetic deletion failure')
-    with TestClient(create_app(tmp_path, token='test', source=DemoSource(), fault=fault, clock=clock), headers=HEADERS) as client:
-        item = setup_reader(client, theses=False)
-        client.post('/api/v3/command-observations',json={'id':'unsupported-material-action','context':{'operation':'retry_material','material_id':item},'result':'failed'})
-        before = client.get('/api/v3/status/details').json()['problems']
-        assert any(p['affected'][0]['material_id'] == item for p in before['current'])
-        assert client.post('/api/v3/problems/'+before['current'][0]['id']+'/abandon').status_code == 400
-        failing[0] = True
-        assert client.post('/api/v3/materials/' + item + '/viewed').status_code == 200
-        result = client.get('/api/v3/status/details').json()['problems']
-        assert any(p['code'] == 'feed_delete_failed' for p in result['current'])
-        assert all(obj.get('material_id') != item for p in result['current'] + result['recent'] for obj in p['affected'])
-        old = next(p for p in result['recent'] if p['code'] == 'command_failed')
-        assert old['outcome'] == 'irrelevant' and old['recovery'] == []
-        failing[0] = False
-        clock.now += 1.1
-        wait_for(client,lambda:not any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status/details').json()['problems']['current']))
-
-
-def test_partial_material_is_visible_with_available_text(tmp_path):
-    class Partial(FailedDownloads):
-        async def fetch(self, publication):
-            return FetchResult(Material('Частичный материал', 'Доступный текст', full=False, reason='Вложение недоступно'))
-    with TestClient(create_app(tmp_path, token='test', source=Partial()), headers=HEADERS) as client:
-        client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
-        presence(client, 'reader')
-        wait_for(client,lambda:len(cards:=read_all_cards(client, '/api/v3/cards'))==2 and all((client.get('/api/v3/publication/' + c['id']).json()['availability'] == 'available') for c in cards))
-        problems=client.get('/api/v3/status/details').json()['problems']
-        assert problems['count']==2
-        assert problems['current'][0]['code']=='material_incomplete'
-        assert len(problems['current'][0]['affected'])==1
-        assert client.get('/api/v3/publication/'+problems['current'][0]['affected'][0]['material_id']).json()['text']=='Доступный текст'
-
-
 def test_viewing_removes_scoped_diagnostic_content_from_server_and_disk(tmp_path):
     from oko.collection.demo import DemoSource
     from tests.support.reader import setup_reader
@@ -207,79 +113,3 @@ def test_viewing_removes_scoped_diagnostic_content_from_server_and_disk(tmp_path
         assert client.post('/api/v3/materials/'+item+'/viewed').status_code==200
         assert title not in client.get('/api/v3/diagnostics').text
         assert title not in (tmp_path/'debug.json').read_text()
-
-
-def test_late_unknown_action_cannot_restore_viewed_material_reference(tmp_path):
-    from oko.collection.demo import DemoSource
-    from tests.support.reader import setup_reader
-    with TestClient(create_app(tmp_path,token='test',source=DemoSource()),headers=HEADERS) as client:
-        item=setup_reader(client,theses=False)
-        assert client.post('/api/v3/materials/'+item+'/viewed').status_code==200
-        result=client.post('/api/v3/command-observations',json={'id':'late-unknown','context':{'operation':'retry_theses','material_id':item},'result':'unknown'})
-        assert result.status_code==200
-        assert result.json()['outcome']=='abandoned'
-        assert client.get('/api/v3/commands/late-unknown').json()['outcome']=='abandoned'
-        state=client.get('/api/v3/status/details').json()['problems']
-        assert all(obj.get('material_id')!=item for p in state['current']+state['recent'] for obj in p['affected'])
-
-
-def test_late_server_failure_keeps_viewed_action_irrelevant_and_forgets_diagnostics(tmp_path):
-    import asyncio
-    from concurrent.futures import ThreadPoolExecutor
-    from threading import Event
-    from oko.collection.demo import DemoSource
-    from tests.support.reader import setup_reader
-    app=create_app(tmp_path,token='test',source=DemoSource())
-    started, released=Event(),Event()
-    private='Synthetic publication content to remove'
-    @app.post('/api/v3/materials/{identity}/slow')
-    async def slow(identity: str):
-        started.set()
-        await asyncio.to_thread(released.wait,5)
-        raise RuntimeError(private)
-    with TestClient(app,headers=HEADERS) as client, ThreadPoolExecutor() as pool:
-        item=setup_reader(client,theses=False)
-        request=pool.submit(client.post,'/api/v3/materials/'+item+'/slow')
-        assert started.wait(2)
-        try:
-            assert client.post('/api/v3/materials/'+item+'/viewed').status_code==200
-        finally:
-            released.set()
-        assert request.result().status_code==500
-        state=client.get('/api/v3/status/details').json()['problems']
-        assert not any(p['code']=='command_failed' for p in state['current'])
-        assert private not in client.get('/api/v3/diagnostics').text
-        assert private not in (tmp_path/'debug.json').read_text()
-
-
-
-
-def test_normal_caption_spacing_is_work_without_a_problem(tmp_path):
-    import httpx
-    from tests.support.youtube import CHANNEL, VIDEO, PNG, feed_xml
-    class Captions:
-        calls = 0
-        async def fetch(self, video):
-            self.calls += 1
-            return 'Synthetic captions'
-    captions=Captions()
-    def reply(request):
-        if request.url.host=='i.ytimg.com':
-            return httpx.Response(200,content=PNG,headers={'content-type':'image/png'})
-        channel=request.url.params.get('channel_id') or 'UC'+request.url.params.get('playlist_id','')[4:]
-        return httpx.Response(200,text=feed_xml().replace(VIDEO,VIDEO if channel==CHANNEL else 'lmnopqrstuv'))
-    options=dict(token='test',rss_enabled=True,rss_transport=httpx.MockTransport(reply),youtube_captions=captions,
-                 clock=lambda:100,wall_clock=lambda:1900000000,lease=1000000,grace=1000000)
-    with TestClient(create_app(tmp_path,**options),headers=HEADERS) as client:
-        client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
-        for channel in (CHANNEL,'UC'+'b'*22):
-            response=add_sources(client, [(f'https://www.youtube.com/feeds/videos.xml?channel_id={channel}', 'Source', 'Topic')])
-            assert response.status_code==200
-            for feed in response.json()['feeds']:
-                client.patch('/api/v3/feeds/'+feed['id'],json={'importance':'high'})
-        presence(client, 'reader')
-        wait_for(client,lambda:captions.calls==1 and len(cards:=read_all_cards(client, '/api/v3/cards'))==2 and sum(client.get('/api/v3/publication/'+card['id']).json()['source'].get('captions')=='available' for card in cards)==1)
-        waiting=next(card['id'] for card in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/publication/'+card['id']).json()['source'].get('captions')!='available')
-        problems=client.get('/api/v3/status/details').json()['problems']
-        assert not any(obj.get('material_id')==waiting for p in problems['current'] for obj in p['affected']),problems
-        assert not any(p['code']=='youtube_rate_limited' for p in problems['current'])

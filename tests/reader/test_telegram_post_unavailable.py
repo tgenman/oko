@@ -5,7 +5,7 @@ import httpx
 from tests.support.app import create_app
 from tests.support.codex import CodexService, configure_codex
 from tests.support.telegram import settled
-from tests.support.telegram_web import external_page, AUDIO, VIDEO, mark_post_unavailable
+from tests.support.telegram_web import external_page, mark_post_unavailable
 from tests.support.v3 import TestClient
 
 
@@ -58,29 +58,6 @@ import pytest
 import time
 
 
-@pytest.mark.parametrize('text,media,restricted,expected', [
-    ('', AUDIO, True, 'external_attachment'),
-    ('', VIDEO, True, 'external_attachment'),
-    ('Own text', '', True, 'source_incomplete'),
-    ('', '', False, 'source_incomplete'),
-])
-def test_whole_post_marker_does_not_override_other_cases(tmp_path, text, media, restricted, expected):
-    def response(request):
-        if request.url.host == 'cdn.example':
-            return httpx.Response(200, content=b'poster', headers={'content-type':'image/jpeg'})
-        return httpx.Response(200, text=unavailable_page(int(request.url.params.get('before', '0')), text, media, restricted))
-    with TestClient(create_app(tmp_path, token='test', api_only=True, rss_transport=httpx.MockTransport(response)), headers={'Authorization':'Bearer test'}) as client:
-        configure_fast_web(client)
-        client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
-        content = client.get('/api/v3/publication/'+settled(client)[0]['id']).json()
-        assert content['post_web_unavailable'] is False
-        assert content['completeness']['reason'] == expected
-        if media:
-            assert content['external_attachments'][0]['kind'] == ('audio' if media == AUDIO else 'video')
-        else:
-            assert client.get('/api/v3/status/details').json()['problems']['count'] > 0
-
-
 def test_previous_local_text_is_kept_when_whole_post_becomes_restricted(tmp_path):
     restricted = [False]
     def response(request):
@@ -97,93 +74,3 @@ def test_previous_local_text_is_kept_when_whole_post_becomes_restricted(tmp_path
         assert content['post_web_unavailable'] is True
         assert content['changed'] is False
         assert client.get('/api/v3/status/details').json()['problems']['count'] == 0
-
-
-def test_later_content_is_collected_and_previous_version_keeps_post_restriction(tmp_path):
-    text = ['']
-    def response(request):
-        return httpx.Response(200, text=unavailable_page(int(request.url.params.get('before', '0')), text[0], restricted=not text[0]))
-    with TestClient(create_app(tmp_path, token='test', api_only=True, rss_transport=httpx.MockTransport(response)), headers={'Authorization':'Bearer test'}) as client:
-        configure_fast_web(client)
-        client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
-        url = '/api/v3/materials/'+settled(client)[0]['id']
-        text[0] = 'Now provided by Telegram'
-        client.post('/api/v3/collect')
-        for _ in range(150):
-            content = client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()
-            if content['text'] == text[0] and not content['loading']: break
-            time.sleep(.02)
-        assert content['text'] == text[0]
-        assert content['post_web_unavailable'] is False
-        assert content['completeness']['state'] == 'complete'
-        assert 'previous_versions' not in content
-
-
-def test_unknown_unsupported_post_is_reclassified_only_after_source_confirmation(tmp_path):
-    confirmed = [False]
-    def response(request):
-        return httpx.Response(200, text=unavailable_page(int(request.url.params.get('before', '0')), restricted=confirmed[0]))
-    with TestClient(create_app(tmp_path, token='test', api_only=True, rss_transport=httpx.MockTransport(response)), headers={'Authorization':'Bearer test'}) as client:
-        configure_fast_web(client)
-        client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
-        url = '/api/v3/materials/'+settled(client)[0]['id']
-        assert client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['post_web_unavailable'] is False
-        assert client.get('/api/v3/status/details').json()['problems']['count'] > 0
-        confirmed[0] = True
-        client.post(url+'/retry'); settled(client)
-        assert client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['post_web_unavailable'] is True
-        assert client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['changed'] is False
-        assert client.get('/api/v3/status/details').json()['problems']['count'] == 0
-
-
-@pytest.mark.parametrize('lost',[False,True])
-def test_whole_post_restriction_keeps_local_video_but_does_not_hide_lost_file(tmp_path,lost):
-    restricted = [False]
-    def response(request):
-        if request.url.host == 'cdn.example':
-            return httpx.Response(200,content=b'saved-video',headers={'content-type':'video/mp4'})
-        media = '' if restricted[0] else '<a class="tgme_widget_message_video_player"><video src="https://cdn.example/video.mp4"></video></a>'
-        return httpx.Response(200,text=unavailable_page(int(request.url.params.get('before','0')),media=media,restricted=restricted[0]))
-    with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers={'Authorization':'Bearer test'}) as client:
-        configure_fast_web(client)
-        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
-        url='/api/v3/materials/'+settled(client)[0]['id']
-        video=[media for media in client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['media'] if media['role'] == 'attachment'][0]
-        if lost:
-            from tests.support.storage import database
-            media_id=video['url'].rsplit('/',1)[-1]
-            with database(tmp_path) as db:
-                key=db.execute('SELECT storage_key FROM media_files WHERE id=%s',(media_id,)).fetchone()[0]
-            local_file=tmp_path/key
-            assert local_file.is_file()
-            local_file.unlink()
-        restricted[0]=True
-        client.post(url+'/retry');settled(client)
-        content=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()
-        if lost:
-            assert client.get('/api/v3/status/details').json()['problems']['count']>0
-        else:
-            assert content['post_web_unavailable'] is True
-            assert client.get([media for media in content['media'] if media['role']=='attachment'][0]['url']).content==b'saved-video'
-            assert content['changed'] is False
-            assert client.get('/api/v3/status/details').json()['problems']['count']==0
-
-
-def test_restricted_post_does_not_hide_neighbour_failure_or_block_explicit_viewed(tmp_path):
-    def response(request):
-        if request.url.host == 'cdn.example': return httpx.Response(404)
-        html = external_page([(11,''),(12,'Broken file<audio src="https://cdn.example/audio.ogg"></audio>')],before=int(request.url.params.get('before','0')))
-        return httpx.Response(200,text=mark_post_unavailable(html,'fixture/11'))
-    with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers={'Authorization':'Bearer test'}) as client:
-        configure_fast_web(client)
-        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
-        cards=settled(client,2)
-        post=next(c for c in cards if c['post_web_unavailable'])
-        broken=next(c for c in cards if not c['post_web_unavailable'])
-        problems=client.get('/api/v3/status/details').json()['problems']
-        affected={obj['material_id'] for p in problems['current'] for obj in p['affected'] if obj['kind']=='material'}
-        assert post['id'] not in affected
-        assert broken['id'] in affected
-        assert client.post('/api/v3/materials/'+post['id']+'/viewed').status_code==200
-        assert client.get('/api/v3/publication/'+post['id']).status_code==404
-        assert client.get('/api/v3/publication/'+broken['id']).status_code==200

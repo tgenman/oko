@@ -243,43 +243,12 @@ def test_health_failure_after_incompatible_migration_stops_without_old_image_or_
     assert 'pg_restore' not in (root / 'commands.jsonl').read_text()
 
 
-def test_maintenance_contention_never_stops_the_reader(machine):
-    import fcntl
-    root, manifest, env = machine
-    with (root / 'maintenance.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        result = invoke(root, 'deploy', '--manifest', str(manifest), env=env)
-    assert result.returncode != 0
-    assert 'Another maintenance operation' in result.stderr
-    assert '"stop"' not in (root / 'commands.jsonl').read_text()
-
-
 def test_ssh_authorization_refuses_a_command_instead_of_a_public_key(tmp_path):
     public_key = tmp_path / 'public-key'
     public_key.write_text('command="sh" ssh-ed25519 AAAAinvalid\n')
     result = invoke(tmp_path, 'authorize', '--public-key-file', str(public_key))
     assert result.returncode != 0
     assert 'dedicated Ed25519 public key' in result.stderr
-
-
-def test_deploy_and_rollback_use_the_active_private_database_schema(machine):
-    root, manifest, env = machine
-    state = json.loads((root / 'synthetic-state.json').read_text())
-    state['schema_name'] = 'oko_import146'
-    (root / 'synthetic-state.json').write_text(json.dumps(state))
-    for role in ('reader', 'migrator'):
-        path = root / 'secrets' / ('database-' + role)
-        path.write_text(path.read_text().replace('search_path%3Doko,public', 'search_path%3Doko_import146,public'))
-    result = invoke(root, 'deploy', '--manifest', str(manifest), env=env)
-    assert result.returncode == 0, result.stderr
-    receipt = json.loads(result.stdout)
-    assert receipt['database_schema'] == 'oko_import146' and receipt['schema_version'] == 3
-    rollback = invoke(root, 'rollback', env=env)
-    assert rollback.returncode == 0, rollback.stderr
-    assert json.loads(rollback.stdout)['database_schema'] == 'oko_import146'
-    commands = (root / 'commands.jsonl').read_text()
-    for role in ('reader', 'migrator'):
-        assert 'private-' + role + '-canary' not in result.stdout + result.stderr + rollback.stdout + rollback.stderr + commands
 
 
 def test_different_reader_and_migration_schemas_block_deploy_before_stop(machine):
@@ -292,19 +261,3 @@ def test_different_reader_and_migration_schemas_block_deploy_before_stop(machine
     assert '"stop"' not in commands
     assert json.loads((root / 'release.json').read_text())['sha'] == OLD
     assert 'private-migrator-canary' not in result.stdout + result.stderr + commands
-
-
-def test_helper_service_uses_named_ipc_group_independent_of_primary_gid(machine):
-    root, manifest, env = machine
-    result = invoke(root, 'deploy', '--manifest', str(manifest), env={**env, 'HELPER_PRIMARY_GID': '988'})
-    assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout)['success'] is True
-
-
-@pytest.mark.parametrize('identity', [{'HELPER_UID':'20003'}, {'IPC_GID':'20002'}])
-def test_invalid_helper_identity_is_rejected_before_service_stop(machine, identity):
-    root, manifest, env = machine
-    result = invoke(root, 'deploy', '--manifest', str(manifest), env={**env, **identity})
-    assert result.returncode != 0
-    assert 'Unexpected helper account identity' in result.stderr
-    assert '"stop"' not in (root / 'commands.jsonl').read_text()

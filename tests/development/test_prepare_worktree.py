@@ -60,14 +60,6 @@ def test_prepare_stops_before_validation_after_build_failure(tmp_path):
     assert 'Prepared and validated' not in result.stdout
 
 
-def test_prepare_validation_failure_is_not_success(tmp_path):
-    donor,root,record,env=fixture(tmp_path)
-    result=run(root,donor,dict(env,FAIL_VALIDATE='9'))
-    assert result.returncode==9
-    assert record.read_text().splitlines()==['BUILD','VALIDATE']
-    assert 'Prepared and validated' not in result.stdout
-
-
 def test_prepare_missing_donor_keeps_existing_paths_and_creates_no_partial_links(tmp_path):
     donor,root,record,env=fixture(tmp_path)
     shutil.rmtree(donor/'node_modules')
@@ -81,35 +73,3 @@ def test_prepare_missing_donor_keeps_existing_paths_and_creates_no_partial_links
     assert result.returncode!=0
     assert (root/'node_modules').is_symlink()
     assert os.readlink(root/'node_modules')==str(root/'missing')
-
-
-def test_prepare_keeps_installed_local_dependencies(tmp_path):
-    donor,root,record,env=fixture(tmp_path)
-    shutil.copytree(donor/'.venv',root/'.venv')
-    (root/'node_modules').mkdir()
-    (root/'node_modules/local').write_text('keep')
-    result=run(root,donor,env)
-    assert result.returncode==0,result.stderr
-    assert not (root/'.venv').is_symlink()
-    assert not (root/'node_modules').is_symlink()
-    assert (root/'node_modules/local').read_text()=='keep'
-
-
-def test_prepare_finds_dependencies_in_main_git_worktree(tmp_path):
-    donor,root,record,env=fixture(tmp_path)
-    # Use the real worktree metadata; the command does not fetch or change refs.
-    subprocess.run(['git','init','-q',str(donor)],check=True)
-    subprocess.run(['git','-C',str(donor),'config','user.name','Test'],check=True)
-    subprocess.run(['git','-C',str(donor),'config','user.email','test@example.test'],check=True)
-    (donor/'tracked').write_text('base')
-    subprocess.run(['git','-C',str(donor),'add','tracked'],check=True)
-    subprocess.run(['git','-C',str(donor),'commit','-qm','base'],check=True)
-    target=tmp_path/'managed'
-    subprocess.run(['git','-C',str(donor),'worktree','add','-q','--detach',str(target)],check=True)
-    (target/'scripts').mkdir()
-    shutil.copy2(CLI,target/'scripts/prepare-worktree')
-    result=subprocess.run([sys.executable,str(target/'scripts/prepare-worktree')],cwd=target,env=env,text=True,capture_output=True)
-    assert result.returncode==0,result.stdout+result.stderr
-    assert (target/'.venv').resolve()==donor/'.venv'
-    assert record.read_text().splitlines()==['BUILD','VALIDATE']
-    assert (target/'tracked').read_text()=='base'

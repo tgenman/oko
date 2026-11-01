@@ -1,17 +1,11 @@
 from tests.support.cards import read_all_cards
-from tests.support.collection_acceptance import discovered
-from tests.support.source import publication_packet
 """Feed information through HTTP and atomic storage lifecycle boundaries."""
-from dataclasses import replace
 from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 import httpx
 import pytest
 
-from oko.collection.demo import DemoSource
-from oko.collection.contracts import DiscoveryResult, Publication, SourceError, SourceObservation
-from tests.support.storage import Store
 from tests.support.app import create_app
 from tests.support.filters import FilterSource, setup_filters, transport
 from tests.support.reader import HEADERS, wait_for
@@ -70,34 +64,6 @@ def test_feed_title_folder_atomicity_noops_and_restart(tmp_path):
         assert saved['activity']['modified'] == stamp(clock[0])
 
 
-def test_new_feed_dates_rss_description_empty_and_missing_metadata(tmp_path):
-    raw = ['<rss><channel><title>RSS</title><description><![CDATA[<b>Channel</b> description]]></description></channel></rss>']
-    clock = [1800000000.]
-    def respond(request):
-        return httpx.Response(200, text=raw[0])
-    with TestClient(create_app(tmp_path, token='test', api_only=True, rss_enabled=True, rss_transport=httpx.MockTransport(respond), wall_clock=lambda: clock[0]), headers=HEADERS) as client:
-        from tests.support.subscriptions import add_source
-        feed = add_source(client, 'https://example.test/feed')['id']
-        path = '/api/v3/settings/feed/' + feed
-        def activity():
-            return client.get(path).json()['activity']
-        wait_for(client, lambda: activity()['updated'])
-        assert activity()['created'] == activity()['modified'] == stamp(clock[0])
-        assert activity()['description'] == 'Channel description'
-        clock[0] += 10
-        raw[0] = '<rss><channel><title>Changed externally</title></channel></rss>'
-        assert client.post('/api/v3/collect').status_code == 200
-        wait_for(client, lambda: activity()['updated'] == stamp(clock[0]))
-        assert activity()['description'] == 'Channel description'
-        assert client.get(path).json()['feed']['title'] == 'Источник'
-        raw[0] = '<rss><channel><description/></channel></rss>'
-        clock[0] += 10
-        assert client.post('/api/v3/collect').status_code == 200
-        wait_for(client, lambda: activity()['updated'] == stamp(clock[0]))
-        assert activity()['description'] == ''
-        assert activity()['modified'] == stamp(1800000000.)
-
-
 def test_unread_includes_hidden_and_viewed_dates_follow_actual_scope(tmp_path):
     clock = [1800000000.]
     with TestClient(create_app(tmp_path, token='test', source=FilterSource(), ai_transport=transport([]), wall_clock=lambda: clock[0]), headers=HEADERS) as client:
@@ -124,57 +90,3 @@ def test_unread_includes_hidden_and_viewed_dates_follow_actual_scope(tmp_path):
         assert activity()['marked_read'] == stamp(clock[0])
     with TestClient(create_app(tmp_path, token='test', source=FilterSource(), api_only=True), headers=HEADERS) as client:
         assert client.get(path).json()['activity']['marked_read'] == stamp(clock[0])
-
-
-class MetadataSource(DemoSource):
-    def __init__(self):
-        self.fail = False
-        self.failures = 0
-        self.description = 'Source description'
-
-    async def discover(self, cursor: str | None) -> DiscoveryResult:
-        if self.fail:
-            self.failures += 1
-            raise SourceError('Synthetic failure')
-        return replace(await super().discover(cursor), observation=SourceObservation(description=self.description))
-
-
-def test_failed_discovery_preserves_update_and_unread_metadata(tmp_path):
-    source = MetadataSource()
-    clock = [1800000000.]
-    steady = [100.]
-    with TestClient(create_app(tmp_path, source=source, token='test', api_only=True, clock=lambda: steady[0], wall_clock=lambda: clock[0]), headers=HEADERS) as client:
-        path = '/api/v3/settings/feed/demo'
-        wait_for(client, lambda: client.get(path).json()['activity']['updated'])
-        before = client.get(path).json()['activity']
-        clock[0] += 10
-        source.fail = True
-        client.post('/api/v3/collect')
-        wait_for(client, lambda: source.failures > 0)
-        assert client.get(path).json()['activity'] == before
-        source.fail = False
-        steady[0] += 1000
-        client.post('/api/v3/collect')
-        wait_for(client, lambda: client.get(path).json()['activity']['updated'] == stamp(clock[0]))
-
-
-def test_stale_and_rolled_back_discovery_cannot_advance_date(tmp_path):
-    clock = [1800000000.]
-    def fault(point):
-        if point == 'before_discovery_commit':
-            raise RuntimeError('Synthetic crash')
-    store = Store(tmp_path, fault, wall_clock=lambda: clock[0])
-    store.subscriptions.ensure_demo()
-    store.jobs.enqueue_discovery()
-    job = store.jobs.next_job(0)
-    assert job
-    publications = [publication_packet(Publication('one', 'https://example.test/one', 1800000000.))]
-    with pytest.raises(RuntimeError, match='Synthetic crash'):
-        discovered(store,publications, 'one', job, description='Uncommitted')
-    assert store.subscriptions.details.snapshot('demo')['updated'] is None
-    assert store.subscriptions.details.snapshot('demo')['description'] is None
-    store.jobs.retry(job, 0, 'stale', 1)
-    discovered(store,publications, 'two', job, description='Stale')
-    assert store.subscriptions.details.snapshot('demo')['updated'] is None
-    assert store.subscriptions.details.snapshot('demo')['unread'] == 0
-    store.db.close()

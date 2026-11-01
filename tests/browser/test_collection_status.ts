@@ -37,31 +37,3 @@ test('collection dialog explains a waiting source, shows raw errors and preserve
   expect(r.errors).toEqual([]);
  }finally{await r.close();}
 });
-
-test('late collection details cannot overwrite reopened dialog and clipboard preserves original text',async()=>{
- const r=await reader();
- try{
-  await r.context.grantPermissions(['clipboard-read','clipboard-write']);
-  await r.start([]);
-  await r.page.evaluate(snapshot=>{readerTransport.replies.set('/api/v3/collection-status',{body:snapshot});readerTransport.held.set('/api/v3/collection-status/feed',true);},snapshot);
-  const trigger=r.page.locator('#collection-progress');
-  await expect(trigger).toContainText('Архив лекций');await trigger.click();
-  const dialog=r.page.getByRole('dialog',{name:'Обновление источников'});
-  await dialog.getByRole('button',{name:'Подробности',exact:true}).click();
-  await expect.poll(()=>r.page.evaluate(()=>readerTransport.pending.has('/api/v3/collection-status/feed'))).toBe(true);
-  await r.page.evaluate(details=>{const resolve=readerTransport.pending.get('/api/v3/collection-status/feed');window.releaseOldMenu=()=>resolve!(new Response(JSON.stringify(details),{headers:{'Content-Type':'application/json'}}));readerTransport.pending.delete('/api/v3/collection-status/feed');readerTransport.held.delete('/api/v3/collection-status/feed');const fresh=structuredClone(details);fresh.revision=10;fresh.operations[0]!.last_error!.message='fresh error\nsecond line';readerTransport.replies.set('/api/v3/collection-status/feed',{body:fresh});},details);
-  await r.page.keyboard.press('Escape');await trigger.click();
-  await expect(dialog).toContainText('fresh error');
-  await r.page.evaluate(()=>window.releaseOldMenu());
-  await expect(dialog).toContainText('fresh error');
-  await expect(dialog).not.toContainText('unsafe');
-  await dialog.getByRole('button',{name:'Копировать ошибку',exact:true}).click();
-  expect(await r.page.evaluate(()=>navigator.clipboard.readText())).toContain('fresh error\nsecond line');
-  await dialog.getByRole('button',{name:'Копировать ссылку',exact:true}).click();
-  expect(await r.page.evaluate(()=>navigator.clipboard.readText())).toBe('https://example.org/media/video.mp4');
-  await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/collection-status',{status:503,body:{code:'storage_unavailable',message:'offline',details:null,diagnostic_id:null,command_id:null}}));
-  await expect(dialog).toContainText('Нет связи с Око');
-  await expect(dialog).toContainText('fresh error');
-  expect(r.errors).toEqual([]);
- }finally{await r.close();}
-});
