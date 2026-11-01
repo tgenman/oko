@@ -34,9 +34,11 @@ for(const scope of ['folder','feed'] as const){
   test(scope+' completion conflict replaces the captured token without replay',async()=>{
     const r=await reader();try{
       await r.start([material('a')]);const url=path(scope),c=controls(r,scope);
+      if(scope==='folder')await r.page.locator('#folders [data-folder="f"]').click();
       await r.page.locator('[data-card="a"]').click();await expect(r.page.locator('#text')).toContainText('Текст a');
       await r.page.evaluate(url=>{readerTransport.replies.set(url+'/preview',{body:{token:'first',cards_count:1,publications_count:1}});readerTransport.replies.set(url,{status:409,body:{code:'composition_changed',message:'Composition changed',details:{preview:{token:'next',cards_count:2,publications_count:2}},command_id:null,diagnostic_id:null}});},url);
-      await open(r,scope);await expect(c.confirm).toBeEnabled();
+      if(scope==='folder')await r.page.locator('#folder-viewed').click();else await open(r,scope);
+      await expect(c.confirm).toBeEnabled();
       expect(await r.page.evaluate(url=>readerTransport.requests.filter(q=>q.url===url).length,url)).toBe(0);
       await c.confirm.click();await expect(c.dialog).toContainText('Composition changed');await expect(c.count).toContainText(scope==='feed'?'Items: 2':'Cards: 2');await expect(r.page.locator('#text')).toContainText('Текст a');
       await expect(c.confirm).toBeEnabled();
