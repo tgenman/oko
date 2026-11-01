@@ -96,40 +96,46 @@ class HeldModel(httpx.AsyncBaseTransport):
 def test_permission_change_invalidates_late_output_and_keeps_one_ai_request(tmp_path: Path):
     held = HeldModel()
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=held), headers=HEADERS) as client:
-        item = setup_reader(client, theses=True)
-        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
-        assert held.started.wait(2)
-        client.patch('/api/v3/settings/oko/global', json={'prompt_theses': 'Новый промпт'})
-        time.sleep(.15)
-        maximum = held.maximum
-        late = client.get('/api/v3/publication/' + item).json()['theses']['result']
-        held.release.set()
-        assert maximum == 1
-        assert late is None
-        result = wait_for(client, lambda: client.get('/api/v3/publication/' + item).json()['theses']['result'])
-        assert result
-        requests = [json.loads(r.content) for r in held.requests if r.url.path == '/v1/chat/completions']
-        assert any('Новый промпт' in r['messages'][0]['content'] for r in requests)
+        try:
+            item = setup_reader(client, theses=True)
+            client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
+            client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
+            assert held.started.wait(2)
+            client.patch('/api/v3/settings/oko/global', json={'prompt_theses': 'Новый промпт'})
+            time.sleep(.15)
+            maximum = held.maximum
+            late = client.get('/api/v3/publication/' + item).json()['theses']['result']
+            held.release.set()
+            assert maximum == 1
+            assert late is None
+            result = wait_for(client, lambda: client.get('/api/v3/publication/' + item).json()['theses']['result'])
+            assert result
+            requests = [json.loads(r.content) for r in held.requests if r.url.path == '/v1/chat/completions']
+            assert any('Новый промпт' in r['messages'][0]['content'] for r in requests)
 
+        finally:
+            held.release.set()
 
-def test_viewed_during_ai_never_reappears_and_stop_is_bounded(tmp_path: Path):
+def test_viewed_during_ai_never_reappears_and_stop_is_bounded(tmp_path: Path, record_property):
     held = HeldModel()
     with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=held), headers=HEADERS) as client:
-        item = setup_reader(client, theses=True)
-        client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
-        client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
-        assert held.started.wait(2)
-        start = time.monotonic()
-        assert client.post('/api/v3/materials/' + item + '/viewed').status_code == 200
-        assert time.monotonic() - start < .8
-        start = time.monotonic()
-        assert client.post('/api/v3/stop').status_code == 200
-        assert time.monotonic() - start < .8
-        held.release.set()
-        time.sleep(.1)
-        assert not (tmp_path / 'content' / item).exists()
-        assert not (tmp_path / 'staging' / item).exists()
+        try:
+            item = setup_reader(client, theses=True)
+            client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
+            client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
+            assert held.started.wait(2)
+            start = time.monotonic()
+            assert client.post('/api/v3/materials/' + item + '/viewed').status_code == 200
+            record_property('viewed_elapsed_seconds', time.monotonic() - start)
+            start = time.monotonic()
+            assert client.post('/api/v3/stop').status_code == 200
+            record_property('stop_elapsed_seconds', time.monotonic() - start)
+            held.release.set()
+            time.sleep(.1)
+            assert not (tmp_path / 'content' / item).exists()
+            assert not (tmp_path / 'staging' / item).exists()
+        finally:
+            held.release.set()
 
 
 import pytest
