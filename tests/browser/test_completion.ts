@@ -1,5 +1,5 @@
 import {test} from 'node:test';
-import {reader,material,expect,type ReaderFixture} from './support';
+import {reader,material,card,expect,type ReaderFixture} from './support';
 import {artifactPath} from './artifacts';
 
 type Scope='feed'|'folder';
@@ -33,7 +33,7 @@ async function release(r:ReaderFixture,scope:Scope,status=200){
 for(const scope of ['folder','feed'] as const){
   test(scope+' completion conflict replaces the captured token without replay',async()=>{
     const r=await reader();try{
-      await r.start([material('a')]);const url=path(scope),c=controls(r,scope);
+      await r.start([material('a')]);await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/cards?sort=newest&folder=f',{body:readerTransport.replies.get('/api/v3/cards')!.body}));const url=path(scope),c=controls(r,scope);
       if(scope==='folder')await r.page.locator('#folders [data-folder="f"]').click();
       await r.page.locator('[data-card="a"]').click();await expect(r.page.locator('#text')).toContainText('Текст a');
       await r.page.evaluate(url=>{readerTransport.replies.set(url+'/preview',{body:{token:'first',cards_count:1,publications_count:1}});readerTransport.replies.set(url,{status:409,body:{code:'composition_changed',message:'Composition changed',details:{preview:{token:'next',cards_count:2,publications_count:2}},command_id:null,diagnostic_id:null}});},url);
@@ -51,10 +51,10 @@ for(const scope of ['folder','feed'] as const){
 
   for(const status of (scope==='feed'?[503]:[200,503]))test(scope+' completion '+status+' preserves new material after the captured items were accepted',async()=>{
     const r=await reader();try{
-      await r.start([material('old')]);const url=path(scope),c=controls(r,scope);
+      await r.start([material('old')]);await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/cards?sort=newest&folder=f',{body:readerTransport.replies.get('/api/v3/cards')!.body}));const url=path(scope),c=controls(r,scope);
       await r.page.evaluate(url=>{readerTransport.replies.set(url+'/preview',{body:{token:'captured',cards_count:1,publications_count:1}});readerTransport.held.set(url,true);},url);
       await open(r,scope);await expect(c.confirm).toBeEnabled();await c.confirm.click();await r.page.waitForFunction(url=>readerTransport.pending.has(url),url);await c.cancel.click();
-      const fresh=material('fresh');await r.page.evaluate(fresh=>{readerTransport.replies.set('/api/v3/cards',{body:[fresh]});readerTransport.replies.set('/fixture/material/fresh',{body:fresh});},fresh);
+      const fresh=material('fresh');await r.page.evaluate(({fresh,row})=>{readerTransport.replies.set('/api/v3/cards',{body:window.readerFixtures.cardPage([row])});readerTransport.replies.set('/api/v3/cards?sort=newest&folder=f',{body:window.readerFixtures.cardPage([row])});readerTransport.replies.set('/api/v3/publication/fresh',{body:fresh});},{fresh,row:card(fresh)});
       await expect(r.page.locator('[data-card="fresh"]')).toBeVisible();await r.page.locator('[data-card="fresh"]').click();await expect(r.page.locator('#text')).toContainText('Текст fresh');
       await release(r,scope,status);await expect(r.page.locator('#text')).toContainText('Текст fresh');await expect(r.page.locator('[data-card="fresh"]')).toBeVisible();expect(r.errors).toEqual([]);
     }finally{await r.close();}

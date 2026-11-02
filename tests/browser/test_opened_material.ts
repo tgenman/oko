@@ -12,7 +12,7 @@ test('opened publication shows variant B with avatar and wrapping long feed and 
   const publicationTitle='Анализирую всё подряд, особенно детство. '+ 'ОченьДлинныйЗаголовокБезПробелов'.repeat(2);
   await r.start([material('one',{title:publicationTitle}),material('two',{feed_id:'second'})]);
   await r.page.evaluate(({avatarUrl,feedTitle})=>{const t=readerTransport;
-   t.replies.set('/api/v3/reading-composition',{body:{count:2,folders:[{id:'f',title:'Каналы',position:0,count:2}],feeds:[{count:1,has_unviewed:true,feed:{id:'feed',title:feedTitle,folder_id:'f',identity:'@fixture',kind:'telegram',connection:'needs_connection',access:{kind:'unconfigured',source_locator:'@fixture'},importance:'normal',original_urls:['https://t.me/fixture'],initial_days:1,public_ai:false,history:{state:'absent'},avatar_url:avatarUrl}},{count:1,has_unviewed:true,feed:{id:'second',title:'Другой фид',folder_id:'f',kind:'rss',connection:'ready',identity:'https://second.test/feed',transport:'rss',importance:'normal',original_urls:['https://second.test/feed'],initial_days:1,public_ai:false,history:{state:'absent'}}}]}});
+   t.replies.set('/api/v3/navigation',{body:{total:2,folders:[{id:'f',title:'Каналы',count:2,feeds:[window.readerFixtures.navigationFeed({id:'feed',title:feedTitle,kind:'telegram',connection:'needs_connection',telegram_access:'unconfigured',count:1,avatar_url:avatarUrl}),window.readerFixtures.navigationFeed({id:'second',title:'Другой фид',count:1})]}]}});
    t.replies.set(avatarUrl,{mime:'image/svg+xml',base64:'PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiBmaWxsPSIjYjZiOGQxIi8+PGNpcmNsZSBjeD0iNTAiIGN5PSIxMCIgcj0iMjUiIGZpbGw9IiNlOGQ0YjciLz48cGF0aCBkPSJNMCA1NVEzMCAxNSA2NCA1NVY2NEgwIiBmaWxsPSIjNmU3YTc4Ii8+PHRleHQgeD0iMzIiIHk9IjQyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSJ3aGl0ZSIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjgiPtCbPC90ZXh0Pjwvc3ZnPg=='});
   },{avatarUrl,feedTitle});
   await expect(r.page.locator('[data-feed="feed"]')).toHaveAttribute('title',feedTitle);
@@ -33,18 +33,18 @@ test('opened publication shows variant B with avatar and wrapping long feed and 
   await expect(r.page.locator('#material-byline .source-icon')).toBeVisible();
   await r.page.locator('#cards button').filter({hasText:publicationTitle}).click();
   await expect(avatar).toHaveJSProperty('naturalWidth',64);
-  await r.page.evaluate(()=>{const nav=readerTransport.replies.get('/api/v3/reading-composition')!.body!;const entry=nav.feeds[0];if('feed' in entry&&entry.feed&&typeof entry.feed==='object'&&'avatar_url' in entry.feed)delete entry.feed.avatar_url;});
+  await r.page.evaluate(()=>{const nav=readerTransport.replies.get('/api/v3/navigation')!.body!;nav.folders[0].feeds[0].avatar_url=null;});
   await expect(avatar).toHaveCount(0);
   await expect(r.page.locator('#material-byline .source-icon')).toBeVisible();
-  await r.page.evaluate(()=>{const t=readerTransport,url='/api/v3/feeds/feed/avatar/'+'b'.repeat(64);t.replies.set(url,{mime:'image/png',base64:'bm90IGFuIGltYWdl'});const entry=t.replies.get('/api/v3/reading-composition')!.body!.feeds[0];if('feed' in entry&&entry.feed&&typeof entry.feed==='object')Object.assign(entry.feed,{avatar_url:url,title:'Канал с повреждённым аватаром'});});
+  await r.page.evaluate(()=>{const t=readerTransport,url='/api/v3/feeds/feed/avatar/'+'b'.repeat(64);t.replies.set(url,{mime:'image/png',base64:'bm90IGFuIGltYWdl'});Object.assign(t.replies.get('/api/v3/navigation')!.body!.folders[0].feeds[0],{avatar_url:url,title:'Канал с повреждённым аватаром'});});
   await expect(r.page.locator('#material-feed-title')).toHaveText('Канал с повреждённым аватаром');
   await expect(avatar).toHaveCount(0);
   await expect(r.page.locator('#material-byline .source-icon')).toBeVisible();
-  await r.page.evaluate(avatarUrl=>{const nav=readerTransport.replies.get('/api/v3/reading-composition')!.body!;const entry=nav.feeds[0];if('feed' in entry&&entry.feed&&typeof entry.feed==='object')Object.assign(entry.feed,{avatar_url:avatarUrl,title:'Переименованный канал'});},avatarUrl);
+  await r.page.evaluate(avatarUrl=>{const nav=readerTransport.replies.get('/api/v3/navigation')!.body!;Object.assign(nav.folders[0].feeds[0],{avatar_url:avatarUrl,title:'Переименованный канал'});},avatarUrl);
   await expect(avatar).toHaveJSProperty('naturalWidth',64);
   await expect(r.page.locator('#material-feed-title')).toHaveText('Переименованный канал');
   const retainedAvatar=await avatar.getAttribute('src');
-  await r.page.evaluate(()=>{const nav=readerTransport.replies.get('/api/v3/reading-composition')!.body!;nav.feeds=nav.feeds.filter(entry=>'feed' in entry&&entry.feed&&typeof entry.feed==='object'&&'id' in entry.feed&&entry.feed.id!=='feed');});
+  await r.page.evaluate(()=>{const nav=readerTransport.replies.get('/api/v3/navigation')!.body!;nav.folders[0].feeds=nav.folders[0].feeds.filter(entry=>entry.id!=='feed');});
   await expect(r.page.locator('[data-feed="feed"]')).toHaveCount(0);
   await expect(r.page.locator('#material-feed-title')).toHaveText('Переименованный канал');
   await expect(avatar).toHaveAttribute('src',retainedAvatar!);
@@ -58,16 +58,16 @@ test('switch clears old material immediately and ignores late opening errors', a
     await r.start([material('A'), material('B'), material('C')]);
     await r.page.locator('#cards').getByRole('button', {name: /^A/}).click();
     await expect(r.page.locator('#text')).toHaveText('Текст A');
-    await r.page.evaluate(() => { readerTransport.held.set('/fixture/material/B', true); readerTransport.held.set('/fixture/material/C', true); });
+    await r.page.evaluate(() => { readerTransport.held.set('/api/v3/publication/B', true); readerTransport.held.set('/api/v3/publication/C', true); });
     await r.page.getByRole('button', {name: /^B/}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/fixture/material/B'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/publication/B'));
     await expect(r.page.locator('#text')).toHaveText('');
     await expect(r.page.locator('#empty')).toHaveText('Loading item…');
     await r.page.locator('#cards').getByRole('button', {name: /^C/}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/fixture/material/C'));
-    await r.page.evaluate(body => readerTransport.release('/fixture/material/C', body), material('C'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/publication/C'));
+    await r.page.evaluate(body => readerTransport.release('/api/v3/publication/C', body), material('C'));
     await expect(r.page.locator('#text')).toHaveText('Текст C');
-    await r.page.evaluate(() => readerTransport.release('/fixture/material/B', {detail: 'Поздняя ошибка B'}, 500));
+    await r.page.evaluate(() => readerTransport.release('/api/v3/publication/B', {detail: 'Поздняя ошибка B'}, 500));
     await settle(r.page);
     await expect(r.page.locator('#text')).toHaveText('Текст C');
     assert.deepEqual(r.errors, []);
@@ -78,12 +78,12 @@ test('late success of an old opening cannot replace the selected card', async ()
   const r = await reader();
   try {
     await r.start([material('A'), material('B')]);
-    await r.page.evaluate(() => readerTransport.held.set('/fixture/material/A', true));
+    await r.page.evaluate(() => readerTransport.held.set('/api/v3/publication/A', true));
     await r.page.locator('#cards').getByRole('button', {name: /^A/}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/fixture/material/A'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/publication/A'));
     await r.page.getByRole('button', {name: /^B/}).click();
     await expect(r.page.locator('#text')).toHaveText('Текст B');
-    await r.page.evaluate(body => readerTransport.release('/fixture/material/A', body), material('A'));
+    await r.page.evaluate(body => readerTransport.release('/api/v3/publication/A', body), material('A'));
     await settle(r.page);
     await expect(r.page.locator('#text')).toHaveText('Текст B');
     assert.deepEqual(r.errors, []);
@@ -123,9 +123,10 @@ const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwM
 test('viewing retains loaded media and playback, rejects late media and switching releases URLs', async () => {
   const r = await reader();
   try {
-    await r.start([material('A', {images: ['/api/v3/materials/A/images/image-2.png'], attachments: [
-      {url: '/api/v3/materials/A/media/media-1.webm', kind: 'video', mime: 'video/webm'},
-      {url: '/api/v3/materials/A/media/media-2.webm', kind: 'circle', mime: 'video/webm'},
+    await r.start([material('A', {media: [
+      {url:'/api/v3/materials/A/images/image-2.png',kind:'image',role:'image',mime:null},
+      {url: '/api/v3/materials/A/media/media-1.webm', kind: 'video', role:'attachment',mime: 'video/webm'},
+      {url: '/api/v3/materials/A/media/media-2.webm', kind: 'circle', role:'attachment',mime: 'video/webm'},
     ]}),material('B')]);
     const base64 = await videoFixture(r.page);
     await r.page.evaluate(({base64, png}) => {
@@ -146,7 +147,7 @@ test('viewing retains loaded media and playback, rejects late media and switchin
       window.testVideo = document.querySelector<HTMLVideoElement>('#images video')!;
       testVideo.muted = true; testVideo.loop = true; await testVideo.play();
     });
-    await r.page.evaluate(() => readerTransport.replies.set('POST /api/v3/materials/A/viewed', {body:{ok:true},next:[['/api/v3/cards',{body:[{...readerTransport.replies.get('/fixture/material/B')!.body!}]}]]}));
+    await r.page.evaluate(() => readerTransport.replies.set('POST /api/v3/materials/A/viewed', {body:{ok:true},next:[['/api/v3/cards',{body:window.readerFixtures.cardPage(readerTransport.replies.get('/api/v3/cards')!.body!.items.filter(card=>card.id==='B'))}]]}));
     await r.page.getByRole('button', {name: 'Mark as Read', exact: true}).click();
     await expect(r.page.locator('#material-retained')).toBeVisible();
     assert.equal(await r.page.evaluate(() => !testVideo.paused && testVideo.hasAttribute('src')), true);
@@ -171,15 +172,15 @@ test('viewing a publication in another tab closes its pending opening but preser
     const unrelated = material('other', {folder_id: 'other-folder',feed_id:'other-feed'});
     await r.start([source, unrelated]);
     const otherTab = await r.context.newPage(); await r.start([source], otherTab);
-    await r.page.evaluate(() => readerTransport.held.set('/fixture/material/source', true));
+    await r.page.evaluate(() => readerTransport.held.set('/api/v3/publication/source', true));
     await r.page.getByRole('button', {name: /^source/}).click();
-    await r.page.waitForFunction(() => readerTransport.pending.has('/fixture/material/source'));
+    await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/publication/source'));
     await otherTab.getByRole('button', {name: /^source/}).click();
     await expect(otherTab.locator('#text')).toHaveText('Текст source');
-    await otherTab.evaluate(() => readerTransport.replies.set('POST /api/v3/materials/source/viewed', {body:{ok:true},next:[['/api/v3/cards',{body:[]}]]}));
+    await otherTab.evaluate(() => readerTransport.replies.set('POST /api/v3/materials/source/viewed', {body:{ok:true},next:[['/api/v3/cards',{body:window.readerFixtures.cardPage([])}]]}));
     await otherTab.getByRole('button', {name: 'Mark as Read', exact: true}).click();
     await expect(r.page.locator('#empty')).toHaveText('Select an item');
-    await r.page.evaluate(body => readerTransport.release('/fixture/material/source', body), source);
+    await r.page.evaluate(body => readerTransport.release('/api/v3/publication/source', body), source);
     await settle(r.page);
     await expect(r.page.locator('#empty')).toHaveText('Select an item');
     await r.page.locator('[data-card="other"]').click();
@@ -196,15 +197,15 @@ for (const interruption of ['stop']) {
     const r = await reader();
     try {
       await r.start([material('A')]);
-      await r.page.evaluate(() => readerTransport.held.set('/fixture/material/A', true));
+      await r.page.evaluate(() => readerTransport.held.set('/api/v3/publication/A', true));
       await r.page.locator('#cards').getByRole('button', {name: /^A/}).click();
-      await r.page.waitForFunction(() => readerTransport.pending.has('/fixture/material/A'));
+      await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/publication/A'));
       if (interruption === 'stop') await r.page.evaluate(()=>{readerTransport.replies.get('/api/v3/status')!.body!.stopped=true;});
       else {
         await r.page.evaluate(() => readerTransport.replies.set('/api/v3/status', {status: 503, body: {detail: 'Связь потеряна'}}));
       }
       await expect(r.page.locator('#empty')).toHaveText('Select an item');
-      await r.page.evaluate(body => readerTransport.release('/fixture/material/A', body), material('A'));
+      await r.page.evaluate(body => readerTransport.release('/api/v3/publication/A', body), material('A'));
       await settle(r.page);
       await expect(r.page.locator('#text')).toHaveText('');
       await expect(r.page.locator('#material')).toBeHidden();
@@ -220,11 +221,11 @@ test('background processing updates keep long material visible and preserve scro
   await expect(r.page.locator('#text')).toContainText('Длинный текст');
   await r.page.locator('article').evaluate(node=>node.scrollTop=700);
   const before=await r.page.locator('article').evaluate(node=>node.scrollTop);expect(before).toBeGreaterThan(100);
-  await r.page.evaluate(()=>{const t=readerTransport;t.held.set('/fixture/material/long',true);t.replies.get('/api/v3/cards')!.body![0].ai={status:'pending',error:'Запрещена публичная AI-обработка'};});
-  await r.page.waitForFunction(()=>readerTransport.pending.has('/fixture/material/long'));
+  await r.page.evaluate(()=>{const t=readerTransport;t.held.set('/api/v3/publication/long',true);});
+  await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/publication/long'));
   await expect(r.page.locator('#text')).toContainText('Длинный текст');
   expect(await r.page.locator('article').evaluate(node=>node.scrollTop)).toBe(before);
-  await r.page.evaluate(()=>readerTransport.release('/fixture/material/long',readerTransport.replies.get('/fixture/material/long')!.body));
+  await r.page.evaluate(()=>readerTransport.release('/api/v3/publication/long',readerTransport.replies.get('/api/v3/publication/long')!.body));
   await expect(r.page.locator('#text')).toContainText('Длинный текст');
   expect(await r.page.locator('article').evaluate(node=>node.scrollTop)).toBe(before);
  }finally{await r.close();}
@@ -233,13 +234,13 @@ test('background processing updates keep long material visible and preserve scro
 test('new text waits for a button, keeps its paragraph and never mixes summaries across revisions',async()=>{
   const r=await reader();try{
     const text=Array.from({length:90},(_,i)=>'Абзац '+i+' '+('сохранённый текст '.repeat(10))).join('\n\n');
-    const old=material('A',{text,version:'old',theses:{points:[{text:'Старые тезисы',sources:[]}]}});
+    const old=material('A',{text,revision_id:'old',theses:{state:'ready',error:null,result:{points:['Старые тезисы'],references:[[]],provenance:{kind:'unknown',reason:'not_recorded'}}}});
     await r.start([old]);await r.page.locator('[data-card="A"]').click();
     await expect(r.page.locator('#theses')).toHaveText('Старые тезисы');
     await r.page.locator('#text [data-reading-paragraph]').nth(25).evaluate(node=>node.scrollIntoView({block:'start'}));
     const before=await r.page.locator('#text [data-reading-paragraph]').nth(25).boundingBox();
-    const fresh={...old,text:'Новый первый абзац\n\n'.repeat(8)+text,version:'new',theses:{points:[{text:'Новые тезисы',sources:[]}]}};
-    await r.page.evaluate(fresh=>readerTransport.replies.set('/fixture/material/A',{body:fresh}),fresh);
+    const fresh={...old,text:'Новый первый абзац\n\n'.repeat(8)+text,revision_id:'new',theses:{state:'ready' as const,error:null,result:{points:['Новые тезисы'],references:[[]],provenance:{kind:'unknown' as const,reason:'not_recorded' as const}}}};
+    await r.page.evaluate(fresh=>readerTransport.replies.set('/api/v3/publication/A',{body:fresh}),fresh);
     await expect(r.page.locator('#material-update-button')).toBeVisible();
     await expect(r.page.locator('#text')).toHaveText(text);
     await expect(r.page.locator('#theses')).toHaveText('Старые тезисы');
@@ -258,7 +259,7 @@ test('new text waits for a button, keeps its paragraph and never mixes summaries
 test('removed cards and connection loss keep loaded text, reload drops it',async()=>{
   const r=await reader();try{
     await r.start([material('A')]);await r.page.locator('[data-card="A"]').click();await expect(r.page.locator('#text')).toHaveText('Текст A');
-    await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/cards',{body:[]}));
+    await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/cards',{body:window.readerFixtures.cardPage([])}));
     await expect(r.page.locator('#cards button')).toHaveCount(0);await expect(r.page.locator('#text')).toHaveText('Текст A');
     await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/status',{status:503,body:{detail:'Offline'}}));
     await expect(r.page.locator('#collection-progress')).toContainText('Нет связи');await expect(r.page.locator('#text')).toHaveText('Текст A');
@@ -280,13 +281,13 @@ test('storage replacement rejects old media replies and stages the replacement b
         return new Response(await reply.text(),{status:reply.status,headers:responseHeaders});
       };
     });
-    await r.start([material('A',{version:'old',images:[]})]);
-    await r.page.evaluate(url=>{const reply=readerTransport.replies.get('/fixture/material/A');if(!reply?.body||typeof reply.body!=='object')throw new Error('Missing material fixture');reply.body={...reply.body,images:[url]};},url);
+    await r.start([material('A',{revision_id:'old',media:[]})]);
+    await r.page.evaluate(url=>{const reply=readerTransport.replies.get('/api/v3/publication/A');if(!reply?.body||typeof reply.body!=='object')throw new Error('Missing material fixture');reply.body={...reply.body,media:[{kind:'image',role:'image',url,mime:null}]};},url);
     await r.page.evaluate(url=>readerTransport.held.set(url,true),url);
     await r.page.locator('[data-card="A"]').click();await expect(r.page.locator('#text')).toHaveText('Текст A');await r.page.waitForFunction(url=>readerTransport.pending.has(url),url);
     await r.page.evaluate(()=>{
       readerTransport.held.set('test-storage-reset',true);
-      readerTransport.replies.set('/fixture/material/A',{body:{...readerTransport.replies.get('/fixture/material/A')!.body!,text:'Другой экземпляр',version:'old'}});
+      readerTransport.replies.set('/api/v3/publication/A',{body:{...readerTransport.replies.get('/api/v3/publication/A')!.body!,text:'Другой экземпляр',revision_id:'old'}});
     });
     // Wait for the request after reset: the already in-flight pre-reset poll
     // can discover the new text before the injected reset is accepted.
@@ -384,7 +385,7 @@ test('a late old-library publication response cannot cross an accepted storage r
     return original(url,options);
    };
   });
-  await r.start([material('A',{version:'same',text:'Original text'})]);
+  await r.start([material('A',{revision_id:'same',text:'Original text'})]);
   await r.page.locator('[data-card="A"]').click();await expect(r.page.locator('#text')).toHaveText('Original text');
   await r.page.evaluate(()=>{(window as unknown as {publicationLateRestore:{enabled:boolean}}).publicationLateRestore.enabled=true;});
   await r.page.waitForFunction(()=>{const r=(window as unknown as {publicationLateRestore:{reset:boolean;oldHeld:boolean}}).publicationLateRestore;return r.reset&&r.oldHeld;});
@@ -425,5 +426,19 @@ test('processing and error states show the current attempt without inventing a r
   await r.page.evaluate(()=>{(window as unknown as {publicationProcessingState:{mode:string}}).publicationProcessingState.mode='pending';});
   await expect(r.page.locator('#ai-status')).toHaveText('Waiting for processor');
   await expect(r.page.locator('#theses-retry')).toBeHidden();
+ }finally{await r.close();}
+});
+
+test('HTTP 404 after opening retains the already displayed publication',async()=>{
+ const r=await reader();try{
+  await r.start([material('gone')]);
+  await r.page.locator('[data-card="gone"]').click();
+  await expect(r.page.locator('#text')).toHaveText('Текст gone');
+  await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/publication/gone',{
+   status:404,body:{code:'resource_not_found',message:'Publication not found',details:{resource:{kind:'material',material_id:'gone'}},diagnostic_id:null,command_id:null}
+  }));
+  await expect(r.page.locator('#material-retained')).toBeVisible();
+  await expect(r.page.locator('#text')).toHaveText('Текст gone');
+  expect(r.errors).toEqual([]);
  }finally{await r.close();}
 });

@@ -8,14 +8,13 @@ test('synthetic reader surfaces screenshots and geometry',async()=>{
  for(const width of [1440]){
   const r=await reader();try{
    await r.page.setViewportSize({width,height:900});
-   const points={points:[{text:'Основной тезис синтетического материала',sources:[{id:'plain',url:'https://example.org/plain'}]}]};
    const source=material('source',{});
    await r.start([
-    material('plain',{title:'We Finally Know More About Humanity’s First Civilization',text:'Сохранённый текст публикации.\n\n'+('Читаем без изменения вёрстки. '.repeat(20)),published:1801991220}),
-    material('video',{title:'Видео с недоступными субтитрами',captions:'unavailable',full:false,reason:'YouTube ограничил получение субтитров',description:'Описание видео\n\n'+('Текст и длинная ссылка https://example.org/'+'example/'.repeat(12)+'\n').repeat(3),text:''}),
-    material('theses',{theses:points,provenance:{processor:'codex',model:'synthetic',reasoning_effort:'high',fast:false}}),
-    material('hidden',{filter:{status:'done',hidden:true,reason:'Синтетический фильтр',removed:[]}}),
-    material('media',{images:['/api/v3/image']}),
+    material('plain',{title:'We Finally Know More About Humanity’s First Civilization',text:'Сохранённый текст публикации.\n\n'+('Читаем без изменения вёрстки. '.repeat(20)),published_at:new Date(1801991220*1000).toISOString()}),
+    material('video',{title:'Видео с недоступными субтитрами',source:{kind:'youtube',feed_id:'feed',source_url:'https://example.org/video',captions:'unavailable'},completeness:{state:'incomplete',reason:'source_incomplete',message:'YouTube ограничил получение субтитров'},description:'Описание видео\n\n'+('Текст и длинная ссылка https://example.org/'+'example/'.repeat(12)+'\n').repeat(3),text:''}),
+    material('theses',{theses:{state:'ready',error:null,result:{points:['Основной тезис синтетического материала'],references:[[{material_id:'plain',source_url:'https://example.org/plain'}]],provenance:{kind:'codex',model:'synthetic',reasoning_effort:'high',fast:false}}}}),
+    material('hidden',{card:{hidden:true},filter:{state:'ready',error:null,result:{hidden:true,reason:'Синтетический фильтр',removed:[],text:'Текст hidden',provenance:{kind:'unknown',reason:'not_recorded'}}}}),
+    material('media',{card:{preview_url:'/api/v3/image'},media:[{kind:'image',role:'image',url:'/api/v3/image',mime:null}]}),
     material('pending'),material('failed')
    ]);
    await r.page.evaluate(()=>{
@@ -26,8 +25,8 @@ test('synthetic reader surfaces screenshots and geometry',async()=>{
     t.replies.set('/api/v3/import/preview',{body:{folders:[{title:'Наука'}],feeds:[]}});
     t.replies.set('/api/v3/feeds/verify',{body:{url:'https://example.org/feed.xml',title:'Синтетический источник',kind:'rss',verification:'verified'}});
     t.replies.set('/api/v3/image',{mime:'image/png',base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR9sAAAAASUVORK5CYII='});
-    t.held.set('/fixture/material/pending',true);
-    t.replies.set('/fixture/material/failed',{status:503,body:{detail:'Синтетическая ошибка открытия'}});
+    t.held.set('/api/v3/publication/pending',true);
+    t.replies.set('/api/v3/publication/failed',{status:503,body:{detail:'Синтетическая ошибка открытия'}});
    });
    async function shot(name: string,scope: string){
     await r.page.locator(scope).scrollIntoViewIfNeeded();

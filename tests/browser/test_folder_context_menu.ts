@@ -65,7 +65,7 @@ test('folder completion by context menu includes hidden zero-count items and ign
  const r=await reader();try{
   await r.start([material('a')]);
   await r.page.evaluate(()=>{
-   readerTransport.replies.set('/api/v3/reading-composition',{body:{count:1,folders:[{id:'f',title:'Hidden',count:0},{id:'other',title:'Other',count:1}],feeds:[{id:'feed',title:'feed',folder_id:'f',kind:'rss',count:0,has_unviewed:true},{id:'other-feed',title:'other',folder_id:'other',kind:'rss',count:1,has_unviewed:true}]}});
+   readerTransport.replies.set('/api/v3/navigation',{body:{total:1,folders:[{id:'f',title:'Hidden',count:0,feeds:[window.readerFixtures.navigationFeed({id:'feed',title:'feed'})]},{id:'other',title:'Other',count:1,feeds:[window.readerFixtures.navigationFeed({id:'other-feed',title:'other',count:1})]}]}});
    readerTransport.held.set('/api/v3/folders/f/completion/preview',true);
    readerTransport.replies.set('/api/v3/folders/other/completion/preview',{body:{token:'other',cards_count:1,publications_count:1}});
   });

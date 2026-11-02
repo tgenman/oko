@@ -1,5 +1,6 @@
 import {installReadingFixtures} from './reading-fixtures';
 import type {FixtureMaterial, ReplyMap} from './fixture-types.ts';
+import type {CardListItem} from '../../frontend/src/api/generated/types.gen';
 import {productionReader} from './http-reader.ts';
 import {expect} from 'playwright/test';
 import {contractFor, validate} from './contracts.ts';
@@ -20,7 +21,13 @@ async function reader() {
       // External transport adapter deliberately ignores cancellation: a late
       // response must be harmless even when abort cannot stop its delivery.
       // Explicit synthetic baseline: scenarios opt into this fixture factory.
-      window.readerFixtures = {history: values => ({mode:'count',count:20,count_text:null,date:null,timezone:'UTC',since:null,loaded:0,viewed:0,incomplete:0,available:20,paused:false,frozen:true,retrying:0,unavailable:0,errors:[],scan_complete:true,state:'done',...values})};
+      window.readerFixtures = {cardPage: items => ({items,total:items.length,next_cursor:null}),
+       cardWindows: items => {
+        for(const key of window.readerTransport.replies.keys())if(key.startsWith('/api/v3/cards?sort=newest&cursor='))window.readerTransport.replies.delete(key);
+        for(let start=0;start<items.length;start++)for(let limit=1;limit<=40;limit++) {
+        const query=new URLSearchParams({sort:'newest',cursor:items[start].id,limit:String(limit)});
+        window.readerTransport.replies.set('/api/v3/cards?'+query,{body:{items:items.slice(start,start+limit),total:items.length,next_cursor:items[start+limit]?.id||null}});
+       }}, navigationFeed: values => ({avatar_url:null,connection:'ready',count:0,has_unviewed:true,kind:'rss',telegram_access:null,...values}), history: values => ({mode:'count',count:20,count_text:null,date:null,timezone:'UTC',since:null,loaded:0,viewed:0,incomplete:0,available:20,paused:false,frozen:true,retrying:0,unavailable:0,errors:[],scan_complete:true,state:'done',...values})};
       const nativeFetch = window.fetch.bind(window);
       const replies: ReplyMap = new Map();
       const held = new Map<string, boolean>();
@@ -100,7 +107,7 @@ async function reader() {
       const response = async (url: string, method: string, body: unknown, status = 200) => {
         body=window.readingFixtureReply(url,method,body,status);
         if(status>=200&&status<300){body=v3Reply(url,method,body);if(url==='/api/v3/status'&&body&&typeof body==='object'&&'work' in body)body=compactStatus(body as import('../../frontend/src/api/generated/types.gen').RuntimeStatus);}
-        if(!(new URL(url,'http://localhost').pathname==='/api/v3/cards'&&Array.isArray(body)))await window.validateReaderReply(url, method, status, body, aliases.get(url), true);
+        await window.validateReaderReply(url, method, status, body, aliases.get(url), true);
         return new Response(JSON.stringify(body), {status, headers: {'Content-Type': 'application/json'}});
       };
       window.readerTransport = {
@@ -110,17 +117,14 @@ async function reader() {
           resolve(status===204?new Response(null,{status:204}):response(url, window.readerTransport.requests.filter(request=>request.url===url).at(-1)?.method||'GET', body, status));
         },
       };
-      // Existing scenarios describe publication snapshots. Adapt those snapshots
-      // to the new wire protocol here; requests still record only actual HTTP calls.
+      // Conditional delivery uses the exact snapshots supplied by each scenario.
       const entityVersions=new Map<string,{version:number;json:string}>();
-      async function fixtureRead(url:string) {
-        if(held.has(url)){const result=await new Promise<Response>(resolve=>pending.set(url,resolve)),body=await result.json();if(!result.ok)throw new Error(body.message||body.detail||'Synthetic reading failure');return body;}
+      async function fixtureResponse(url:string):Promise<Response> {
+        if(held.has(url))return new Promise<Response>(resolve=>pending.set(url,resolve));
         const pathname=url.split('?')[0],reply=replies.get('GET '+url)||replies.get(url)||replies.get('GET '+pathname)||replies.get(pathname)||(pathname==='/api/v3/status/details'?replies.get('/api/v3/status'):undefined);
         if(!reply)throw new Error('Missing selective fixture: '+url);
         for(const [route,next] of reply.next||[])replies.set(route,next);
-        const result=await response(url,'GET',reply.body,reply.status||200),body=await result.json();
-        if(!result.ok)throw new Error(body.message||body.detail||'Synthetic reading failure');
-        return body;
+        return response(url,'GET',reply.body,reply.status||200);
       }
       const storageId='3f003741-d0c7-4e62-8d12-55fb652f404a';
       window.fetch = async (url, options) => {
@@ -129,49 +133,43 @@ async function reader() {
         if (window.readerTransport.native.has(key)) return nativeFetch(url, options);
         if(new URL(key,'http://localhost').pathname==='/api/v3/cards'&&(options?.method||'GET')==='GET'){
           const query=new URL(key,'http://localhost').searchParams,p=new URLSearchParams({sort:query.get('sort')||'newest'});
-          for(const name of ['folder','feed','show_hidden'])if(query.has(name)&&(name!=='show_hidden'||query.get(name)==='true'))p.set(name,query.get(name)!);
-          const rows=await fixtureRead('/api/v3/cards?'+p) as import('./fixture-types').SyntheticCard[];
-          const cursor=query.get('cursor'),start=cursor?rows.findIndex(card=>card.id===cursor):0;
-          if(start<0)return new Response(JSON.stringify({code:'cursor_expired'}),{status:409,headers:{'Content-Type':'application/json'}});
-          const limit=Number(query.get('limit')||40),selected=rows.slice(start,start+limit),next=rows[start+limit]?.id||null;
-          const items=selected.map(card=>({id:card.id,feed_id:card.feed_id,title:card.title,published_at:card.published_at,source_url:card.source_url,preview_url:card.availability==='available'?(card.images[0]||card.attachments.find(a=>a.kind==='image')?.url||null):null,loading:card.loading||card.availability==='pending',changed:card.availability==='available'&&card.changed,hidden:!!card.filter.result?.hidden,post_web_unavailable:card.availability==='available'&&!!card.post_web_unavailable,external_attachment_kinds:card.availability==='available'?card.external_attachment_kinds||[]:[]}));
-          return response(key,'GET',{items,total:rows.length,next_cursor:next});
+          for(const name of ['folder','feed','show_hidden','cursor'])if(query.has(name)&&(name!=='show_hidden'||query.get(name)==='true'))p.set(name,query.get(name)!);
+          if(query.has('cursor'))p.set('limit',query.get('limit')||'40');
+          const route='/api/v3/cards?'+p;
+          if(held.has(route))return new Promise(resolve=>pending.set(route,resolve));
+          const reply=replies.get('GET '+route)||replies.get(route)||(p.toString()==='sort=newest'?replies.get('/api/v3/cards'):undefined);
+          if(!reply)throw new Error('Missing card page fixture: '+route);
+          for(const [target,next] of reply.next||[])replies.set(target,next);
+          return response(key,'GET',reply.body,reply.status||200);
         }
         if(key==='/api/v3/cards/read'&&options?.method==='POST'){
           if(held.has(key))return new Promise(resolve=>pending.set(key,resolve));
-          const failure=replies.get('POST '+key)||replies.get(key);if(failure&&(failure.status||200)>=400)return response(key,'POST',failure.body,failure.status);
-          const ids=JSON.parse(String(options.body)).ids as string[];
-          const updates=ids.flatMap(id=>replies.get('POST /api/v3/materials/'+id+'/viewed')?.next||[]);
-          for(const [route,next] of updates)replies.set(route,next);
+          const reply=replies.get('POST '+key)||replies.get(key);
+          if(reply&&(reply.status||200)>=400)return response(key,'POST',reply.body,reply.status);
+          for(const [route,next] of reply?.next||[])replies.set(route,next);
           return new Response(null,{status:204});
         }
         if(/^\/api\/v3\/publication\/[^/]+$/.test(key)){
-          const id=key.split('/')[4],m=await fixtureRead('/fixture/material/'+id) as import('./fixture-types').SyntheticOpened;
-          const c=m.availability==='available'?m.content:null,f=m.filter.result,t=m.theses.result;
-          const state=(part:typeof m.filter|typeof m.theses)=>part.attempt.state==='running'?'processing':part.diagnostic_message&&part.attempt.state!=='ready'?'error':({disabled:'disabled',queued:'pending',cancelled:'pending',waiting:'pending',ready:'ready'} as const)[part.attempt.state];
-          const attachments=c?.attachments||[],images=c?.images||[];
-          const body={id:m.id,title:m.title,feed_id:m.feed_id,published_at:m.published_at,source_url:m.source_url,text:c?.text||'',source:m.source,availability:m.availability,description:c?.description||'',revision_id:c?.revision_id||null,completeness:c?.completeness||null,loading:c?.loading??m.content.loading,changed:c?.changed||false,source_deleted:c?.source_deleted||false,linked_content:c?.linked_content||null,reply_preview:c?.reply_preview||null,post_web_unavailable:c?.post_web_unavailable||false,external_attachments:c?.external_attachments||[],
-           filter:{state:state(m.filter),result:f?{hidden:f.hidden,reason:f.reason,text:f.removed.reduce((text,fragment)=>text.split(fragment).join(''),c?.text||''),removed:f.removed,provenance:f.provenance}:null,error:state(m.filter)==='error'?m.filter.diagnostic_message:null},
-           theses:{state:state(m.theses),result:t?{points:t.points.map(p=>p.text),references:t.points.map(p=>p.references),provenance:t.provenance}:null,error:state(m.theses)==='error'?m.theses.diagnostic_message:null},
-           media:[...images.map(url=>({kind:'image' as const,url,mime:null,role:'image' as const})),...attachments.map(a=>({kind:a.kind,url:a.url,mime:a.mime,role:'attachment' as const}))]};
+          const id=key.split('/')[4],snapshot=await fixtureResponse('/api/v3/publication/'+id);
+          if(!snapshot.ok)return snapshot;
+          const body=await snapshot.json();
           const json=JSON.stringify(body),old=entityVersions.get('publication/'+id),version=old?(old.json===json?old.version:old.version+1):1;entityVersions.set('publication/'+id,{version,json});
           const etag='"'+version+'"';if(new Headers(options?.headers).get('If-None-Match')===etag)return new Response(null,{status:304,headers:{ETag:etag}});
           const result=await response(key,'GET',body);result.headers.set('ETag',etag);return result;
         }
         if(key==='/api/v3/navigation'){
-          const catalog=await fixtureRead('/api/v3/reading-composition') as import('../../frontend/src/api/generated/types.gen').ReadingComposition;
-          const body={total:catalog.count,folders:catalog.folders.map(folder=>({id:folder.id,title:folder.title,count:folder.count,
-            feeds:catalog.feeds.filter(entry=>entry.feed.folder_id===folder.id).sort((a,b)=>a.feed.title.toLocaleLowerCase().localeCompare(b.feed.title.toLocaleLowerCase())||a.feed.id.localeCompare(b.feed.id)).map(entry=>({id:entry.feed.id,title:entry.feed.title,
-              avatar_url:'avatar_url' in entry.feed?entry.feed.avatar_url??null:null,count:entry.count,kind:entry.feed.kind,
-              has_unviewed:entry.has_unviewed,connection:entry.feed.connection,
-              telegram_access:entry.feed.kind==='telegram'?entry.feed.access.kind:null}))}))};
+          const snapshot=await fixtureResponse('/api/v3/navigation');
+          if(!snapshot.ok)return snapshot;
+          const body=await snapshot.json();
           const json=JSON.stringify(body),old=entityVersions.get('navigation/subject'),version=old?(old.json===json?old.version:old.version+1):1;
           entityVersions.set('navigation/subject',{version,json});const etag='"'+version+'"';
           if(new Headers(options?.headers).get('If-None-Match')===etag)return new Response(null,{status:304,headers:{ETag:etag}});
           const result=await response(key,'GET',body);result.headers.set('ETag',etag);return result;
         }
         if(key==='/api/v3/status'||key==='/api/v3/status/details'){
-          const body=await fixtureRead(key);
+          const snapshot=await fixtureResponse(key);
+          if(!snapshot.ok)return snapshot;
+          const body=await snapshot.json();
           const json=JSON.stringify(body),old=entityVersions.get(key),version=old?(old.json===json?old.version:old.version+1):1;
           entityVersions.set(key,{version,json});const etag='"'+version+'"';
           if(new Headers(options?.headers).get('If-None-Match')===etag)return new Response(null,{status:304,headers:{ETag:etag,'X-Oko-Storage-Id':storageId}});
@@ -193,30 +191,48 @@ async function reader() {
       URL.revokeObjectURL = url => { window.browserResources.revoked.push(url); revoked(url); };
     });
     const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
-    async function start(materials: FixtureMaterial[], target = page) {
-      await target.addInitScript(materials => {
+    async function start(materials: FixtureMaterial[], target = page, pages: Record<string, import('../../frontend/src/api/generated/types.gen').CardPage> = {}) {
+      await target.addInitScript(({materials,cards,metadata,pages}) => {
         const t = window.readerTransport;
         t.replies.set('/api/v3/status', {body: {stage: 'Готово', errors: [], sources: [], ready_sources: 1, total_sources: 1}});
         t.replies.set('/api/v3/folders', {body: [{id: 'f', title: 'Тема', count: 0}]});
-        t.replies.set('/api/v3/reading-composition', {body: {folders: [...new Set(['f',...materials.map(m=>m.folder_id||'f')])].map(id=>({id,title:id==='f'?'Тема':id,count:0})), feeds:[...new Map(materials.map(m=>[m.feed_id,{id:m.feed_id,title:m.feed_title||m.feed_id,folder_id:m.folder_id||'f',kind:'rss',count:0}])).values()], count:0}});
+        t.replies.set('/api/v3/navigation', {body: {total:0,folders: [...new Set(['f',...metadata.map(m=>m.folder_id)])].map(id=>({id,title:id==='f'?'Тема':id,count:0,feeds:[...new Map(materials.flatMap((m,i)=>metadata[i].folder_id===id?[[m.feed_id,window.readerFixtures.navigationFeed({id:m.feed_id,title:metadata[i].feed_title||m.feed_id})] as const]:[])).values()]}))}});
         t.replies.set('/api/v3/processors/codex', {body:{config:null}});
         t.replies.set('/api/v3/youtube', {body:{mode:'direct', address:'', has_password:false, has_username:false, paused:false, next_at:0, strikes:0, reason:''}});
         t.replies.set('/api/v3/processors/codex/models', {body:{models:[]}});
         const settings = {originals: true, theses: true, prompt_theses: 'Тезисы', prompt_filters: '', filter_enabled: false, processor: 'codex'};
         t.replies.set('/api/v3/settings/oko/global', {body: {overrides: {}, effective: Object.fromEntries(Object.entries(settings).map(([key, value]) => [key, {value, scope: 'oko', owner: 'global'}]))}});
-        t.replies.set('/api/v3/cards', {body: materials.map(({text, description, display_text, reply_preview, ...card}) => ({folder_id:'f',published_known:true,feed_title:'feed',importance:'normal',snippet:'',...card}))});
-        for (const material of materials) {
-          const {snippet, feed_title, ...opened} = material;
-          t.replies.set('/fixture/material/' + material.id, {body: opened});
-        }
-      }, materials);
+        t.replies.set('/api/v3/cards', {body: {items:cards.slice(0,40),total:cards.length,next_cursor:cards[40]?.id||null}});
+        for(const [route,body] of Object.entries(pages))t.replies.set(route,{body});
+        for (const material of materials) t.replies.set('/api/v3/publication/' + material.id, {body: material});
+      }, {materials,cards:materials.map(card),metadata:materials.map(m=>{const v=fixtureMetadata.get(m);return {folder_id:v?.folder_id||'f',feed_title:v?.feed_title};}),pages});
       await target.goto(origin + '/#token=' + token);
       await expect(target.locator('#cards button')).toHaveCount(Math.min(40,materials.length));
     }
   return {...fixture, errors, start, async close() {await fixture.close(); expect(schemaFailures).toEqual([]);}};
   } catch (error) {await fixture.close(); throw error;}
 }
-function material(id: string, extra: Partial<FixtureMaterial> = {}): FixtureMaterial { return {id, title: id, text: 'Текст ' + id, published: 100, published_known:true, importance:'normal', folder_id: 'f', feed_id: 'feed', url: 'https://example.org/' + id, complete: true, full: true, version: '1', images: [], attachments: [], ...extra}; }
-export {reader, material, expect};
+type FixtureMetadata = {folder_id:string;feed_title?:string;card:CardListItem};
+const fixtureMetadata = new WeakMap<FixtureMaterial, FixtureMetadata>();
+function card(value: FixtureMaterial): CardListItem {
+  const metadata=fixtureMetadata.get(value);
+  if(!metadata)throw new Error('Publication fixture has no explicitly prepared card');
+  return structuredClone(metadata.card);
+}
+function material(id: string, extra: Partial<FixtureMaterial> & {folder_id?:string;feed_title?:string;card?:Partial<CardListItem>} = {}): FixtureMaterial {
+  const {folder_id='f',feed_title,card:cardOverrides,...overrides}=extra;
+  const feed=overrides.feed_id||'feed',url=overrides.source_url||'https://example.org/'+id;
+  const title=overrides.title||id,published=overrides.published_at===undefined?new Date(100000).toISOString():overrides.published_at;
+  const row:CardListItem={id,title,feed_id:feed,published_at:published,source_url:url,preview_url:null,
+    loading:false,changed:false,hidden:false,post_web_unavailable:false,external_attachment_kinds:[],...cardOverrides};
+  const value:FixtureMaterial={id,title,feed_id:feed,published_at:published,source_url:url,
+    source:{kind:'rss',feed_id:feed,source_url:url},availability:'available',
+    text:'Текст '+id,description:'',revision_id:'1',completeness:{state:'complete'},loading:false,changed:false,source_deleted:false,
+    linked_content:null,reply_preview:null,post_web_unavailable:false,external_attachments:[],media:[],
+    filter:{state:'disabled',result:null,error:null},theses:{state:'disabled',result:null,error:null},...overrides};
+  fixtureMetadata.set(value,{folder_id,feed_title,card:row});
+  return value;
+}
+export {reader, material, card, expect};
 
 export type ReaderFixture = Awaited<ReturnType<typeof reader>>;

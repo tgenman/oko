@@ -12,7 +12,10 @@ test('late folder completion preserves another folder material and confirmation 
   const r=await reader();try {
     await r.start([material('a'),material('b',{feed_id:'other-feed',folder_id:'other'})]);
     await r.page.evaluate(()=>{
-      readerTransport.replies.set('/api/v3/reading-composition',{body:{count:2,folders:[{id:'f',title:'Тема',count:1},{id:'other',title:'Другая',count:1}],feeds:[{id:'feed',title:'feed',folder_id:'f',kind:'rss',count:1},{id:'other-feed',title:'Другой фид',folder_id:'other',kind:'rss',count:1}]}});
+      readerTransport.replies.set('/api/v3/navigation',{body:{total:2,folders:[{id:'f',title:'Тема',count:1,feeds:[window.readerFixtures.navigationFeed({id:'feed',title:'feed',count:1})]},{id:'other',title:'Другая',count:1,feeds:[window.readerFixtures.navigationFeed({id:'other-feed',title:'Другой фид',count:1})]}]}});
+      const cards=readerTransport.replies.get('/api/v3/cards')!.body!.items;
+      readerTransport.replies.set('/api/v3/cards?sort=newest&folder=f',{body:window.readerFixtures.cardPage(cards.filter(c=>c.feed_id==='feed'))});
+      readerTransport.replies.set('/api/v3/cards?sort=newest&folder=other',{body:window.readerFixtures.cardPage(cards.filter(c=>c.feed_id==='other-feed'))});
       readerTransport.replies.set('/api/v3/folders/f/completion/preview',{body:{cards:1,originals:1,token:'first'}});
       readerTransport.replies.set('/api/v3/folders/other/completion/preview',{body:{cards:1,originals:1,token:'other'}});
       readerTransport.held.set('/api/v3/folders/f/completion',true);
