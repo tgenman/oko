@@ -11,7 +11,7 @@ def test_processing_failure_and_finish_are_saved_without_status_read(tmp_path,po
     try:
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id) VALUES ('article')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','other_web','article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','article',true)")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES (%s,'article','running',1) RETURNING id",(kind,)).fetchone()[0]
         with pytest.raises(ValueError,match='rollback'):
@@ -58,7 +58,7 @@ def test_http_status_reads_recovered_processing_without_mutation(tmp_path,postgr
     from tests.support.reader import HEADERS
     with psycopg.connect(postgres_url,autocommit=True) as db:
         db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
-        db.execute("INSERT INTO publications(id) VALUES ('article')")
+        db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','other_web','article')")
         db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','article',true)")
         db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES (%s,'article','failed','failure','model-invalid')",(kind,))
     with TestClient(create_app(tmp_path,token='test',database_url=postgres_url,api_only=True),headers=HEADERS) as client:

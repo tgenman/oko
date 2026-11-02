@@ -53,3 +53,23 @@ def test_corrupt_source_url_becomes_placeholder_without_breaking_page(tmp_path):
         assert broken['title']=='Публикация недоступна'
         assert broken['source_url'] is None and broken['preview_url'] is None
         assert broken['published_at']==previous['published_at']
+
+
+def test_unknown_publication_dates_sort_last_in_both_directions(tmp_path):
+    feeds, _ = library(tmp_path, [3])
+    app = traced_app(tmp_path)
+    with TestClient(app, headers=HEADERS) as client:
+        identities = [card['id'] for card in client.get('/api/v3/cards', params={'feed': feeds[0]}).json()['items']]
+        store = app.state.host.require_store()
+        def set_dates():
+            with store.db:
+                for identity, date in zip(identities, (100., 200., None)):
+                    store.db.execute('UPDATE publications SET published_at=%s WHERE id=%s', (date, identity))
+        client.portal.call(set_dates)
+        for order, expected in [('oldest', [identities[0], identities[1], identities[2]]),
+                                ('newest', [identities[1], identities[0], identities[2]])]:
+            response = client.get('/api/v3/cards', params={'feed': feeds[0], 'sort': order})
+            assert response.status_code == 200
+            cards = response.json()['items']
+            assert [card['id'] for card in cards] == expected
+            assert cards[-1]['published_at'] is None

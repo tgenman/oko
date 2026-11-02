@@ -12,8 +12,8 @@ def test_linked_title_change_rollback_restores_running_parent(tmp_path):
     store,item,execution,tasks=worker_library(tmp_path)
     try:
         with transaction(store.db):
-            store.db.execute("""INSERT INTO publications(id,source_id,url,platform,external_id,complete,content,title,published_known)
-                SELECT 'linked','linked:linked','https://example.org/linked','other_web','linked',1,content,'Old title',0 FROM publications WHERE id=%s""",(item,))
+            store.db.execute("""INSERT INTO publications(id,url,platform,external_id,complete,content,title,discovered_at)
+                SELECT 'linked','https://example.org/linked','other_web','linked',1,content,'Old title',discovered_at FROM publications WHERE id=%s""",(item,))
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES (%s,'linked')",(item,))
             store.processing.reconcile_accepted_item(item)
             job=store.jobs.claim_processing('filter',store.clock())
@@ -46,8 +46,8 @@ def test_linked_title_roundtrip_rejects_real_late_model_reply(tmp_path):
         store,item,execution,tasks=worker_library(tmp_path)
         try:
             with transaction(store.db):
-                store.db.execute("""INSERT INTO publications(id,source_id,url,platform,external_id,complete,content,title,published_known)
-                    SELECT 'linked','linked:linked','https://example.org/linked','other_web','linked',1,content,'Old title',0 FROM publications WHERE id=%s""",(item,))
+                store.db.execute("""INSERT INTO publications(id,url,platform,external_id,complete,content,title,discovered_at)
+                    SELECT 'linked','https://example.org/linked','other_web','linked',1,content,'Old title',discovered_at FROM publications WHERE id=%s""",(item,))
                 store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES (%s,'linked')",(item,))
                 store.processing.reconcile_accepted_item(item)
             worker=workers(execution,tasks,httpx.MockTransport(model))[0]

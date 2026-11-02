@@ -9,7 +9,7 @@ def test_fetch_failure_retry_and_finish_without_status_read(tmp_path,postgres_ur
     try:
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id) VALUES ('article')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','other_web','article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','article',true)")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','article','running',1) RETURNING id").fetchone()[0]
         store.jobs.retry(Job(job_id,'fetch','article',1),1,'failure',code='article-limit')
@@ -51,7 +51,7 @@ def test_linked_fetch_failure_updates_all_owners_and_resolves_together(tmp_path,
     try:
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected',ARRAY[]::text[]),('y','y','Y','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id) VALUES ('root-x'),('root-y'),('article')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('root-x','other_web','root-x'),('root-y','other_web','root-y'),('article','other_web','article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('x','root-x',true),('y','root-y',true)")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root-x','article'),('root-y','article')")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','article','running',1) RETURNING id").fetchone()[0]
@@ -71,7 +71,7 @@ def test_http_status_reads_recovered_fetch_without_mutation(tmp_path,postgres_ur
     from tests.support.reader import HEADERS
     with psycopg.connect(postgres_url,autocommit=True) as db:
         db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
-        db.execute("INSERT INTO publications(id) VALUES ('article')")
+        db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','other_web','article')")
         db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','article',true)")
         db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','article','failed','failure','article-limit')")
     with TestClient(create_app(tmp_path,token='test',database_url=postgres_url,api_only=True),headers=HEADERS) as client:

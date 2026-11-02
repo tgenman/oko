@@ -9,7 +9,7 @@ def library(root, database_url, count):
         fields = list(template)
         for number in range(1, count):
             identity = f'{number:032x}'
-            row = dict(template, id=identity, source_id='completion:'+identity, external_id='completion:'+identity)
+            row = dict(template, id=identity, external_id='completion:'+identity)
             marks = ['%s::integer::boolean' if isinstance(row[field], bool) else '%s' for field in fields]
             store.db.execute('INSERT INTO publications('+','.join(fields)+') VALUES ('+','.join(marks)+')', tuple(row[field] for field in fields))
             store.db.execute('INSERT INTO feed_publications (feed_id,publication_id,is_primary) VALUES ( %s , %s , true )', ('demo', identity))

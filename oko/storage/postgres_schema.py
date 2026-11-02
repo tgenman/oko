@@ -102,4 +102,5 @@ MIGRATIONS = (
     Migration(95, 'remove-telegram-client', (Path(__file__).parent / 'postgres' / '095-remove-telegram-client.sql').read_text()),
     Migration(96, 'normalize-publication-content', (Path(__file__).parent / 'postgres' / '096-normalize-publication-content.sql').read_text()),
     Migration(97, 'normalize-publication-titles', (Path(__file__).parent / 'postgres' / '097-normalize-publication-titles.sql').read_text()),
+    Migration(98, 'publication-identity-date', (Path(__file__).parent / 'postgres' / '098-publication-identity-date.sql').read_text()),
 )

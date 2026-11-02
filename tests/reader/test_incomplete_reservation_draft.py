@@ -43,7 +43,7 @@ def test_feed_removal_after_deadline_does_not_restore_forgotten_material(tmp_pat
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'blocks':[],'extra':{'_reader':{'full':False}}})
-            store.db.execute("INSERT INTO publications(id,source_id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube:p','youtube','p',0,1,%s,0)",(raw,))
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class,discovered_at) VALUES ('p','youtube','p',0,1,%s,0,1)",(raw,))
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             save_keys(store.db,['p'])
         store.youtube.blocked(100,900);clock[0]=1001

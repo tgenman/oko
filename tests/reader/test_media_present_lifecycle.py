@@ -7,7 +7,7 @@ def test_http_reads_recovered_empty_media_without_write(tmp_path,postgres_url):
     from tests.support.app import create_app
     from tests.support.reader import HEADERS
     with psycopg.connect(postgres_url,autocommit=True) as db:
-        db.execute("INSERT INTO publications(id) VALUES ('article')")
+        db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','other_web','article')")
         db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('media','article','image','x','file','unavailable')")
         db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('download_media','media','failed','failure','')")
     with TestClient(create_app(tmp_path,token='test',database_url=postgres_url,api_only=True),headers=HEADERS) as client:

@@ -9,7 +9,7 @@ def test_real_collection_outer_catch_persists_extra_delete_error(tmp_path,postgr
     s=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(s.db):
-            s.db.execute("INSERT INTO publications(id) VALUES ('p')")
+            s.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','other_web','p')")
             job_id=s.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('delete','p','running',1) RETURNING id").fetchone()[0]
         worker=collection_worker(tmp_path,s,object())
         def fail_delete(_):raise OSError('synthetic delete failure')

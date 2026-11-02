@@ -10,7 +10,7 @@ def test_job_events_create_and_finish_source_occurrence_without_get(kind,tmp_pat
     try:
         with transaction(store.db):
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id) VALUES ('p')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','other_web','p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             if kind=='download_media':store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','image','x','file','unavailable')")
             item='m' if kind=='download_media' else 'f' if kind=='feed-delete' else 'p'
@@ -30,7 +30,7 @@ def test_source_failure_and_group_rollback_together(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO publications(id) VALUES ('p')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','other_web','p')")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','p','running',1) RETURNING id").fetchone()[0]
         with pytest.raises(RuntimeError,match='rollback'):
             with transaction(store.db):
@@ -49,7 +49,7 @@ def test_source_failure_changes_group_after_retry_claim(tmp_path,postgres_url):
     try:
         with transaction(store.db):
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id) VALUES ('p')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','other_web','p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','p','running',1) RETURNING id").fetchone()[0]
         store.jobs.retry(Job(job_id,'fetch','p',1),1,'offline',code='source-network')
@@ -90,7 +90,7 @@ def test_http_source_group_is_visible_and_get_does_not_write(tmp_path,postgres_u
     from tests.support.reader import HEADERS
     with psycopg.connect(postgres_url,autocommit=True) as db:
         db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
-        db.execute("INSERT INTO publications(id) VALUES ('p')")
+        db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','other_web','p')")
         db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
         db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','p','failed','failure','source-network')")
     with TestClient(create_app(tmp_path,token='test',database_url=postgres_url,api_only=True),headers=HEADERS) as client:

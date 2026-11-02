@@ -10,7 +10,7 @@ def test_media_failure_and_finish_without_status_read(tmp_path,postgres_url):
     try:
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id) VALUES ('article')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','other_web','article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','article',true)")
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('file','article','image:1','https://example.test/file','file','pending_download')")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('download_media','file','running',1) RETURNING id").fetchone()[0]
@@ -28,7 +28,7 @@ def test_two_files_on_one_publication_keep_separate_errors(tmp_path,postgres_url
     try:
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id) VALUES ('article')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','other_web','article')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','article',true)")
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('one','article','image:1','https://example.test/1','one','pending_download'),('two','article','image:2','https://example.test/2','two','pending_download')")
             jobs=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('download_media','one','running',1),('download_media','two','running',1) RETURNING id,item").fetchall()
