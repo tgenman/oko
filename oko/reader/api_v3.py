@@ -183,10 +183,6 @@ def register(app: FastAPI, runtime: ReaderApplication, lifetime: Lifetime, wall_
             ready_sources=old.ready_sources, total_sources=old.total_sources,
             youtube=project.youtube(old.youtube if isinstance(old.youtube, facts.YouTube) else None),
             initial_histories=[project.history(value) for value in old.initial_histories] if isinstance(old.initial_histories, list) else [],
-            telegram_reads=[wire.TelegramReadState(feed_id=wire.FeedId(value.feed_id),
-                initial=wire.TelegramMessageId(str(value.initial)) if value.initial else None,
-                confirmed=wire.TelegramMessageId(str(value.confirmed)) if value.confirmed else None, pending=value.pending,
-                waiting=wire.WaitingReason('telegram_read_frontier') if value.waiting else None, error=value.error or None) for value in old.telegram_reads] if isinstance(old.telegram_reads, list) else [],
             problems=project.problems(old.problems,bindings,material_feeds,set(old.viewed_ids) if isinstance(old.viewed_ids,list) else set()) if isinstance(old.problems, facts.ProblemSnapshot) else wire.ProblemSnapshot(current=[], recent=[], count=0, updated_at=timestamp(wall_clock())),
             diagnostic_count=len(journal.records), diagnostic_persistence_error=journal.persistence_error or None,
             viewed_ids=[wire.MaterialId(value) for value in old.viewed_ids] if isinstance(old.viewed_ids, list) else [])

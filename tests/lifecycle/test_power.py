@@ -52,7 +52,6 @@ def test_disabled_oko_rejects_every_external_command_but_keeps_local_settings(tm
             ('PUT', '/api/v3/processors/codex', config),
             ('POST', '/api/v3/processors/codex/check', None),
             ('POST', '/api/v3/processors/llamacpp/check', None),
-            ('PUT', '/api/v3/telegram/profiles/personal', {'configuration_ref': 'synthetic'}),
             ('POST', '/api/v3/telegram/connect', {'source_locator': '@fixture', 'access': {'kind': 'web'}, 'folder': 'News'}),
             ('POST', '/api/v3/feeds/demo/history', {'mode': 'count', 'count': '10'}),
             ('PATCH', '/api/v3/feeds/demo/history', {'paused': False}),
@@ -120,112 +119,20 @@ def test_power_rejects_late_download_and_resumes_interrupted_material(tmp_path):
         assert ready[0]['text'] == 'Resumed successfully'
 
 
-def test_viewed_while_disabled_defers_telegram_acknowledgement_until_start(tmp_path):
-    import time
-    from tests.support.presence import presence
-    from tests.support.reader import wait_for
-    from tests.support.telegram import Telegram, connect, settled
-
-    class Client(Telegram):
-        acknowledgements: list[int] = []
-
-        async def acknowledge(self, account, peer, max_id):
-            self.acknowledgements.append(max_id)
-
-    telegram = Client()
-    with TestClient(create_app(tmp_path, token='test', telegram_client=telegram), headers=HEADERS) as client:
-        client.patch('/api/v3/settings/oko/global', json={'theses': False, 'prompt_filters': ''})
-        presence(client, 'reader')
-        connect(client)
-        item = settled(client)[0]['id']
-        assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
-        assert client.post('/api/v3/materials/' + item + '/viewed').status_code == 200
-        assert read_all_cards(client, '/api/v3/cards') == []
-        time.sleep(.08)
-        assert telegram.acknowledgements == []
-        assert client.put('/api/v3/power', json={'enabled': True}).status_code == 200
-        assert wait_for(client, lambda: telegram.acknowledgements) == [11]
 
 
-def test_disabling_during_telegram_identity_check_keeps_verified_profile(tmp_path):
-    import asyncio
-    from concurrent.futures import ThreadPoolExecutor
-    import threading
-    from tests.support.telegram import Telegram, configure
-
-    checking = threading.Event()
-
-    class Client(Telegram):
-        hold = False
-
-        async def identity(self, account):
-            if self.hold:
-                checking.set()
-                await asyncio.sleep(60)
-            return await super().identity(account)
-
-    telegram = Client()
-    with TestClient(create_app(tmp_path, token='test', api_only=True, telegram_client=telegram), headers=HEADERS) as client:
-        assert configure(client).status_code == 200
-        before = client.get('/api/v3/telegram/profiles').json()['personal']
-        telegram.hold = True
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            request = pool.submit(client.post, '/api/v3/telegram/connect', json={
-                'source_locator': '@fixture', 'folder': 'News', 'access': {'kind': 'client', 'profile': 'personal'},
-            })
-            assert checking.wait(2)
-            assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
-            assert request.result(timeout=2).status_code != 200
-        assert client.get('/api/v3/telegram/profiles').json()['personal'] == before
-        assert client.get('/api/v3/subscriptions').json()['feeds'] == []
 
 
-def test_queued_web_connection_cannot_start_preview_after_power_off(tmp_path):
-    import asyncio
+def test_web_connection_does_not_start_preview_when_power_is_off(tmp_path):
     import httpx
-    from tests.support.telegram import Telegram
-
-    entered, release = asyncio.Event(), asyncio.Event()
     previews = []
-
-    class Client(Telegram):
-        hold_close = True
-
-        async def close(self):
-            if self.hold_close:
-                self.hold_close = False
-                entered.set()
-                await release.wait()
-
-    async def preview(request):
+    def preview(request):
         previews.append(str(request.url))
         return httpx.Response(503)
-
-    app = create_app(tmp_path, token='test', api_only=True, telegram_client=Client(), rss_transport=httpx.MockTransport(preview))
-    with TestClient(app, headers=HEADERS) as client:
-        async def queued_actions():
-            power_queued, connect_queued = asyncio.Event(), asyncio.Event()
-            application=app.state.application
-            original=application.action_started
-            async def observe_action(identity, context, **kwargs):
-                operation=context.get('command_context',{}).get('operation')
-                if operation=='power':power_queued.set()
-                if operation=='telegram_connect':connect_queued.set()
-                return await original(identity,context,**kwargs)
-            application.action_started=observe_action
-            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://testserver', headers=HEADERS) as http:
-                configuration = asyncio.create_task(http.patch('/api/v3/youtube', json={'mode': 'direct'}))
-                await asyncio.wait_for(entered.wait(), timeout=5)
-                power = asyncio.create_task(http.put('/api/v3/power', json={'enabled': False}))
-                await asyncio.wait_for(power_queued.wait(), timeout=5)
-                connect = asyncio.create_task(http.post('/api/v3/telegram/connect', json={
-                    'source_locator': '@fixture', 'folder': 'News', 'access': {'kind': 'web'},
-                }))
-                await asyncio.wait_for(connect_queued.wait(), timeout=5)
-                release.set()
-                configured, connected, disabled = await asyncio.gather(configuration, connect, power)
-                assert configured.status_code == disabled.status_code == 200
-                assert connected.status_code != 200
-        client.portal.call(queued_actions)
+    app=create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(preview))
+    with TestClient(app,headers=HEADERS) as client:
+        assert client.put('/api/v3/power',json={'enabled':False}).status_code==200
+        result=client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'News'})
+        assert result.status_code==409
         assert previews == []
         assert client.get('/api/v3/subscriptions').json()['feeds'] == []

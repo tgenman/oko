@@ -62,8 +62,6 @@ class JobRepository:
             source_groups.sync(self.store,job.kind,source_groups.job_keys(self.store,job.id,changed['previous_code']),self.store.wall_clock(),evidence=source_groups.job_evidence_many(self.store,[(job.id,changed['previous_code'])]))
         if job.kind=='delete' and previous:
             self.store.problems.sync_deletion(job.id,previous,self.store.wall_clock())
-        if job.kind=='read':
-            self.store.problems.sync_read_feed(job.item,self.store.wall_clock())
         if job.kind=='fetch' and previous_fetch:
             self.store.problems.sync_fetch(job.id,previous_fetch,self.store.wall_clock())
         if job.kind=='download_media' and previous_media:
@@ -463,9 +461,9 @@ class JobRepository:
             placeholders = ','.join('%s' for _ in available) or "''"
             dependencies=available if dependency_feeds is None else dependency_feeds
             dependency_keys=','.join('%s' for _ in dependencies) or "''"
-            query += f""" AND kind IN ('delete','feed-delete','discover','read','fetch') AND id IN (WITH allowed AS MATERIALIZED (
+            query += f""" AND kind IN ('delete','feed-delete','discover','fetch') AND id IN (WITH allowed AS MATERIALIZED (
                 SELECT id FROM jobs WHERE status='pending' AND kind IN ('delete','feed-delete')
-                UNION SELECT id FROM jobs WHERE status='pending' AND kind IN ('discover','read') AND item IN ({placeholders})
+                UNION SELECT id FROM jobs WHERE status='pending' AND kind = 'discover' AND item IN ({placeholders})
                 UNION SELECT id FROM jobs WHERE status='pending' AND kind='fetch' AND item IN (
                     SELECT own.id FROM feed_publications owner JOIN publications own ON own.id=owner.publication_id
                         WHERE owner.is_primary AND owner.is_unviewed AND owner.feed_id IN ({placeholders}) AND own.viewed=0
@@ -652,8 +650,6 @@ class JobRepository:
                 job_write(self.store.db,"UPDATE jobs SET source_event_owned=(%s=1) AND (problem_code LIKE 'source-%%') IS TRUE WHERE id=%s",(complete,job.id))
             if changed and job.kind in ('delete','feed-delete'):
                 self.store.problems.sync_deletion(job.id,previous,self.store.wall_clock())
-            if changed and job.kind=='read':
-                self.store.problems.sync_read_feed(job.item,self.store.wall_clock())
             if changed and job.kind=='download_media':
                 self.store.problems.sync_media_problem(job.id,previous_media,self.store.wall_clock())
             if changed:
@@ -688,7 +684,6 @@ class JobRepository:
             for row in changed:
                 self.store.incomplete_draft.mark_job(row['kind'],row['item'],row['id'])
                 if row['kind']=='filter':self.store.processing.filter_changed(row['item'])
-                if row['kind']=='read':self.store.problems.sync_read_feed(row['item'],self.store.wall_clock())
                 if row['kind'] in ('delete','feed-delete') and (row['error'] is not None or row['problem_code'] is not None):
                     self.store.problems.sync_deletion(row['id'],[],self.store.wall_clock())
 
@@ -753,109 +748,6 @@ class JobRepository:
 
     def checkpoint(self, name: str) -> None:
         self.store.fault(name)
-
-    def sync_reads(self) -> None:
-        if self.store.processing.background:
-            return
-        for _ in self.sync_reads_steps():
-            pass
-
-    def sync_reads_steps(self) -> Iterator[None]:
-        db = self.store.db
-        revision = self.store.subscriptions.source_revision()
-        if revision != self.store.read_sync._configuration:
-            configs = self.store.subscriptions.feeds(transport='telegram')
-        else:
-            pending = [row[0] for row in db.execute('SELECT feed FROM telegram_read_state WHERE needs_sync OR saved_backfill_after IS NOT NULL')]
-            if not pending:
-                return
-            configs = [config for feed in pending for config in self.store.subscriptions.feeds(feed, transport='telegram')]
-        bindings = self.store.subscriptions.telegram.bindings([config['id'] for config in configs]) if configs else {}
-        profiles = self.store.subscriptions.telegram.profiles() if any(binding['kind']=='client' for binding in bindings.values()) else {}
-        cleared = []
-        for config in configs:
-            feed = config['id']
-            binding = bindings.get(feed)
-            if config['transport'] == 'telegram' and config['connection'] != 'deleting' and binding and binding['kind'] == 'client':
-                # Claim this marker before yielding. New observations during the
-                # pass can insert another marker and must not be erased at its end.
-                with db:
-                    db.execute('UPDATE telegram_read_state SET needs_sync=false WHERE feed = %s AND needs_sync', (feed,))
-                while True:
-                    if self.store.subscriptions.source_revision() != revision:
-                        return
-                    with db:
-                        state = db.execute('SELECT saved_backfill_after FROM telegram_read_state WHERE feed=%s', (feed,)).fetchone()
-                        if not state or state[0] is None:
-                            break
-                        batch = [row[0] for row in db.execute('''SELECT m.publication_id FROM feed_publications m
-                            WHERE m.feed_id=%s AND m.publication_id>%s
-                            ORDER BY m.publication_id LIMIT 8''', (feed,state[0]))]
-                        for item in batch:
-                            self.store.read_sync.saved_publication(item)
-                        if batch:
-                            db.execute('UPDATE telegram_read_state SET saved_backfill_after=%s WHERE feed=%s', (batch[-1],feed))
-                        else:
-                            db.execute('UPDATE telegram_read_state SET saved_backfill_after=NULL,needs_sync=true WHERE feed=%s', (feed,))
-                            status_changed(db)
-                        self.store.problems.sync_read_feed(feed,self.store.wall_clock())
-                    yield
-                    if not batch:
-                        break
-                if self.store.subscriptions.source_revision() != revision:
-                    return
-                with db:
-                    profile = profiles.get(binding['role'])
-                    request = self.store.read_sync._request(config, binding, profile)
-                    if request is not None:
-                        state = expect_row(db.execute('SELECT signature , waiting FROM telegram_read_state WHERE feed = %s', (feed,)).fetchone())
-                        if request['eligible'] or request['read_history'] or state['waiting']:
-                            signature = self.store.read_sync.signature(request)
-                            if state['signature'] != signature:
-                                db.execute('UPDATE telegram_read_state SET signature = %s WHERE feed = %s', (signature, feed))
-                                changed=job_write(db, "INSERT INTO jobs ( kind , item ) VALUES ( 'read' , %s ) ON CONFLICT ( kind , item ) DO UPDATE SET status = 'pending' , next = 0 , error = NULL , generation = jobs . generation + 1 RETURNING id,problem_code", (feed,)).fetchone()
-                                self.store.problems.sync_read_feed(feed,self.store.wall_clock())
-                                if changed and changed['problem_code']=='processor-config':
-                                    self.store.problems.finish_processor_change([changed['id']],None,self.store.wall_clock())
-                yield
-                if self.store.subscriptions.source_revision() != revision:
-                    return
-            else:
-                cleared.append(feed)
-        # Deleted and non-Telegram feeds need no read-frontier work.
-        with db:
-            if cleared:
-                db.execute('UPDATE telegram_read_state SET needs_sync=false,saved_backfill_after=NULL WHERE feed = ANY(%s)', (cleared,))
-            db.execute("UPDATE telegram_read_state SET needs_sync=false,saved_backfill_after=NULL WHERE (needs_sync OR saved_backfill_after IS NOT NULL) AND NOT EXISTS ( SELECT 1 FROM feeds WHERE id = telegram_read_state.feed AND transport = 'telegram' AND connection IS DISTINCT FROM 'deleting' )")
-        self.store.read_sync._configuration = revision
-
-
-    def finish_read(self, job: Job, waiting: str, now: float) -> None:
-        if waiting:
-            processor_previous=self.store.problems.prepare_processor_change([job.id],self.store.wall_clock())
-            changed=job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , next = %s , error = %s , problem_code = NULL WHERE id = %s AND generation = %s AND status = 'running'",(now+(.1 if waiting=='Продолжение проверки истории Telegram' else 30),waiting,job.id,job.generation)).rowcount
-            if changed:
-                self.store.problems.sync_read_feed(job.item,self.store.wall_clock())
-                self.store.problems.finish_processor_change([job.id],processor_previous,self.store.wall_clock())
-        else:self.finish(job)
-
-    def account_wait(self, user: int, until: float, job: Job | None = None) -> None:
-        from oko.storage import memberships
-        memberships.lock_graph(self.store.db)
-        self.store.db.execute('INSERT INTO state VALUES ( %s , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value',('telegram-retry:'+str(user),str(until)))
-        if job:
-            processor_previous=self.store.problems.prepare_processor_change([job.id],self.store.wall_clock())
-            from oko.storage.media_job_problems import previous_candidates as media_candidates
-            previous_media=media_candidates(self.store,job.id,self.store.wall_clock()) if job.kind=='download_media' else []
-            changed=job_write(self.store.db, "UPDATE jobs SET problem_code = %s WHERE id = %s AND generation = %s AND status = 'pending' AND CASE WHEN kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING id,OLD.problem_code AS previous_code",(job.kind+':FloodWaitError',job.id,job.generation)).fetchone()
-            if changed and (changed['previous_code'] or '').startswith('source-'):
-                from oko.storage import source_groups
-                source_groups.sync_changed_rows(self.store,[changed],self.store.wall_clock())
-            if changed and job.kind=='read':self.store.problems.sync_read_feed(job.item,self.store.wall_clock())
-            if changed and job.kind=='discover':self.store.problems.sync_discover(job.id,self.store.wall_clock())
-            if changed and previous_media:self.store.problems.sync_media_problem(job.id,previous_media,self.store.wall_clock())
-            if changed:self.store.problems.finish_processor_change([job.id],processor_previous,self.store.wall_clock())
-            if changed:self.store.incomplete_draft.mark_job(job.kind,job.item,job.id)
 
     def fail_media(self, job: Job, issue: AdapterIssue) -> None:
         collection_jobs.fail(self.store,job,issue,cancelled=issue.kind==AdapterErrorKind.media_changed)
@@ -1054,8 +946,6 @@ class JobRepository:
         processor_previous=self.store.problems.prepare_processor_change(processor_affected,self.store.wall_clock())
         job_write(db, f"UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL , problem_code = NULL , retry_at = NULL , retry_delay = 0 , wait_scope = NULL , next = 0 WHERE kind = 'download_media' AND item IN ( SELECT m.id FROM media_files m JOIN ({owned_ids('= %s')}) owner ON owner.id=m.publication_id )",(feed,feed))
         job_write(db, "INSERT INTO jobs ( kind , item , queued_wall ) SELECT 'fetch' , items.id , extract(epoch FROM clock_timestamp()) FROM publications items JOIN feed_publications owner ON owner.publication_id=items.id AND owner.is_primary AND owner.is_unviewed WHERE owner.feed_id = %s AND items.viewed = 0 ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , generation = jobs . generation + 1 , next = 0 , retry_at = NULL , retry_delay = 0 , wait_scope = NULL , error = NULL , problem_code = NULL",(feed,))
-        job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , error = NULL WHERE kind = 'read' AND item = %s",(feed,))
-        self.store.problems.sync_read_feed(feed,self.store.wall_clock())
         self.enqueue_discovery(feed)
         for job_id,previous in effects.fetch_problems_before.items():
             self.store.problems.sync_fetch(job_id,previous,self.store.wall_clock())
@@ -1096,7 +986,6 @@ class JobRepository:
         changed_ids=sorted(changed_processing)
         for start in range(0,len(changed_ids),400):previous_processing.update(self.store.problems.saved_processing_candidates(changed_ids[start:start+400]))
         if previous_processing:self.store.problems.sync_processing_problems(previous_processing,self.store.wall_clock())
-        self.store.problems.sync_read_feed(feed,self.store.wall_clock())
         if discover:self.store.problems.sync_discover(discover['id'],self.store.wall_clock())
         self.reconcile_cleanup()
         if source_rows:
@@ -1236,11 +1125,11 @@ class JobRepository:
             job_write(self.store.db, "DELETE FROM jobs WHERE item = %s OR (kind='delete' AND payload::jsonb->>'cleanup_feed' = %s)", (feed, feed))
             self.store.problems.sync_deletion(job.id,previous_problem,self.store.wall_clock())
             if affected:self.store.problems.finish_processor_change(affected,processor_previous,self.store.wall_clock(),removed_outcome='irrelevant')
-            for table in ('history_members', 'initial_history', 'telegram_read_members', 'telegram_read_state'):
+            for table in ('history_members', 'initial_history'):
                 deleted = self.store.db.execute(f'DELETE FROM {table} WHERE feed = %s', (feed,)).rowcount
                 if table=='initial_history' and deleted:
                     source_changed(self.store.db)
-                if table in ('history_members','telegram_read_members','telegram_read_state') and deleted:
+                if table in ('history_members',) and deleted:
                     status_changed(self.store.db)
             self.store.db.execute('UPDATE jobs SET feed_id=NULL, collection_attempt=NULL WHERE feed_id=%s AND collection_attempt IS NOT NULL', (feed,))
             self.store.subscriptions.clear_settings('feed', feed)
@@ -1250,7 +1139,6 @@ class JobRepository:
                 source_changed(self.store.db)
                 if affects_codex:
                     self.store.problems.sync_codex_choice(self.store.wall_clock())
-            self.store.problems.sync_read_feed(feed,self.store.wall_clock())
             if source_effects.source_groups_before:self.sync_captured_source_groups(source_effects)
 
 

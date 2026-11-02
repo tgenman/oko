@@ -284,7 +284,7 @@ def test_interrupted_attempt_uses_new_model_on_next_attempt(postgres_url, tmp_pa
     restarted = Store(tmp_path, lambda _: None, database_url=postgres_url)
     execution = Execution(lambda: True)
     execution._store = restarted
-    tasks = JobControl(execution, {}, None, restarted.clock)
+    tasks = JobControl(execution, {}, restarted.clock)
     model = Recording()
     worker = FilterWorker(execution, tasks, lambda: restarted.clock() + 3601, model, None)
     try:

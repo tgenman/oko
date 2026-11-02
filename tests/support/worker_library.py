@@ -27,7 +27,7 @@ def worker_library(root, *, text='Useful text', fault=lambda _:None, database_ur
     item=store.db.execute('SELECT id FROM publications').fetchone()[0]
     execution=Execution(lambda:True)
     execution._store=store
-    tasks=JobControl(execution,{},None,store.clock)
+    tasks=JobControl(execution,{},store.clock)
     return store,item,execution,tasks
 
 

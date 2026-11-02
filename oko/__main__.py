@@ -16,7 +16,6 @@ import uvicorn
 from oko.reader.app import create_app
 from oko.collection.demo import DemoSource
 from oko.collection.contracts import Source
-from oko.collection.telegram.source import LocalTelegram
 
 
 def existing(root: Path, browser: bool, *, api_only: bool = False, persistent: bool = False) -> None:
@@ -48,8 +47,6 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
     parser = argparse.ArgumentParser(description='Око — локальный читатель')
     parser.add_argument('--data', type=Path, default=Path('data'))
     parser.add_argument('--database-url-file', type=Path, required=True, help='Закрытый файл подключения PostgreSQL; схема устанавливается отдельной командой миграции')
-    parser.add_argument('--telegram-env', type=Path, help='Путь к существующей .env с авторизацией Telegram')
-    parser.add_argument('--telegram-project', type=Path, help=argparse.SUPPRESS)
     parser.add_argument('--demo', action='store_true', help='Подключить синтетический тестовый источник')
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--api-only', action='store_true', help='API без веб-интерфейса, работа до явной остановки')
@@ -91,7 +88,6 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
     if database_url is not None:
         from oko.storage.readiness import wait_database
         wait_database(database_url)
-    telegram_env = args.telegram_env or (args.telegram_project / '.env' if args.telegram_project else None)
     root = args.data.resolve()
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.umask(0o077)
@@ -125,8 +121,7 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
                              token=token, fault=fault, shutdown=shutdown,
                              lease=args.lease, grace=args.grace, api_only=args.api_only, persistent=args.persistent,
                              public_url=args.public_url, codex_client=codex_client, rss_enabled=not args.demo, database_url=database_url,
-                             metrics_token=metrics_token,
-                             telegram_client=LocalTelegram(telegram_env, root) if telegram_env and not args.demo else None)
+                             metrics_token=metrics_token)
             config = uvicorn.Config(app, access_log=False, log_level='critical', timeout_graceful_shutdown=2, proxy_headers=False,
                                     ssl_certfile=str(args.tls_cert) if args.tls_cert else None,
                                     ssl_keyfile=str(args.tls_key) if args.tls_key else None)
@@ -143,7 +138,7 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
                     temporary.write_text(json.dumps(dict(url=url, control_url=control_url, token=token, pid=os.getpid(),
                                                          lifetime='explicit' if args.api_only or args.persistent else 'client_presence', api_version=version)))
                     os.replace(temporary, root / 'runtime.json')
-                    print(f'Око запущено: {url} (источник: {"тестовый" if args.demo else "RSS / Telegram" if telegram_env else "RSS"}).', flush=True)
+                    print(f'Око запущено: {url} (источник: {"тестовый" if args.demo else "RSS / Telegram"}).', flush=True)
                     if not (args.no_browser or args.api_only):
                         await asyncio.to_thread(webbrowser.open, url + ('/' if args.persistent else '/#token=' + token))
                 await task

@@ -99,4 +99,5 @@ MIGRATIONS = (
     Migration(92, 'telegram-binding-jsonb', (Path(__file__).parent / 'postgres' / '092-telegram-binding-jsonb.sql').read_text()),
     Migration(93, 'manual-once-boolean', (Path(__file__).parent / 'postgres' / '093-manual-once-boolean.sql').read_text()),
     Migration(94, 'remove-source-problem-legacy', (Path(__file__).parent / 'postgres' / '094-remove-source-problem-legacy.sql').read_text()),
+    Migration(95, 'remove-telegram-client', (Path(__file__).parent / 'postgres' / '095-remove-telegram-client.sql').read_text()),
 )

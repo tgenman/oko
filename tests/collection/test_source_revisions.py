@@ -114,44 +114,6 @@ def test_interrupted_version_publish_keeps_old_until_fresh_retry(tmp_path):
         assert not (tmp_path / 'staging' / item).exists()
 
 
-def test_explicit_telegram_reload_checks_known_ids_including_media_only_edits_and_deletions(tmp_path):
-    from tests.support.telegram import Telegram, connect, settled
-    class Editable(Telegram):
-        text = 'Текст до правки'
-        data = b'first-image'
-        missing = False
-        async def page(self,account,peer,after,since):
-            return dict(messages=await self.messages(account,peer,[11]) if after<11 else [],more=False)
-        async def messages(self, account, peer, ids):
-            if self.missing:
-                return []
-            return [dict(id=11, date=time.time()-60, text=self.text, group=None,
-                         media=dict(kind='image', mime='image/jpeg', extension='jpg'))]
-        async def download(self, account, peer, id):
-            return self.data
-    source = Editable()
-    with TestClient(create_app(tmp_path, token='test-token', telegram_client=source), headers=HEADERS) as client:
-        client.patch('/api/v3/settings/oko/global', json={})
-        presence(client, 'test')
-        connect(client)
-        item = settled(client)[0]['id']
-        source.text = ''  # A real edit may remove all text.
-        source.data = b'edited-image'
-        client.post('/api/v3/materials/' + item + '/retry')
-        edited = wait_for(client, lambda: m if (m := client.get('/api/v3/publication/' + item).json()).get('text') == '' and not m['loading'] else None)
-        assert client.get([media for media in edited['media'] if media['role'] == 'attachment'][0]['url']).content == b'edited-image'
-        assert 'previous_versions' not in edited
-        previous_revision=edited['revision_id']
-        source.data = b'media-only-edit'
-        client.post('/api/v3/materials/' + item + '/retry')
-        edited = wait_for(client, lambda: m if (m := client.get('/api/v3/publication/' + item).json())['revision_id']!=previous_revision else None)
-        assert client.get([media for media in edited['media'] if media['role'] == 'attachment'][0]['url']).content == b'media-only-edit'
-        source.missing = True
-        client.post('/api/v3/materials/' + item + '/retry')
-        wait_for(client, lambda: client.get('/api/v3/publication/' + item).json()['source_deleted'])
-        assert client.get([media for media in edited['media'] if media['role'] == 'attachment'][0]['url']).content == b'media-only-edit'
-        client.post('/api/v3/materials/' + item + '/viewed')
-        assert client.get([media for media in edited['media'] if media['role'] == 'attachment'][0]['url']).status_code == 404
 
 
 def test_late_ai_response_cannot_publish_theses_for_superseded_version(tmp_path):
@@ -264,53 +226,6 @@ def test_revision_waits_for_public_ai_permission_instead_of_reusing_old_theses(t
         wait_for(client,lambda:'Запрещена публичная' in (client.get('/api/v3/publication/'+item).json()['theses']['error'] or ''))
 
 
-def test_failed_unchanged_telegram_reload_does_not_create_revision_or_erase_media(tmp_path):
-    from tests.support.telegram import Telegram, connect, settled
-    from oko.collection.contracts import SourceError
-    class Editable(Telegram):
-        fail = False
-        text = 'Неизменный пост'
-        async def page(self,account,peer,after,since):
-            return dict(messages=await self.messages(account,peer,[11]) if after<11 else [],more=False)
-        async def messages(self, account, peer, ids):
-            return [dict(id=11, date=time.time()-60, text=self.text, group=None,
-                         media=dict(kind='image', mime='image/jpeg', extension='jpg'))]
-        async def download(self, account, peer, id):
-            if self.fail:
-                raise SourceError('Ограничение частоты', 60)
-            return b'saved-image'
-    source = Editable()
-    with TestClient(create_app(tmp_path, token='test-token', telegram_client=source), headers=HEADERS) as client:
-        client.patch('/api/v3/settings/oko/global', json={'theses': False})
-        client.patch('/api/v3/settings/oko/global', json={})
-        presence(client, 'test')
-        connect(client)
-        card = settled(client)[0]
-        item = card['id']
-        original = client.get('/api/v3/publication/' + item).json()
-        source.fail = True
-        client.post('/api/v3/materials/' + item + '/retry')
-        wait_for(client, lambda: any(p['code']=='source_unavailable' for p in client.get('/api/v3/status/details').json()['problems']['current']) or client.get('/api/v3/publication/' + item).json()['changed'])
-        retained = client.get('/api/v3/publication/' + item).json()
-        assert retained['revision_id'] == original['revision_id']
-        assert retained['changed'] is False and 'previous_versions' not in retained
-        assert (retained['completeness']['state']=='complete') is True
-        assert client.get([media for media in retained['media'] if media['role'] == 'attachment'][0]['url']).content == b'saved-image'
-        assert [p['message'] for p in client.get('/api/v3/status/details').json()['problems']['current'] if p['code'] in ('source_unavailable','material_save_failed','material_read_failed')] == ['Ограничение частоты']
-        source.fail = False
-        client.post('/api/v3/materials/' + item + '/retry')
-        wait_for(client, lambda: not client.get('/api/v3/publication/' + item).json()['loading'])
-        assert client.get('/api/v3/publication/' + item).json()['revision_id'] == original['revision_id']
-        source.text = 'Настоящая правка текста при недоступном вложении'
-        source.fail = True
-        client.post('/api/v3/materials/' + item + '/retry')
-        wait_for(client, lambda: any(p['code']=='source_unavailable' for p in client.get('/api/v3/status/details').json()['problems']['current']))
-        wait_for(client,lambda:client.get('/api/v3/publication/'+item).json()['text']==source.text)
-        source.fail = False
-        client.post('/api/v3/materials/' + item + '/retry')
-        edited = wait_for(client, lambda: m if (m := client.get('/api/v3/publication/' + item).json()).get('text') == source.text else None)
-        assert edited['changed'] is True and (edited['completeness']['state']=='complete') is True
-        assert 'previous_versions' not in edited
 
 
 def test_disabling_youtube_theses_keeps_existing_captions_without_refetch(tmp_path):

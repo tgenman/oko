@@ -46,9 +46,7 @@ class FeedPatch(BaseModel):
     importance: Literal['normal', 'elevated', 'high'] | None = None
     initial_days: int | None = Field(default=None, ge=1, le=3650)
     public_ai: bool | None = None
-    read_history: bool | None = None
-    auto_read: bool | None = None
-    transport: Literal['telegram', 'rss', 'youtube'] | None = None
+    transport: Literal['rss', 'youtube'] | None = None
 
 
 DEFAULT_FEED_REFRESH_MINUTES = 15

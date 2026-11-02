@@ -81,7 +81,7 @@ class Captions:
         return 'Модель принимает только текст. Источники сохраняются точно.'
 
 
-def test_saved_captions_are_never_requested_again(tmp_path):
+def test_saved_captions_are_reused_during_collection_and_after_restart(tmp_path):
     captions, downloads = Captions(), []
     kwargs = dict(token='test', rss_enabled=True, rss_transport=transport(downloads), youtube_captions=captions)
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
@@ -91,24 +91,40 @@ def test_saved_captions_are_never_requested_again(tmp_path):
         material = wait(client, lambda m: m['source'].get('captions') == 'available' and not m['loading'])
         item, text = material['id'], material['text']
         assert captions.calls == [VIDEO]
-        # Both manual material reload and feed collection must use saved text.
-        for endpoint in ('/api/v3/materials/' + item + '/retry', '/api/v3/collect'):
-            before = len(downloads)
-            assert client.post(endpoint).status_code == 200
-            material = wait(client, lambda m: len(downloads) > before and not m['loading'])
-            assert material['source']['captions'] == 'available' and material['text'] == text
-            assert captions.calls == [VIDEO]
+        # Ordinary source refresh keeps saved captions; explicit Reload Publication
+        # separately revalidates media, including subtitles (youtube-publications.md).
+        before = len(downloads)
+        assert client.post('/api/v3/collect').status_code == 200
+        material = wait(client, lambda m: len(downloads) > before and not m['loading'])
+        assert material['source']['captions'] == 'available' and material['text'] == text
+        assert captions.calls == [VIDEO]
         client.patch('/api/v3/settings/feed/' + feed, json={'theses': False})
         client.patch('/api/v3/settings/feed/' + feed, json={'theses': True})
     # Persistence, rather than an in-memory cache, must prevent another request.
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
         presence(client, 'reader')
         before = len(downloads)
-        assert client.post('/api/v3/materials/' + item + '/retry').status_code == 200
+        assert client.post('/api/v3/collect').status_code == 200
         material = wait(client, lambda m: len(downloads) > before and not m['loading'])
         assert material['source']['captions'] == 'available' and material['text'] == text
         assert captions.calls == [VIDEO]
 
+
+
+def test_explicit_reload_revalidates_saved_captions_after_source_interval(tmp_path):
+    captions, downloads, shift = Captions(), [], [0.0]
+    kwargs = dict(token='test', rss_enabled=True, rss_transport=transport(downloads), youtube_captions=captions,
+                  lease=600, clock=lambda: time.monotonic()+shift[0], wall_clock=lambda: time.time()+shift[0])
+    with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
+        presence(client, 'reader')
+        subscribe(client)
+        material = wait(client, lambda m: m['source'].get('captions') == 'available' and not m['loading'])
+        assert captions.calls == [VIDEO]
+        assert client.post('/api/v3/materials/' + material['id'] + '/retry').status_code == 200
+        shift[0] += 60
+        updated = wait(client, lambda m: len(captions.calls) == 2 and not m['loading'])
+        assert updated['text'] == material['text']
+        assert captions.calls == [VIDEO, VIDEO]
 
 def test_normal_feed_waits_for_mode_and_missing_captions_never_reach_ai(tmp_path):
     from oko.collection.contracts import SourceError

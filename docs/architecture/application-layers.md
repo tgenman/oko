@@ -36,7 +36,7 @@ flowchart TB
   обслуживает технический lifecycle читателя. Host не выбирает и не принимает Job.
 - Execution хранит текущий Store, допуск, epoch, внешние ожидания и callbacks чтения.
   Он не управляет последовательностью этапов.
-- CollectionWorker владеет discover/fetch/download_media, Telegram read sync,
+- CollectionWorker владеет discover/fetch/download_media,
   ограничениями источников и периодической очисткой файлов. Медиа — часть сбора,
   четвёртого воркера нет. Фильтр и тезисы имеют собственные циклы и выбор заданий.
 - JobControl хранит активные asyncio-задачи и общий лимит модели, обеспечивает

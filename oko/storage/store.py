@@ -28,7 +28,6 @@ from oko.storage.postgres_connection import PostgresConnection
 from oko.storage.problems import Problems
 from oko.storage.youtube import YouTubeAccess
 from oko.storage.composition import FolderContents, ReadingComposition
-from oko.storage.read_sync import ReadSync
 from oko.collection.telegram.contracts import HistoryEnvelope
 from oko.storage.filter_results import FilterResults
 from oko.storage.processing_coordination import ProcessingState
@@ -60,46 +59,22 @@ class Store:
     def is_integrity_failure(error: BaseException) -> bool:
         return isinstance(error, INTEGRITY_ERRORS)
 
-    def save_telegram_profile(self, role: str, account: str, user_id: int, generation: int, checked: float) -> None:
+    def connect_telegram(self, binding: dict[str,Any], info: dict[str,Any], source: str, folder: str, history: InitialHistory | None) -> dict[str,Any]:
         boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
         with boundary:
             membership_graph.lock_graph(self.db)
-            self.subscriptions.telegram.save_profile(role, account, user_id, generation, checked)
-            self.problems.sync_profiles(checked, {role})
-
-    def check_telegram_profile(self, role: str, generation: int, user_id: int | None, checked: float) -> bool:
-        boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
-        with boundary:
-            membership_graph.lock_graph(self.db)
-            valid = self.subscriptions.telegram.checked(role, generation, user_id, checked)
-            self.problems.sync_profiles(checked, {role})
-            return valid
-
-    def connect_telegram(self, binding: dict[str,Any], info: dict[str,Any], source: str, folder: str, history: InitialHistory | None, auto_read: bool) -> dict[str,Any]:
-        boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
-        with boundary:
-            membership_graph.lock_graph(self.db)
-            result = self.subscriptions.telegram.connect(binding,info,source,folder,history,auto_read,self.subscriptions)
+            result = self.subscriptions.telegram.connect(binding,info,source,folder,history,self.subscriptions)
             self.problems.sync_codex_feed_added(result['id'], self.wall_clock())
-            if binding['kind']=='client':
-                self.problems.sync_profiles(self.wall_clock(), {str(binding.get('role') or result['id'])})
             return result
 
-    def change_telegram_access(self, feed: str, binding: dict[str,Any], info: dict[str,Any],
-                               auto_read: bool | None) -> dict[str,Any]:
+    def change_telegram_access(self, feed: str, binding: dict[str,Any], info: dict[str,Any]) -> dict[str,Any]:
         boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
         with boundary:
             begin_write(self.db)
             membership_graph.lock_graph(self.db)
-            previous=self.subscriptions.telegram.binding(feed)
-            result=self.subscriptions.telegram.change_access(feed,binding,info,auto_read,self.subscriptions)
+            result=self.subscriptions.telegram.change_access(feed,binding,info,self.subscriptions)
             self.publications.configure_feed(feed)
             self.publications.changed_adapter(feed)
-            if previous and previous['kind']=='web' and binding['kind']=='client':
-                self.read_sync.schedule_saved_backfill(feed)
-            roles = {str(value.get('role') or feed) for value in (previous,binding) if value and value['kind']=='client'}
-            if roles:
-                self.problems.sync_profiles(self.wall_clock(),roles)
         return result
 
     def __init__(self, root: Path, fault: Callable[[str], None], *, wall_clock: Callable[[], float] = time.time, clock: Callable[[], float] = time.monotonic, database_url: str | None = None, defer_recovery: bool = False) -> None:
@@ -121,7 +96,6 @@ class Store:
             self.filters = FilterResults(self)
             self.processing = ProcessingState(self)
             self.reading = ReadingComposition(self)
-            self.read_sync = ReadSync(self)
             self.youtube = YouTubeAccess(self)
             self.problems = Problems(self)
             from oko.storage.incomplete_index import recover as recover_incomplete_class
@@ -136,12 +110,10 @@ class Store:
                 if expect_row(self.db.execute('SELECT youtube_admission_recovered FROM youtube_access WHERE id=1').fetchone())[0]:self.youtube_admission_ready=True
             with self.db:
                 self.problems.sync_codex_choice(self.wall_clock())
-                self.problems.sync_profiles(self.wall_clock())
             for name in ('content', 'staging'):
                 (root / name).mkdir(exist_ok=True)
             with self.db:
                 collection_jobs.interrupt(self)
-                running_read = [row['item'] for row in self.db.execute("SELECT item FROM jobs WHERE kind='read' AND status='running' AND (error IS NOT NULL OR problem_code IS NOT NULL)")]
                 running_delete = [row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE kind IN ('delete','feed-delete') AND status='running' AND (error IS NOT NULL OR problem_code IS NOT NULL) AND (deletion_extra_owned OR coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))")]
                 running_source=[row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE status='running' AND kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code LIKE 'source-%%'")]
                 job_write(self.db, "UPDATE jobs SET status='pending', generation=generation+1 WHERE status='running'")
@@ -149,13 +121,9 @@ class Store:
                     from oko.storage import source_groups
                     source_groups.sync_jobs(self,running_source,self.wall_clock())
                 job_write(self.db, "UPDATE jobs SET next = 0 WHERE status = 'pending' AND next IS DISTINCT FROM 0")
-                if self.db.execute("SELECT 1 FROM state WHERE key='read-problems-recovered-v1'").fetchone():
-                    for feed in running_read:
-                        self.problems.sync_read_feed(feed,self.wall_clock())
                 if self.db.execute("SELECT 1 FROM state WHERE key='delete-problems-recovered-v1'").fetchone():
                     for job_id in running_delete:
                         self.problems.sync_deletion(job_id,[],self.wall_clock())
-            self.problems.recover_read_problems()
             self.problems.recover_deletion_problems()
             self.problems.recover_deletion_extra_problems()
             collection_jobs.recover(self)
@@ -234,10 +202,8 @@ class Store:
             yield from self.jobs.backfill_processing_steps()
             yield from self.processing.recovery_steps(seed=initial)
             initial = False
-            yield from self.jobs.sync_reads_steps()
             # User commands may have changed settings or membership between steps.
-            if (not self.processing.pending()
-                    and self.read_sync._configuration == self.subscriptions.source_revision()):
+            if not self.processing.pending():
                 break
         self.processing.recovering = False
 
@@ -245,15 +211,14 @@ class Store:
         """Runtime changes use the same bounded owner without repeating startup scans."""
         while True:
             yield from self.processing.recovery_steps(seed=False)
-            yield from self.jobs.sync_reads_steps()
-            if not self.processing.pending() and not self.read_sync.pending():
+            if not self.processing.pending():
                 break
         self.processing.recovering = False
 
     def recover_step(self) -> bool:
         """Advance owned recovery without leaving an SQL transaction open."""
         if self._recovery is None:
-            if not self.processing.background or not (self.processing.pending() or self.read_sync.pending()):
+            if not self.processing.background or not self.processing.pending():
                 return False
             self._recovery = self._reconcile_steps()
         try:
@@ -273,8 +238,13 @@ class Store:
         # No uncommitted publication/file output is promoted on restart.
         staging=self.root/'staging'
         for path in staging.iterdir():
-            if path.name not in ('_media','_telegram'):
-                shutil.rmtree(path) if path.is_dir() else path.unlink()
+            if path.name != '_media':
+                if path.is_symlink():
+                    path.unlink()
+                elif path.is_dir():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink()
 
 
     def ensure_demo(self) -> None:
@@ -287,7 +257,6 @@ class Store:
         self.subscriptions.check_owner('feed', feed)
         with self.db:
             result=self.subscriptions.history.pause(feed, paused)
-            self.problems.sync_read_feed(feed,self.wall_clock())
             return result
 
     def change_history(self, feed: str, selection: InitialHistory | None) -> dict[str, Any]:
@@ -299,7 +268,6 @@ class Store:
             raise ValueError('Догрузка YouTube поддерживает последние N видео')
         with self.db:
             result=self.subscriptions.history.start(feed, selection) if selection else self.subscriptions.history.cancel(feed)
-            self.problems.sync_read_feed(feed,self.wall_clock())
             return result
 
 
@@ -316,7 +284,7 @@ class Store:
             saved_items: set[str] = set()
             added_memberships: list[str] = []
             completed_links: set[str] = set()
-            envelope=HistoryEnvelope.decode(cursor,adapter='client' if namespace=='telegram' else 'web') if namespace in ('telegram','telegram-web') else None
+            envelope=HistoryEnvelope.decode(cursor,adapter='web') if namespace=='telegram-web' else None
             selection=json.loads(cursor) if not envelope and self.subscriptions.history.status(feed) else {}
             enrolled=set(envelope.selection.enrolled_ids) if envelope else set(selection.get('history_enroll',[]))
             ordered=source_order
@@ -377,7 +345,6 @@ class Store:
                 if membership:
                     added_memberships.append(item)
                     saved_items.add(item)
-                self.read_sync.mark_feed(feed)
                 if publication.adapter_reference is None:
                     raise ValueError('Adapter did not return a publication external key')
                 rank=orders.get(publication.adapter_reference.key)
@@ -416,7 +383,6 @@ class Store:
             self.read_versions.memberships_changed(added_memberships)
             if envelope or 'history_enroll' in selection:
                 self.subscriptions.history.enroll(feed,history_items,envelope.selection.scan_complete if envelope else selection['scan_complete'])
-                self.problems.sync_read_feed(feed,self.wall_clock())
                 if envelope:
                     self.subscriptions.history.telegram_state(feed,envelope.selection)
                 for item in history_items:
@@ -427,10 +393,6 @@ class Store:
                         self.subscriptions.history.saved(item,bool(self.original(item)[0].get('full')))
             if selection:
                 self.subscriptions.history.discovery_state(feed,selection)
-            if envelope and namespace=='telegram':
-                self.read_sync.observed(feed,tuple(member for publication in publications for member in publication.members),cursor)
-                for item in saved_items:
-                    self.read_sync.saved_publication(item)
             for item in saved_items:
                 self.processing.reconcile_accepted_item(item)
             publication_links.notify_parents_many(self, set(added_memberships) | completed_links)
@@ -588,8 +550,6 @@ class Store:
                 item_status_changed |= bool(self.db.execute('UPDATE publications SET members = %s WHERE id = %s AND members IS DISTINCT FROM %s',(json.dumps(material.members),item,json.dumps(material.members))).rowcount)
             if item_status_changed:
                 status_changed(self.db)
-            self.read_sync.mark_item(item)
-            self.read_sync.saved_publication(item)
             publication_links.notify_parents(self,item,preserve_cancelled=item in effects.title_only_changes)
             for row in prepared[1]:
                 old=old_media.get(row['id'])
@@ -655,11 +615,9 @@ class Store:
                     eligibility.setdefault(feed, set()).update(json.loads(rows[member]['members']))
             for feed, messages in eligibility.items():
                 self.subscriptions.details.record(feed, 'marked_read')
-                self.read_sync.eligible(feed, sorted(messages), 'viewed')
             self.incomplete_draft.mark_materials(members)
             self.problems.forget_materials(set(members), self.wall_clock())
-            # Capture all read-sync facts before removing any membership. A
-            # single reachability pass then sees the final remaining roots.
+            # A single reachability pass sees the final remaining roots.
             for start in range(0, len(members), 400):
                 batch = members[start:start+400]
                 marks = ','.join('%s' for _ in batch)
@@ -697,7 +655,6 @@ class Store:
                 self.db.execute("UPDATE publications SET processing_metadata=(processing_metadata::jsonb-'_pass')::text WHERE id=ANY(%s)", (selected,))
             if self.db.execute("UPDATE feeds SET connection = 'deleting' WHERE id = %s AND connection IS DISTINCT FROM 'deleting'", (feed,)).rowcount:
                 source_changed(self.db)
-            self.problems.sync_read_feed(feed,self.wall_clock())
             for row in self.db.execute("SELECT id FROM jobs WHERE kind='discover' AND (item=%s OR feed_id=%s) AND (error IS NOT NULL OR problem_code IS NOT NULL)",(feed,feed)):
                 self.problems.sync_discover(row['id'],self.wall_clock())
             shared=[r[0] for r in self.db.execute(f'SELECT p.id FROM ({owned_ids("= %s")}) owner JOIN publications p ON p.id=owner.id WHERE p.platform IS NOT NULL',(feed,feed))]
@@ -714,8 +671,6 @@ class Store:
             publication_links.capture_root_deletion_problems(self,effects,set(shared))
             removed = membership_graph.remove(self.db,feed=feed)
             self.read_versions.memberships_changed(removed)
-            for item in shared:
-                self.read_sync.mark_item(item)
             publication_links.prune(self,set(shared),effects=effects)
             for item in shared:
                 self._remember_cleanup_owner(item, feed)
@@ -732,8 +687,6 @@ class Store:
                 self.set_processor_viewed([item],True)
             self.processing.memberships_removed(removed)
             publication_links.notify_parents_many(self, set(removed))
-            if binding and binding['kind']=='client':
-                self.problems.sync_profiles(self.wall_clock(), {str(binding.get('role') or feed)})
             self.jobs.sync_captured_deletions(effects)
         self.db.after_commit(lambda: self.fault('after_feed_delete_commit'))
 
@@ -839,7 +792,7 @@ class Store:
             # the completed archive even when it has no problems.
             condition = """jobs.id IN (SELECT id FROM jobs WHERE status IN ('pending','running') OR error IS NOT NULL
                 UNION SELECT id FROM jobs WHERE problem_code IS NOT NULL OR error IS NOT NULL)"""
-        rows = self.db.execute(f"SELECT jobs . kind , jobs . status , jobs . problem_code , count ( * ) AS count , CASE WHEN jobs . kind IN ( 'discover' , 'read' , 'feed-delete' ) THEN NULLIF ( jobs . item , '' ) WHEN jobs . kind = 'download_media' THEN ( SELECT {owner_expr('i')} FROM media_files m JOIN publications i ON i . id = m . publication_id WHERE m . id = jobs . item ) ELSE {owner_expr('items')} END AS feed , min ( jobs . next ) AS next , sum ( CASE WHEN jobs . error IS NOT NULL THEN 1 ELSE 0 END ) AS errors FROM jobs LEFT JOIN publications items ON items . id = jobs . item WHERE {condition} GROUP BY jobs . kind , jobs . status , jobs . problem_code , feed ORDER BY min ( jobs . id )").fetchall()
+        rows = self.db.execute(f"SELECT jobs . kind , jobs . status , jobs . problem_code , count ( * ) AS count , CASE WHEN jobs . kind IN ( 'discover' , 'feed-delete' ) THEN NULLIF ( jobs . item , '' ) WHEN jobs . kind = 'download_media' THEN ( SELECT {owner_expr('i')} FROM media_files m JOIN publications i ON i . id = m . publication_id WHERE m . id = jobs . item ) ELSE {owner_expr('items')} END AS feed , min ( jobs . next ) AS next , sum ( CASE WHEN jobs . error IS NOT NULL THEN 1 ELSE 0 END ) AS errors FROM jobs LEFT JOIN publications items ON items . id = jobs . item WHERE {condition} GROUP BY jobs . kind , jobs . status , jobs . problem_code , feed ORDER BY min ( jobs . id )").fetchall()
         now, wall = self.clock(), self.wall_clock()
         return [WorkSummary(row['kind'],row['status'],row['feed'],row['count'],
                     row['problem_code'] or (row['kind']+'-failed' if row['errors'] else None),

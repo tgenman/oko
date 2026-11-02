@@ -19,7 +19,6 @@ from oko.storage.media import MediaOutput, MediaDownload
 from oko.storage.store import Store
 from oko.storage.job_types import Job
 from oko.collection.telegram.contracts import TelegramBinding
-from oko.collection.telegram.source import LocalTelegram, TelegramClient, TelegramSource
 from oko.collection.youtube.source import LocalCaptions
 from oko.collection.contracts import CaptionsClient
 from oko.collection.youtube.history import HistoryClient
@@ -35,12 +34,11 @@ from oko.services.media import MediaService
 
 class CollectionWorker:
     clean_collection: Callable[[dict[str, Any]], dict[str, Any]]
-    verify_telegram_profile: Callable[[str], Awaitable[Any]]
     _collection_interval: float
 
     def __init__(self, execution: Execution, source: Source | None, clock: Callable[[],float],
                  fault: Callable[[str],None], source_feed: str, rss_enabled: bool,
-                 rss_transport: httpx.AsyncBaseTransport | None, telegram_client: TelegramClient | None,
+                 rss_transport: httpx.AsyncBaseTransport | None,
                  youtube_captions: CaptionsClient | None, youtube_history: HistoryClient | None,
                  wall_clock: Callable[[],float]) -> None:
         self.execution = execution
@@ -50,13 +48,11 @@ class CollectionWorker:
         self._youtube_history = youtube_history
         self._wall_clock = wall_clock
         self._captions_active: 'CaptionAttempt | None' = None
-        self._read_sync_at = 0.0
         self._started=False
         self._source_revision: int | None = None
         self._dependency_feeds: list[str] = []
         self._source,self._clock,self._fault=source,clock,fault
         self._source_feed = source_feed
-        self._telegram_client = telegram_client
         self._telegram_http = TelegramHTTP(rss_transport, clock, wall_clock,
             lambda group: self.require_store().jobs.telegram_http_state(group),
             self._save_telegram_http_wait,
@@ -65,17 +61,13 @@ class CollectionWorker:
         self._source_http=SourceHTTP(rss_transport,wall_clock,
             lambda scope:self.require_store().jobs.source_http_until(scope),self._save_source_http_wait,
             lambda:self._live() and not self.jobs._cancelling,lambda:self.execution._epoch)
-        self._collection = Sources(source, source_feed, rss_enabled, rss_transport, telegram_client,
+        self._collection = Sources(source, source_feed, rss_enabled, rss_transport,
                                    self._youtube_captions, self._youtube_history, self._telegram_http,self._source_http)
         self._sources = self._collection.sources
-        self.jobs = JobControl(self.execution, self._sources, telegram_client, clock)
+        self.jobs = JobControl(self.execution, self._sources, clock)
         self._telegram_bindings: dict[str, TelegramBinding] = {}
         self._last_collection = clock()
         self._last_media_cleanup = clock()
-        self._account_retry: dict[int, float] = {}
-        self._restored_wait_feeds: set[str] = set()
-        if isinstance(telegram_client, LocalTelegram):
-            telegram_client.allowed = lambda: self._live() and not self.jobs._cancelling
 
     @property
     def diagnostics(self) -> Journal | None:
@@ -124,13 +116,6 @@ class CollectionWorker:
             if source and binding and not setting.deleting:
                 if binding['kind']=='web':
                     self._telegram_bindings[feed]=TelegramBinding(source,'telegram-web','common')
-                elif feed in snapshot.reads:
-                    read=snapshot.reads[feed]
-                    self._telegram_bindings[feed]=TelegramBinding(source,'telegram',binding['role'],read)
-                    if read.user_id in snapshot.waits and feed not in self._restored_wait_feeds:
-                        deadline=self._account_retry.setdefault(read.user_id,self._clock()+max(0,snapshot.waits[read.user_id]-self._wall_clock()))
-                        current.jobs.restore_telegram_wait(feed,deadline)
-                        self._restored_wait_feeds.add(feed)
         self._source_revision=snapshot.revision
 
     @property
@@ -146,57 +131,9 @@ class CollectionWorker:
         return self.execution._store
 
 
-    async def _execute_read(self, job: Job, current: Store, source: Source) -> None:
-        binding = self._telegram_bindings.get(job.item)
-        client = self._telegram_client
-        if not client or not binding or not binding.read or not isinstance(source, TelegramSource):
-            async with self.execution._actions:
-                if self.execution._store is current and current.jobs.valid(job):
-                    with current.jobs.transaction(self._live):current.jobs.finish(job)
-            return
-        async with self.execution._actions:
-            request = self.service.read_request(job.item)
-            if not request:
-                with current.jobs.transaction(self._live):current.jobs.finish(job)
-                return
-            signature = self.service.read_signature(request)
-        await source.resolve()
-        state = await client.read_state(source.account, source.peer, request['since'], )
-        state['read_max'] = max(state['read_max'], self.service.read_confirmed(job.item))
-        window: dict[str, Any] = {}
-        plan = self.service.read_plan(request, state)
-        confirmed = plan.confirmed
-        if plan.until > confirmed:
-            window = await client.read_window(source.account, source.peer, confirmed, plan.until, )
-            plan = self.service.read_plan(request, state, window)
-        async with self.execution._actions:
-            if source.identity_info and self.execution._store is current and current.jobs.valid(job):
-                self.service.refresh_identity(job.item, source.identity_info)
-            latest = self.service.read_request(job.item) if self.execution._store is current else None
-            if not self._live() or not current.jobs.valid(job) or not latest or self.service.read_signature(latest) != signature:
-                return
-        if plan.candidate > confirmed:
-            await client.acknowledge(source.account, source.peer, plan.candidate, )
-            self._fault('after_telegram_acknowledge')
-            confirmed = plan.candidate
-        async with self.execution._actions:
-            if self.execution._store is current and self._live() and current.jobs.valid(job):
-                with current.jobs.transaction(self._live):
-                    self.service.read_completed(job.item,plan,confirmed)
-                    current.jobs.finish_read(job,plan.waiting,self._clock())
-
     def _lane(self, feed: str) -> str:
         binding = self._telegram_bindings.get(feed)
         return binding.lane if binding else 'common'
-
-    def _account_wait(self, feed: str, error: SourceError | None, job: Job | None = None) -> None:
-        binding = self._telegram_bindings.get(feed)
-        if not error or error.remote_type != 'FloodWaitError' or not binding or not binding.read or not self.execution._store:
-            return
-        ready = self._clock() + error.delay
-        self._account_retry[binding.read.user_id] = ready
-        with self.execution._store.jobs.transaction(self._live):
-            self.execution._store.jobs.account_wait(binding.read.user_id,self._wall_clock()+error.delay,job)
 
     def _finish_collection(self, job: Job, current: Store, error: BaseException | None = None) -> None:
         attempt = self.jobs._collection_active.get(job.id)
@@ -260,15 +197,10 @@ class CollectionWorker:
                 return
             if access is not None:
                 saved_binding = self.service.binding(feed)
-                if not saved_binding or saved_binding['kind'] not in ('client', 'web'):
-                    raise SourceError('Сопоставьте старый аккаунт профилю Telegram', code='identity-unconfirmed')
-                if saved_binding['kind'] == 'client':
-                    await self.verify_telegram_profile(saved_binding['role'])
+                if not saved_binding or saved_binding['kind'] != 'web':
+                    raise SourceError('Недоступная привязка Telegram', code='identity-unconfirmed')
 
-            if job.kind == 'read':
-                assert source is not None
-                await self._execute_read(job, current, source)
-            elif job.kind == 'discover':
+            if job.kind == 'discover':
                 assert source is not None
                 outcome = await source.discover(cursor)
                 async with self.execution._actions:
@@ -276,7 +208,6 @@ class CollectionWorker:
                         if outcome.observation.identity:
                             self.service.refresh_identity(feed, outcome.observation.identity.as_info())
                         collection_error = outcome.retry_error
-                        self._account_wait(feed, outcome.retry_error)
                         with current.jobs.transaction(self._live):
                             if not self._live() or not current.jobs.valid(job):
                                 return
@@ -317,8 +248,6 @@ class CollectionWorker:
                                 current.jobs.finish(job)
                             current.jobs.checkpoint('collection_after_finish')
                             self._finish_collection(job, current, collection_error)
-                        self._account_wait(feed, material.collection_error, job)
-                        current.jobs.sync_reads()
                         self.service.feed_status(feed, error=None, gap=fetched.observation.gap, changes=fetched.observation.changes)
         except CaptionsDeferred:
             async with self.execution._actions:
@@ -350,9 +279,7 @@ class CollectionWorker:
                             self.service.notify_parents(job.item)
                             self._finish_collection(job,current)
                         return
-                    label = error.label if isinstance(error, SourceError) else str(error) if isinstance(error, TelegramConflict) else 'Ошибка синхронизации Telegram' if job.kind == 'read' else 'Ошибка сбора'
-                    if isinstance(error, SourceError):
-                        self._account_wait(feed, error)
+                    label = error.label if isinstance(error, SourceError) else str(error) if isinstance(error, TelegramConflict) else 'Ошибка сбора'
                     if isinstance(error, SourceError):
                         code = error.code or 'source-unavailable'
                     elif isinstance(error, TelegramConflict):
@@ -372,9 +299,7 @@ class CollectionWorker:
                             self.service.notify_parents(job.item)
                         if job.kind=='discover':
                             self.service.discovery_wait(feed,label,current.jobs.retry_at(job))
-                        if job.kind == 'read':
-                            self.service.read_failed(feed, label)
-                        elif isinstance(error, SourceError):
+                        if isinstance(error, SourceError):
                             self.service.feed_status(feed, error=label, gap=None)
                         self._finish_collection(job, current, error)
 
@@ -419,15 +344,6 @@ class CollectionWorker:
                 with current.jobs.transaction(self._live):current.jobs.finish(job)
                 return
             feed=self.service.feed(owner)
-            binding=self._telegram_bindings.get(feed)
-            native=binding if binding and binding.read and not self.service.feedless(owner) else None
-            if native and native.read:
-                ready=self._account_retry.get(native.read.user_id,0)
-                if ready>self._clock():
-                    self._media_failure(current,job,AdapterIssue('telegram-flood-wait','Ожидание ограничения Telegram',AdapterErrorKind.source_wait,
-                        scope='telegram:account:'+str(native.read.user_id),
-                        retry_at=datetime.fromtimestamp(self._wall_clock()+ready-self._clock(),timezone.utc)))
-                    return
             download = media.begin(job.item,str(job.id)+'-'+str(job.generation),current.jobs.manual(job))
             if download is None:
                 with current.jobs.transaction(self._live):current.jobs.finish(job)
@@ -444,11 +360,6 @@ class CollectionWorker:
         try:
             if adapter is None:
                 raise ValueError('Publication adapter unavailable')
-            if native:
-                await self.verify_telegram_profile(native.lane)
-                async with self.execution._actions:
-                    if self.execution._store is not current or not self._live() or not current.jobs.valid(job):
-                        raise asyncio.CancelledError
             with MediaOutput(download.temporary,lambda:self.execution._store is current and self._live() and current.jobs.valid(job)) as output:
                 actual = await adapter.download_media(download.publication, download.media, output)
             async with self.execution._actions:
@@ -479,17 +390,12 @@ class CollectionWorker:
                         'Не удалось сохранить вложение' if isinstance(error,OSError) else str(error) if isinstance(error,(ActionError,TelegramConflict)) else 'Нарушен контракт медиа',
                         AdapterErrorKind.temporary if isinstance(error,(OSError,ActionError,TelegramConflict)) else AdapterErrorKind.permanent)
                     source_error=error.__cause__ if isinstance(error.__cause__,SourceError) else None
-                    if native and native.read and source_error and source_error.remote_type=='FloodWaitError':
-                        issue=AdapterIssue(issue.code,issue.message,AdapterErrorKind.source_wait,download.publication,download.media.key,
-                            'telegram:account:'+str(native.read.user_id),datetime.fromtimestamp(self._wall_clock()+source_error.delay,timezone.utc))
                     if caption_attempt and caption_attempt.blocked:
                         issue=AdapterIssue(issue.code,issue.message,AdapterErrorKind.source_wait,download.publication,download.media.key,
                             'youtube:captions',caption_retry_datetime(self.service.caption_ready()))
                     if issue.kind!=AdapterErrorKind.notice:
                         record_caught('runtime._execute_media')
                     self._media_failure(current,job, issue,None if issue.kind==AdapterErrorKind.notice else source_error or error)
-                    if native:
-                        self._account_wait(feed,source_error,job)
         finally:
             if caption_attempt is not None:
                 caption_attempt.release()
@@ -521,9 +427,6 @@ class CollectionWorker:
             if now-self._last_media_cleanup>=3600:
                 self.media.cleanup()
                 self._last_media_cleanup=now
-            if not self.execution._store.processing.background and now - self._read_sync_at >= .5:
-                self.execution._store.jobs.sync_reads()
-                self._read_sync_at = now
             self._sync_sources()
             if now-self._last_collection >= self._collection_interval:
                 for feed in self._sources:
@@ -531,7 +434,7 @@ class CollectionWorker:
                 self._last_collection = now
             state = self.execution._store.status()
             caption_feeds=self._collection.caption_feeds()
-            for lane in ('common', 'personal', 'collection', 'media','captions'):
+            for lane in ('common', 'media','captions'):
                 if lane=='captions' and not caption_feeds:
                     continue
                 media_lane=lane in ('media','captions')
@@ -548,9 +451,7 @@ class CollectionWorker:
                     del self.jobs._lanes[lane]
                     if media_lane:
                         self.jobs._media_jobs.pop(lane,None)
-                profile = self.service.profile(lane) if lane in ('personal','collection') else None
-                ready_at = self._account_retry.get(profile['user_id'], 0) if profile else 0
-                if lane in self.jobs._lanes or now < ready_at:
+                if lane in self.jobs._lanes:
                     continue
                 feeds = [feed for feed in self._sources if self._collection.publication_adapter(feed) is not None] if media_lane else [feed for feed in self._sources if self._lane(feed) == lane]
                 if lane=='captions':

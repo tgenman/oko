@@ -11,10 +11,9 @@ from oko.collection.rss import RSSSource
 from oko.collection.rss_source import RSSAdapterSource
 from oko.collection.web_adapter import WebAdapter
 from oko.collection.web_source import WebArticleSource
-from oko.collection.telegram.source import TelegramClient, TelegramSource
+from oko.collection.telegram.source import TelegramSource
 from oko.collection.telegram.web import WebTelegram
 from oko.collection.telegram.channel_source import TelegramWebSource
-from oko.collection.telegram.client_channel_source import TelegramClientSource
 from oko.collection.youtube.source import YouTubeSource
 from oko.collection.youtube.publication_source import YouTubeAdapterSource
 from oko.collection.contracts import CaptionsClient
@@ -23,10 +22,8 @@ from oko.collection.youtube.history import HistoryClient
 
 @dataclass(frozen=True)
 class TelegramAccess:
-    kind: Literal['web', 'client']
+    kind: Literal['web']
     username: str | None = None
-    account: str | None = None
-    peer: int | None = None
 
 
 @dataclass(frozen=True)
@@ -49,13 +46,13 @@ class SourceUpdates:
 
 class Sources:
     def __init__(self, source: Source | None, source_feed: str, rss_enabled: bool,
-                 transport: httpx.AsyncBaseTransport | None, telegram: TelegramClient | None,
+                 transport: httpx.AsyncBaseTransport | None,
                  captions: CaptionsClient, history: HistoryClient | None,
                  telegram_transport: httpx.AsyncBaseTransport | None = None,
                  publication_transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.sources: dict[str, Source] = {source_feed: source} if source else {}
         self._injected = source_feed if source else None
-        self._rss_enabled, self._transport, self._telegram = rss_enabled, transport, telegram
+        self._rss_enabled, self._transport = rss_enabled, transport
         self._captions, self._history = captions, history
         self._telegram_transport = telegram_transport or transport
         self._publication_transport = publication_transport or transport
@@ -83,14 +80,7 @@ class Sources:
                 assert access.username is not None
                 web_type=TelegramWebSource
                 source = previous if type(previous) is web_type else web_type(
-                    WebTelegram(access.username, self._telegram_transport), '', 0, config.initial_days, access.username,
-                    http_transport=self._telegram_transport)
-            elif config.transport == 'telegram' and self._telegram and access and access.peer:
-                assert access.account is not None
-                client_type=TelegramClientSource
-                source = previous if type(previous) is client_type else client_type(
-                    self._telegram, access.account, access.peer, config.initial_days, access.username,
-                    http_transport=self._telegram_transport)
+                    WebTelegram(access.username, self._telegram_transport), config.initial_days, access.username)
             elif config.transport == 'rss' and self._rss_enabled:
                 source_type = RSSAdapterSource
                 source = previous if type(previous) is source_type else source_type(config.url, config.initial_days, self._publication_transport)
@@ -120,9 +110,9 @@ class Sources:
         source = self.sources.get(feed)
         return source.changes if source else None
 
-    def telegram_access(self, feed: str) -> Literal['web', 'client'] | None:
+    def telegram_access(self, feed: str) -> Literal['web'] | None:
         source = self.sources.get(feed)
-        return source.adapter if isinstance(source, TelegramSource) else None
+        return 'web' if isinstance(source, TelegramSource) else None
 
     def caption_feeds(self) -> list[str]:
         return [feed for feed,source in self.sources.items() if isinstance(source,YouTubeAdapterSource)]
@@ -139,7 +129,5 @@ class Sources:
                 adapter.captions=captions
             return adapter
         if isinstance(source,RSSAdapterSource):
-            return source.publication_adapter()
-        if isinstance(source,TelegramClientSource):
             return source.publication_adapter()
         return source.publication_adapter() if source is not None else None

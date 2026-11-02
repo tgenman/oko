@@ -81,8 +81,6 @@ def claim(store: 'Store', row: Any) -> Iterator[None]:
         _sync_source(store, kind, job_id, row['problem_code'], source_before)
     if kind == 'filter':
         store.processing.filter_changed(row['item'])
-    if kind == 'read':
-        store.problems.sync_read_feed(row['item'], store.wall_clock())
     if kind == 'fetch' and previous:
         _sync(store, kind, job_id, previous)
     store.incomplete_draft.mark_job(kind, row['item'], job_id)

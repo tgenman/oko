@@ -125,8 +125,6 @@ def notify_parents_many(store: 'Store', items: set[str], *, preserve_cancelled: 
     memberships.lock_graph(store.db)
     rows = store.db.execute('SELECT DISTINCT source_publication_id FROM publication_links WHERE target_publication_id = ANY(%s)', (sorted(items),)).fetchall()
     for row in rows:
-        store.read_sync.mark_item(row[0])
-        store.read_sync.saved_publication(row[0])
         store.processing.reconcile_accepted_item(row[0],preserve_cancelled=preserve_cancelled)
 
 

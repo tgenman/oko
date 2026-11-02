@@ -53,7 +53,7 @@ def test_new_readers_and_writers_use_migrated_array_in_store_and_http(tmp_path,p
   assert next(f for f in store.subscriptions.feeds() if f['id']=='old')['original_urls']==['https://old.test/feed','https://old.test/feed']
   created=store.subscriptions.add_feed(AddFeed(url='https://new.test/feed',title='New',folder='Folder',verification='synthetic'))
   store.publications.configure_feed(created['id'])
-  telegram=store.subscriptions.telegram.connect({'kind':'web','username':'synthetic','preview_url':'https://t.me/s/synthetic'},{'title':'Synthetic','username':'synthetic'},'https://t.me/synthetic','Folder',None,False,store.subscriptions)
+  telegram=store.subscriptions.telegram.connect({'kind':'web','username':'synthetic','preview_url':'https://t.me/s/synthetic'},{'title':'Synthetic','username':'synthetic'},'https://t.me/synthetic','Folder',None,store.subscriptions)
   assert created['original_urls']==['https://new.test/feed']
   assert telegram['original_urls']==['https://t.me/synthetic']
  finally:store.db.close()

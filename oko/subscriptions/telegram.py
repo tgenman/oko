@@ -57,17 +57,6 @@ class TelegramAccess:
         self.db = db
         self.modified = modified
         self.wall_clock = wall_clock
-        # No executescript here: migrations and their ownership rows are atomic.
-        with db:
-            begin_write(db)
-            changed = db.execute("SELECT 1 FROM telegram_profiles WHERE state IS DISTINCT FROM 'unavailable' LIMIT 1").fetchone() is not None
-            message_changed = db.execute("SELECT 1 FROM telegram_profiles WHERE message IS DISTINCT FROM 'Требуется проверка сессии после запуска' LIMIT 1").fetchone() is not None
-            db.execute("UPDATE telegram_profiles SET state = 'unavailable' , message = 'Требуется проверка сессии после запуска'")
-            if changed:
-                source_changed(db)
-            if message_changed:
-                status_changed(db)
-
     def bindings(self, feeds: list[str] | None = None) -> dict[str, dict[str, Any]]:
         return self._bindings(tuple(sorted(set(feeds))) if feeds is not None else None)
 
@@ -80,8 +69,6 @@ class TelegramAccess:
             params=(list(feeds),)
         return {row['feed']:json.loads(row['binding_raw']) if row['binding_raw'] is not None else row['binding'] for row in self.db.execute(query,params)}
 
-    def profiles(self) -> dict[str, dict[str, Any]]:
-        return {row['role']: dict(row) for row in self.db.execute('SELECT * FROM telegram_profiles')}
 
     @reading_value
     def binding(self, feed: str) -> dict[str, Any] | None:
@@ -119,45 +106,9 @@ class TelegramAccess:
         if changed:
             source_changed(self.db)
 
-    @reading_value
-    def profile(self, role: str) -> dict[str, Any] | None:
-        row = self.db.execute('SELECT * FROM telegram_profiles WHERE role = %s', (role,)).fetchone()
-        return dict(row) if row else None
 
-    def dependents(self, role: str) -> list[str]:
-        return [r['feed'] for r in self.db.execute("SELECT feed FROM telegram_bindings WHERE indexed_role = %s", (role,))]
 
-    def save_profile(self, role: str, account: str, user_id: int, generation: int, checked: float) -> dict[str, Any]:
-        with self.db:
-            begin_write(self.db)
-            old = self.profile(role)
-            if (old['generation'] if old else 0) != generation:
-                raise TelegramConflict('profile_unavailable', dict(retry_at=None), 'Профиль изменился; повторите проверку', 503)
-            if old and old['user_id'] != user_id and self.dependents(role):
-                raise TelegramConflict('profile_in_use', dict(role=role), 'Профиль используется фидами')
-            if self.db.execute('SELECT 1 FROM telegram_profiles WHERE role != %s AND user_id = %s', (role, user_id)).fetchone():
-                raise TelegramConflict('profile_account_conflict', dict(role=role), 'Для двух ролей нужны разные аккаунты')
-            self.db.execute('INSERT INTO telegram_profiles VALUES ( %s , %s , %s , %s , %s , %s , %s ) ON CONFLICT ( role ) DO UPDATE SET account = excluded . account , user_id = excluded . user_id , generation = excluded . generation , state = excluded . state , checked = excluded . checked , message = NULL',
-                (role, account, user_id, generation + 1, 'ready', checked, None))
-            source_changed(self.db)
-            if old and old['message'] is not None:
-                status_changed(self.db)
-        return self.profile(role) or {}
 
-    def checked(self, role: str, generation: int, user_id: int | None, checked: float) -> bool:
-        row = self.profile(role)
-        if not row or row['generation'] != generation:
-            return False
-        state = 'ready' if user_id == row['user_id'] else 'unavailable' if user_id is None else 'identity_mismatch'
-        message = None if state == 'ready' else 'Личность Telegram-аккаунта не подтверждена'
-        with self.db:
-            self.db.execute('UPDATE telegram_profiles SET state = %s , checked = %s , message = %s WHERE role = %s',
-                (state, checked, message, role))
-            if row['state'] != state:
-                source_changed(self.db)
-            if row['message'] != message:
-                status_changed(self.db)
-        return state == 'ready'
 
     def claims(self, info: dict[str, Any]) -> list[tuple[str, str]]:
         result = [('peer', str(info['peer']))] if info.get('peer') is not None else []
@@ -181,7 +132,7 @@ class TelegramAccess:
                     raise TelegramConflict('source_identity_conflict', dict(feed_id=feed), 'Сохранённый username принадлежит другому peer')
         return owners
 
-    def connect(self, binding: dict[str, Any], info: dict[str, Any], source: str, folder: str, history: Any, auto_read: bool, subscriptions: Any) -> dict[str, Any]:
+    def connect(self, binding: dict[str, Any], info: dict[str, Any], source: str, folder: str, history: Any, subscriptions: Any) -> dict[str, Any]:
         with self.db:
             begin_write(self.db)
             claims = self.claims(info)
@@ -190,18 +141,16 @@ class TelegramAccess:
                 raise TelegramConflict('duplicate_source', self.duplicates(duplicates), 'Источник уже подключён')
             identity = subscriptions.new_feed_id()
             folder_id = subscriptions.ensure_folder(folder)
-            profile = self.profile(binding['role']) if binding['kind'] == 'client' else None
             self.db.execute("INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport , telegram_peer , telegram_account , telegram_username , auto_read ) VALUES ( %s , %s , %s , 'telegram' , %s , %s , 'connected' , %s , %s , %s , %s , %s )",
                 (identity, 'telegram-instance:' + identity, info['title'], folder_id, [source],
-                 'telegram' if profile else None, info.get('peer'), profile['account'] if profile else None,
-                 info.get('username'), auto_read if profile else None))
+                 None, info.get('peer'), None, info.get('username'), None))
             source_changed(self.db)
             subscriptions.details.created(identity)
             subscriptions.details.description(identity, info.get('description'))
             self.put_binding(identity, binding)
             self.save_metadata(identity, info)
             for claim in claims:
-                self.claim(identity, claim, 'verified client' if profile else 'public preview')
+                self.claim(identity, claim, 'public preview')
             if history is not None:
                 subscriptions.history.configure(identity, history)
         result: dict[str, Any] = subscriptions.feeds(identity)[0]
@@ -211,8 +160,7 @@ class TelegramAccess:
         return dict(existing_feeds=[dict(feed_id=feed, title=expect_row(self.db.execute('SELECT title FROM feeds WHERE id = %s', (feed,)).fetchone())[0], access=self.binding(feed)) for feed in feeds])
 
 
-    def change_access(self, feed: str, binding: dict[str,Any], info: dict[str,Any],
-                      auto_read: bool | None, subscriptions: Any) -> dict[str,Any]:
+    def change_access(self, feed: str, binding: dict[str,Any], info: dict[str,Any], subscriptions: Any) -> dict[str,Any]:
         """Apply verified channel access inside Runtime's acceptance transaction."""
         subscriptions.check_owner('feed',feed)
         row=expect_row(self.db.execute('SELECT kind,transport,connection,telegram_peer,telegram_account,auto_read FROM feeds WHERE id = %s',(feed,)).fetchone())
@@ -222,7 +170,7 @@ class TelegramAccess:
         known_peer=row['telegram_peer']
         if known_peer is not None and info.get('peer')!=known_peer:
             raise TelegramConflict('source_identity_conflict',dict(feed_id=feed),'Не подтверждён прежний канал Telegram')
-        if info.get('kind') not in (None,'channel') or binding['kind']=='client' and info.get('kind')!='channel':
+        if info.get('kind') not in (None,'channel'):
             raise TelegramConflict('access_immutable',dict(feed_id=feed),'Смена доступа поддерживается только для каналов')
         aliases={name.lower() for name in [info.get('username'),*info.get('usernames',[])] if isinstance(name,str)}
         if previous['kind']=='web' and previous['username'].lower() not in aliases:
@@ -230,13 +178,9 @@ class TelegramAccess:
         owners=[owner for owner in self.conflicts(self.claims(info),info.get('peer')) if owner!=feed]
         if owners:
             raise TelegramConflict('source_identity_conflict',dict(feed_id=feed),'Внешний ключ уже принадлежит другому фиду')
-        profile=self.profile(binding['role']) if binding['kind']=='client' else None
-        account=profile['account'] if profile else row['telegram_account']
-        automatic=(bool(row['auto_read']) if auto_read is None else auto_read) if profile else None
         self.put_binding(feed,binding)
-        self.db.execute("UPDATE feeds SET telegram_peer = %s , telegram_account = %s , telegram_username = %s , transport = %s , connection = 'connected' , auto_read = %s , config = %s::jsonb , cursor = '' WHERE id = %s",
-            (info.get('peer',known_peer),account,info.get('username'), 'telegram' if profile else None,automatic,
-             json.dumps(dict(source_kind=info.get('kind','channel'))),feed))
+        self.db.execute("UPDATE feeds SET telegram_peer = %s , telegram_account = NULL , telegram_username = %s , transport = NULL , connection = 'connected' , auto_read = NULL , config = %s::jsonb , cursor = '' WHERE id = %s",
+            (info.get('peer',known_peer),info.get('username'),json.dumps(dict(source_kind=info.get('kind','channel'))),feed))
         source_changed(self.db)
         self.save_metadata(feed,info)
         for claim in self.claims(info):
@@ -254,7 +198,7 @@ class TelegramAccess:
                 if owners and feed not in owners:
                     raise TelegramConflict('source_identity_conflict', dict(feed_id=feed), 'Новый alias уже занят другим фидом')
             for claim in claims:
-                self.claim(feed, claim, 'client metadata refresh')
+                self.claim(feed, claim, 'public metadata refresh')
             self.save_metadata(feed, info)
 
     def save_metadata(self, feed: str, info: dict[str, Any]) -> None:

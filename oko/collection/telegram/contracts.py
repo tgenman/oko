@@ -10,18 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 
 from oko.collection.contracts import Publication, Source, SourceError, ExternalMedia
 
-Adapter = Literal['web', 'client']
-Profile = Literal['personal', 'collection']
-Lane = Literal['common', 'personal', 'collection']
-
-
-@dataclass(frozen=True)
-class ClientReadBinding:
-    account: str
-    user_id: int
-    peer_id: int
-    generation: int
-    lower_bound: int
+Adapter = Literal['web']
+Lane = Literal['common']
 
 
 @dataclass(frozen=True)
@@ -29,7 +19,6 @@ class TelegramBinding:
     source: Source
     cursor_key: str
     lane: Lane
-    read: ClientReadBinding | None = None
 
 
 @dataclass(frozen=True)

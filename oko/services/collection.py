@@ -1,6 +1,5 @@
 """Publication collection and source state, independent of attempts and adapters."""
 from collections.abc import Callable
-from oko.storage.read_sync import ReadPlan
 from typing import Any
 from oko.domain.collection import CollectionEffects
 from oko.storage.store import Store
@@ -69,9 +68,6 @@ class CollectionService:
     def binding(self, feed: str) -> dict[str,Any] | None:
         return CollectionState(self._storage()).binding(feed)
 
-    @repository_access
-    def profile(self, role: str) -> dict[str,Any] | None:
-        return CollectionState(self._storage()).profile(role)
 
     @repository_access
     def refresh_identity(self, feed: str, info: dict[str,Any]) -> None:
@@ -88,30 +84,6 @@ class CollectionService:
     @repository_access
     def discovery_wait(self, feed: str, label: str, retry_at: float | None) -> None:
         CollectionState(self._storage()).discovery_wait(feed,label,retry_at)
-
-    @repository_access
-    def read_request(self, feed: str) -> dict[str,Any] | None:
-        return CollectionState(self._storage()).read_request(feed)
-
-    @repository_access
-    def read_confirmed(self, feed: str) -> int:
-        return CollectionState(self._storage()).read_confirmed(feed)
-
-    @repository_access
-    def read_signature(self, request: dict[str,Any]) -> str:
-        return CollectionState(self._storage()).read_signature(request)
-
-    @repository_access
-    def read_plan(self, request: dict[str,Any], state: dict[str,Any], window: dict[str,Any] | None = None) -> ReadPlan:
-        return CollectionState(self._storage()).read_plan(request,state,window)
-
-    @repository_access
-    def read_completed(self, feed: str, plan: ReadPlan, confirmed: int) -> None:
-        CollectionState(self._storage()).read_completed(feed,plan,confirmed)
-
-    @repository_access
-    def read_failed(self, feed: str, label: str) -> None:
-        CollectionState(self._storage()).read_failed(feed,label)
 
     @repository_access
     def caption_ready(self) -> float:

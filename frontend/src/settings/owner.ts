@@ -78,7 +78,7 @@ export class MenusOwner {
     const submitted=keys.map(key=>({key,value:values[key],revision:this.draftRevisions.get(path+'/'+key)}));
     this.saving.add(key);this.settingsMessage='Saving…';this.changed();
     try{
-      await this.api.command({operation:'feed_patch',feed_id:feed.id,fields:Object.keys(patch).sort().filter((key):key is keyof FeedPatch=>['title','auto_read','folder_id','new_folder','importance','initial_days','public_ai','read_history','transport'].includes(key))},headers=>settings.feedPatch({client:this.api.client,path:{identity:feed.id},body:patch,headers}));
+      await this.api.command({operation:'feed_patch',feed_id:feed.id,fields:Object.keys(patch).sort().filter((key):key is keyof FeedPatch=>['title','folder_id','new_folder','importance','initial_days','public_ai','transport'].includes(key))},headers=>settings.feedPatch({client:this.api.client,path:{identity:feed.id},body:patch,headers}));
       for(const {key,value,revision} of submitted)if(values[key]===value&&this.draftRevisions.get(path+'/'+key)===revision)delete values[key];
       this.onChanged();this.needsRefresh.add(path);await this.refresh();
       if(this.currentPath===path&&action.current)await this.loadSettings();

@@ -15,7 +15,6 @@
   Codex/llama.cpp. Контракт не импортирует адаптеры.
 - `oko/storage` содержит PostgreSQL, файлы, репозитории сущностей, JobRepository и
   recovery; общая граница БД — `database.py`, нативная схема PostgreSQL — версионируемые SQL-миграции. FilterResults/SummaryResults/ProcessingState заменяют старый reviews.
-  ReadSync хранит границы чтения каналов, JobRepository владеет его заданиями.
 - `storage/feed_facts.py` выбирает и нормализует общие читательские поля фида;
   каталог отдельно дополняет их историей и аватаром, открытый материал — привязкой Telegram.
 - `oko/subscriptions` содержит модели подписок и наследование правил.
@@ -45,14 +44,13 @@ HTTP/PostgreSQL-проверки поведения.
 Результат фиксирует публикации/материал, сведения об источнике и частичные ошибки
 одной попытки. CollectionWorker не читает изменяемые поля adapter после discover/fetch.
 
-`collection/sources.py` выбирает и настраивает существующие RSS, Telegram web/client
+`collection/sources.py` выбирает и настраивает существующие RSS, Telegram web
 и YouTube adapters. Стабильная настройка сохраняет кеш; изменившаяся настройка
 не меняет экземпляр выполняющейся попытки. Модуль не обращается к Store, сети
 или workers при настройке. История и формат курсоров остаются прежними.
 
 Воркеры создают ресурсы под action lock, выполняет внешнее ожидание вне lock
-и принимает результат после повторного допуска. CaptionAttempt, FloodWait,
-ReadSync и владение workers сохраняются; Store отвечает за staging и фиксацию.
+и принимает результат после повторного допуска. CaptionAttempt и владение workers сохраняются; Store отвечает за staging и фиксацию.
 
 ## Переход к PublicationAdapter (#90)
 

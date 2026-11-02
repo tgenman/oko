@@ -46,6 +46,7 @@ def test_release_discards_old_source_history_and_recovers_current_error(tmp_path
         assert db.execute("SELECT id FROM publications WHERE id='p'").fetchone() == ('p',)
         # Isolate the current-error scenario from unrelated legacy test records.
         db.execute("DELETE FROM reader_problems WHERE id IN ('action','discover','marked')")
+        migrate(db, MIGRATIONS)
     occurrence = None
     for _ in range(2):
         with TestClient(create_app(tmp_path, token='test', database_url=postgres_database_url, api_only=True), headers=HEADERS) as client:

@@ -10,7 +10,6 @@ import httpx
 from oko.collection.contracts import Source
 from oko.processing.codex import CodexClient,LocalCodex
 from oko.storage.store import Store
-from oko.collection.telegram.source import TelegramClient
 from oko.collection.contracts import CaptionsClient
 from oko.collection.youtube.history import HistoryClient
 from oko.diagnostics import Journal, active_journal, record_caught
@@ -42,11 +41,11 @@ class Host:
 
     def __init__(self, root: Path, source: Source | None, clock: Callable[[], float],
                  fault: Callable[[str], None], shutdown: Callable[[], None],
-                 admitted: Callable[[], bool], should_stop: Callable[[], bool], source_feed: str, rss_enabled: bool, rss_transport: httpx.AsyncBaseTransport | None, telegram_client: TelegramClient | None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None, youtube_captions: CaptionsClient | None = None, youtube_history: HistoryClient | None = None, wall_clock: Callable[[], float] = time.time, database_url: str | None = None) -> None:
+                 admitted: Callable[[], bool], should_stop: Callable[[], bool], source_feed: str, rss_enabled: bool, rss_transport: httpx.AsyncBaseTransport | None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None, youtube_captions: CaptionsClient | None = None, youtube_history: HistoryClient | None = None, wall_clock: Callable[[], float] = time.time, database_url: str | None = None) -> None:
         self._database_url = database_url
         self.execution = Execution(admitted)
         self.codex=codex_client or LocalCodex()
-        self.collection=CollectionWorker(self.execution,source,clock,fault,source_feed,rss_enabled,rss_transport,telegram_client,youtube_captions,youtube_history,wall_clock)
+        self.collection=CollectionWorker(self.execution,source,clock,fault,source_feed,rss_enabled,rss_transport,youtube_captions,youtube_history,wall_clock)
         self.jobs=self.collection.jobs
         self.filters=FilterWorker(self.execution,self.jobs,clock,self.codex,ai_transport)
         self.summaries=SummaryWorker(self.execution,self.jobs,clock,self.codex,ai_transport)

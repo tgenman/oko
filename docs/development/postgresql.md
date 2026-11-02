@@ -122,5 +122,5 @@ Production backup/restore and releases follow [cloud backup](cloud-backup.md) an
 [cloud deployment](cloud-deploy.md). A file-only backup is incomplete. Old local
 file-copy update, rollback, backup, restore and import commands refuse before
 changing an installation. Existing data and historical backups are not deleted.
-External Codex/Telethon formats remain owned by those applications; their security
+External Codex formats remain owned by that application; their security
 checks do not provide an alternative Oko storage backend.

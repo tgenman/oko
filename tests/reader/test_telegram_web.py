@@ -27,7 +27,7 @@ def test_web_connect_collects_text_and_links_without_client_or_read_sync(tmp_pat
         material = client.get('/api/v3/publication/'+cards[0]['id']).json()
         assert material['text'] == 'Hello\nWorld [article](https://example.org/article?a=1&b=2)'
         assert (material['completeness']['state']=='complete') is True
-        assert client.get('/api/v3/status/details').json()['telegram_reads'] == []
+        assert 'telegram_reads' not in client.get('/api/v3/status/details').json()
         assert all(url.startswith('https://t.me/') for url in requests)
 
 

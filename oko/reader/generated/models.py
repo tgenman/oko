@@ -1167,11 +1167,6 @@ class TelegramProfileConfiguration(WireModel):
     label: StrictStr
 
 
-class TelegramProfileRequest(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    configuration_ref: ConfigurationRef
-
-
 class TelegramRole(RootModel[Literal["personal", "collection"]]):
     model_config = ConfigDict(allow_inf_nan=False)
     root: Literal["personal", "collection"] = Field(..., examples=["personal"])
@@ -1247,7 +1242,6 @@ class WaitingReason(
             "storage_unavailable",
             "client_presence_required",
             "retry_scheduled",
-            "telegram_read_frontier",
         ]
     ]
 ):
@@ -1262,7 +1256,6 @@ class WaitingReason(
         "storage_unavailable",
         "client_presence_required",
         "retry_scheduled",
-        "telegram_read_frontier",
     ] = Field(..., examples=["processor_unavailable"])
 
 
@@ -1875,7 +1868,6 @@ class FeedCollectionTarget(WireModel):
 
 class FeedPatchRequest(WireModel):
     model_config = ConfigDict(extra="forbid")
-    auto_read: StrictBool | None | MISSING = MISSING
     folder_id: FolderId | MISSING = MISSING
     importance: Importance | MISSING = MISSING
     initial_days: StrictInt | MISSING = Field(default=MISSING, ge=1, le=3650)
@@ -1887,12 +1879,11 @@ class FeedPatchRequest(WireModel):
         pattern="\\S",
     )
     public_ai: StrictBool | MISSING = MISSING
-    read_history: StrictBool | MISSING = MISSING
     title: StrictStr | MISSING = Field(
         default=MISSING,
         description="Local feed title. Trimmed before saving; must contain 1 to 200 characters after trimming. Does not change source identity.",
     )
-    transport: Literal["telegram", "rss", "youtube"] | None | MISSING = MISSING
+    transport: Literal["rss", "youtube"] | None | MISSING = MISSING
 
 
 class FolderCollectionTarget(WireModel):
@@ -2373,40 +2364,24 @@ class StoredOverrides(WireModel):
     theses: StrictBool | MISSING = MISSING
 
 
-class TelegramClientAccess(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    account_user_id: TelegramUserId
-    kind: Literal["client"]
-    peer_id: TelegramPeerId
-    role: TelegramRole
-
-
-class TelegramClientAccessRequest(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["client"]
-    profile: TelegramRole
-
-
-class TelegramClientConnectRequest(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    access: TelegramClientAccessRequest
-    auto_read: StrictBool = False
-    feed_id: FeedId | MISSING = Field(
-        default=MISSING,
-        description="Explicitly change access for this existing Telegram feed. Preserve its settings and publications; verify source identity before applying.",
-    )
-    folder: StrictStr = Field(..., max_length=200, min_length=1)
-    initial_history: HistoryCountSelection = Field(
-        default={"count": "20", "mode": "count"},
-        description="Omitted entire field defaults to count 20. Explicit null or an incomplete object is invalid.",
-        validate_default=True,
-    )
-    source_locator: StrictStr = Field(..., max_length=4000, min_length=1)
-
-
-class TelegramConfirmedAccess(RootModel[TelegramWebAccess | TelegramClientAccess]):
+class TelegramAccess(RootModel[TelegramUnconfiguredAccess | TelegramWebAccess]):
     model_config = ConfigDict(allow_inf_nan=False)
-    root: TelegramWebAccess | TelegramClientAccess = Field(
+    root: TelegramUnconfiguredAccess | TelegramWebAccess = Field(
+        ...,
+        discriminator="kind",
+        examples=[
+            {
+                "kind": "web",
+                "preview_url": "https://example.test/post/1",
+                "username": "example",
+            }
+        ],
+    )
+
+
+class TelegramConfirmedAccess(RootModel[TelegramWebAccess]):
+    model_config = ConfigDict(allow_inf_nan=False)
+    root: TelegramWebAccess = Field(
         ...,
         discriminator="kind",
         examples=[
@@ -2468,14 +2443,13 @@ class TelegramProfileUnconfigured(WireModel):
     state: Literal["unconfigured"]
 
 
-class TelegramReadState(WireModel):
+class TelegramSourceReference(WireModel):
     model_config = ConfigDict(extra="forbid")
-    confirmed: TelegramMessageId | None
-    error: StrictStr | None
+    access: TelegramAccess
     feed_id: FeedId
-    initial: TelegramMessageId | None
-    pending: StrictInt = Field(..., ge=0, le=9007199254740991)
-    waiting: WaitingReason | None
+    kind: Literal["telegram"]
+    message_ids: list[TelegramMessageId]
+    source_url: SourceUrl
 
 
 class TelegramWebConnectRequest(WireModel):
@@ -2875,6 +2849,13 @@ class EffectiveSettingsValues(WireModel):
     theses: EffectiveTheses
 
 
+class ExistingTelegramFeed(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    access: TelegramAccess
+    feed_id: FeedId
+    title: StrictStr
+
+
 class FilterResult(WireModel):
     model_config = ConfigDict(extra="forbid")
     hidden: StrictBool
@@ -3075,6 +3056,33 @@ class RssSubscriptionFeed(WireModel):
     transport: Literal["rss"] | None
 
 
+class SourceReference(
+    RootModel[
+        DemoSourceReference
+        | RssSourceReference
+        | YoutubeSourceReference
+        | TelegramSourceReference
+    ]
+):
+    model_config = ConfigDict(allow_inf_nan=False)
+    root: (
+        DemoSourceReference
+        | RssSourceReference
+        | YoutubeSourceReference
+        | TelegramSourceReference
+    ) = Field(
+        ...,
+        discriminator="kind",
+        examples=[
+            {
+                "feed_id": "example",
+                "kind": "demo",
+                "source_url": "https://example.test/post/1",
+            }
+        ],
+    )
+
+
 class SourceUnavailableError(WireModel):
     model_config = ConfigDict(extra="forbid")
     code: Literal["source_unavailable"]
@@ -3107,113 +3115,29 @@ class StoredCommandContext(RootModel[CommandContext]):
     )
 
 
-class TelegramAccess(
-    RootModel[TelegramUnconfiguredAccess | TelegramWebAccess | TelegramClientAccess]
-):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: TelegramUnconfiguredAccess | TelegramWebAccess | TelegramClientAccess = Field(
-        ...,
-        discriminator="kind",
-        examples=[
-            {
-                "kind": "web",
-                "preview_url": "https://example.test/post/1",
-                "username": "example",
-            }
-        ],
-    )
-
-
-class TelegramClientSubscriptionFeed(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    access: TelegramClientAccess
-    auto_read: StrictBool
-    avatar_url: FeedAvatarUrl | MISSING = MISSING
-    connection: Literal["ready", "unavailable", "deleting"]
-    folder_id: FolderId
-    history: HistoryState
-    id: FeedId
-    identity: StrictStr = Field(..., min_length=1)
-    importance: Importance
-    initial_days: StrictInt = Field(..., ge=1, le=3650)
-    kind: Literal["telegram"]
-    original_urls: list[SourceLocator]
-    public_ai: StrictBool | None
-    read_history: StrictBool
-    title: StrictStr
-
-
 class TelegramConnect503Errors(
-    RootModel[
-        ProfileUnavailableError | SourceUnavailableError | StorageUnavailableError
-    ]
+    RootModel[SourceUnavailableError | StorageUnavailableError]
 ):
     model_config = ConfigDict(allow_inf_nan=False)
-    root: ProfileUnavailableError | SourceUnavailableError | StorageUnavailableError = (
-        Field(
-            ...,
-            discriminator="code",
-            examples=[
-                {
-                    "code": "profile_unavailable",
-                    "command_id": None,
-                    "details": {"retry_at": None},
-                    "diagnostic_id": None,
-                    "message": "example",
-                }
-            ],
-        )
-    )
-
-
-class TelegramConnectRequest(
-    RootModel[TelegramWebConnectRequest | TelegramClientConnectRequest]
-):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: TelegramWebConnectRequest | TelegramClientConnectRequest = Field(
-        ..., examples=[{"folder": "example", "source_locator": "example"}]
-    )
-
-
-class TelegramProfileSave409Errors(
-    RootModel[
-        ProfileInUseError | ProfileAccountConflictError | AccountIdentityMismatchError
-    ]
-):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: (
-        ProfileInUseError | ProfileAccountConflictError | AccountIdentityMismatchError
-    ) = Field(
+    root: SourceUnavailableError | StorageUnavailableError = Field(
         ...,
         discriminator="code",
         examples=[
             {
-                "code": "profile_in_use",
-                "command_id": None,
-                "details": {"role": "personal"},
-                "diagnostic_id": None,
-                "message": "example",
-            }
-        ],
-    )
-
-
-class TelegramProfileSave503Errors(
-    RootModel[ProfileUnavailableError | StorageUnavailableError]
-):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: ProfileUnavailableError | StorageUnavailableError = Field(
-        ...,
-        discriminator="code",
-        examples=[
-            {
-                "code": "profile_unavailable",
+                "code": "source_unavailable",
                 "command_id": None,
                 "details": {"retry_at": None},
                 "diagnostic_id": None,
                 "message": "example",
             }
         ],
+    )
+
+
+class TelegramConnectRequest(RootModel[TelegramWebConnectRequest]):
+    model_config = ConfigDict(allow_inf_nan=False)
+    root: TelegramWebConnectRequest = Field(
+        ..., examples=[{"folder": "example", "source_locator": "example"}]
     )
 
 
@@ -3236,22 +3160,6 @@ class TelegramProfileState(
         discriminator="state",
         examples=[{"role": "personal", "state": "unconfigured"}],
     )
-
-
-class TelegramProfiles(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    collection: CollectionTelegramProfileState
-    configurations: list[TelegramProfileConfiguration]
-    personal: PersonalTelegramProfileState
-
-
-class TelegramSourceReference(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    access: TelegramAccess
-    feed_id: FeedId
-    kind: Literal["telegram"]
-    message_ids: list[TelegramMessageId]
-    source_url: SourceUrl
 
 
 class TelegramUnconfiguredSubscriptionFeed(WireModel):
@@ -3478,11 +3386,9 @@ class DemoSubscriptionFeed(WireModel):
     transport: Literal["demo"] | None
 
 
-class ExistingTelegramFeed(WireModel):
+class DuplicateSourceErrorDetails(WireModel):
     model_config = ConfigDict(extra="forbid")
-    access: TelegramAccess
-    feed_id: FeedId
-    title: StrictStr
+    existing_feeds: list[ExistingTelegramFeed] = Field(..., min_length=1)
 
 
 class FeedHistoryState(WireModel):
@@ -3509,6 +3415,31 @@ class HistoryConflictErrorDetails(WireModel):
     model_config = ConfigDict(extra="forbid")
     feed_id: FeedId
     history: HistoryState
+
+
+class PublicationResponse(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    availability: Literal["available", "pending"]
+    changed: StrictBool
+    completeness: ContentCompleteness | None
+    description: StrictStr
+    external_attachments: list[ExternalAttachment]
+    feed_id: FeedId
+    filter: Filter
+    id: MaterialId
+    linked_content: LinkedContent | None
+    loading: StrictBool
+    media: list[MediaItem]
+    post_web_unavailable: StrictBool
+    published_at: Timestamp | None
+    reply_preview: ReplyPreview | None
+    revision_id: RevisionId | None
+    source: SourceReference
+    source_deleted: StrictBool
+    source_url: SourceUrl
+    text: StrictStr
+    theses: Theses
+    title: StrictStr
 
 
 class RecoveryIntent(
@@ -3576,33 +3507,6 @@ class RetryingProblem(WireModel):
     )
 
 
-class SourceReference(
-    RootModel[
-        DemoSourceReference
-        | RssSourceReference
-        | YoutubeSourceReference
-        | TelegramSourceReference
-    ]
-):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: (
-        DemoSourceReference
-        | RssSourceReference
-        | YoutubeSourceReference
-        | TelegramSourceReference
-    ) = Field(
-        ...,
-        discriminator="kind",
-        examples=[
-            {
-                "feed_id": "example",
-                "kind": "demo",
-                "source_url": "https://example.test/post/1",
-            }
-        ],
-    )
-
-
 class SubscriptionFeed(
     RootModel[
         TelegramUnconfiguredSubscriptionFeed
@@ -3611,7 +3515,6 @@ class SubscriptionFeed(
         | YoutubeSubscriptionFeed
         | UnresolvedSubscriptionFeed
         | TelegramWebSubscriptionFeed
-        | TelegramClientSubscriptionFeed
     ]
 ):
     model_config = ConfigDict(allow_inf_nan=False)
@@ -3622,7 +3525,6 @@ class SubscriptionFeed(
         | YoutubeSubscriptionFeed
         | UnresolvedSubscriptionFeed
         | TelegramWebSubscriptionFeed
-        | TelegramClientSubscriptionFeed
     ) = Field(
         ...,
         examples=[
@@ -3666,9 +3568,13 @@ class CurrentProblem(WireModel):
     )
 
 
-class DuplicateSourceErrorDetails(WireModel):
+class DuplicateSourceError(WireModel):
     model_config = ConfigDict(extra="forbid")
-    existing_feeds: list[ExistingTelegramFeed] = Field(..., min_length=1)
+    code: Literal["duplicate_source"]
+    command_id: CommandId | None
+    details: DuplicateSourceErrorDetails
+    diagnostic_id: DiagnosticId | None
+    message: StrictStr
 
 
 class ExistingFeedVerification(WireModel):
@@ -3854,31 +3760,6 @@ class ProblemSnapshot(WireModel):
     updated_at: Timestamp
 
 
-class PublicationResponse(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    availability: Literal["available", "pending"]
-    changed: StrictBool
-    completeness: ContentCompleteness | None
-    description: StrictStr
-    external_attachments: list[ExternalAttachment]
-    feed_id: FeedId
-    filter: Filter
-    id: MaterialId
-    linked_content: LinkedContent | None
-    loading: StrictBool
-    media: list[MediaItem]
-    post_web_unavailable: StrictBool
-    published_at: Timestamp | None
-    reply_preview: ReplyPreview | None
-    revision_id: RevisionId | None
-    source: SourceReference
-    source_deleted: StrictBool
-    source_url: SourceUrl
-    text: StrictStr
-    theses: Theses
-    title: StrictStr
-
-
 class ReadingComposition(WireModel):
     model_config = ConfigDict(extra="forbid")
     count: StrictInt = Field(..., ge=0, le=9007199254740991)
@@ -3898,7 +3779,6 @@ class RuntimeStatus(WireModel):
     ready_sources: StrictInt = Field(..., ge=0, le=9007199254740991)
     runtime_state: Literal["running", "disabled", "stopping", "stopped", "unavailable"]
     sources: list[SourceState]
-    telegram_reads: list[TelegramReadState]
     total_sources: StrictInt = Field(..., ge=0, le=9007199254740991)
     viewed_ids: list[MaterialId]
     work: list[WorkEntry]
@@ -3912,13 +3792,49 @@ class SubscriptionCatalog(WireModel):
     folders: list[SubscriptionFolder]
 
 
-class DuplicateSourceError(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    code: Literal["duplicate_source"]
-    command_id: CommandId | None
-    details: DuplicateSourceErrorDetails
-    diagnostic_id: DiagnosticId | None
-    message: StrictStr
+class TelegramConnect409Errors(
+    RootModel[
+        AccessImmutableError
+        | DuplicateSourceError
+        | IdentityUnconfirmedError
+        | SourceIdentityConflictError
+        | DeletionInProgressError
+        | RuntimeStoppedError
+    ]
+):
+    model_config = ConfigDict(allow_inf_nan=False)
+    root: (
+        AccessImmutableError
+        | DuplicateSourceError
+        | IdentityUnconfirmedError
+        | SourceIdentityConflictError
+        | DeletionInProgressError
+        | RuntimeStoppedError
+    ) = Field(
+        ...,
+        discriminator="code",
+        examples=[
+            {
+                "code": "duplicate_source",
+                "command_id": None,
+                "details": {
+                    "existing_feeds": [
+                        {
+                            "access": {
+                                "kind": "web",
+                                "preview_url": "https://example.test/post/1",
+                                "username": "example",
+                            },
+                            "feed_id": "example",
+                            "title": "example",
+                        }
+                    ]
+                },
+                "diagnostic_id": None,
+                "message": "example",
+            }
+        ],
+    )
 
 
 class EffectiveSettingsSnapshot(
@@ -4038,55 +3954,6 @@ class ErrorEnvelope(
                 "code": "action_invalid",
                 "command_id": None,
                 "details": {"reason": "example"},
-                "diagnostic_id": None,
-                "message": "example",
-            }
-        ],
-    )
-
-
-class TelegramConnect409Errors(
-    RootModel[
-        AccessImmutableError
-        | DuplicateSourceError
-        | IdentityUnconfirmedError
-        | SourceIdentityConflictError
-        | DeletionInProgressError
-        | ProfileNotConfiguredError
-        | AccountIdentityMismatchError
-        | RuntimeStoppedError
-    ]
-):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: (
-        AccessImmutableError
-        | DuplicateSourceError
-        | IdentityUnconfirmedError
-        | SourceIdentityConflictError
-        | DeletionInProgressError
-        | ProfileNotConfiguredError
-        | AccountIdentityMismatchError
-        | RuntimeStoppedError
-    ) = Field(
-        ...,
-        discriminator="code",
-        examples=[
-            {
-                "code": "duplicate_source",
-                "command_id": None,
-                "details": {
-                    "existing_feeds": [
-                        {
-                            "access": {
-                                "kind": "web",
-                                "preview_url": "https://example.test/post/1",
-                                "username": "example",
-                            },
-                            "feed_id": "example",
-                            "title": "example",
-                        }
-                    ]
-                },
                 "diagnostic_id": None,
                 "message": "example",
             }

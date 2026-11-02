@@ -7,7 +7,6 @@ from typing import Any, Literal, TYPE_CHECKING
 from oko.collection.contracts import Source
 from oko.storage.store import Store
 from oko.storage.job_types import Job
-from oko.collection.telegram.source import LocalTelegram, TelegramClient, TelegramSource
 from oko.diagnostics import Journal, record_caught
 from oko.execution import Execution
 from oko.services.queries import ReadingQueries
@@ -26,8 +25,8 @@ class _CollectionAttempt:
 
 
 class JobControl:
-    def __init__(self, execution: Execution, sources: dict[str, Source], telegram: TelegramClient | None, clock: Callable[[], float]) -> None:
-        self.execution, self._sources, self._telegram_client, self._clock = execution, sources, telegram, clock
+    def __init__(self, execution: Execution, sources: dict[str, Source], clock: Callable[[], float]) -> None:
+        self.execution, self._sources, self._clock = execution, sources, clock
         self._collection_active: dict[int, _CollectionAttempt] = {}
         self._ai: asyncio.Task[None] | None = None
         self._lanes: dict[str, asyncio.Task[None]] = {}
@@ -78,7 +77,6 @@ class JobControl:
                     del self._collection_active[identity]
             ai_task = self._ai
             lanes = [lane for lane in self._lanes if feeds is None or self._lane_feeds.get(lane) in feeds]
-            cancelled_feeds = {self._lane_feeds[lane] for lane in lanes if lane in self._lane_feeds}
             tasks = [self._lanes.pop(lane) for lane in lanes]
             for media_lane in ('media','captions'):
                 if media_lane in lanes:
@@ -97,13 +95,6 @@ class JobControl:
                             self.diagnostics.capture(error, 'Завершение фоновой задачи')
                 else:
                     self._detach_task(task, ai=task is ai_task)
-            if self._telegram_client:
-                if feeds is None or (tasks and not isinstance(self._telegram_client, LocalTelegram)):
-                    await self._telegram_client.close()
-                elif isinstance(self._telegram_client,LocalTelegram):
-                    accounts = {source.account for feed in cancelled_feeds if isinstance(source := self._sources.get(feed), TelegramSource)}
-                    for account in accounts:
-                        await self._telegram_client.close_account(account)
         finally:
             if feeds is None:
                 self._cancelling -= 1
@@ -192,7 +183,6 @@ class JobControl:
     def reconcile_cleanup(self) -> None:
         store=self.execution.require_store()
         store.jobs.reconcile_cleanup()
-        store.jobs.sync_reads()
 
     def change_adapter(self, feed: str) -> None:
         self.execution.require_store().jobs.change_adapter(feed)

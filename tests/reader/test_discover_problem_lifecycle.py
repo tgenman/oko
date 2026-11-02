@@ -33,21 +33,6 @@ def test_discover_failure_and_completion_are_saved_without_status_read(tmp_path,
     finally: store.db.close()
 
 
-def test_profile_problem_suppresses_discovery_failure_without_status_read(tmp_path,postgres_url):
-    from tests.support.read_problem import setup
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    try:
-        setup(store)
-        with store.db:
-            job_id=store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,generation) VALUES ('discover','feed','feed','running',1) RETURNING id").fetchone()[0]
-        store.jobs.retry(Job(job_id,'discover','feed',1),1,'failure',code='identity-unconfirmed')
-        identity='job:identity-unconfirmed:feed:discover:feed'
-        assert store.db.execute('SELECT id FROM reader_problems WHERE identity=%s AND finished IS NULL',(identity,)).fetchone()
-        assert not store.check_telegram_profile('personal',1,202,2)
-        assert not store.db.execute('SELECT id FROM reader_problems WHERE identity=%s AND finished IS NULL',(identity,)).fetchone()
-        assert store.check_telegram_profile('personal',1,101,3)
-        assert store.db.execute('SELECT id FROM reader_problems WHERE identity=%s AND finished IS NULL',(identity,)).fetchone()
-    finally:store.db.close()
 
 
 def test_http_reports_recovered_source_failure_without_get_writes(tmp_path,postgres_url):

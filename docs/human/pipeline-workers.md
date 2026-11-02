@@ -11,7 +11,7 @@ flowchart TB
     APP --> SV["Сервисы сущностей и чтения"]
     APP --> CTL["JobControl: отмена и повтор"]
     subgraph CRONS["Три независимых запуска"]
-      C["CollectionWorker: сбор, медиа, read sync"]
+      C["CollectionWorker: сбор и медиа"]
       F["FilterWorker: фильтрация"]
       T["SummaryWorker: тезисы"]
     end

@@ -45,7 +45,7 @@ def test_telegram_legacy_is_response_only_and_web_does_not_accept_auto_read():
     assert not accepts('TelegramConnectRequest', {'source_locator': '@example', 'folder': 'News', 'access': legacy})
     assert accepts('TelegramConnectRequest', {'source_locator': '@example', 'folder': 'News'})
     assert not accepts('TelegramConnectRequest', {'source_locator': '@example', 'folder': 'News', 'auto_read': False})
-    assert accepts('TelegramConnectRequest', {'source_locator': '-100123', 'folder': 'News', 'access': {'kind': 'client', 'profile': 'personal'}, 'auto_read': False})
+    assert not accepts('TelegramConnectRequest', {'source_locator': '-100123', 'folder': 'News', 'access': {'kind': 'client', 'profile': 'personal'}, 'auto_read': False})
 
 
 def test_explicit_lifetime_cannot_contain_client_presence_timers():
@@ -132,9 +132,7 @@ def test_current_problem_snapshot_does_not_accept_finished_problems():
     assert not accepts('ProblemSnapshot', snapshot)
 
 
-def test_profile_roles_and_command_problem_correlation_are_explicit():
-    assert accepts('TelegramProfiles', {'personal': {'state': 'unconfigured', 'role': 'personal'}, 'collection': {'state': 'unconfigured', 'role': 'collection'}, 'configurations': []})
-    assert not accepts('TelegramProfiles', {'personal': {'state': 'unconfigured', 'role': 'collection'}, 'collection': {'state': 'unconfigured', 'role': 'collection'}, 'configurations': []})
+def test_command_problem_correlation_is_explicit():
     unavailable = {'state': 'unavailable', 'local': None, 'auth': 'unknown', 'version': None, 'limits_checked': False, 'quota_windows': [], 'reason': 'unavailable', 'message': 'Availability has not been checked'}
     assert accepts('CodexAvailability', unavailable)
     problem = dict(contract()['components']['schemas']['CurrentProblem']['examples'][0], command_id='lost-request-1')

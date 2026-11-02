@@ -65,7 +65,7 @@ def failure_status(issue: AdapterIssue) -> str:
 
 
 def fail(store: 'Store', job: 'Job', issue: AdapterIssue, *, cancelled: bool = False) -> None:
-    if job.kind not in ('read','discover','feed-delete'):
+    if job.kind not in ('discover','feed-delete'):
         from oko.storage import memberships
         memberships.lock_graph(store.db)
     if not store.jobs.valid(job):
