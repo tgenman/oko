@@ -603,41 +603,25 @@ class JobRepository:
         if not row:
             return None
         with self.store.db:
-            source_before: set[str]=set()
             sequence_value=None
             if row['kind'] in ('fetch','download_media','filter','theses','delete','feed-delete'):
-                from oko.storage import memberships,source_groups
+                from oko.storage import memberships
                 memberships.lock_graph(self.store.db)
                 current=self.store.db.execute("SELECT jobs.*,(SELECT value FROM state WHERE key='job-dispatch-generation') AS dispatch_sequence FROM jobs WHERE id=%s",(row['id'],)).fetchone()
                 if current is None or current['status']!='pending' or current['generation']!=row['generation']:
                     return None
                 row=current
                 sequence_value=current['dispatch_sequence']
-                if (row['problem_code'] or '').startswith('source-'):
-                    source_before=source_groups.job_keys(self.store,row['id'])
-            # Keep dispatch generations monotonic even when every old job was removed.
-            previous = self.store.problems.deletion_candidates(row['id'],self.store.wall_clock()) if row['kind'] in ('delete','feed-delete') and (row['error'] is not None or row['problem_code'] is not None) else []
-            from oko.storage.fetch_job_problems import previous_candidates as managed_candidates
-            previous_fetch=managed_candidates(self.store,row['id'],self.store.wall_clock()) if row['kind']=='fetch' and (row['error'] is not None or row['problem_code'] is not None) else []
-            from oko.storage.media_job_problems import previous_candidates as media_candidates
-            previous_media=media_candidates(self.store,row['id'],self.store.wall_clock()) if row['kind']=='download_media' and (row['error'] is not None or row['problem_code'] is not None) else []
-            from oko.storage.processing_job_problems import managed_candidates as processing_candidates
-            previous_processing=processing_candidates(self.store,row['id'],self.store.wall_clock()) if row['kind'] in ('filter','theses') and (row['error'] is not None or row['problem_code'] is not None) else []
-            if row['kind'] not in ('fetch','download_media','filter','theses','delete','feed-delete'):
-                sequence = self.store.db.execute("SELECT value FROM state WHERE key = 'job-dispatch-generation'").fetchone()
-                sequence_value=sequence[0] if sequence else None
-            generation = max(row['generation'], int(sequence_value) if sequence_value is not None else 0) + 1
-            self.store.db.execute("INSERT INTO state VALUES ( 'job-dispatch-generation' , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value", (str(generation),))
-            job_write(self.store.db, "UPDATE jobs SET status='running', attempt=attempt+1, generation=%s WHERE id=%s", (generation, row['id']))
-            if source_before:
-                complete=source_groups.sync(self.store,row['kind'],source_before | source_groups.job_keys(self.store,row['id']),self.store.wall_clock(),evidence=source_groups.job_evidence_many(self.store,[(row['id'],row['problem_code'])]))
-                job_write(self.store.db,"UPDATE jobs SET source_event_owned=(%s=1) WHERE id=%s",(complete,row['id']))
-            if row['kind']=='filter':self.store.processing.filter_changed(row['item'])
-            if row['kind']=='read':self.store.problems.sync_read_feed(row['item'],self.store.wall_clock())
-            if row['kind']=='fetch' and previous_fetch:self.store.problems.sync_fetch(row['id'],previous_fetch,self.store.wall_clock())
-            self.store.incomplete_draft.mark_job(row['kind'],row['item'],row['id'])
-            if row['kind']=='download_media' and previous_media:self.store.problems.sync_media_problem(row['id'],previous_media,self.store.wall_clock())
-            if row['kind'] in ('filter','theses') and previous_processing:self.store.problems.sync_processing_problem(row['id'],previous_processing,self.store.wall_clock())
+            from oko.storage import individual_job_problems
+            with individual_job_problems.claim(self.store, row):
+                previous = self.store.problems.deletion_candidates(row['id'],self.store.wall_clock()) if row['kind'] in ('delete','feed-delete') and (row['error'] is not None or row['problem_code'] is not None) else []
+                # Keep dispatch generations monotonic even when every old job was removed.
+                if row['kind'] not in ('fetch','download_media','filter','theses','delete','feed-delete'):
+                    sequence = self.store.db.execute("SELECT value FROM state WHERE key = 'job-dispatch-generation'").fetchone()
+                    sequence_value=sequence[0] if sequence else None
+                generation = max(row['generation'], int(sequence_value) if sequence_value is not None else 0) + 1
+                self.store.db.execute("INSERT INTO state VALUES ( 'job-dispatch-generation' , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value", (str(generation),))
+                job_write(self.store.db, "UPDATE jobs SET status='running', attempt=attempt+1, generation=%s WHERE id=%s", (generation, row['id']))
             if row['kind']=='discover' and (row['error'] is not None or row['problem_code'] is not None):self.store.problems.sync_discover(row['id'],self.store.wall_clock())
             if row['kind'] in ('delete','feed-delete') and previous:
                 self.store.problems.sync_deletion(row['id'],previous,self.store.wall_clock())
