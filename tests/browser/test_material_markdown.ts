@@ -8,7 +8,7 @@ import {artifactPath} from './artifacts';
 test('publication Markdown renders semantic text and safe links without external images',async()=>{
  const r=await reader();try{
   const text='# Заголовок\n\n**Важно** и *выделение*. [Статья](https://example.net/a_(b)?x=1&y=2) и [Относительная](../story).\n\n[По ссылке][ref]\n\n[ref]: https://example.net/ref\n\n<https://example.net/auto> https://example.net/plain\n\n- Первый\n- Второй\n\n> Цитата\n\n`[Код](https://code.test)`\n\n<script>alert(1)</script>\n\n[Опасно](javascript:alert(1)) [Файл](file:///etc/passwd) [Почта](mailto:reader@example.net)\n\n![Подпись изображения](https://image.test/x.png)';
-  await r.start([material('A',{text,url:'https://example.org/posts/A'})]);await r.page.locator('[data-card="A"]').click();
+  await r.start([material('A',{text,source_url:'https://example.org/posts/A'})]);await r.page.locator('[data-card="A"]').click();
   const body=r.page.locator('#text');
   await expect(body.getByRole('link',{name:'Статья',exact:true})).toHaveAttribute('href','https://example.net/a_(b)?x=1&y=2');
   await expect(body.getByRole('link',{name:'Относительная',exact:true})).toHaveAttribute('href','https://example.org/story');
@@ -48,7 +48,7 @@ test('Markdown publication links travel through the production HTTP reader uncha
 
 test('filtered publication keeps a collapsed full original, media and restorable Markdown text',async()=>{
  const r=await reader();try{
-  const item=material('A',{text:'[Статья](https://example.net/story)\n\nРеклама',images:['/api/v3/materials/A/images/x.png'],filter:{status:'done',hidden:false,reason:'Убрана реклама',removed:['Реклама']}});
+  const item=material('A',{text:'[Статья](https://example.net/story)\n\nРеклама',media:[{kind:'image',role:'image',url:'/api/v3/materials/A/images/x.png',mime:null}],filter:{state:'ready',error:null,result:{hidden:false,reason:'Убрана реклама',removed:['Реклама'],text:'[Статья](https://example.net/story)\n\n',provenance:{kind:'unknown',reason:'not_recorded'}}}});
   await r.start([item]);
   await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/materials/A/images/x.png',{base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jL1sAAAAASUVORK5CYII=',mime:'image/png'}));
   await r.page.locator('[data-card="A"]').click();
@@ -59,11 +59,11 @@ test('filtered publication keeps a collapsed full original, media and restorable
   await r.page.locator('#original-panel summary').click();await expect(r.page.locator('#text').getByRole('link',{name:'Статья'})).toBeVisible();
   await expect(r.page.locator('#text')).toContainText('Реклама');await expect(r.page.locator('#material img')).toHaveCount(1);
   await expect(r.page.locator('#filter-restore')).toHaveCount(0);
-  const hidden={...item,filter:{...item.filter!,hidden:true,reason:'Скрыто фильтром'}};
-  await r.page.evaluate(hidden=>readerTransport.replies.set('/fixture/material/A',{body:hidden}),hidden);
+  const hidden={...item,filter:{...item.filter,result:{...item.filter.result!,hidden:true,reason:'Скрыто фильтром'}}};
+  await r.page.evaluate(hidden=>readerTransport.replies.set('/api/v3/publication/A',{body:hidden}),hidden);
   await expect(r.page.locator('#filter-status')).toContainText('Скрыто фильтром');await expect(r.page.locator('#text').getByRole('link',{name:'Статья'})).toBeVisible();
   await expect(r.page.locator('#original-panel')).toHaveCount(0);
-  await r.page.evaluate(item=>readerTransport.replies.set('/fixture/material/A',{body:item}),item);
+  await r.page.evaluate(item=>readerTransport.replies.set('/api/v3/publication/A',{body:item}),item);
   await expect(r.page.locator('#original-panel')).toHaveCount(1);
   await expect(r.page.locator('#original-panel')).not.toHaveAttribute('open');
   assert.deepEqual(r.errors,[]);

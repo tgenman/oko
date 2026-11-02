@@ -1,14 +1,14 @@
 import type * as Wire from '../../frontend/src/api/generated/types.gen';
-import type {Card, Material, Status, Subscriptions, Navigation, EffectiveSettings, History} from './scenario-data';
+import type {Status, Subscriptions, EffectiveSettings, History} from './scenario-data';
 
 // Scenarios deliberately omit optional fields and inject malformed HTTP replies.
 // Keep those payloads unknown at the transport boundary; successful snapshots
 // are additionally checked against the exported OpenAPI schemas at delivery.
-export type FixtureMaterial = {post_web_unavailable?:boolean} & Partial<Material & Card> & Pick<Material, 'id' | 'title' | 'text' | 'feed_id' | 'published' | 'complete' | 'url'>;
+export type FixtureMaterial = Wire.PublicationResponse;
 export interface FixtureReply<T = unknown> {body?: T; status?: number; next?: [string, FixtureReply][]; base64?: string; mime?: string;}
 type NativeReply<P extends string> = P extends 'feeds/verify' ? Wire.FeedVerification : P extends 'feeds' ? Wire.SubscriptionFeed : P extends 'client-sessions' ? Wire.ClientSession : P extends 'cards' ? Wire.CardPage : P extends 'reading-composition' ? Wire.ReadingComposition : P extends 'youtube' ? Wire.YouTubeState : P extends 'subscriptions' ? Wire.SubscriptionCatalog : P extends 'settings/feed-refresh' ? Wire.EffectiveFeedRefreshMinutes : P extends 'settings/telegram-http' ? Wire.EffectiveTelegramHttpRps : P extends 'settings/retries' ? Wire.RetrySettings : P extends `settings/${string}` ? Wire.EffectiveSettingsSnapshot : P extends `publication/${string}` ? Wire.PublicationResponse : P extends 'status' ? Wire.StatusSummary : P extends 'status/details' ? Wire.RuntimeStatus : P extends 'diagnostics' ? Wire.DiagnosticJournal : P extends 'processors/codex' ? Wire.CodexProcessorState : P extends 'processors/llamacpp' ? Wire.LocalProcessorState : P extends `feeds/${string}/history` ? Wire.FeedHistoryState : unknown;
 export type ApiReply<P extends string> = NativeReply<P extends `v3/${infer Route}` ? Route : P>;
-type Snapshot<P extends string> = P extends '/api/v3/cards' | `/api/v3/cards?${string}` ? Partial<Card>[] : P extends '/api/v3/reading-composition' ? Navigation : P extends '/api/v3/status' ? Status : P extends '/api/v3/subscriptions' ? Subscriptions : P extends `${string}/history` ? History : P extends `/api/v3/settings/${string}` ? EffectiveSettings : unknown;
+type Snapshot<P extends string> = P extends '/api/v3/cards' | `/api/v3/cards?${string}` ? Wire.CardPage : P extends '/api/v3/navigation' ? Wire.NavigationResponse : P extends `/api/v3/publication/${string}` ? Wire.PublicationResponse : P extends '/api/v3/status' ? Status : P extends '/api/v3/subscriptions' ? Subscriptions : P extends `${string}/history` ? History : P extends `/api/v3/settings/${string}` ? EffectiveSettings : unknown;
 export interface ReplyMap extends Map<string, FixtureReply> {get<P extends string>(path: P): FixtureReply<Snapshot<P>> | undefined;}
 export interface ReaderTransport {
   replies: ReplyMap;
@@ -28,7 +28,7 @@ declare global {
     readingFixtureReply(url:string,method:string,body:unknown,status:number):unknown;
     browserResources: typeof browserResources;
     testVideo: HTMLVideoElement;
-    readerFixtures: {history(values: Partial<History & {feed_id: string}>): History & {feed_id?: string}};
+    readerFixtures: {history(values: Partial<History & {feed_id: string}>): History & {feed_id?: string}; navigationFeed(values: Pick<Wire.NavigationEntry, 'id' | 'title'> & Partial<Wire.NavigationEntry>): Wire.NavigationEntry; cardPage(items: Wire.CardListItem[]): Wire.CardPage; cardWindows(items: Wire.CardListItem[]): void};
     validateReaderReply(url: string, method: string, status: number, body: unknown, alias?: string, record?: boolean): Promise<void>;
     releaseOldMenu(): void;
     interruptedCatalogReply(value: Response): void;
@@ -37,18 +37,3 @@ declare global {
     refreshProbe: {enabled: boolean; oldStarted: boolean; feedRequests: number};
   }
 }
-
-// Synthetic source snapshots used only by the fixture adapter.
-type SyntheticCommon = Pick<Wire.PublicationResponse, 'id' | 'title' | 'feed_id' | 'published_at' | 'source_url' | 'source'> & {source_position: number | null; originals: boolean; filter: Wire.FilterReadyState | Wire.FilterAttemptState; theses: Wire.ThesesReadyState | Wire.ThesesAttemptState};
-export type SyntheticCard = SyntheticCommon & ({availability: 'pending'; loading: boolean} | {availability: 'available'; loading: boolean; changed: boolean; images: string[]; attachments: Wire.Attachment[]; post_web_unavailable?: boolean; external_attachment_kinds?: string[]});
-export type SyntheticOpened = SyntheticCommon & ({availability: 'pending'; content: {availability: 'pending'; loading: boolean}} | {availability: 'available'; content: SyntheticAvailableContent});
-
-// Historical source snapshots are fixture inputs, not public HTTP responses.
-type SyntheticAvailableContent = {
-  availability: 'available'; text: string; display_text: string; description: string;
-  revision_id: string; version: number; completeness: Wire.ContentCompleteness;
-  loading: boolean; changed: boolean; source_deleted: boolean;
-  linked_content?: Wire.LinkedContent | null; reply_preview: Wire.ReplyPreview | null;
-  post_web_unavailable?: boolean; external_attachments?: Wire.ExternalAttachment[];
-  images: string[]; attachments: Wire.Attachment[];
-};

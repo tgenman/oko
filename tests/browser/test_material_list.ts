@@ -1,9 +1,9 @@
 import {test} from 'node:test';
-import {reader, material, expect} from './support.ts';
+import {reader, material, card, expect} from './support.ts';
 
 test('compact rows show titles without post excerpts and current area with actions in menu', async () => {
  const r=await reader(); try {
-  await r.start([material('video',{title:'Заголовок видео',snippet:'Описание сохранённого видео',feed_title:'Канал'}), material('article',{title:'Статья',snippet:'Текст статьи'})]);
+  await r.start([material('video',{title:'Заголовок видео',feed_title:'Канал'}), material('article',{title:'Статья'})]);
   await expect(r.page.locator('#list-title')).toHaveText('All Items');
   await expect(r.page.locator('#count-label')).toHaveText('2');
   await expect(r.page.locator('#cards .card-snippet')).toHaveCount(0);
@@ -25,9 +25,9 @@ test('compact rows show titles without post excerpts and current area with actio
 test('keyboard focus does not open content and viewing focuses next without opening it', async () => {
  const r=await reader(); try {
   await r.start([material('one'),material('two'),material('three')]);
-  await r.page.evaluate(() => {const t=readerTransport, [one,two,three]=t.replies.get('/api/v3/cards')!.body!;
-   for (const [id, rows] of [['two',[one,three]], ['three',[one]], ['one',[]]])
-    t.replies.set('POST /api/v3/materials/'+id+'/viewed', {body:{ok:true}, next:[['/api/v3/cards',{body:rows}]]});
+  await r.page.evaluate(() => {const t=readerTransport, [one,two,three]=t.replies.get('/api/v3/cards')!.body!.items;
+   for (const [id, rows] of ([['two',[one,three]], ['three',[one]], ['one',[]]] as const))
+    t.replies.set('POST /api/v3/materials/'+id+'/viewed', {body:{ok:true}, next:[['/api/v3/cards',{body:window.readerFixtures.cardPage([...rows])}]]});
   });
   await r.page.locator('[data-card="one"]').focus();
   await r.page.keyboard.press('ArrowDown');
@@ -55,10 +55,12 @@ test('keyboard focus does not open content and viewing focuses next without open
 test('date groups, saved sorting and displayed hidden card count use current rows', async () => {
  const r=await reader(); try {
   const now=Date.now()/1000;
-  await r.start([material('today',{published:now}),material('yesterday',{published:now-86400}),material('unknown',{published:0,published_known:false})]);
+  const input=[material('today',{published_at:new Date(now*1000).toISOString()}),material('yesterday',{published_at:new Date((now-86400)*1000).toISOString()}),material('unknown',{published_at:null})];
+  const rows=input.map(card),withHidden=[rows[0],{...rows[0],id:'hidden',hidden:true},...rows.slice(1)];
+  const hiddenPage={items:withHidden,total:withHidden.length,next_cursor:null};
+  await r.start(input,undefined,{'/api/v3/cards?sort=newest&show_hidden=true':hiddenPage,'/api/v3/cards?sort=oldest&show_hidden=true':hiddenPage,'/api/v3/cards?sort=oldest':hiddenPage});
   await expect(r.page.locator('.date-group')).toHaveText(['Today','Yesterday','Unknown date']);
   await expect(r.page.locator('#count-label')).toHaveText('3');
-  await r.page.evaluate(()=>{const t=readerTransport; t.replies.set('/api/v3/cards?sort=newest&show_hidden=true',{body:[t.replies.get('/api/v3/cards')!.body![0],{...t.replies.get('/api/v3/cards')!.body![0],id:'hidden',filter:{status:'done',hidden:true,reason:'Синтетический фильтр',removed:[]}},...t.replies.get('/api/v3/cards')!.body!.slice(1)]});});
   await r.page.locator('#list-menu-toggle').click();
   await r.page.locator('#show-hidden').check();
   await expect(r.page.locator('#count-label')).toHaveText('4');
@@ -73,7 +75,7 @@ test('date groups, saved sorting and displayed hidden card count use current row
 
 test('opened YouTube material preserves description separately from captions', async () => {
  const r=await reader(); try {
-  await r.start([material('video',{description:'Описание из Atom',text:'Сохранённые субтитры',captions:'available'})]);
+  await r.start([material('video',{description:'Описание из Atom',text:'Сохранённые субтитры',source:{kind:'youtube',feed_id:'feed',source_url:'https://example.org/video',captions:'available'}})]);
   await r.page.locator('[data-card="video"]').click();
   await expect(r.page.locator('#description')).toHaveText('Описание из Atom');
   await expect(r.page.locator('#text')).toHaveText('Сохранённые субтитры');
@@ -83,14 +85,15 @@ test('opened YouTube material preserves description separately from captions', a
 
 test('polling preserves row focus and anchored scroll, and returning restores area position', async () => {
  const r=await reader(); try {
-  const items=Array.from({length:30},(_,i)=>material('item-'+String(i).padStart(2,'0'),{published:1000-i,feed_id:i%2?'second':'feed',snippet:'Краткий текст'}));
+  const items=Array.from({length:30},(_,i)=>material('item-'+String(i).padStart(2,'0'),{published_at:new Date((1000-i)*1000).toISOString(),feed_id:i%2?'second':'feed'}));
   await r.start(items);
+  await r.page.evaluate(rows=>window.readerFixtures.cardWindows(rows),items.map(card));
   await r.page.evaluate(items => {const t=readerTransport;
-   t.replies.set('/api/v3/cards?sort=newest&feed=feed',{body:[{...items[0],id:'new',title:'Новый материал',published:2000}, ...items]});
-  }, items.filter((_,index)=>index%2===0).map(({text,...card})=>({feed_title:'feed',snippet:'',...card})));
+   t.replies.set('/api/v3/cards?sort=newest&feed=feed',{body:window.readerFixtures.cardPage([{...items[0],id:'new',title:'Новый материал',published_at:new Date(2000*1000).toISOString()}, ...items])});
+  }, items.filter((_,index)=>index%2===0).map(card));
   await r.page.locator('[data-card="item-20"]').focus();
   const before=await r.page.locator('[data-card="item-20"]').evaluate(n=>n.getBoundingClientRect().top);
-  await r.page.evaluate(()=>readerTransport.replies.get('/api/v3/cards')!.body!.unshift({...readerTransport.replies.get('/api/v3/cards')!.body![0],id:'new',title:'Новый материал',published:2000}));
+  await r.page.evaluate(()=>{const page=readerTransport.replies.get('/api/v3/cards')!.body!;page.items.unshift({...page.items[0],id:'new',title:'Новый материал',published_at:new Date(2000*1000).toISOString()});page.total=page.items.length;window.readerFixtures.cardWindows(page.items);});
   await expect(r.page.locator('#cards-new')).toBeVisible();
   await expect(r.page.locator('#cards button')).toHaveCount(30);
   await expect(r.page.locator('[data-card="item-20"]')).toBeFocused();
@@ -113,8 +116,8 @@ test('failed refresh keeps rows and retry updates current area, late failed sele
   await r.start([material('one'),material('two',{feed_id:'second'})]);
   await r.page.locator('[data-card="one"]').click();await expect(r.page.locator('#text')).toContainText('Текст one');
   await r.page.evaluate(() => {const t=readerTransport;
-   t.replies.get('/api/v3/reading-composition')!.body!.feeds=t.replies.get('/api/v3/reading-composition')!.body!.feeds.filter(f=>f.id!=='second').concat({id:'second',title:'second',folder_id:'f',kind:'rss',count:1});
-   t.replies.set('/api/v3/cards?sort=newest&feed=second',{body:[t.replies.get('/api/v3/cards')!.body![1]]});
+   const folder=t.replies.get('/api/v3/navigation')!.body!.folders[0];folder.feeds=folder.feeds.filter(f=>f.id!=='second').concat(window.readerFixtures.navigationFeed({id:'second',title:'second',count:1}));
+   t.replies.set('/api/v3/cards?sort=newest&feed=second',{body:window.readerFixtures.cardPage([t.replies.get('/api/v3/cards')!.body!.items[1]])});
   });
   await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/cards?sort=newest',{status:500,body:{detail:'Сбой списка'}}));
   await expect(r.page.locator('#list-status')).toContainText('Сбой списка');

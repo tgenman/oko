@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import {expect} from 'playwright/test';
 import {productionReader} from './http-reader';
 import {addSources} from './connections';
-import {reader,material} from './support';
+import {reader,material,card} from './support';
 import {artifactPath} from './artifacts';
 
 test('news menu uses original links and marks only above/below in the displayed order', {timeout:30000},async t=>{
@@ -24,10 +24,9 @@ test('news menu uses original links and marks only above/below in the displayed 
 test('mark above clears the opened material only when it is in the range',async()=>{
  const r=await reader();try{
   await r.start(['a','b','c'].map(id=>material(id)));
-  await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/materials/a/viewed',{body:{ok:true}}));
   await r.page.locator('[data-card="a"]').click();await expect(r.page.locator('#text')).toContainText('Текст a');
   await r.page.locator('[data-card="b"]').click({button:'right'});await r.page.getByRole('menuitem',{name:'Mark Above as Read',exact:true}).click();
-  await r.page.evaluate(()=>{const t=readerTransport;const rows=t.replies.get('/api/v3/cards')!.body!;t.replies.set('/api/v3/cards',{body:rows.filter(c=>c.id!=='a')});});
+  await r.page.evaluate(()=>{const t=readerTransport;const rows=t.replies.get('/api/v3/cards')!.body!.items;t.replies.set('/api/v3/cards',{body:window.readerFixtures.cardPage(rows.filter(c=>c.id!=='a'))});});
   await r.page.locator('#news-read-confirm').click();
   await expect(r.page.locator('[data-card="a"]')).toHaveCount(0);await expect(r.page.locator('#material')).toBeHidden();await expect(r.page.locator('#empty')).toBeVisible();await expect(r.page.locator('#empty')).toHaveText('Select an item');await r.page.screenshot({path:artifactPath('news-range-cleared.png')});
   await r.page.locator('[data-card="c"]').click();await expect(r.page.locator('#text')).toContainText('Текст c');expect(r.errors).toEqual([]);
@@ -37,10 +36,9 @@ test('mark above clears the opened material only when it is in the range',async(
 test('range confirmation captures IDs before new arrivals and preserves target',async()=>{
  const r=await reader();try{
   await r.start(['a','b','c','d'].map(id=>material(id)));
-  await r.page.evaluate(()=>{for(const id of ['a','b'])readerTransport.replies.set('/api/v3/materials/'+id+'/viewed',{body:{ok:true}});});
   await r.page.locator('[data-card="c"]').click();await r.page.locator('[data-card="c"]').click({button:'right'});await r.page.getByRole('menuitem',{name:'Mark Above as Read',exact:true}).click();
   await expect(r.page.locator('#news-read-dialog li')).toHaveCount(2);
-  const fresh=material('fresh');await r.page.evaluate(fresh=>{const t=readerTransport;const rows=t.replies.get('/api/v3/cards')!.body!;t.replies.set('/api/v3/cards',{body:[fresh,...rows.filter(c=>c.id==='c'||c.id==='d')]});},fresh);
+  const fresh=card(material('fresh'));await r.page.evaluate(fresh=>{const t=readerTransport;const rows=t.replies.get('/api/v3/cards')!.body!.items;t.replies.set('/api/v3/cards',{body:window.readerFixtures.cardPage([fresh,...rows.filter(c=>c.id==='c'||c.id==='d')])});},fresh);
   await r.page.locator('#news-read-confirm').click();await expect(r.page.locator('#news-read-dialog')).toHaveCount(0);await expect(r.page.locator('[data-card="fresh"]')).toBeVisible();await expect(r.page.locator('#text')).toContainText('Текст c');
   expect(await r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url==='/api/v3/cards/read').map(q=>q.body))).toEqual([{ids:['a','b']}]);expect(r.errors).toEqual([]);
  }finally{await r.close();}

@@ -129,7 +129,7 @@ test('a saved feed updates reading even when navigation cancels its catalog refr
   const r = await reader();
   try {
     await r.start([material('before')]); await objects(r);
-    await r.page.evaluate(()=>{const nav=readerTransport.replies.get('/api/v3/reading-composition')!.body!;nav.feeds.push({id:'one',title:'one',folder_id:'f',kind:'rss',count:1});});
+    await r.page.evaluate(()=>{const nav=readerTransport.replies.get('/api/v3/navigation')!.body!;nav.folders[0].feeds.push(window.readerFixtures.navigationFeed({id:'one',title:'one',count:1}));});
     await r.page.locator('#feeds-open').click();
     await r.page.locator('#feed-tree').getByRole('button', {name:'one',exact:true}).click();
     const subscriptions = await r.page.evaluate(() => readerTransport.replies.get('/api/v3/subscriptions')!.body);
@@ -152,7 +152,7 @@ test('a saved feed updates reading even when navigation cancels its catalog refr
     // An old background read is still pending when the server write completes.
     await expect.poll(() => Boolean(heldStatus)).toBe(true);
     await r.page.evaluate(()=>readerTransport.native.delete('/api/v3/status/details'));
-    await r.page.evaluate(() => {readerTransport.replies.get('/api/v3/cards')!.body = [{id:'after',title:'После сохранения',published:100,folder_id:'f',feed_id:'one',url:'https://example.org/after',complete:true,published_known:true,feed_title:'one',importance:'high',snippet:''}];});
+    await r.page.evaluate(() => {readerTransport.replies.get('/api/v3/cards')!.body = window.readerFixtures.cardPage([{id:'after',title:'После сохранения',published_at:new Date(100000).toISOString(),feed_id:'one',source_url:'https://example.org/after',preview_url:null,loading:false,changed:false,hidden:false,post_web_unavailable:false,external_attachment_kinds:[]}]);});
     await feedOptions(r.page);
     await r.page.locator('#feed-importance').selectOption('high');
     await r.page.getByRole('button',{name:'Save Feed',exact:true}).click();
