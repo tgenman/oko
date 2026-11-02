@@ -113,50 +113,6 @@ export type AuthorizationErrors = ({
     code: 'origin_not_allowed';
 } & OriginNotAllowedError);
 
-export type AvailablePublicationContent = {
-    attachments: Array<Attachment>;
-    availability: 'available';
-    changed: boolean;
-    completeness: ContentCompleteness;
-    /**
-     * Server-produced publication text after accepted filtering; clients do not reapply business filtering rules.
-     */
-    description: string;
-    /**
-     * Server-produced publication text after accepted filtering; clients do not reapply business filtering rules.
-     */
-    display_text: string;
-    external_attachments?: Array<ExternalAttachment>;
-    images: Array<MediaUrl>;
-    /**
-     * Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for unrelated content. Combined text remains available for processing and independent clients.
-     */
-    linked_content?: LinkedContent | null;
-    loading: boolean;
-    /**
-     * Source-confirmed restriction of the whole post through Telegram web; separate from external media.
-     */
-    post_web_unavailable?: boolean;
-    reply_preview: ReplyPreview | null;
-    revision_id: RevisionId;
-    source_deleted: boolean;
-    text: string;
-    version: number;
-};
-
-export type AvailableReadingEntityMaterial = {
-    availability: 'available';
-    content: ReadingTextContent;
-    feed_id: FeedId;
-    id: MaterialId;
-    originals: boolean;
-    published_at: Timestamp | null;
-    source: SourceReference;
-    source_position: number | null;
-    source_url: SourceUrl;
-    title: string;
-};
-
 export type BrowserSessionRevoked = {
     revoked: true;
 };
@@ -1312,8 +1268,6 @@ export type FilterResult = {
     removed: Array<string>;
 };
 
-export type FilterState = FilterReadyState | FilterAttemptState;
-
 export type FinishedProblem = {
     affected: Array<AffectedResource>;
     code: ProblemCode;
@@ -1764,24 +1718,6 @@ export type OriginNotAllowedError = {
     message: string;
 };
 
-export type PendingPublicationContent = {
-    availability: 'pending';
-    loading: boolean;
-};
-
-export type PendingReadingEntityMaterial = {
-    availability: 'pending';
-    content: PendingPublicationContent;
-    feed_id: FeedId;
-    id: MaterialId;
-    originals: boolean;
-    published_at: Timestamp | null;
-    source: SourceReference;
-    source_position: number | null;
-    source_url: SourceUrl;
-    title: string;
-};
-
 export type PersonalTelegramProfileIdentityMismatch = {
     checked_at: Timestamp;
     configuration_ref: ConfigurationRef;
@@ -2005,20 +1941,17 @@ export type PublicationResponse = {
     linked_content: LinkedContent | null;
     loading: boolean;
     media: Array<{
-        id: string;
         kind: 'image' | 'video' | 'audio' | 'circle' | 'file';
         mime: string | null;
         role: 'image' | 'attachment';
         url: MediaUrl;
     }>;
-    originals: boolean;
     post_web_unavailable: boolean;
     published_at: Timestamp | null;
     reply_preview: ReplyPreview | null;
     revision_id: RevisionId | null;
     source: SourceReference;
     source_deleted: boolean;
-    source_position: number | null;
     source_url: SourceUrl;
     text: string;
     theses: {
@@ -2048,12 +1981,6 @@ export type ReadingComposition = {
     feeds: Array<NavigationFeed>;
     folders: Array<ReadingFolder>;
 };
-
-export type ReadingEntityMaterial = ({
-    availability: 'available';
-} & AvailableReadingEntityMaterial) | ({
-    availability: 'pending';
-} & PendingReadingEntityMaterial);
 
 export type ReadingFolder = {
     count: number;
@@ -2802,8 +2729,6 @@ export type ThesesReadyState = {
     diagnostic_message: string | null;
     result: PublicationTheses;
 };
-
-export type ThesesState = ThesesReadyState | ThesesAttemptState;
 
 /**
  * RFC 3339 timestamp with a mandatory timezone offset, normalized to UTC in responses.

@@ -74,8 +74,6 @@ paths:
                   kind: demo
                   feed_id: example
                   source_url: https://example.test/post/1
-                source_position: null
-                originals: true
                 availability: available
                 description: ''
                 revision_id: '1'
@@ -12759,8 +12757,6 @@ components:
             type: object
             additionalProperties: false
             properties:
-              id:
-                type: string
               kind:
                 type: string
                 enum:
@@ -12781,20 +12777,12 @@ components:
                 - image
                 - attachment
             required:
-            - id
             - kind
             - url
             - mime
             - role
         source:
           $ref: '#/components/schemas/SourceReference'
-        source_position:
-          anyOf:
-          - type: integer
-            minimum: 0
-          - type: 'null'
-        originals:
-          type: boolean
         availability:
           type: string
           enum:
@@ -12841,8 +12829,6 @@ components:
       - theses
       - media
       - source
-      - source_position
-      - originals
       - availability
       - description
       - revision_id
@@ -12888,8 +12874,6 @@ components:
           kind: demo
           feed_id: example
           source_url: https://example.test/post/1
-        source_position: null
-        originals: true
         availability: available
         description: ''
         revision_id: '1'
@@ -16553,21 +16537,6 @@ components:
           state: queued
         result: null
         diagnostic_message: null
-    FilterState:
-      oneOf:
-      - $ref: '#/components/schemas/FilterReadyState'
-      - $ref: '#/components/schemas/FilterAttemptState'
-      examples:
-      - attempt:
-          state: ready
-        result:
-          hidden: false
-          reason: example
-          removed: []
-          provenance:
-            kind: unknown
-            reason: not_recorded
-        diagnostic_message: null
     ThesesReadyState:
       type: object
       properties:
@@ -16619,19 +16588,6 @@ components:
       - attempt:
           state: queued
         result: null
-        diagnostic_message: null
-    ThesesState:
-      oneOf:
-      - $ref: '#/components/schemas/ThesesReadyState'
-      - $ref: '#/components/schemas/ThesesAttemptState'
-      examples:
-      - attempt:
-          state: ready
-        result:
-          points: []
-          provenance:
-            kind: unknown
-            reason: not_recorded
         diagnostic_message: null
     CompleteContent:
       type: object
@@ -16705,109 +16661,6 @@ components:
       - author: Example author
         text: Saved excerpt…
         source_url: https://t.me/example/1
-    PendingPublicationContent:
-      type: object
-      properties:
-        availability:
-          type: string
-          const: pending
-        loading:
-          type: boolean
-      required:
-      - availability
-      - loading
-      additionalProperties: false
-      examples:
-      - availability: pending
-        loading: false
-    AvailablePublicationContent:
-      type: object
-      properties:
-        linked_content:
-          description: Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for unrelated
-            content. Combined text remains available for processing and independent clients.
-          anyOf:
-          - $ref: '#/components/schemas/LinkedContent'
-          - type: 'null'
-          default: null
-        post_web_unavailable:
-          type: boolean
-          default: false
-          description: Source-confirmed restriction of the whole post through Telegram web; separate from external media.
-        external_attachments:
-          type: array
-          default: []
-          items:
-            $ref: '#/components/schemas/ExternalAttachment'
-        reply_preview:
-          anyOf:
-          - $ref: '#/components/schemas/ReplyPreview'
-          - type: 'null'
-        availability:
-          type: string
-          const: available
-        text:
-          type: string
-        images:
-          type: array
-          items:
-            $ref: '#/components/schemas/MediaUrl'
-        attachments:
-          type: array
-          items:
-            $ref: '#/components/schemas/Attachment'
-        revision_id:
-          $ref: '#/components/schemas/RevisionId'
-        version:
-          type: integer
-          minimum: 1
-          maximum: 9007199254740991
-        completeness:
-          $ref: '#/components/schemas/ContentCompleteness'
-        loading:
-          type: boolean
-        source_deleted:
-          type: boolean
-        changed:
-          type: boolean
-        description:
-          type: string
-          description: Server-produced publication text after accepted filtering; clients do not reapply business filtering
-            rules.
-        display_text:
-          type: string
-          description: Server-produced publication text after accepted filtering; clients do not reapply business filtering
-            rules.
-      required:
-      - reply_preview
-      - availability
-      - text
-      - images
-      - attachments
-      - revision_id
-      - version
-      - completeness
-      - loading
-      - source_deleted
-      - changed
-      - description
-      - display_text
-      additionalProperties: false
-      examples:
-      - availability: available
-        reply_preview: null
-        text: example
-        images: []
-        attachments: []
-        revision_id: example
-        version: 1
-        completeness:
-          state: complete
-        loading: false
-        source_deleted: false
-        changed: false
-        description: example
-        display_text: example
     CompletionPreview:
       type: object
       properties:
@@ -21423,165 +21276,6 @@ components:
         source_deleted: false
         changed: false
         description: example
-    AvailableReadingEntityMaterial:
-      type: object
-      properties:
-        id:
-          $ref: '#/components/schemas/MaterialId'
-        title:
-          type: string
-        feed_id:
-          $ref: '#/components/schemas/FeedId'
-        source_url:
-          $ref: '#/components/schemas/SourceUrl'
-        published_at:
-          anyOf:
-          - $ref: '#/components/schemas/Timestamp'
-          - type: 'null'
-        source:
-          $ref: '#/components/schemas/SourceReference'
-        source_position:
-          anyOf:
-          - type: integer
-            minimum: 0
-            maximum: 9007199254740991
-          - type: 'null'
-        originals:
-          type: boolean
-        availability:
-          type: string
-          const: available
-        content:
-          $ref: '#/components/schemas/ReadingTextContent'
-      required:
-      - id
-      - title
-      - feed_id
-      - source_url
-      - published_at
-      - source
-      - source_position
-      - originals
-      - availability
-      - content
-      additionalProperties: false
-      examples:
-      - id: example
-        title: example
-        feed_id: example
-        source_url: https://example.test/post/1
-        published_at: null
-        source:
-          kind: demo
-          feed_id: example
-          source_url: https://example.test/post/1
-        source_position: null
-        originals: false
-        availability: available
-        content:
-          availability: available
-          reply_preview: null
-          text: example
-          revision_id: example
-          version: 1
-          completeness:
-            state: complete
-          loading: false
-          source_deleted: false
-          changed: false
-          description: example
-    PendingReadingEntityMaterial:
-      type: object
-      properties:
-        id:
-          $ref: '#/components/schemas/MaterialId'
-        title:
-          type: string
-        feed_id:
-          $ref: '#/components/schemas/FeedId'
-        source_url:
-          $ref: '#/components/schemas/SourceUrl'
-        published_at:
-          anyOf:
-          - $ref: '#/components/schemas/Timestamp'
-          - type: 'null'
-        source:
-          $ref: '#/components/schemas/SourceReference'
-        source_position:
-          anyOf:
-          - type: integer
-            minimum: 0
-            maximum: 9007199254740991
-          - type: 'null'
-        originals:
-          type: boolean
-        availability:
-          type: string
-          const: pending
-        content:
-          $ref: '#/components/schemas/PendingPublicationContent'
-      required:
-      - id
-      - title
-      - feed_id
-      - source_url
-      - published_at
-      - source
-      - source_position
-      - originals
-      - availability
-      - content
-      additionalProperties: false
-      examples:
-      - id: example
-        title: example
-        feed_id: example
-        source_url: https://example.test/post/1
-        published_at: null
-        source:
-          kind: demo
-          feed_id: example
-          source_url: https://example.test/post/1
-        source_position: null
-        originals: false
-        availability: pending
-        content:
-          availability: pending
-          loading: false
-    ReadingEntityMaterial:
-      oneOf:
-      - $ref: '#/components/schemas/AvailableReadingEntityMaterial'
-      - $ref: '#/components/schemas/PendingReadingEntityMaterial'
-      discriminator:
-        propertyName: availability
-        mapping:
-          available: '#/components/schemas/AvailableReadingEntityMaterial'
-          pending: '#/components/schemas/PendingReadingEntityMaterial'
-      examples:
-      - id: example
-        title: example
-        feed_id: example
-        source_url: https://example.test/post/1
-        published_at: null
-        source:
-          kind: demo
-          feed_id: example
-          source_url: https://example.test/post/1
-        source_position: null
-        originals: false
-        availability: available
-        content:
-          availability: available
-          reply_preview: null
-          text: example
-          revision_id: example
-          version: 1
-          completeness:
-            state: complete
-          loading: false
-          source_deleted: false
-          changed: false
-          description: example
     CollectionRequestFailure:
       type: object
       additionalProperties: false

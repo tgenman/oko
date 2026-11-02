@@ -10,8 +10,8 @@ import {newsTitle} from './title';
 import {copyText} from '../browser-platform';
 import {useEffect,useLayoutEffect,useRef,useState} from 'react';
 import {publication,regenerate,retryMaterial,retryTheses,retryFilter,viewed} from '../api/generated/sdk.gen';
-import type {Attachment,AvailablePublicationContent,ReplyPreview as ReplyContext} from '../api/generated/types.gen';
-import type {PublicationResponse,ReadingEntityMaterial} from '../api/generated/types.gen';
+import type {Attachment,ReplyPreview as ReplyContext} from '../api/generated/types.gen';
+import type {PublicationResponse} from '../api/generated/types.gen';
 import type {CardView as Card} from './resources';
 import {ReaderError,type ReaderApi} from '../api/reader';
 import {mountSurface} from '../renderer';
@@ -19,11 +19,12 @@ import {reportError} from '../status/debug';
 import {createStore,useStore,host,errorMessage} from './store';
 
 type MediaFetch=(path:string,signal?:AbortSignal,cache?:RequestCache)=>Promise<Response>;
-type Material = (ReadingEntityMaterial & Pick<PublicationResponse,'filter'|'theses'>) & {content:AvailablePublicationContent|{availability:'pending'}};
+type Material = PublicationResponse;
+type DisplayContent = Omit<PublicationResponse, 'completeness' | 'revision_id'> & {completeness: NonNullable<PublicationResponse['completeness']>; revision_id: string; display_text: string; images: string[]; attachments: Attachment[]};
 type OpenCard=Pick<Card,'id'>&Partial<Card>;
 type Session={id:string;sourceTitle?:string;sourceFeed?:Navigation['feeds'][number];folder_id:string|undefined;etag:string|null;loading:boolean;detached:boolean;reset:boolean;assetsPaused:boolean;assetEpoch:number;assets:AbortController;controller:AbortController};
 type Resource={url:string;kind:Attachment['kind'];name:string;failed?:boolean};
-function Media({material,fetchMedia,session,id,className,imageAlt='Publication image',optional=false}:{material:Pick<AvailablePublicationContent,'images'|'attachments'|'external_attachments'>;fetchMedia:MediaFetch;session:Session;id?:string;className?:string;imageAlt?:string;optional?:boolean}) {
+function Media({material,fetchMedia,session,id,className,imageAlt='Publication image',optional=false}:{material:Pick<DisplayContent,'images'|'attachments'> & Partial<Pick<DisplayContent,'external_attachments'>>;fetchMedia:MediaFetch;session:Session;id?:string;className?:string;imageAlt?:string;optional?:boolean}) {
   const ref=useRef<HTMLDivElement>(null),[resources,setResources]=useState<Resource[]>([]);
   useLayoutEffect(()=>()=>{for(const media of ref.current?.querySelectorAll<HTMLMediaElement>('video,audio')||[]){media.pause();media.removeAttribute('src');media.load();}},[]);
   const resourcesKey=JSON.stringify([material.images,material.attachments,material.external_attachments]);
@@ -51,8 +52,8 @@ function Media({material,fetchMedia,session,id,className,imageAlt='Publication i
   useEffect(()=>{const owned=loaded.current;return()=>{for(const resource of owned.values())URL.revokeObjectURL(resource.url);owned.clear();};},[]);
   return <div ref={ref} {...(id?{id}:{})} {...(className?{className}:{})}>{resources.map(resource=>resource.kind==='image'?<img key={resource.url} src={resource.url} alt={imageAlt} onError={optional?()=>{resource.failed=true;setResources(current=>current.filter(item=>item!==resource));}:undefined}/>:resource.kind==='video'||resource.kind==='circle'?<video key={resource.url} src={resource.url} controls preload="metadata" className={resource.kind==='circle'?'circle':undefined} aria-label={resource.kind==='circle'?'Telegram video message':'Publication video'}/>:resource.kind==='audio'?<audio key={resource.url} src={resource.url} controls preload="metadata" aria-label="Publication audio"/>:<a key={resource.url} href={resource.url} download={resource.name}>Download Attachment</a>)}</div>;
 }
-type PublicationBody = Pick<AvailablePublicationContent,'text'|'images'|'attachments'|'linked_content'>;
-function postMedia<T extends Pick<AvailablePublicationContent,'images'|'attachments'|'linked_content'>>(material:T):T {
+type PublicationBody = Pick<DisplayContent,'text'|'images'|'attachments'|'linked_content'>;
+function postMedia<T extends Pick<DisplayContent,'images'|'attachments'|'linked_content'>>(material:T):T {
   const articleUrls=new Set(material.linked_content?.articles.flatMap(article=>article.media_urls)||[]);
   return {...material,attachments:material.attachments.filter(media=>!articleUrls.has(media.url))};
 }
@@ -71,12 +72,13 @@ function ReplyPreview({preview,id}:{preview:ReplyContext;id?:string}) {
 }
 function Points({points,references}:{points:string[];references:NonNullable<PublicationResponse['theses']['result']>['references']}) {return <>{points.map((point,index)=><li key={index}>{point}{(references[index]||[]).map((ref,i)=><a key={i} href={ref.source_url} target="_blank" rel="noopener noreferrer"> Source</a>)}</li>)}</>;}
 
-function availableContent(material:Material):AvailablePublicationContent|null {
-  switch(material.availability) {
-    case 'available': return material.content;
-    case 'pending': return null;
-    default: {const unreachable:never=material;return unreachable;}
-  }
+function availableContent(material:Material):DisplayContent|null {
+  if(material.availability !== 'available')return null;
+  if(!material.revision_id || !material.completeness)return null;
+  return {...material,revision_id:material.revision_id,completeness:material.completeness,
+    display_text:material.filter.result?.text??material.text,
+    images:material.media.filter(m=>m.role==='image').map(m=>m.url),
+    attachments:material.media.filter(m=>m.role==='attachment').map(m=>({kind:m.kind,url:m.url,mime:m.mime||'application/octet-stream'}))};
 }
 
 export function createOpenedMaterial({readerApi,fetchMedia,onViewed,onChanged,getFeed,getStorage}:{getStorage:()=>string|null;getFeed:(id:string)=>Navigation['feeds'][number]|undefined;readerApi:ReaderApi;fetchMedia:MediaFetch;onViewed:(id:string)=>void;onChanged:(changed:boolean)=>void}) {
@@ -92,19 +94,11 @@ export function createOpenedMaterial({readerApi,fetchMedia,onViewed,onChanged,ge
     update({...state,retained:true,pending:null,message});
   }
   function showLatest(){const state=store.get();if(state.pending&&!state.retained){state.session!.reset=false;state.session!.assetsPaused=false;update({...state,material:state.pending,pending:null,message:'',generation:state.generation+1});}}
-  function materialFromPublication(value:PublicationResponse):Material {
-    const f=value.filter.result,filter=value.filter,theses=value.theses;
-    const common={id:value.id,title:value.title,feed_id:value.feed_id,published_at:value.published_at,source_url:value.source_url,source_position:value.source_position,source:value.source,originals:value.originals};
-    const revision=value.availability==='available'?value.revision_id:null;
-    if(value.availability==='available'&&(!revision||!value.completeness))throw new Error('Publication revision unavailable');
-    if(value.availability==='pending')return {...common,availability:'pending',content:{availability:'pending',loading:value.loading},filter,theses};
-    const content:AvailablePublicationContent={availability:'available',text:value.text,display_text:f?.text??value.text,description:value.description,revision_id:revision!,version:1,completeness:value.completeness!,loading:value.loading,changed:value.changed,source_deleted:value.source_deleted,linked_content:value.linked_content,reply_preview:value.reply_preview,post_web_unavailable:value.post_web_unavailable,external_attachments:value.external_attachments,images:value.media.filter(m=>m.role==='image').map(m=>m.url),attachments:value.media.filter(m=>m.role==='attachment').map(m=>({kind:m.kind,url:m.url,mime:m.mime||'application/octet-stream'}))};
-    return {...common,availability:'available',content,filter,theses};
-  }
   function acceptPublication(value:PublicationResponse,session:Session) {
-    const next=materialFromPublication(value),state=store.get(),shown=state.material;
+    if(value.availability==='available'&&(!value.revision_id||!value.completeness))throw new Error('Publication revision unavailable');
+    const next=value,state=store.get(),shown=state.material;
     const feed=getFeed(next.feed_id);if(feed){session.sourceFeed=feed;session.sourceTitle=feed.title;}
-    const changed=shown?.availability==='available'&&(session.reset||next.availability!=='available'||next.content.revision_id!==shown.content.revision_id||next.content.text!==shown.content.text||next.content.description!==shown.content.description||next.title!==shown.title);
+    const changed=shown?.availability==='available'&&(session.reset||next.availability!=='available'||next.revision_id!==shown.revision_id||next.text!==shown.text||next.description!==shown.description||next.title!==shown.title);
     if(changed)update({...state,pending:next,message:'A new version is available. Updates for the displayed version may be unavailable.'});
     else update({...state,material:next,pending:null,message:''});
   }

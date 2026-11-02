@@ -69,9 +69,6 @@ def test_target_registry_is_well_formed():
 
 
 def test_ready_processing_requires_a_result_and_legacy_problems_keep_raw_code():
-    assert not accepts('FilterState', {'attempt': {'state': 'ready'}, 'result': None})
-    assert accepts('FilterState', {'attempt': {'state': 'running'}, 'result': None, 'diagnostic_message': None})
-    assert not accepts('ThesesState', {'attempt': {'state': 'ready'}, 'result': None})
     assert not accepts('CodexChoice', {'model': 'example', 'reasoning_effort': 'high'})
     assert accepts('CodexChoiceRequest', {'model': 'example', 'reasoning_effort': 'high'})
 
@@ -110,11 +107,7 @@ def test_existing_reading_fields_and_demo_position_are_preserved():
     assert accepts('SubscriptionFolder', {'id': 'demo', 'title': 'Тестовый источник', 'position': -1})
     assert accepts('ReadingComposition', {'folders': [], 'feeds': [], 'count': 0})
     assert not accepts('ReadingComposition', {'folders': [], 'feeds': []})
-    content = contract()['components']['schemas']['AvailablePublicationContent']['examples'][0]
-    literal = dict(content, description='Описание видео', display_text='Текст без скрытого фрагмента', text='Текст со скрытым фрагментом')
-    assert accepts('AvailablePublicationContent', literal)
-    for field in ['description', 'display_text']:
-        assert not accepts('AvailablePublicationContent', {key: value for key, value in literal.items() if key != field})
+
 
 
 def test_saved_subscription_transport_and_unresolved_connection_are_preserved():

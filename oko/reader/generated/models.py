@@ -42,11 +42,6 @@ class ApiVersionRemovedErrorDetails(WireModel):
     api_version: StrictStr
 
 
-class SourcePosition(RootModel[StrictInt]):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: StrictInt = Field(..., ge=0, le=9007199254740991)
-
-
 class BrowserSessionRevoked(WireModel):
     model_config = ConfigDict(extra="forbid")
     revoked: Annotated[Literal[True], BeforeValidator(boolean_constant)]
@@ -679,12 +674,6 @@ class OriginNotAllowedError(WireModel):
     message: StrictStr
 
 
-class PendingPublicationContent(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    availability: Literal["pending"]
-    loading: StrictBool
-
-
 class PersonalTelegramProfileUnconfigured(WireModel):
     model_config = ConfigDict(extra="forbid")
     role: Literal["personal"]
@@ -828,16 +817,10 @@ class ProcessorSelection(RootModel[Literal["codex", "llamacpp"] | ProcessorSelec
 
 class MediaItem(WireModel):
     model_config = ConfigDict(extra="forbid")
-    id: StrictStr
     kind: Literal["image", "video", "audio", "circle", "file"]
     mime: StrictStr | None
     role: Literal["image", "attachment"]
     url: MediaUrl
-
-
-class SourcePosition2(RootModel[StrictInt]):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: StrictInt = Field(..., ge=0)
 
 
 class ReadingFolder(WireModel):
@@ -2635,40 +2618,6 @@ class AffectedResource(
     )
 
 
-class AvailablePublicationContent(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    attachments: list[Attachment]
-    availability: Literal["available"]
-    changed: StrictBool
-    completeness: ContentCompleteness
-    description: StrictStr = Field(
-        ...,
-        description="Server-produced publication text after accepted filtering; clients do not reapply business filtering rules.",
-    )
-    display_text: StrictStr = Field(
-        ...,
-        description="Server-produced publication text after accepted filtering; clients do not reapply business filtering rules.",
-    )
-    external_attachments: list[ExternalAttachment] = Field(
-        default=[], validate_default=True
-    )
-    images: list[MediaUrl]
-    linked_content: LinkedContent | None = Field(
-        default=None,
-        description="Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for unrelated content. Combined text remains available for processing and independent clients.",
-    )
-    loading: StrictBool
-    post_web_unavailable: StrictBool = Field(
-        default=False,
-        description="Source-confirmed restriction of the whole post through Telegram web; separate from external media.",
-    )
-    reply_preview: ReplyPreview | None
-    revision_id: RevisionId
-    source_deleted: StrictBool
-    text: StrictStr
-    version: StrictInt = Field(..., ge=1, le=9007199254740991)
-
-
 class ClientSessionExpiredError(WireModel):
     model_config = ConfigDict(extra="forbid")
     code: Literal["client_session_expired"]
@@ -3353,23 +3302,6 @@ class ThesesReadyState(WireModel):
     result: PublicationTheses
 
 
-class ThesesState(RootModel[ThesesReadyState | ThesesAttemptState]):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: ThesesReadyState | ThesesAttemptState = Field(
-        ...,
-        examples=[
-            {
-                "attempt": {"state": "ready"},
-                "diagnostic_message": None,
-                "result": {
-                    "points": [],
-                    "provenance": {"kind": "unknown", "reason": "not_recorded"},
-                },
-            }
-        ],
-    )
-
-
 class UnresolvedSubscriptionFeed(WireModel):
     model_config = ConfigDict(extra="forbid")
     connection: Literal["ambiguous", "needs_connection", "unavailable", "deleting"] = (
@@ -3573,25 +3505,6 @@ class FilterReadyState(WireModel):
     result: FilterResult
 
 
-class FilterState(RootModel[FilterReadyState | FilterAttemptState]):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: FilterReadyState | FilterAttemptState = Field(
-        ...,
-        examples=[
-            {
-                "attempt": {"state": "ready"},
-                "diagnostic_message": None,
-                "result": {
-                    "hidden": False,
-                    "provenance": {"kind": "unknown", "reason": "not_recorded"},
-                    "reason": "example",
-                    "removed": [],
-                },
-            }
-        ],
-    )
-
-
 class HistoryConflictErrorDetails(WireModel):
     model_config = ConfigDict(extra="forbid")
     feed_id: FeedId
@@ -3729,20 +3642,6 @@ class SubscriptionFeed(
             }
         ],
     )
-
-
-class AvailableReadingEntityMaterial(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    availability: Literal["available"]
-    content: ReadingTextContent
-    feed_id: FeedId
-    id: MaterialId
-    originals: StrictBool
-    published_at: Timestamp | None
-    source: SourceReference
-    source_position: SourcePosition | None
-    source_url: SourceUrl
-    title: StrictStr
 
 
 class CurrentProblem(WireModel):
@@ -3884,20 +3783,6 @@ class NavigationFeed(WireModel):
     )
 
 
-class PendingReadingEntityMaterial(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    availability: Literal["pending"]
-    content: PendingPublicationContent
-    feed_id: FeedId
-    id: MaterialId
-    originals: StrictBool
-    published_at: Timestamp | None
-    source: SourceReference
-    source_position: SourcePosition | None
-    source_url: SourceUrl
-    title: StrictStr
-
-
 class PreviousMedia404Errors(
     RootModel[ResourceNotFoundError | VersionUnavailableError | MediaUnavailableError]
 ):
@@ -3982,14 +3867,12 @@ class PublicationResponse(WireModel):
     linked_content: LinkedContent | None
     loading: StrictBool
     media: list[MediaItem]
-    originals: StrictBool
     post_web_unavailable: StrictBool
     published_at: Timestamp | None
     reply_preview: ReplyPreview | None
     revision_id: RevisionId | None
     source: SourceReference
     source_deleted: StrictBool
-    source_position: SourcePosition2 | None
     source_url: SourceUrl
     text: StrictStr
     theses: Theses
@@ -4001,45 +3884,6 @@ class ReadingComposition(WireModel):
     count: StrictInt = Field(..., ge=0, le=9007199254740991)
     feeds: list[NavigationFeed]
     folders: list[ReadingFolder]
-
-
-class ReadingEntityMaterial(
-    RootModel[AvailableReadingEntityMaterial | PendingReadingEntityMaterial]
-):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: AvailableReadingEntityMaterial | PendingReadingEntityMaterial = Field(
-        ...,
-        discriminator="availability",
-        examples=[
-            {
-                "availability": "available",
-                "content": {
-                    "availability": "available",
-                    "changed": False,
-                    "completeness": {"state": "complete"},
-                    "description": "example",
-                    "loading": False,
-                    "reply_preview": None,
-                    "revision_id": "example",
-                    "source_deleted": False,
-                    "text": "example",
-                    "version": 1,
-                },
-                "feed_id": "example",
-                "id": "example",
-                "originals": False,
-                "published_at": None,
-                "source": {
-                    "feed_id": "example",
-                    "kind": "demo",
-                    "source_url": "https://example.test/post/1",
-                },
-                "source_position": None,
-                "source_url": "https://example.test/post/1",
-                "title": "example",
-            }
-        ],
-    )
 
 
 class RuntimeStatus(WireModel):

@@ -20,7 +20,6 @@ from oko.reader.generated import models as wire
 from oko.reader import snapshots as facts
 from oko.application.reader import ReaderApplication
 from oko.execution import ActionError
-from oko.domain.processing import ProcessingWait
 
 
 def card_source_url(value: object) -> object:
@@ -39,51 +38,6 @@ def provenance(value: facts.UnknownProvenance | facts.CodexProvenance | facts.Lo
     if isinstance(value, facts.LocalProvenance) and value.processor == 'llamacpp':
         return wire.Provenance(wire.LocalResultProvenance(kind='local', processor_id='llamacpp', model=wire.LocalModel(wire.KnownLocalModel(state='known', name=value.model) if value.model else wire.UnknownLocalModel(state='unknown'))))
     return wire.Provenance(wire.UnknownResultProvenance(kind='unknown', reason='not_recorded'))
-
-
-def attempt(status: str, error: str | None, waiting: ProcessingWait | None = None) -> wire.UnfinishedProcessingAttempt:
-    if status == 'running':
-        return wire.UnfinishedProcessingAttempt(wire.ProcessingRunning(state='running'))
-    if status == 'cancelled':
-        return wire.UnfinishedProcessingAttempt(wire.ProcessingCancelled(state='cancelled'))
-    if status == 'off':
-        return wire.UnfinishedProcessingAttempt(wire.ProcessingDisabled(state='disabled'))
-    if error:
-        return wire.UnfinishedProcessingAttempt(wire.ProcessingWaiting(state='waiting', reason=wire.WaitingReason(waiting.reason if waiting else 'retry_scheduled'), retry_at=project.timestamp(waiting.retry_at) if waiting and waiting.retry_at is not None else None))
-    return wire.UnfinishedProcessingAttempt(wire.ProcessingQueued(state='queued'))
-
-
-def filter_state(value: facts.Filter | None, waiting: ProcessingWait | None) -> wire.FilterState:
-    if value is None:
-        return wire.FilterState(wire.FilterAttemptState(attempt=attempt('off', None), diagnostic_message=None, result=None))
-    message = value.error if isinstance(value.error, str) else None
-    result = wire.FilterResult(hidden=value.hidden, removed=value.removed, reason=value.reason, provenance=provenance(None)) if value.status == 'done' else None
-    if result is not None:
-        return wire.FilterState(wire.FilterReadyState(attempt=wire.ProcessingReady(state='ready'), diagnostic_message=message, result=result))
-    return wire.FilterState(wire.FilterAttemptState(attempt=attempt(value.status, message, waiting), diagnostic_message=message, result=None))
-
-
-def theses_parts(summary: facts.Summary | None,
-                 origin: facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance | None,
-                 ai: facts.AI | None, waiting: ProcessingWait | None) -> wire.ThesesState:
-    result = wire.PublicationTheses(points=[wire.ThesesPoint(text=p.text, references=[wire.PublicationReference(material_id=wire.MaterialId(r.id), source_url=wire.SourceUrl(r.url)) for r in p.sources]) for p in summary.points], provenance=provenance(origin)) if summary is not None else None
-    status = ai.status if ai is not None else 'off'
-    message = ai.error if ai is not None else None
-    if status == 'done' and result is not None:
-        return wire.ThesesState(wire.ThesesReadyState(attempt=wire.ProcessingReady(state='ready'), diagnostic_message=message, result=result))
-    return wire.ThesesState(wire.ThesesAttemptState(attempt=attempt(status, message, waiting), diagnostic_message=message, result=result))
-
-
-def saved_filter(runtime: ReaderApplication, item: str, value: facts.Filter | None) -> wire.FilterState:
-    current=runtime.queries
-    filtered = filter_state(value, runtime.processing_wait(item, 'filter'))
-    if filtered.root.result is not None:
-        saved = current.provenance(item,'filter')
-        if saved:
-            from pydantic import TypeAdapter
-            origin: facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance = TypeAdapter(facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance).validate_python(saved)
-            filtered.root.result.provenance = provenance(origin)
-    return filtered
 
 
 def missing(resource: wire.AffectedResource) -> ApiError:

@@ -86,9 +86,10 @@ def test_results_have_atomic_metadata_and_media_change_preserves_processing(tmp_
         accepted=row['processing_metadata']
         count=len(calls)
         original=client.get('/api/v3/publication/'+item).json()
-        assert original['originals'] is False and original['text'] and original['theses']['result']
+        assert client.get('/api/v3/settings/feed/'+card['feed_id']).json()['effective']['originals']['value'] is False
+        assert original['text'] and original['theses']['result']
         client.patch('/api/v3/settings/feed/'+card['feed_id'],json={'originals':True})
-        assert client.get('/api/v3/publication/'+item).json()['originals'] is True
+        assert client.get('/api/v3/settings/feed/'+card['feed_id']).json()['effective']['originals']['value'] is True
         assert client.get('/api/v3/settings/feed/'+card['feed_id']).json()['effective']['theses']['value'] is True
         assert client.get('/api/v3/publication/'+item).json()['theses']['result']==original['theses']['result']
         assert len(calls)==count
