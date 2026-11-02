@@ -733,11 +733,12 @@ class JobRepository:
         rows = self.store.db.execute("SELECT items.id , items.platform , items.content FROM publications items JOIN feed_publications owner ON owner.publication_id=items.id AND owner.is_primary AND owner.is_unviewed WHERE owner.feed_id = %s AND items.viewed = 0 AND items.complete = 1 AND NOT EXISTS ( SELECT 1 FROM jobs WHERE kind = 'fetch' AND item = items . id AND status IN ( 'pending' , 'running' ) )", (feed,)).fetchall()
         for row in rows:
             try:
-                header=json.loads(row['content']).get('extra',{}).get('_reader',{})
+                extra=json.loads(row['content']).get('extra',{})
             except (OSError, ValueError):
                 record_caught('store.prepare_youtube')
                 continue
-            if header.get('captions') == 'not_requested':
+            from oko.storage.publication_document import caption_state
+            if caption_state(extra.get('youtube', {}), extra.get('_reader', {})) == 'not_requested':
                 self.retry_material(row['id'])
 
 
@@ -1058,6 +1059,7 @@ class JobRepository:
                 if resource and resource['status']=='unavailable':
                     store.db.execute("UPDATE media_files SET status = 'pending_download' , reason = '' WHERE id = %s",(subtitles,))
                     content['extra']['youtube']['captions']='pending'
+                    content['extra']['_reader'].pop('captions', None)
                     store.db.execute('UPDATE publications SET content = %s WHERE id = %s',(json.dumps(content,ensure_ascii=False),item))
                     from oko.storage.incomplete_index import save_class
                     save_class(store.db,item,content)

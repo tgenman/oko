@@ -3537,6 +3537,9 @@ class Problems:
                 continue
             raw_header=raw_content.get('extra',{}).get('_reader')
             header = self.header(json.dumps(raw_header) if raw_header is not None else None)
+            if isinstance(raw_content.get('extra', {}).get('youtube'), dict):
+                from oko.storage.publication_document import caption_state
+                header['captions']=caption_state(raw_content['extra']['youtube'], header)
             if header.get('full', True) or (youtube['paused'] and feeds.get(row['feed_id'], {}).get('kind') == 'youtube'):
                 continue
             if header.get('expected_incomplete'):

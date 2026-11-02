@@ -12,7 +12,8 @@ from tests.support.reading_cost import library,traced_app,tracing
 from tests.support.reader import HEADERS
 from tests.support.storage import Store
 from tests.support.postgres_work import scan_rows
-from oko.collection.contracts import Material,Publication
+from oko.collection.contracts import Publication
+from tests.support.synthetic_material import material as Material
 
 
 def archive_evidence():

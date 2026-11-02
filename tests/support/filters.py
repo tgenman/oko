@@ -1,7 +1,8 @@
 from oko.collection.contracts import DiscoveryResult, FetchResult
 from tests.support.presence import presence, close_presence
 import json, httpx
-from oko.collection.contracts import Material, Publication
+from oko.collection.contracts import Publication
+from tests.support.synthetic_material import material as Material
 from tests.support.models import model_transport
 from tests.support.reader import wait_for
 

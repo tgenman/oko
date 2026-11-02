@@ -4,7 +4,7 @@ from pathlib import Path
 import argparse
 import json
 
-from oko.collection.contracts import Material
+from tests.support.synthetic_material import material as Material
 from oko.processing.llamacpp import ProcessorConfig
 from tests.support.storage import Store
 from oko.subscriptions.subscriptions import Overrides

@@ -11,7 +11,7 @@ from typing import Any
 
 from oko.collection.adapters import AdapterException,AdapterErrorKind,PublicationContent
 from oko.collection.adapter_errors import source_error
-from oko.collection.contracts import SourceError, SourceManifest, Material, Publication, FetchResult, DiscoveryResult, ReplyPreview
+from oko.collection.contracts import SourceError, SourceManifest, Material, Publication, FetchResult, DiscoveryResult
 from oko.collection.telegram.adapter import TelegramWebAdapter,reference,publication_reference,finish_window
 from oko.collection.telegram.contracts import HistoryEnvelope,HistorySelection
 from oko.collection.telegram.source import TelegramSource
@@ -23,7 +23,6 @@ def material(value: PublicationContent, previous: Material | None = None) -> Mat
     observed_preview=manifest.preview_fragment
     if manifest.preview_error and previous and previous.source_manifest and previous.source_manifest.preview_fragment:
         manifest = manifest.model_copy(update={'preview_fragment': previous.source_manifest.preview_fragment})
-    reply = manifest.post.get('reply_preview')
     title, text = value.metadata.title, str(manifest.post['text'])
     reason = 'Вложения ещё не загружены' if value.media else '; '.join(issue.message for issue in value.issues if issue.kind!=AdapterErrorKind.notice)
     if manifest.post_web_unavailable and text.strip():
@@ -42,10 +41,9 @@ def material(value: PublicationContent, previous: Material | None = None) -> Mat
         elif not bodies and text:
             content['blocks'].insert(0,dict(type='text',role='body',text=text))
         value=replace(value,content=content)
-    return Material(title, text, False, reason,
+    return Material(title, False, reason,
                     members=tuple(extra['members']), description=extra['description'],
-                    source_manifest=manifest,
-                    reply_preview=ReplyPreview.model_validate(reply) if reply else None, adapter_content=value)
+                    source_manifest=manifest, adapter_content=value)
 
 
 def publication(value: PublicationContent) -> Publication:

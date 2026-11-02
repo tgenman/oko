@@ -222,6 +222,10 @@ class Publications:
         row=self.store.db.execute('SELECT content FROM publications WHERE id = %s',(item,)).fetchone()
         if row and row[0]!='{}':
             content=json.loads(row[0])
+            previous_header=content.get('extra', {}).get('_reader', {})
+            previous_quote=previous_header.get('reply_preview')
+            if previous_quote:
+                header['reply_preview']=previous_quote
             content['extra'].update(_reader=header,_collection_reason=material.reason)
             if material.adapter_content is None:
                 content['extra']['_links']=[dict(platform=row['platform'],external_id=row['external_id'],url=row['url'])
@@ -237,6 +241,13 @@ class Publications:
         value=material.adapter_content
         assert value is not None
         content=deepcopy(value.content)
+        telegram=content.get('extra', {}).get('telegram')
+        if isinstance(telegram, dict) and header.get('source_manifest'):
+            # The mutable source manifest is owned by the saved reader facts;
+            # the adapter copy is an input, not a second persisted snapshot.
+            telegram.pop('manifest', None)
+            telegram.pop('members', None)
+            telegram.pop('description', None)
         media=[]
         identities={}
         known={row['resource_key']:dict(row) for row in self.store.db.execute('SELECT * FROM media_files WHERE publication_id = %s',(item,))}
@@ -286,7 +297,6 @@ class Publications:
                 block.clear()
                 block.update(type='media',role=resource['kind'],ref={'$media':resource['key']})
         if youtube is not None:
-            header['captions']={'available':'available','unavailable':'unavailable','not_requested':'not_requested'}.get(youtube.get('captions'),'error')
             if youtube.get('captions')=='not_requested':
                 for block in content['blocks']:
                     if block.get('role')=='subtitles':
@@ -409,6 +419,16 @@ class Publications:
         assert row is not None
         content=saved_content(row['content'])
         header=deepcopy(content['extra']['_reader'])
+        youtube=content.get('extra', {}).get('youtube')
+        if isinstance(youtube, dict):
+            from oko.storage.publication_document import caption_state
+            header['captions']=caption_state(youtube, header)
+        descriptions=[block['text'] for block in content.get('blocks', []) if block.get('type')=='text' and block.get('role')=='description']
+        if descriptions and 'description' not in header:
+            header['description']='\n\n'.join(descriptions)
+        quote=next((block for block in content.get('blocks', []) if block.get('type')=='quote'), None)
+        if quote is not None and 'reply_preview' not in header:
+            header['reply_preview']={key:quote.get(key) for key in ('text','author','source_url')}
         text='\n\n'.join(b['text'] for b in content.get('blocks',[]) if b['type']=='text' and b['role']=='body')
         return header,text
 

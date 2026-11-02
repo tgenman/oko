@@ -1,5 +1,5 @@
 from oko.collection.contracts import FetchResult
-from oko.collection.contracts import Material
+from tests.support.synthetic_material import material as Material
 import asyncio
 from oko.collection.demo import DemoSource
 

@@ -31,10 +31,23 @@ def test_reply_is_separate_from_own_text_and_survives_restart(tmp_path, href):
         assert entity['reply_preview'] == material['reply_preview']
         assert entity['title'] == card['title']
         assert material['completeness']['state'] == 'complete'
+    import json
+    from tests.support.storage import database
+    with database(tmp_path) as db:
+        row=db.execute('SELECT content FROM publications WHERE id=%s', (card['id'],)).fetchone()
+        content=json.loads(row[0])
+        assert 'reply_preview' not in content['extra']['_reader']
+        content['extra']['_reader']['reply_preview'] = dict(material['reply_preview'], text='Legacy displayed context')
+        db.execute('UPDATE publications SET content=%s WHERE id=%s', (json.dumps(content), card['id']))
     with TestClient(create_app(tmp_path, **options), headers=headers) as client:
         configure_fast_web(client)
         saved = client.get('/api/v3/publication/'+card['id']).json()
-        assert saved['reply_preview'] == material['reply_preview']
+        assert saved['reply_preview'] == dict(material['reply_preview'], text='Legacy displayed context')
+    with database(tmp_path) as db:
+        content=json.loads(db.execute('SELECT content FROM publications WHERE id=%s', (card['id'],)).fetchone()[0])
+        assert content['extra']['_reader']['source_manifest']
+        assert 'manifest' not in content['extra']['telegram']
+        assert content['extra']['_reader']['reply_preview']['text'] == 'Legacy displayed context'
 
 
 def test_both_ai_operations_receive_reply_and_reply_changes_invalidate_results(tmp_path):

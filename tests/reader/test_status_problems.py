@@ -6,7 +6,8 @@ from tests.support.app import create_app
 from tests.support.codex import CodexService, configure_codex
 from tests.support.reader import HEADERS
 from tests.support.reader import wait_for
-from oko.collection.contracts import Publication, SourceError, Material
+from oko.collection.contracts import Publication, SourceError
+from tests.support.synthetic_material import material as Material
 
 
 class FailedDownloads:

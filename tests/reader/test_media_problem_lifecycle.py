@@ -42,7 +42,8 @@ def test_two_files_on_one_publication_keep_separate_errors(tmp_path,postgres_url
 
 def test_real_material_replacement_rolls_back_file_job_and_problem(tmp_path,postgres_url):
     import pytest
-    from oko.collection.contracts import Material,Publication
+    from oko.collection.contracts import Publication
+    from tests.support.synthetic_material import material as Material
     from tests.support.source import StructuredSource,publication_packet
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:

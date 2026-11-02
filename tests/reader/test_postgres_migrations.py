@@ -151,3 +151,105 @@ def test_current_schema_has_no_legacy_publication_views(connections):
         assert db.execute('SELECT viewname FROM pg_views WHERE schemaname=current_schema() AND viewname=ANY(%s)', (list(names),)).fetchall() == []
         assert db.execute('SELECT viewname FROM pg_views WHERE schemaname=current_schema()').fetchall() == []
         assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND NOT t.tgisinternal").fetchone()[0] == 0
+
+
+def test_duplicate_reply_migration_preserves_old_and_conflicting_quotes(connections):
+    from pathlib import Path
+    from oko.storage.processing_input import blocks, digest
+
+    sql = (Path(__file__).parents[2] / 'oko/storage/postgres/096-normalize-publication-content.sql').read_text()
+    quote = dict(text='Old quote', author='Author', source_url='https://example.test/post')
+    def document(blocks, reply):
+        return json.dumps(dict(blocks=blocks, extra={'_reader': {'reply_preview': reply}}))
+    with connections() as db:
+        db.execute('CREATE TABLE publications (id text PRIMARY KEY, content text NOT NULL, platform text)')
+        rows = [
+            ('same', document([dict(type='quote', **quote)], quote)),
+            ('legacy', document([], quote)),
+            ('different', document([dict(type='quote', **dict(quote, text='New quote'))], quote)),
+            ('later_match', document([dict(type='quote', **dict(quote, text='New quote')),
+                                      dict(type='quote', **quote)], quote)),
+        ]
+        for identity, content in rows:
+            db.execute('INSERT INTO publications (id, content) VALUES (%s, %s)', (identity, content))
+        db.execute(sql)
+        saved = {identity: json.loads(content) for identity, content in db.execute('SELECT id, content FROM publications')}
+        assert 'reply_preview' not in saved['same']['extra']['_reader']
+        assert saved['same']['blocks'] == [dict(type='quote', **quote)]
+        assert saved['legacy']['blocks'] == [dict(type='quote', **quote)]
+        assert saved['different']['blocks'] == [dict(type='quote', **quote)]
+        assert saved['later_match']['blocks'] == [dict(type='quote', **quote), dict(type='quote', **quote)]
+        assert all('reply_preview' not in saved[key]['extra']['_reader'] for key in ('legacy', 'different', 'later_match'))
+        assert digest(blocks(saved['same'])) == digest(blocks(json.loads(rows[0][1])))
+        assert digest(blocks(saved['legacy'])) != digest(blocks(json.loads(rows[1][1])))
+        assert digest(blocks(saved['different'])) != digest(blocks(json.loads(rows[2][1])))
+        db.execute(sql)
+        assert {identity: json.loads(content) for identity, content in db.execute('SELECT id, content FROM publications')} == saved
+
+
+def test_youtube_description_migration_preserves_existing_blocks(connections):
+    from pathlib import Path
+
+    sql = (Path(__file__).parents[2] / 'oko/storage/postgres/096-normalize-publication-content.sql').read_text()
+    with connections() as db:
+        db.execute('CREATE TABLE publications (id text PRIMARY KEY, content text NOT NULL, platform text)')
+        old = {'blocks': [{'type': 'external_media', 'kind': 'youtube'}],
+               'extra': {'_reader': {'description': 'Saved description'}, 'youtube': {'captions': 'available'}}}
+        db.execute('INSERT INTO publications VALUES (%s, %s, %s)', ('youtube', json.dumps(old), 'youtube'))
+        db.execute(sql)
+        new = json.loads(db.execute('SELECT content FROM publications').fetchone()[0])
+        assert new['blocks'][0] == old['blocks'][0]
+        assert new['blocks'][1] == {'type': 'text', 'role': 'description', 'text': 'Saved description'}
+        assert 'description' not in new['extra']['_reader']
+        assert new['extra']['youtube'] == old['extra']['youtube']
+        db.execute(sql)
+        assert json.loads(db.execute('SELECT content FROM publications').fetchone()[0]) == new
+
+
+@pytest.mark.parametrize(('source', 'reader', 'removed'), [
+    ('available', 'available', True), ('pending', 'error', True),
+    ('unavailable', 'available', False), ('not_requested', 'not_requested', True),
+])
+def test_caption_migration_preserves_conflicting_state(connections, source, reader, removed):
+    from pathlib import Path
+    sql = (Path(__file__).parents[2] / 'oko/storage/postgres/096-normalize-publication-content.sql').read_text()
+    content = {'blocks': [], 'extra': {'youtube': {'captions': source}, '_reader': {'captions': reader}}}
+    with connections() as db:
+        db.execute('CREATE TABLE publications (id text PRIMARY KEY, content text NOT NULL, platform text)')
+        db.execute('INSERT INTO publications VALUES (%s, %s, %s)', ('item', json.dumps(content), 'youtube'))
+        db.execute(sql)
+        result = json.loads(db.execute('SELECT content FROM publications').fetchone()[0])
+        assert ('captions' not in result['extra']['_reader']) is removed
+        assert result['extra']['youtube']['captions'] == source
+
+
+def test_telegram_manifest_migration_removes_only_equal_copies(connections):
+    from pathlib import Path
+    sql = (Path(__file__).parents[2] / 'oko/storage/postgres/096-normalize-publication-content.sql').read_text()
+    manifest = {'post': {'text': 'Saved'}, 'resources': []}
+    with connections() as db:
+        db.execute('CREATE TABLE publications (id text PRIMARY KEY, content text NOT NULL, platform text)')
+        for identity, source in [('equal', manifest), ('different', {'post': {'text': 'Earlier'}, 'resources': []})]:
+            content = {'blocks': [], 'extra': {'telegram': {'manifest': source, 'members': [1], 'description': 'Description'}, '_reader': {'source_manifest': manifest, 'members': [1] if identity=='equal' else [2], 'description': 'Description' if identity=='equal' else 'Other'}}}
+            db.execute('INSERT INTO publications VALUES (%s, %s, %s)', (identity, json.dumps(content), 'telegram'))
+        db.execute(sql)
+        rows = {identity: json.loads(content) for identity, content in db.execute('SELECT id,content FROM publications')}
+        assert 'manifest' not in rows['equal']['extra']['telegram']
+        assert rows['equal']['extra']['_reader']['source_manifest'] == manifest
+        assert 'members' not in rows['equal']['extra']['telegram']
+        assert 'description' not in rows['equal']['extra']['telegram']
+        assert rows['different']['extra']['telegram']['manifest']['post']['text'] == 'Earlier'
+        assert rows['different']['extra']['telegram']['members'] == [1]
+        assert rows['different']['extra']['telegram']['description'] == 'Description'
+
+
+def test_content_migration_preserves_damaged_records(connections):
+    from pathlib import Path
+    sql = (Path(__file__).parents[2] / 'oko/storage/postgres/096-normalize-publication-content.sql').read_text()
+    with connections() as db:
+        db.execute('CREATE TABLE publications (id text PRIMARY KEY, content text NOT NULL, platform text)')
+        for identity, value in [('invalid', '{broken'), ('nul', r'{"blocks":[],"bad":"\u0000"}'), ('huge', '{"x":1e1000000}'), ('scalar', '"unexpected"'), ('bad_blocks', '{"blocks":{},"extra":{"_reader":{}}}')]:
+            db.execute('INSERT INTO publications VALUES (%s, %s, %s)', (identity, value, 'youtube'))
+        before = db.execute('SELECT id,content FROM publications ORDER BY id').fetchall()
+        db.execute(sql)
+        assert db.execute('SELECT id,content FROM publications ORDER BY id').fetchall() == before

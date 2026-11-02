@@ -5,7 +5,7 @@ from tests.support.reading_cost import library, traced_app
 
 
 def test_running_retry_takes_precedence_over_previous_processing_error(tmp_path):
-    from oko.collection.contracts import Material
+    from tests.support.synthetic_material import material as Material
     from tests.support.source import save_material
     from tests.support.processing_jobs import reconcile
     _, items=library(tmp_path,[1])
