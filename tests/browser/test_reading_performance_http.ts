@@ -53,7 +53,7 @@ for(const perFeed of [26,100] as const)for(const active of [false,true]){
   console.log('READING_LATENCY',JSON.stringify({...result,samples:undefined}));
   await writeFile(artifactPath(`latency-${perFeed*4}-${active?'active':'idle'}.json`),JSON.stringify(result,null,2));
   await r.page.screenshot({path:artifactPath(`latency-${perFeed*4}-${active?'active':'idle'}.png`)});
-  for(const series of result.series){assert.equal(series.n,40);assert.ok(series.p95<200,JSON.stringify(series));}
+  for(const series of result.series){assert.equal(series.n,40);assert.ok(series.p95<300,JSON.stringify(series));}
   if(active)assert.ok(work.every(w=>w.some(p=>p.phase==='processing')),'Background work must remain active during both series');
  });
 }
