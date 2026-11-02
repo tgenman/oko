@@ -42,6 +42,28 @@ def test_source_failure_and_group_rollback_together(tmp_path,postgres_url):
     finally:store.db.close()
 
 
+def test_source_failure_changes_group_after_retry_claim(tmp_path,postgres_url):
+    from oko.storage.job_types import Job
+    from oko.storage.transaction import transaction
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with transaction(store.db):
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
+            store.db.execute("INSERT INTO publications(id) VALUES ('p')")
+            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
+            job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','p','running',1) RETURNING id").fetchone()[0]
+        store.jobs.retry(Job(job_id,'fetch','p',1),1,'offline',code='source-network')
+        old=store.db.execute("SELECT id FROM reader_problems WHERE body::jsonb->>'source_group_identity'='job:source-network:f:fetch' AND finished IS NULL").fetchone()[0]
+        with transaction(store.db):store.db.execute('UPDATE jobs SET next=0 WHERE id=%s',(job_id,))
+        claimed=store.jobs.next_job(1,feeds=['f'])
+        assert claimed
+        assert store.db.execute("SELECT body::jsonb->>'state' FROM reader_problems WHERE id=%s",(old,)).fetchone()[0]=='retrying'
+        store.jobs.retry(claimed,1,'access changed',code='source-reconnect')
+        assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s',(old,)).fetchone()[0] is not None
+        assert store.db.execute("SELECT 1 FROM reader_problems WHERE body::jsonb->>'source_group_identity'='job:source-reconnect:f:fetch' AND finished IS NULL").fetchone()
+    finally:store.db.close()
+
+
 def test_removing_one_of_two_source_roots_finishes_only_its_group(tmp_path,postgres_url):
     from oko.storage.job_types import Job
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
