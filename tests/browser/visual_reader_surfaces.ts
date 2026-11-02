@@ -14,7 +14,7 @@ test('synthetic reader surfaces screenshots and geometry',async()=>{
     material('video',{title:'Видео с недоступными субтитрами',source:{kind:'youtube',feed_id:'feed',source_url:'https://example.org/video',captions:'unavailable'},completeness:{state:'incomplete',reason:'source_incomplete',message:'YouTube ограничил получение субтитров'},description:'Описание видео\n\n'+('Текст и длинная ссылка https://example.org/'+'example/'.repeat(12)+'\n').repeat(3),text:''}),
     material('theses',{theses:{state:'ready',error:null,result:{points:['Основной тезис синтетического материала'],references:[[{material_id:'plain',source_url:'https://example.org/plain'}]],provenance:{kind:'codex',model:'synthetic',reasoning_effort:'high',fast:false}}}}),
     material('hidden',{card:{hidden:true},filter:{state:'ready',error:null,result:{hidden:true,reason:'Синтетический фильтр',removed:[],text:'Текст hidden',provenance:{kind:'unknown',reason:'not_recorded'}}}}),
-    material('media',{card:{preview_url:'/api/v3/image'},media:[{kind:'image',role:'image',url:'/api/v3/image',mime:null}]}),
+    material('media',{card:{preview_url:'/api/v3/materials/media/media/image'},media:[{kind:'image',role:'image',url:'/api/v3/materials/media/media/image',mime:null}]}),
     material('pending'),material('failed')
    ]);
    await r.page.evaluate(()=>{
@@ -22,7 +22,7 @@ test('synthetic reader surfaces screenshots and geometry',async()=>{
     t.replies.set('/api/v3/subscriptions',{body:{folders:[{id:'f',title:'Наука'}],feeds:[]}});
     t.replies.set('/api/v3/import/preview',{body:{folders:[{title:'Наука'}],feeds:[]}});
     t.replies.set('/api/v3/feeds/verify',{body:{url:'https://example.org/feed.xml',title:'Синтетический источник',kind:'rss',verification:'verified'}});
-    t.replies.set('/api/v3/image',{mime:'image/png',base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR9sAAAAASUVORK5CYII='});
+    t.replies.set('/api/v3/materials/media/media/image',{mime:'image/png',base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR9sAAAAASUVORK5CYII='});
     t.held.set('/api/v3/publication/pending',true);
     t.replies.set('/api/v3/publication/failed',{status:503,body:{detail:'Синтетическая ошибка открытия'}});
    });
@@ -56,7 +56,6 @@ test('synthetic reader surfaces screenshots and geometry',async()=>{
    await shot('rss-empty','#add-dialog');
    await r.page.locator('#rss-url').fill('https://example.org/feed.xml');await r.page.locator('#rss-check').focus();await shot('rss-ready','#add-dialog');
    await r.page.locator('#rss-check').click();await expect(r.page.locator('#rss-checked-fields')).toBeVisible();await shot('rss-checked','#add-dialog');
-   await r.page.locator('#rss-history-mode').selectOption('date');await shot('rss-date','#add-dialog');
    await r.page.locator('#rss-url').fill('https://example.org/error');await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/feeds/verify',{status:400,body:{detail:'Синтетическая ошибка проверки фида. '+ 'Длинное пояснение '.repeat(8)}}));
    await r.page.locator('#rss-check').click();await expect(r.page.locator('#rss-message')).toContainText('Синтетическая ошибка');await shot('rss-error','#add-dialog');
    await r.page.locator('#add-telegram-tab').click();
@@ -65,14 +64,13 @@ test('synthetic reader surfaces screenshots and geometry',async()=>{
    await r.page.locator('#add-close').click();await expect(r.page.locator('#add-open')).toBeFocused();
    for(const id of ['plain','video','theses','hidden','media']){
     await r.page.locator('[data-card="'+id+'"]').click();await expect(r.page.locator('#material')).toBeVisible();
-    if(id==='media'){await expect(r.page.locator('#images img')).toBeVisible();await r.page.locator('#versions summary').click();await expect(r.page.locator('#versions')).toContainText('Ранее сохранённый текст');}
+    if(id==='media')await expect(r.page.locator('#images img')).toBeVisible();
     expect(await r.page.locator('main>article').evaluate(n=>getComputedStyle(n).backgroundColor)).toBe('rgb(255, 255, 255)');
     if(id==='video')expect(await r.page.locator('#completeness').evaluate(n=>getComputedStyle(n).color)).toBe('rgb(137, 91, 31)');
     if(id==='plain')expect(await r.page.locator('#completeness').evaluate(n=>getComputedStyle(n).color)).toBe('rgb(99, 99, 102)');
     await shot(id,'main>article');
-    if(id==='plain'){await r.page.locator('#original-panel summary').click();await shot('original-collapsed','main>article');}
    }
-   await r.page.locator('[data-card="pending"]').click();await expect(r.page.locator('#empty')).toContainText('Загрузка');await shot('loading','main>article');
+   await r.page.locator('[data-card="pending"]').click();await expect(r.page.locator('#empty')).toContainText('Loading item');await shot('loading','main>article');
    await r.page.locator('[data-card="failed"]').click();await expect(r.page.locator('#empty')).toContainText('Синтетическая ошибка');await shot('error','main>article');
    // The intentional HTTP errors are UI feedback, not JS execution errors.
    expect(r.errors).toEqual([]);

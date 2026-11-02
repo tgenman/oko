@@ -6,3 +6,4 @@
 - `./scripts/check browser --browser-workers 2 --files tests/browser/test_separate_menus.ts tests/browser/test_status_v3_http.ts tests/browser/test_telegram_connection.ts tests/browser/test_telegram_v3_http.ts tests/browser/test_completion.ts tests/browser/test_news_context_menu.ts` — PASS, 24 сценария; browser-types и tooling-types — PASS.
 - Поиск по тестовому коду клиентских профилей, аккаунтов, Telethon, sync_reads, read_sync и auto_read — совпадений нет. HTML-фикстуры публичного веба и общие тесты веб-адаптера сохранены.
 - По явному запросу удалены также проверки отказа клиентского API, старого staging и безопасности миграции; соответствующее автоматическое покрытие отсутствует. Полный набор не запускался.
+- Отдельный визуальный Playwright-сценарий после трёх отказов на устаревших URL/селекторах и тексте приведён к текущему интерфейсу: повтор — PASS, 13 состояний. Скриншот формы Telegram просмотрен.
