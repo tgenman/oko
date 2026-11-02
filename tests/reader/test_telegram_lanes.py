@@ -88,7 +88,7 @@ def test_blocked_personal_download_keeps_web_and_collection_live_until_stop(tmp_
             telegram.release.set()
 
 
-def test_flood_wait_survives_a_new_monotonic_origin_and_does_not_block_other_account(tmp_path):
+def test_flood_wait_survives_a_new_monotonic_origin_and_does_not_block_other_account(tmp_path, monkeypatch):
     from oko.collection.contracts import SourceError
     class Limited(TwoAccounts):
         def __init__(self):
@@ -103,15 +103,25 @@ def test_flood_wait_survives_a_new_monotonic_origin_and_does_not_block_other_acc
                     raise SourceError.from_worker('synthetic FloodWait', {'error_type':'FloodWaitError'}, 60)
             return await super().history_page(account, peer, upper, before, since)
     telegram = Limited()
-    mono, wall = [1000.], [time.time()]
+    mono, wall = [1000.], [float(int(time.time()))]
+    # Adapter and Store must share the same wall clock, including time jumps.
+    from datetime import datetime
+    class ClockedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls.fromtimestamp(wall[0], tz)
+    monkeypatch.setattr('oko.collection.telegram.client_adapter.datetime', ClockedDatetime)
     options = dict(token='test', api_only=True, telegram_client=telegram,
                    clock=lambda:mono[0], wall_clock=lambda:wall[0])
     headers = {'Authorization':'Bearer test'}
     with TestClient(create_app(tmp_path, **options), headers=headers) as client:
         for role, account in [('personal','one'),('collection','two')]:
             client.put('/api/v3/telegram/profiles/'+role,json={'configuration_ref':account})
-            assert client.post('/api/v3/telegram/connect',json=dict(source_locator='@'+role,folder=role,
-                    access={'kind':'client','profile':role})).status_code == 200
+            response = client.post('/api/v3/telegram/connect',json=dict(source_locator='@'+role,folder=role,
+                    access={'kind':'client','profile':role}))
+            assert response.status_code == 200
+            if role == 'personal':
+                personal_feed = response.json()['feed_id']
         deadline = time.monotonic()+2
         while time.monotonic()<deadline:
             if telegram.calls == 1 and any((client.get('/api/v3/publication/'+c['id']).json()['availability'] == 'available') for c in read_all_cards(client, '/api/v3/cards')):
@@ -119,6 +129,18 @@ def test_flood_wait_survives_a_new_monotonic_origin_and_does_not_block_other_acc
             time.sleep(.02)
         assert telegram.calls == 1
         assert any((client.get('/api/v3/publication/'+c['id']).json()['availability'] == 'available') for c in read_all_cards(client, '/api/v3/cards'))
+        # The external call increments its counter before the worker commits its
+        # error. Restart only after both durable waits describe the same attempt.
+        def persisted_wait():
+            store = client.app.state.host.require_store()
+            with store.db.access_lock:
+                account = store.db.execute("SELECT value FROM state WHERE key='telegram-retry:101'").fetchone()
+                job = store.db.execute("SELECT status,retry_at FROM jobs WHERE kind='discover' AND item=%s", (personal_feed,)).fetchone()
+                return bool(account and float(account[0]) == wall[0]+60 and job and job['status']=='pending' and job['retry_at'] == wall[0]+60)
+        deadline = time.monotonic()+5
+        while time.monotonic()<deadline and not client.portal.call(persisted_wait):
+            time.sleep(.02)
+        assert client.portal.call(persisted_wait), 'FloodWait was not durably recorded'
     mono[0] = 10
     wall[0] += 30
     with TestClient(create_app(tmp_path, **options), headers=headers) as client:
