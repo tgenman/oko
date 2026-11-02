@@ -37,6 +37,7 @@ def test_reply_is_separate_from_own_text_and_survives_restart(tmp_path, href):
         row=db.execute('SELECT content FROM publications WHERE id=%s', (card['id'],)).fetchone()
         content=json.loads(row[0])
         assert 'reply_preview' not in content['extra']['_reader']
+        assert 'title' not in content['extra']['_reader']
         content['extra']['_reader']['reply_preview'] = dict(material['reply_preview'], text='Legacy displayed context')
         db.execute('UPDATE publications SET content=%s WHERE id=%s', (json.dumps(content), card['id']))
     with TestClient(create_app(tmp_path, **options), headers=headers) as client:

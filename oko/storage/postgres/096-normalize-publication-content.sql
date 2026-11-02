@@ -69,7 +69,9 @@ WHERE (CASE WHEN pg_input_is_valid(content, 'jsonb') THEN content::jsonb END) #>
 UPDATE publications
 SET content = ((CASE WHEN pg_input_is_valid(content, 'jsonb') THEN content::jsonb END) #- '{extra,telegram,description}')::text
 WHERE (CASE WHEN pg_input_is_valid(content, 'jsonb') THEN content::jsonb END) #> '{extra,telegram,description}' =
-      (CASE WHEN pg_input_is_valid(content, 'jsonb') THEN content::jsonb END) #> '{extra,_reader,description}';
+      (CASE WHEN pg_input_is_valid(content, 'jsonb') THEN content::jsonb END) #> '{extra,_reader,description}'
+   OR ((CASE WHEN pg_input_is_valid(content, 'jsonb') THEN content::jsonb END) #> '{extra,telegram,description}' = '""'::jsonb
+       AND (CASE WHEN pg_input_is_valid(content, 'jsonb') THEN content::jsonb END) #> '{extra,_reader,description}' IS NULL);
 
 -- Older readers displayed the header quote even if the structured input was
 -- missing it or differed. Preserve that displayed quote as the canonical block.
@@ -105,3 +107,29 @@ WITH legacy AS (
     FROM candidates c
 )
 UPDATE publications p SET content=rebuilt.doc::text FROM rebuilt WHERE p.id=rebuilt.id;
+
+
+-- The adapter manifest is a discovery snapshot. Media projection later updates
+-- only name, status, reason and digest in the retained reader manifest. Remove
+-- a stale adapter copy only if every other field and resource order agrees.
+WITH parsed AS MATERIALIZED (
+ SELECT id, CASE WHEN pg_input_is_valid(content, 'jsonb') THEN content::jsonb END AS doc
+ FROM publications
+), candidates AS (
+ SELECT id, doc, doc #> '{extra,telegram,manifest}' AS adapter,
+        doc #> '{extra,_reader,source_manifest}' AS retained
+ FROM parsed
+), equivalent AS (
+ SELECT id, doc FROM candidates
+ WHERE jsonb_typeof(adapter)='object' AND jsonb_typeof(retained)='object'
+   AND adapter - 'resources' = retained - 'resources'
+   AND jsonb_typeof(adapter->'resources')='array'
+   AND jsonb_typeof(retained->'resources')='array'
+   AND (SELECT jsonb_agg(CASE WHEN jsonb_typeof(value)='object' THEN value - ARRAY['name','status','reason','sha256'] ELSE value END ORDER BY n)
+        FROM jsonb_array_elements(CASE WHEN jsonb_typeof(adapter->'resources')='array' THEN adapter->'resources' ELSE '[]'::jsonb END) WITH ORDINALITY q(value,n))
+     IS NOT DISTINCT FROM
+       (SELECT jsonb_agg(CASE WHEN jsonb_typeof(value)='object' THEN value - ARRAY['name','status','reason','sha256'] ELSE value END ORDER BY n)
+        FROM jsonb_array_elements(CASE WHEN jsonb_typeof(retained->'resources')='array' THEN retained->'resources' ELSE '[]'::jsonb END) WITH ORDINALITY q(value,n))
+)
+UPDATE publications p SET content=(e.doc #- '{extra,telegram,manifest}')::text
+FROM equivalent e WHERE p.id=e.id;

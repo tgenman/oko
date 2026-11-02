@@ -347,7 +347,8 @@ class Publications:
         links=content['extra'].pop('_links',[])
         links_changed=publication_links.sync(store,item,tuple(ExternalReference(ExternalKey(Platform(ref['platform']),ref['external_id']),ref['url']) for ref in links),effects)
         previous = json.loads(old['content'])
-        same = not links_changed and publication_input.blocks(previous)==publication_input.blocks(content) and previous.get('extra',{}).get('_reader',{}).get('title')==content['extra']['_reader']['title']
+        previous_title=previous.get('extra',{}).get('_reader',{}).get('title',old['title'])
+        same = not links_changed and publication_input.blocks(previous)==publication_input.blocks(content) and previous_title==content['extra']['_reader']['title']
         if 'youtube' in content.get('extra',{}):
             before=previous.get('extra',{}).get('youtube',{})
             after=content['extra']['youtube']
@@ -359,7 +360,7 @@ class Publications:
         source_changed=bool(previous.get('blocks')) and (
             embeds(old_header)!=embeds(content['extra']['_reader']) or
             '\n\n'.join(block['text'] for block in publication_input.blocks(previous))!='\n\n'.join(block['text'] for block in publication_input.blocks(content))
-            or old_header.get('title')!=content['extra']['_reader']['title']
+            or previous_title!=content['extra']['_reader']['title']
             or bool(old_header.get('attachments')) and
                 [block.get('media_id') for block in previous.get('blocks',[]) if block['type']=='media']!=
                 [block.get('media_id') for block in content.get('blocks',[]) if block['type']=='media'])
@@ -384,8 +385,10 @@ class Publications:
         for row in media:
             if row['resource_key']=='youtube:cover' and row['status']=='ready':
                 effects.revalidate[row['id']]=False
+        persisted=deepcopy(content)
+        persisted['extra']['_reader'].pop('title',None)
         store.db.execute('UPDATE publications SET content = %s , media_ids = %s , title = %s , status = %s WHERE id = %s',
-            (json.dumps(content, ensure_ascii=False), json.dumps([r['id'] for r in media]),
+            (json.dumps(persisted, ensure_ascii=False), json.dumps([r['id'] for r in media]),
              content['extra']['_reader']['title'], 'pending_filtering', item))
         if old['title']!=content['extra']['_reader']['title']:
             before_youtube=previous.get('extra',{}).get('youtube',{})
@@ -396,12 +399,12 @@ class Publications:
             store.jobs.invalidate_source_metadata_inputs(item,title=True,preserve_cancelled=title_only)
         from oko.storage.incomplete_index import save_class
         save_class(store.db,item,content)
-        if previous and old['platform'] != 'youtube' and old_header.get('title') != content['extra']['_reader']['title']:
+        if previous and old['platform'] != 'youtube' and previous_title != content['extra']['_reader']['title']:
             metadata_row = expect_row(store.db.execute('SELECT processing_metadata FROM publications WHERE id = %s', (item,)).fetchone())
             metadata = json.loads(metadata_row[0])
             for operation in ('filter', 'summary'):
                 if operation in metadata:
-                    metadata[operation].setdefault('source_title', old_header.get('title'))
+                    metadata[operation].setdefault('source_title', previous_title)
             store.db.execute('UPDATE publications SET processing_metadata=%s WHERE id=%s',
                              (json.dumps(metadata, ensure_ascii=False), item))
         if same and previous:
@@ -419,6 +422,7 @@ class Publications:
         assert row is not None
         content=saved_content(row['content'])
         header=deepcopy(content['extra']['_reader'])
+        header.setdefault('title',row['title'])
         youtube=content.get('extra', {}).get('youtube')
         if isinstance(youtube, dict):
             from oko.storage.publication_document import caption_state
