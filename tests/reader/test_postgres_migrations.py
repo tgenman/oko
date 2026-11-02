@@ -253,3 +253,22 @@ def test_content_migration_preserves_damaged_records(connections):
         before = db.execute('SELECT id,content FROM publications ORDER BY id').fetchall()
         db.execute(sql)
         assert db.execute('SELECT id,content FROM publications ORDER BY id').fetchall() == before
+
+
+def test_content_inventory_reports_counts_without_publication_text(connections):
+    from pathlib import Path
+    audit=(Path(__file__).parents[2]/'scripts/audit-publication-content.sql').read_text()
+    quote=dict(text='Sensitive fixture',author='Fixture',source_url=None)
+    with connections() as db:
+        db.execute('CREATE TABLE publications (platform text, content text, viewed integer)')
+        values=[('telegram','{broken',0),
+                ('telegram',json.dumps({'blocks':[], 'extra':{'_reader':{'reply_preview':quote}}}),0),
+                ('telegram',json.dumps({'blocks':[dict(type='quote', **dict(quote,text='Other'))], 'extra':{'_reader':{'reply_preview':quote}}}),0),
+                ('telegram','{}',1),
+                ('telegram',json.dumps({'blocks':{}, 'extra':{'_reader':{'reply_preview':quote}}}),0),
+                ('telegram','null',0)]
+        for row in values:
+            db.execute('INSERT INTO publications VALUES (%s,%s,%s)',row)
+        result=db.execute(audit).fetchone()
+        assert result[:7] == (6,1,1,2,1,1,0)
+        assert all(not isinstance(value,str) for value in result)
