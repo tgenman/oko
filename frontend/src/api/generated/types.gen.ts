@@ -1191,7 +1191,6 @@ export type FeedId = string;
  * new_folder creates a uniquely named folder and moves this feed atomically. It cannot be combined with folder_id. Duplicate names or incompatible fields return action_invalid without any write.
  */
 export type FeedPatchRequest = {
-    auto_read?: boolean | null;
     folder_id?: FolderId;
     importance?: Importance;
     initial_days?: number;
@@ -1200,12 +1199,11 @@ export type FeedPatchRequest = {
      */
     new_folder?: string;
     public_ai?: boolean;
-    read_history?: boolean;
     /**
      * Local feed title. Trimmed before saving; must contain 1 to 200 characters after trimming. Does not change source identity.
      */
     title?: string;
-    transport?: 'telegram' | 'rss' | 'youtube' | null;
+    transport?: 'rss' | 'youtube' | null;
 };
 
 export type FeedResource = {
@@ -2447,7 +2445,7 @@ export type SubscriptionCatalog = {
     folders: Array<SubscriptionFolder>;
 };
 
-export type SubscriptionFeed = TelegramUnconfiguredSubscriptionFeed | DemoSubscriptionFeed | RssSubscriptionFeed | YoutubeSubscriptionFeed | UnresolvedSubscriptionFeed | TelegramWebSubscriptionFeed | TelegramClientSubscriptionFeed;
+export type SubscriptionFeed = TelegramUnconfiguredSubscriptionFeed | DemoSubscriptionFeed | RssSubscriptionFeed | YoutubeSubscriptionFeed | UnresolvedSubscriptionFeed | TelegramWebSubscriptionFeed;
 
 export type SubscriptionFolder = {
     id: FolderId;
@@ -2462,60 +2460,11 @@ export type TelegramAccess = ({
     kind: 'unconfigured';
 } & TelegramUnconfiguredAccess) | ({
     kind: 'web';
-} & TelegramWebAccess) | ({
-    kind: 'client';
-} & TelegramClientAccess);
+} & TelegramWebAccess);
 
-export type TelegramClientAccess = {
-    account_user_id: TelegramUserId;
-    kind: 'client';
-    peer_id: TelegramPeerId;
-    role: TelegramRole;
-};
-
-export type TelegramClientAccessRequest = {
-    kind: 'client';
-    profile: TelegramRole;
-};
-
-export type TelegramClientConnectRequest = {
-    access: TelegramClientAccessRequest;
-    auto_read?: boolean;
-    /**
-     * Explicitly change access for this existing Telegram feed. Preserve its settings and publications; verify source identity before applying.
-     */
-    feed_id?: FeedId;
-    folder: string;
-    /**
-     * Omitted entire field defaults to count 20. Explicit null or an incomplete object is invalid.
-     */
-    initial_history?: HistoryCountSelection;
-    source_locator: string;
-};
-
-export type TelegramClientSubscriptionFeed = {
-    access: TelegramClientAccess;
-    auto_read: boolean;
-    avatar_url?: FeedAvatarUrl;
-    connection: 'ready' | 'unavailable' | 'deleting';
-    folder_id: FolderId;
-    history: HistoryState;
-    id: FeedId;
-    identity: string;
-    importance: Importance;
-    initial_days: number;
-    kind: 'telegram';
-    original_urls: Array<SourceLocator>;
-    public_ai: boolean | null;
-    read_history: boolean;
-    title: string;
-};
-
-export type TelegramConfirmedAccess = ({
+export type TelegramConfirmedAccess = {
     kind: 'web';
-} & TelegramWebAccess) | ({
-    kind: 'client';
-} & TelegramClientAccess);
+} & TelegramWebAccess;
 
 export type TelegramConnect409Errors = ({
     code: 'access_immutable';
@@ -2528,22 +2477,16 @@ export type TelegramConnect409Errors = ({
 } & SourceIdentityConflictError) | ({
     code: 'deletion_in_progress';
 } & DeletionInProgressError) | ({
-    code: 'profile_not_configured';
-} & ProfileNotConfiguredError) | ({
-    code: 'account_identity_mismatch';
-} & AccountIdentityMismatchError) | ({
     code: 'runtime_stopped';
 } & RuntimeStoppedError);
 
 export type TelegramConnect503Errors = ({
-    code: 'profile_unavailable';
-} & ProfileUnavailableError) | ({
     code: 'source_unavailable';
 } & SourceUnavailableError) | ({
     code: 'storage_unavailable';
 } & StorageUnavailableError);
 
-export type TelegramConnectRequest = TelegramWebConnectRequest | TelegramClientConnectRequest;
+export type TelegramConnectRequest = TelegramWebConnectRequest;
 
 export type TelegramConnectResult = {
     access: TelegramConfirmedAccess;
@@ -2577,28 +2520,10 @@ export type TelegramProfileReady = {
     verified_user_id: TelegramUserId;
 };
 
-export type TelegramProfileRequest = {
-    configuration_ref: ConfigurationRef;
-};
-
 export type TelegramProfileResource = {
     kind: 'telegram_profile';
     role: TelegramRole;
 };
-
-export type TelegramProfileSave409Errors = ({
-    code: 'profile_in_use';
-} & ProfileInUseError) | ({
-    code: 'profile_account_conflict';
-} & ProfileAccountConflictError) | ({
-    code: 'account_identity_mismatch';
-} & AccountIdentityMismatchError);
-
-export type TelegramProfileSave503Errors = ({
-    code: 'profile_unavailable';
-} & ProfileUnavailableError) | ({
-    code: 'storage_unavailable';
-} & StorageUnavailableError);
 
 export type TelegramProfileState = ({
     state: 'unconfigured';
@@ -2623,12 +2548,6 @@ export type TelegramProfileUnavailable = {
 export type TelegramProfileUnconfigured = {
     role: TelegramRole;
     state: 'unconfigured';
-};
-
-export type TelegramProfiles = {
-    collection: CollectionTelegramProfileState;
-    configurations: Array<TelegramProfileConfiguration>;
-    personal: PersonalTelegramProfileState;
 };
 
 export type TelegramReadState = {
@@ -3876,7 +3795,7 @@ export type FeedPatchError = FeedPatchErrors[keyof FeedPatchErrors];
 
 export type FeedPatchResponses = {
     /**
-     * Patch source configuration after resource-dependent admission. The five non-null fields reject null. Telegram access/profile/account/peer are immutable; web never accepts auto_read/read_history.
+     * Patch source configuration after resource-dependent admission. The five non-null fields reject null. Telegram Telegram source identity is immutable.
      */
     200: SubscriptionFeed;
 };
@@ -5690,95 +5609,6 @@ export type TelegramConnectResponses = {
 };
 
 export type TelegramConnectResponse = TelegramConnectResponses[keyof TelegramConnectResponses];
-
-export type TelegramProfilesData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/v3/telegram/profiles';
-};
-
-export type TelegramProfilesErrors = {
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    403: AuthorizationErrors;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    422: RequestInvalidError;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    500: InternalErrorError;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    503: StorageUnavailableError;
-};
-
-export type TelegramProfilesError = TelegramProfilesErrors[keyof TelegramProfilesErrors];
-
-export type TelegramProfilesResponses = {
-    /**
-     * Read the personal and collection roles and opaque references to existing configurations. This read does not verify an account and never discloses session secrets or file paths.
-     */
-    200: TelegramProfiles;
-};
-
-export type TelegramProfilesResponse = TelegramProfilesResponses[keyof TelegramProfilesResponses];
-
-export type TelegramProfileSaveData = {
-    body: TelegramProfileRequest;
-    headers?: {
-        /**
-         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
-         */
-        'X-Oko-Action'?: CommandId;
-    };
-    path: {
-        /**
-         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
-         */
-        role: TelegramRole;
-    };
-    query?: never;
-    url: '/api/v3/telegram/profiles/{role}';
-};
-
-export type TelegramProfileSaveErrors = {
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    403: AuthorizationErrors;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    409: TelegramProfileSave409Errors | RuntimeDisabledError;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    422: RequestInvalidError;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    500: InternalErrorError;
-    /**
-     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-     */
-    503: TelegramProfileSave503Errors;
-};
-
-export type TelegramProfileSaveError = TelegramProfileSaveErrors[keyof TelegramProfileSaveErrors];
-
-export type TelegramProfileSaveResponses = {
-    /**
-     * Verify a real account through an existing opaque configuration reference before binding the role. The same PUT rechecks the same account. Failed verification never persists a new unverified binding; dependent feeds prohibit real-account replacement.
-     */
-    200: TelegramProfileState;
-};
-
-export type TelegramProfileSaveResponse = TelegramProfileSaveResponses[keyof TelegramProfileSaveResponses];
 
 export type YoutubeSettingsData = {
     body?: never;

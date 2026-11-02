@@ -57,8 +57,6 @@ RESPONSES: dict[tuple[str, str], Any] = {
     ('POST', '/api/v3/stop'): models.CommandAcknowledgement,
     ('GET', '/api/v3/subscriptions'): models.SubscriptionCatalog,
     ('POST', '/api/v3/telegram/connect'): models.TelegramConnectResult,
-    ('GET', '/api/v3/telegram/profiles'): models.TelegramProfiles,
-    ('PUT', '/api/v3/telegram/profiles/{role}'): models.TelegramProfileState,
     ('GET', '/api/v3/youtube'): models.YouTubeState,
     ('PATCH', '/api/v3/youtube'): models.YouTubeState,
 }
@@ -81,6 +79,5 @@ REQUESTS: dict[tuple[str, str], Any] = {
     ('PUT', '/api/v3/processors/llamacpp'): models.LocalProcessorConfigurationRequest,
     ('PATCH', '/api/v3/settings/{scope}/{owner}'): models.SettingsPatch,
     ('POST', '/api/v3/telegram/connect'): models.TelegramConnectRequest,
-    ('PUT', '/api/v3/telegram/profiles/{role}'): models.TelegramProfileRequest,
     ('PATCH', '/api/v3/youtube'): models.YouTubePatchRequest,
 }

@@ -4,7 +4,7 @@ import time
 import pytest
 
 from tests.support.app import create_app
-from tests.support.telegram import Telegram, connect, settled, configure_fast_web
+from tests.support.telegram import settled, configure_fast_web
 from tests.support.reader import wait_for
 from tests.support.v3 import TestClient
 

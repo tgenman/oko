@@ -42,25 +42,15 @@ Oko saves the announcement, attempts to extract the linked article without execu
 
 ### Telegram
 
-Choose public **Web access** (`Веб-доступ`), **Personal account** (`Личный аккаунт`), or **Collection account** (`Аккаунт для сбора`). Web access needs no session and never marks messages read in Telegram.
-
-Account access uses Telethon directly and requires an existing authorized environment:
-
-```sh
-uv run --locked python -m oko --telegram-env /path/to/telegram.env --data ./data
-```
-
-Oko reads existing session configuration without copying the environment file or importing another project's code. It supports named StringSession values and existing `.session` files; relative session paths resolve from the environment file. Session pools through `TELEGRAM_SESSION_STRINGS` are not supported. Account sessions are locked against concurrent clients.
-
-Map existing configurations to the two account roles in Telegram settings before connecting account-backed feeds. One account cannot fill both roles. A feed retains its chosen access method and account; there is no automatic fallback. Telegram groups, supergroups, and forums are currently unsupported; connect channels.
+Connect a public Telegram channel by its username or public link. Oko collects its publicly visible web pages without a Telegram account. Private channels, groups, supergroups and forums are not supported.
 
 Albums appear as one publication. Supported images, video, audio, and files are saved locally; unsupported or unavailable attachments leave an explicit reason and retry action. Oko does not transcribe them. Direct Telegraph article links can supply article text and supported media; arbitrary links inside articles are not recursively followed.
 
 Ordinary updates collect new posts and continue incomplete downloads. Use **Reload** (`Загрузить заново`) for an explicit refresh of a complete saved post. Reload accepts a fresh description and then refreshes media separately; an attachment failure remains visible.
 
-For account feeds, automatic read synchronization acknowledges messages only after full saving when enabled; otherwise explicit viewing provides eligibility. A safe frontier prevents newer eligible messages from skipping earlier ineligible ones. Telegram read state is separate from Oko's viewed state. Removing a feed locally does not leave the Telegram source or acknowledge its messages.
+Oko never marks messages read in Telegram. Marking a publication viewed in Oko removes its local reading content; removing a feed does not affect Telegram.
 
-See [Telegram acceptance](verification/telegram-real-acceptance.md), [public access and recovery](verification/telegram-public-recovery.md), and [read synchronization](verification/telegram-read-sync.md) for bounded live checks.
+See [public access and recovery](verification/telegram-public-recovery.md) for bounded live checks.
 
 ### YouTube
 

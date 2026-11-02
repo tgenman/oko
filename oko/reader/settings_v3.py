@@ -156,8 +156,6 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
         async with track(runtime, request, context):
             if feed.kind == 'telegram' and 'transport' in body.model_fields_set:
                 raise ApiError(409, wire.ErrorEnvelope(wire.AccessImmutableError(code='access_immutable', message='Способ доступа Telegram нельзя менять настройкой фида', details=wire.AccessImmutableErrorDetails(feed_id=wire.FeedId(identity)), diagnostic_id=None, command_id=wire.CommandId(request.state.command_id))))
-            if feed.kind == 'telegram' and feed.transport != 'telegram' and body.model_fields_set.intersection(('auto_read', 'read_history')):
-                raise ApiError(400, wire.ErrorEnvelope(wire.SourceConnectionInvalidError(code='source_connection_invalid', message='Веб-доступ не поддерживает отметки Telegram', details=wire.SourceConnectionInvalidErrorDetails(reason='telegram_web_read_unavailable'), diagnostic_id=None, command_id=wire.CommandId(request.state.command_id))))
             result = await runtime.patch_feed(identity, FeedPatch.model_validate(body.model_dump(exclude_unset=True)))
             return subscription(facts.SubscriptionFeed.model_validate(result), runtime.queries.binding(identity))
 

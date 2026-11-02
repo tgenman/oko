@@ -18,7 +18,7 @@ The interface follows a simple flow: **folders → cards → material**. Opening
 
 ## What you can do
 
-- **Bring sources together.** Add RSS/Atom feeds, YouTube channel feeds, and Telegram sources through public web access or an existing Telegram account.
+- **Bring sources together.** Add RSS/Atom feeds, YouTube channel feeds, and public Telegram channels through web access.
 - **Read saved content.** Oko extracts article text and saves supported images and Telegram attachments locally. Partial downloads remain visible with a reason and recovery action.
 - **Organize your reading.** Group feeds into topic folders, set their importance, and inherit settings from Oko to folder to feed.
 - **Choose your AI.** Use a connected llama.cpp server or supported Codex CLI for filtering and publication summaries. Public AI processing requires permission for the feed.
@@ -117,7 +117,7 @@ The deeper design documents, glossary, and operational runbooks are currently in
 
 ## Project status and limitations
 
-Oko is under active development. RSS extraction is heuristic and does not execute page JavaScript. Telegram web access depends on publicly available pages; account access requires an existing session. YouTube collection saves metadata, previews, and available captions, **not full video or audio**. Oko does not transcribe audio or video.
+Oko is under active development. RSS extraction is heuristic and does not execute page JavaScript. Telegram collection depends on publicly available web pages. YouTube collection saves metadata, previews, and available captions, **not full video or audio**. Oko does not transcribe audio or video.
 
 Real integrations have had bounded acceptance checks, documented in the verification reports. Those checks do not guarantee source availability or model quality for every subscription. The managed Docker release targets macOS with Linux ARM64 containers and a separate host process for Codex; it is not a generic cross-platform installer.
 
@@ -129,6 +129,6 @@ Before changing code, read [AGENTS.md](AGENTS.md), the [glossary](GLOSSARY.md), 
 
 ## Third-party notices
 
-Telegram session-lock code includes adaptations from telegram-mcp under [Apache 2.0](docs/licenses/telegram-mcp-Apache-2.0.txt). Telegram web and Telegraph extraction includes adaptations from RSSHub; see the [attribution notice](docs/licenses/RSSHub-NOTICE.md) and [AGPLv3 text](docs/licenses/RSSHub-AGPL-3.0.txt).
+Telegram web and Telegraph extraction includes adaptations from RSSHub; see the [attribution notice](docs/licenses/RSSHub-NOTICE.md) and [AGPLv3 text](docs/licenses/RSSHub-AGPL-3.0.txt).
 
 These notices describe third-party components. A project-wide license has not yet been declared in this repository.

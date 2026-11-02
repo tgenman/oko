@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from oko.domain.processing import ProcessingWait
 from collections.abc import Awaitable, Callable
 import secrets
-from typing import Any, Literal, TypeVar
+from typing import Any, Literal
 import httpx
 from oko.collection.rss import RSSSource, feed_title, normalized
 from oko.collection.contracts import SourceError
@@ -18,7 +18,6 @@ from oko.processing.codex import Codex, CodexClient, status as codex_status
 from oko.collection.telegram.http import TelegramHTTP
 from oko.storage.store import Store
 from oko.collection.telegram.contracts import TelegramBinding
-from oko.collection.telegram.source import LocalTelegram, TelegramClient
 from oko.subscriptions.subscriptions import AddFeed, FeedURL, Overrides, FeedPatch, FolderConflict, identify
 from oko.subscriptions.history import InitialHistory
 from oko.subscriptions.telegram import TelegramConflict
@@ -32,7 +31,6 @@ from oko.services.reading import ReadingService
 from oko.services.connections import ConnectionService
 from oko.services.commands import CommandJournal
 
-T = TypeVar('T')
 
 @dataclass(frozen=True)
 class StatusSnapshot:
@@ -41,7 +39,7 @@ class StatusSnapshot:
 
 
 class ReaderApplication:
-    def __init__(self, execution: Execution, jobs: JobControl, *, clock: Callable[[], float], wall_clock: Callable[[], float], sources: dict[str, Source], bindings: dict[str, TelegramBinding], sync_sources: Callable[[], None], interval_changed: Callable[[float], None], source_description: Callable[[str], str | None], rss_transport: httpx.AsyncBaseTransport | None, ai_transport: httpx.AsyncBaseTransport | None, telegram: TelegramClient | None, telegram_http: TelegramHTTP, codex: CodexClient, stop: Callable[[], Awaitable[None]], admission_changed: Callable[[], Awaitable[None]], set_power: Callable[[bool], Awaitable[None]]) -> None:
+    def __init__(self, execution: Execution, jobs: JobControl, *, clock: Callable[[], float], wall_clock: Callable[[], float], sources: dict[str, Source], bindings: dict[str, TelegramBinding], sync_sources: Callable[[], None], interval_changed: Callable[[float], None], source_description: Callable[[str], str | None], rss_transport: httpx.AsyncBaseTransport | None, ai_transport: httpx.AsyncBaseTransport | None, telegram_http: TelegramHTTP, codex: CodexClient, stop: Callable[[], Awaitable[None]], admission_changed: Callable[[], Awaitable[None]], set_power: Callable[[bool], Awaitable[None]]) -> None:
         self.execution, self.jobs = execution, jobs
         self.subscriptions = SubscriptionService(execution.require_store)
         self.queries = ReadingQueries(execution.require_store)
@@ -54,7 +52,7 @@ class ReaderApplication:
         self._sync_sources, self._interval_changed = sync_sources, interval_changed
         self._source_description = source_description
         self._rss_transport, self._ai_transport = rss_transport, ai_transport
-        self._telegram_client, self._telegram_http, self._codex_client = telegram, telegram_http, codex
+        self._telegram_http, self._codex_client = telegram_http, codex
         self.stop, self.admission_changed, self.set_power = stop, admission_changed, set_power
         self._cancel, self._drain_deletions = jobs.cancel, jobs._drain_deletions
         self._feed_checks: dict[str, str] = {}
@@ -167,7 +165,7 @@ class ReaderApplication:
         source_states = self._store.source_statuses() if self._store else []
         names = {f['id']: f['title'] for f in self._store.subscriptions.feeds()} if self._store else {}
         source_states = [dict(s, title=names.get(s['feed_id'], s['feed_id']), changes=self._source_description(s['feed_id'])) for s in source_states if s['feed_id'] in self._sources]
-        return dict(**state, initial_histories=[dict(feed_id=f['id'], **f['initial_history']) for f in self._store.subscriptions.feeds() if f['initial_history']] if self._store else [], telegram_reads=self._store.read_sync.statuses() if self._store and not self.stopped else [], sources=source_states, error=self._error,
+        return dict(**state, initial_histories=[dict(feed_id=f['id'], **f['initial_history']) for f in self._store.subscriptions.feeds() if f['initial_history']] if self._store else [], telegram_reads=[], sources=source_states, error=self._error,
                     ready_sources=self._store.ready_sources(list(self._sources)) if self._store and not self.stopped else 0,
                     total_sources=len(self._sources))
 
@@ -587,74 +585,7 @@ class ReaderApplication:
                     raise ActionError('missing', 'Результат недоступен для пересоздания')
 
 
-    async def telegram_profiles(self) -> dict[str, Any]:
-        current = self.require_store()
-        accounts = (await self._call_telegram(lambda client: client.accounts()))[0] if self._telegram_client and self._live() else []
-        from oko.reader.api_v3 import timestamp
-        result: dict[str, Any] = dict(configurations=[dict(configuration_ref=a, label=a) for a in accounts])
-        for role in ('personal', 'collection'):
-            profile = self.connections.profile(role)
-            if not profile:
-                result[role] = dict(role=role, state='unconfigured')
-                continue
-            value = dict(role=role, state=profile['state'], configuration_ref=profile['account'],
-                         verified_user_id=str(profile['user_id']), checked_at=timestamp(profile['checked']).root)
-            if profile['state'] != 'ready':
-                value.update(reason='account_identity_mismatch' if profile['state'] == 'identity_mismatch' else 'profile_unavailable', message=profile['message'] or 'Профиль недоступен')
-            result[role] = value
-        return result
-
-
-    async def save_telegram_profile(self, role: str, account: str) -> dict[str, Any]:
-        from oko.subscriptions.telegram import TelegramConflict
-        async with self._actions:
-            self.require_work()
-            current, _ = self._telegram_ready()
-            old = self.connections.profile(role)
-            generation = old['generation'] if old else 0
-        try:
-            user_id, check = await self._call_telegram(lambda client: client.identity(account))
-        except ActionError:
-            raise TelegramConflict('profile_unavailable', dict(retry_at=None), 'Не удалось проверить существующую сессию', 503) from None
-        if type(user_id) is not int or user_id <= 0:
-            raise TelegramConflict('profile_unavailable', dict(retry_at=None), 'Клиент не подтвердил user ID', 503)
-        async with check.accept() as current:
-            with transaction(current.db):
-                self.connections.save_profile(role, account, user_id, generation, self._wall_clock())
-                self.jobs.invalidate()
-            await self.jobs.cancel(invalidate=False)
-            self._sources.clear()
-            self._sync_sources()
-        result = (await self.telegram_profiles())[role]
-        assert isinstance(result, dict)
-        return result
-
-
-    async def _verify_telegram_profile(self, role: str) -> dict[str, Any]:
-        from oko.subscriptions.telegram import TelegramConflict
-        current = self.require_store()
-        profile = self.connections.profile(role)
-        if not profile:
-            raise TelegramConflict('profile_not_configured', dict(role=role), 'Профиль Telegram не настроен')
-        verification = _ExternalCheck(self.execution, current)
-        try:
-            user_id, check = await self._call_telegram(lambda client: client.identity(profile['account']))
-        except ActionError as error:
-            async with verification.accept(failure=error) as current:
-                with transaction(current.db):
-                    self.connections.checked(role, profile['generation'], None, self._wall_clock())
-            raise TelegramConflict('profile_unavailable', dict(retry_at=None), 'Сессия Telegram недоступна', 503) from None
-        async with check.accept():
-            with transaction(current.db):
-                valid = self.connections.checked(role, profile['generation'], user_id, self._wall_clock())
-            if not valid:
-                raise TelegramConflict('account_identity_mismatch', dict(role=role), 'Личность аккаунта изменилась')
-            if isinstance(self._telegram_client, LocalTelegram):
-                self._telegram_client.expected_users[profile['account']] = user_id
-        return profile
-
-
-    async def connect_telegram_binding(self, source: str, folder: str, history: InitialHistory | None, role: str | None, auto_read: bool | None = None, feed_id: str | None = None) -> dict[str, Any]:
+    async def connect_telegram_binding(self, source: str, folder: str, history: InitialHistory | None, feed_id: str | None = None) -> dict[str, Any]:
         from oko.subscriptions.telegram import locator, TelegramConflict
         kind, address = locator(source)
         async with self._actions:
@@ -671,44 +602,23 @@ class ReaderApplication:
             if feed_id and not self.connections.supports_access_change(feed_id):
                 raise TelegramConflict('access_immutable',dict(feed_id=feed_id),'Этот сохранённый фид ещё не поддерживает смену доступа')
             connection = _ExternalCheck(self.execution, current)
-        profile = await self._verify_telegram_profile(role) if role else None
-        if profile:
-            info, check = await self._call_telegram(lambda client: client.info(profile['account'], '@' + str(address) if kind == 'username' else address))
-            connection = connection.follow(check)
-            if info.get('kind')!='channel' or info.get('forum',False):
-                raise TelegramConflict('source_connection_invalid',dict(reason='unsupported_group'),
-                    'Группы Telegram пока не поддерживаются; подключите канал',400)
-            binding = dict(kind='client', role=role, account_user_id=str(profile['user_id']), peer_id=str(info['peer']))
-        else:
-            if kind != 'username':
-                raise ValueError('Веб-доступ требует публичный username')
-            from oko.collection.telegram.web import preview
-            async with connection.accept(require_work=True):
-                pending = connection.start(preview(str(address), self._telegram_http))
-            try:
-                info = await pending
-            except SourceError as error:
-                raise TelegramConflict('source_unavailable', dict(retry_at=None), error.label, 503) from None
-            binding = dict(kind='web', username=info['username'], preview_url=info['preview_url'])
-            if previous and previous['kind']=='client':
-                old_profile=await self._verify_telegram_profile(previous['role'])
-                verified,check=await self._call_telegram(lambda client:client.info(old_profile['account'],int(previous['peer_id'])))
-                connection=connection.follow(check)
-                aliases={name.lower() for name in [verified.get('username'),*verified.get('usernames',[])] if isinstance(name,str)}
-                if info['username'].lower() not in aliases:
-                    raise TelegramConflict('source_identity_conflict',dict(feed_id=feed_id),'Публичный адрес прежнего канала не подтверждён')
-                info.update(peer=verified['peer'],kind=verified.get('kind'))
+        if kind != 'username':
+            raise ValueError('Веб-доступ требует публичный username')
+        from oko.collection.telegram.web import preview
+        async with connection.accept(require_work=True):
+            pending = connection.start(preview(str(address), self._telegram_http))
+        try:
+            info = await pending
+        except SourceError as error:
+            raise TelegramConflict('source_unavailable', dict(retry_at=None), error.label, 503) from None
+        binding = dict(kind='web', username=info['username'], preview_url=info['preview_url'])
         async with connection.accept() as current:
-            if profile:
-                latest = self.connections.profile(str(role))
-                if not latest or latest['generation'] != profile['generation']:
-                    raise TelegramConflict('profile_unavailable', dict(retry_at=None), 'Профиль изменился во время подключения', 503)
             if feed_id:
                 if self.queries.binding(feed_id)!=previous:
                     raise TelegramConflict('source_identity_conflict',dict(feed_id=feed_id),'Привязка изменилась во время проверки; повторите действие')
                 try:
                     with transaction(current.db):
-                        result=self.connections.change_access(feed_id,binding,info,auto_read)
+                        result=self.connections.change_access(feed_id,binding,info,None)
                         self.jobs.change_adapter(feed_id)
                         self.jobs.invalidate({feed_id})
                 except INTEGRITY_ERRORS:
@@ -717,44 +627,9 @@ class ReaderApplication:
                 self._sources.pop(feed_id,None)
             else:
                 with transaction(current.db):
-                    result = self.connections.connect(binding, info, source, folder, history, bool(auto_read))
+                    result = self.connections.connect(binding, info, source, folder, history, False)
             self._sync_sources()
             return result
-
-
-    def _telegram_ready(self) -> tuple[Store, TelegramClient]:
-        current = self.require_store()
-        if not self._live():
-            raise ActionError('conflict', 'Откройте читатель для подключения')
-        if not self._telegram_client:
-            raise ActionError('conflict', 'Telegram-клиент не настроен')
-        return current, self._telegram_client
-
-
-    async def _call_telegram(self, call: Callable[[TelegramClient], Awaitable[T]]) -> tuple[T, _ExternalCheck]:
-        async with self._actions:
-            self.require_work()
-            current, client = self._telegram_ready()
-            check = _ExternalCheck(self.execution, current)
-            pending = check.start(call(client))
-        try:
-            # Network work is deliberately outside the mutation seam.
-            result = await pending
-        except SourceError as error:
-            record_caught('runtime._call_telegram')
-            raise ActionError('conflict', error.label) from None
-        except asyncio.CancelledError:
-            caller = asyncio.current_task()
-            if caller and caller.cancelling():
-                raise
-            raise ActionError('conflict', 'Око остановлено' if self.stopped else 'Подключение Telegram прервано; повторите действие', expected=True) from None
-        async with check.accept():
-            return result, check
-
-
-    async def telegram_accounts(self) -> list[str]:
-        result, _ = await self._call_telegram(lambda client: client.accounts())
-        return result
 
 
     async def remove_feed(self, identity: str) -> None:

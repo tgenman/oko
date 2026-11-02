@@ -152,3 +152,57 @@ def test_current_schema_has_no_legacy_publication_views(connections):
         assert db.execute('SELECT viewname FROM pg_views WHERE schemaname=current_schema() AND viewname=ANY(%s)', (list(names),)).fetchall() == []
         assert db.execute('SELECT viewname FROM pg_views WHERE schemaname=current_schema()').fetchall() == []
         assert db.execute("SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND NOT t.tgisinternal").fetchone()[0] == 0
+
+
+def test_removing_telegram_accounts_preserves_web_feed_and_clears_client_state(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    assert MIGRATIONS[-1].name == 'remove-telegram-client'
+    with connections() as db:
+        migrate(db, MIGRATIONS[:-1])
+        db.execute("INSERT INTO feeds(id,kind,identity,title) VALUES ('web','telegram','web-fixture','Web')")
+        db.execute("INSERT INTO telegram_bindings(feed,binding) VALUES ('web',%s::jsonb)",
+                   (json.dumps(dict(kind='web',username='fixture',preview_url='https://t.me/s/fixture')),))
+        db.execute("INSERT INTO publications(id,platform,external_id,url) VALUES ('post','telegram','post-1','https://t.me/fixture/1')")
+        db.execute("INSERT INTO feed_publications(feed_id,publication_id) VALUES ('web','post')")
+        db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('photo','post','image','https://cdn.example/photo','photo','pending_download')")
+        db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state) VALUES ('personal','fixture',123,1,'ready')")
+        db.execute("INSERT INTO telegram_read_state(feed,needs_sync) VALUES ('web',true)")
+        db.execute("INSERT INTO telegram_read_members(feed,member) VALUES ('web',42)")
+        db.execute("INSERT INTO state(key,value) VALUES ('telegram-retry:123','9')")
+        db.execute("INSERT INTO jobs(kind,item) VALUES ('read','web')")
+        for identity, operation in [('profile:personal','producer:status'), ('job:read:web:read','producer:read'), ('job:other','producer:fetch')]:
+            body=json.dumps(dict(code='profile_unavailable',operation=operation,objects=[]))
+            db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES (%s,%s,'background',%s,1)", (identity,identity,body))
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT binding->>'kind' FROM telegram_bindings WHERE feed='web'").fetchone() == ('web',)
+        assert db.execute("SELECT id FROM feeds WHERE id='web'").fetchone() == ('web',)
+        assert db.execute("SELECT publication_id FROM feed_publications WHERE feed_id='web'").fetchone() == ('post',)
+        assert db.execute("SELECT publication_id FROM media_files WHERE id='photo'").fetchone() == ('post',)
+        assert db.execute('SELECT count(*) FROM telegram_profiles').fetchone() == (0,)
+        assert db.execute('SELECT count(*) FROM telegram_read_state').fetchone() == (0,)
+        assert db.execute('SELECT count(*) FROM telegram_read_members').fetchone() == (0,)
+        assert db.execute("SELECT count(*) FROM state WHERE key LIKE 'telegram-retry:%'").fetchone() == (0,)
+        assert db.execute("SELECT count(*) FROM jobs WHERE kind='read'").fetchone() == (0,)
+        assert db.execute("SELECT identity,outcome FROM reader_problems WHERE finished IS NOT NULL ORDER BY identity").fetchall() == [('job:read:web:read','irrelevant'),('profile:personal','irrelevant')]
+        assert db.execute("SELECT finished FROM reader_problems WHERE identity='job:other'").fetchone() == (None,)
+
+
+@pytest.mark.parametrize('kind', ['client', 'raw', 'adapter', 'missing'])
+def test_telegram_account_removal_refuses_unsupported_feeds_atomically(connections, kind):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:-1])
+        db.execute("INSERT INTO feeds(id,kind,identity,title) VALUES ('feed','telegram','fixture','Fixture')")
+        if kind == 'client':
+            db.execute("INSERT INTO telegram_bindings(feed,binding,indexed_role) VALUES ('feed',%s::jsonb,'personal')",
+                       (json.dumps(dict(kind='client',role='personal',account_user_id='123',peer_id='456')),))
+        elif kind == 'raw':
+            db.execute("INSERT INTO telegram_bindings(feed,binding_raw) VALUES ('feed','unreadable')")
+        elif kind == 'adapter':
+            db.execute("UPDATE feeds SET adapter='telegram_client_adapter' WHERE id='feed'")
+        db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state) VALUES ('personal','fixture',123,1,'ready')")
+        with pytest.raises(psycopg.errors.RaiseException, match='Unsupported or unreadable Telegram binding'):
+            migrate(db, MIGRATIONS)
+        assert db.execute("SELECT account FROM telegram_profiles WHERE role='personal'").fetchone() == ('fixture',)
+        assert db.execute("SELECT id FROM feeds WHERE id='feed'").fetchone() == ('feed',)
+        verify(db, MIGRATIONS[:-1])

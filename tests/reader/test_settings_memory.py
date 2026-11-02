@@ -108,36 +108,3 @@ def test_codex_configuration_problem_rolls_back_with_settings(tmp_path, settings
         assert store.db.execute("SELECT outcome FROM reader_problems WHERE id=%s",(identity,)).fetchone()[0]=='irrelevant'
     finally:
         store.db.close()
-
-
-def test_telegram_profile_problem_rolls_back_with_identity_check(tmp_path, settings_database, monkeypatch):
-    import json
-    from oko.services.connections import ConnectionService
-    from oko.storage.transaction import transaction
-    from tests.support.storage import Store
-    store=Store(tmp_path,lambda _:None,database_url=settings_database)
-    try:
-        with store.db:
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('telegram','telegram','Telegram','default','telegram','telegram','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO telegram_profiles(role,account,user_id,generation,state,checked) VALUES ('personal','one',101,1,'ready',1)")
-            store.subscriptions.telegram.put_binding('telegram',dict(kind='client',role='personal',account_user_id='101',peer_id='123'))
-        service=ConnectionService(lambda:store)
-        with monkeypatch.context() as patch:
-            def fail(*args,**kwargs):
-                raise RuntimeError('problem persistence failed')
-            patch.setattr(store.problems,'sync_profiles',fail)
-            with pytest.raises(RuntimeError,match='problem persistence failed'):
-                service.checked('personal',1,202,2)
-        assert store.subscriptions.telegram.profile('personal')['state']=='ready'
-        with pytest.raises(ValueError,match='rollback'):
-            with transaction(store.db):
-                assert not service.checked('personal',1,202,2)
-                assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='profile:personal' AND finished IS NULL").fetchone()
-                raise ValueError('rollback')
-        assert store.subscriptions.telegram.profile('personal')['state']=='ready'
-        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='profile:personal'").fetchone() is None
-        with transaction(store.db):
-            assert not service.checked('personal',1,202,2)
-        assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='profile:personal' AND finished IS NULL").fetchone()
-    finally:
-        store.db.close()

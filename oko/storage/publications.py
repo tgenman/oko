@@ -84,7 +84,7 @@ class Publications:
             status_changed(self.store.db)
 
     def feed(self, feed: str) -> bool:
-        return self.store.db.execute("SELECT 1 FROM feeds WHERE id = %s AND adapter IN ( 'telegram_web_adapter' , 'telegram_client_adapter' , 'rss_adapter' , 'youtube_adapter' )", (feed,)).fetchone() is not None
+        return self.store.db.execute("SELECT 1 FROM feeds WHERE id = %s AND adapter IN ( 'telegram_web_adapter' , 'rss_adapter' , 'youtube_adapter' )", (feed,)).fetchone() is not None
 
     def sync_feeds(self, feeds: list[str]) -> None:
         if self.store.db.execute("SELECT 1 FROM state WHERE key = 'publication-pipeline'").fetchone():
@@ -110,12 +110,6 @@ class Publications:
                 url=ref.url
             store.db.execute("UPDATE feeds SET platform = %s , external_id = %s , url = %s , adapter = %s , config = '{}' , enabled = %s WHERE id = %s",
                 (platform,external_id,url,adapter,int(row['transport'] is not None),feed))
-            return
-        if row and binding and binding['kind']=='client' and json.loads(row['config']).get('source_kind')=='channel':
-            config={**json.loads(row['config']),**binding}
-            url='https://t.me/'+row['telegram_username'] if row['telegram_username'] else 'https://t.me/c/'+str(-row['telegram_peer']-1000000000000)
-            store.db.execute("UPDATE feeds SET platform = 'telegram' , external_id = %s , url = %s , adapter = 'telegram_client_adapter' , config = %s::jsonb WHERE id = %s",
-                (str(row['telegram_peer']),url,json.dumps(config),feed))
             return
         if not row or not binding or binding['kind'] != 'web':
             return
@@ -147,8 +141,6 @@ class Publications:
         marked = [row[0] for row in db.execute(f'SELECT p.id FROM ({owned_ids("= %s")}) owner JOIN publications p ON p.id=owner.id WHERE p.source_deleted', (feed,feed))]
         self.set_source_deleted(marked, False)
         db.execute("UPDATE publications SET status = 'pending_collection' WHERE id IN (SELECT p.id FROM feed_publications m JOIN publications p ON p.id=m.publication_id WHERE m.feed_id = %s AND m.is_primary AND m.is_unviewed AND p.viewed = 0)",(feed,))
-        if db.execute('DELETE FROM telegram_read_state WHERE feed = %s',(feed,)).rowcount:
-            status_changed(db)
 
     def plan(self, feed: str, publications: list[Publication]) -> dict[str, DiscoveryProjection]:
         """Prepare cache output before the short page acceptance transaction."""

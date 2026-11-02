@@ -19,7 +19,6 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import JSONResponse, Response
 from oko.collection.contracts import Source
 from oko.processing.codex import CodexClient
-from oko.collection.telegram.source import TelegramClient
 from oko.host import Host
 from oko.application.reader import ReaderApplication
 from oko.execution import ActionError
@@ -40,7 +39,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
                lease: float = 6, grace: float = 15, api_only: bool = False, persistent: bool = False,
                public_url: str | None = None, source_feed: str = 'demo',
                rss_enabled: bool = False, rss_transport: httpx.AsyncBaseTransport | None = None,
-               telegram_client: TelegramClient | None = None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None,
+               ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None,
                youtube_captions: CaptionsClient | None = None, youtube_history: HistoryClient | None = None, wall_clock: Callable[[], float] = time.time, database_url: str | None = None,
                metrics_token: str | None = None) -> FastAPI:
     if not api_only:
@@ -59,16 +58,15 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
     lifetime = Lifetime('explicit' if api_only or persistent else 'client_presence', clock=clock, wall_clock=wall_clock, lease=lease, grace=grace)
     token = token or secrets.token_urlsafe(32)
     instance_id = secrets.token_hex(16)
-    runtime = Host(root, source, clock, fault, shutdown, lifetime.admitted, lifetime.should_stop, source_feed, rss_enabled, rss_transport, telegram_client, ai_transport, codex_client, youtube_captions, youtube_history, wall_clock, database_url)
+    runtime = Host(root, source, clock, fault, shutdown, lifetime.admitted, lifetime.should_stop, source_feed, rss_enabled, rss_transport, ai_transport, codex_client, youtube_captions, youtube_history, wall_clock, database_url)
     application = ReaderApplication(runtime.execution, runtime.jobs, clock=clock, wall_clock=wall_clock,
         sources=runtime.collection._sources, bindings=runtime.collection._telegram_bindings, sync_sources=runtime.collection._sync_sources,
         interval_changed=lambda value: setattr(runtime.collection, '_collection_interval', value),
         source_description=runtime.collection._collection.description, rss_transport=rss_transport, ai_transport=ai_transport,
-        telegram=telegram_client, telegram_http=runtime.collection._telegram_http, codex=runtime.codex,
+        telegram_http=runtime.collection._telegram_http, codex=runtime.codex,
         stop=runtime.stop, admission_changed=runtime.admission_changed, set_power=runtime.set_power)
     journal = Journal(root, token)
     runtime.collection.clean_collection=application._clean_collection
-    runtime.collection.verify_telegram_profile=application._verify_telegram_profile
     runtime.clear_feed_checks=application._feed_checks.clear
     runtime.diagnostics = journal
     metrics = None

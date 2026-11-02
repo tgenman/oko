@@ -112,7 +112,7 @@ Media downloads stream to a temporary file, flush to disk, move into place, and 
 
 Opening or copying preserves material. Filtering can hide it without deleting it. Explicit viewing deletes local publication content and owned media/results; there are no permanent viewed tombstones in the current pipeline. Rediscovery or an explicit history reload can create that publication again. Source unavailability does not itself mean that the user finished reading.
 
-Folder completion uses the server's full composition, including hidden and not-yet-loaded material. Telegram read synchronization has a separate safe frontier: external read state does not delete Oko content. See [reading composition](reading-composition.md) and [opened material](opened-material.md).
+Folder completion uses the server's full composition, including hidden and not-yet-loaded material. Oko does not mark messages read in Telegram. See [reading composition](reading-composition.md) and [opened material](opened-material.md).
 
 ## Runtime profiles and delivery
 

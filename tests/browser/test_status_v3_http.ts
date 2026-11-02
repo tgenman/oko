@@ -77,17 +77,15 @@ test('lost command response stays unknown until receipt reconciliation and is ne
  expect(puts).toBe(1);
 });
 
-test('typed profile recovery selects the exact role',async()=>{
+test('historical account errors do not offer removed profile settings',async()=>{
  const r=await fixtureReader();try{
   const baseline=await r.api('v3/status/details');
   if(!baseline||typeof baseline!=='object')throw new Error('Missing RuntimeStatus');
   await r.start([]);
   await r.page.evaluate(base=>readerTransport.replies.set('/api/v3/status',{body:{...base,work_allowed:true,problems:{current:[{id:'role-problem',code:'profile_unavailable',command_id:null,title:'Profile',message:'Session unavailable',consequence:'Collection paused',affected:[{kind:'telegram_profile',role:'personal'}],recovery:[{kind:'configure_telegram_profile',role:'personal'}],created_at:new Date().toISOString(),state:'current'}],recent:[],count:1,updated_at:new Date().toISOString()}}}),baseline);
   await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 1');await r.page.locator('#status-toggle').click();
-  await r.page.getByRole('button',{name:'Configure Telegram Profile',exact:true}).click();
-  await expect(r.page.locator('#settings-dialog')).toHaveAttribute('data-settings-view','telegram-profiles');
-  await expect(r.page.locator('#telegram-profile-personal')).toBeFocused();
-  await r.page.locator('#settings-close').click();
+  await expect(r.page.locator('#status-panel')).toContainText('Check Telegram Profile');
+  await expect(r.page.getByRole('button',{name:'Configure Telegram Profile',exact:true})).toHaveCount(0);
   expect(r.errors).toEqual([]);
  }finally{await r.close();}
 });

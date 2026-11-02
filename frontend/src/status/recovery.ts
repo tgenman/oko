@@ -63,7 +63,7 @@ export function workText(state:RuntimeStatus):string {
 export function commandResources(context:CommandContext):{affected:AffectedResource[];recovery:RecoveryIntent[]} {
  if(context.operation==='settings_patch')return {affected:[{kind:'settings',target:context.target}],recovery:context.keys.length?[{kind:'change_setting',target:context.target,keys:context.keys}]:[]};
  if(context.operation==='processor_save'||context.operation==='processor_check'||context.operation==='codex_save'||context.operation==='codex_check'){const processor_id=context.operation.startsWith('codex')?'codex':'llamacpp';return {affected:[{kind:'processor',processor_id}],recovery:[{kind:'configure_processor',processor_id}]};}
- if(context.operation==='telegram_profile_save')return {affected:[{kind:'telegram_profile',role:context.role}],recovery:[{kind:'configure_telegram_profile',role:context.role}]};
+ if(context.operation==='telegram_profile_save')return {affected:[],recovery:[]};
  if(context.operation==='telegram_connect')return {affected:[],recovery:[{kind:'connect_source',source_kind:'telegram'}]};
  if(context.operation==='add_feed'||context.operation==='verify_feed')return {affected:[],recovery:[{kind:'connect_source',source_kind:'rss'}]};
  if('material_id'in context)return {affected:[{kind:'material',material_id:context.material_id}],recovery:[{kind:'inspect_materials',material_ids:[context.material_id]}]};

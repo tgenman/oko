@@ -42,9 +42,6 @@ def command_recovery(context: wire.CommandContext) -> tuple[list[wire.AffectedRe
         processor = wire.ProcessorId('codex' if isinstance(value, (wire.CommandCodexSave, wire.CommandCodexCheck)) else 'llamacpp')
         resources.append(wire.AffectedResource(wire.ProcessorResource(kind='processor', processor_id=processor)))
         recovery.append(wire.RecoveryIntent(wire.RecoveryConfigureProcessor(kind='configure_processor', processor_id=processor)))
-    elif isinstance(value, wire.CommandTelegramProfileSave):
-        resources.append(wire.AffectedResource(wire.TelegramProfileResource(kind='telegram_profile', role=value.role)))
-        recovery.append(wire.RecoveryIntent(wire.RecoveryConfigureTelegramProfile(kind='configure_telegram_profile', role=value.role)))
     elif isinstance(value, wire.CommandTelegramConnect):
         recovery.append(wire.RecoveryIntent(wire.RecoveryConnectSource(kind='connect_source', source_kind='telegram')))
     elif isinstance(value, (wire.CommandAddFeed, wire.CommandVerifyFeed)):
@@ -105,8 +102,7 @@ def problem(value: facts.Problem, bindings: dict[str, wire.TelegramAccess] | Non
                 elif error.details.feed_id:
                     resources = [wire.AffectedResource(wire.FeedResource(kind='feed',feed_id=error.details.feed_id))]
             elif isinstance(error,(wire.AccountIdentityMismatchError,wire.ProfileNotConfiguredError,wire.ProfileInUseError)):
-                recovery = [wire.RecoveryIntent(wire.RecoveryConfigureTelegramProfile(kind='configure_telegram_profile',role=error.details.role))]
-                resources.append(wire.AffectedResource(wire.TelegramProfileResource(kind='telegram_profile',role=error.details.role)))
+                recovery = []
             elif isinstance(error,wire.ProfileUnavailableError) and isinstance(context.root,wire.CommandTelegramConnect):
                 recovery = []
     elif live:
@@ -123,10 +119,6 @@ def problem(value: facts.Problem, bindings: dict[str, wire.TelegramAccess] | Non
             for feed in sorted(set(feeds)):
                 recovery.append(wire.RecoveryIntent(wire.RecoveryChangeSetting(kind='change_setting',
                     target=wire.SettingsTarget(wire.FeedSettingsTarget(scope='feed',owner=wire.FeedId(feed))),keys=[wire.SettingKey('processor')])))
-        elif code in ('source_reconnect_required','profile_not_configured','profile_unavailable','account_identity_mismatch'):
-            roles = {binding.root.role.root for feed in feeds if (binding := (bindings or {}).get(feed)) and isinstance(binding.root,wire.TelegramClientAccess)}
-            for role in sorted(roles):
-                recovery.append(wire.RecoveryIntent(wire.RecoveryConfigureTelegramProfile(kind='configure_telegram_profile',role=wire.TelegramRole(role))))
         elif code not in ('source_identity_conflict','duplicate_source','feed_delete_failed','storage_unavailable'):
             if materials:
                 intent = 'inspect_materials' if code=='youtube_rate_limited' else 'retry_theses' if kind=='theses' else 'retry_filter' if kind=='filter' else 'retry_material'
@@ -147,7 +139,7 @@ def problem(value: facts.Problem, bindings: dict[str, wire.TelegramAccess] | Non
                 retained.append(recommendation)
         recovery = retained
     if code=='command_outcome_unknown':
-        recovery = [intent for intent in recovery if isinstance(intent.root,(wire.RecoveryConfigureProcessor,wire.RecoveryConfigureTelegramProfile,wire.RecoveryChangeSetting,wire.RecoveryConnectSource,wire.RecoveryInspectMaterials))]
+        recovery = [intent for intent in recovery if isinstance(intent.root,(wire.RecoveryConfigureProcessor,wire.RecoveryChangeSetting,wire.RecoveryConnectSource,wire.RecoveryInspectMaterials))]
     unreadable_action = value.code in ('action-failed','action-unknown') and context is None and not live
     if unreadable_action:
         code = 'command_outcome_unknown' if value.code=='action-unknown' else 'command_failed'
@@ -253,7 +245,7 @@ def history(value: facts.InitialHistoryStatus) -> wire.FeedHistoryState:
 
 def telegram_access(value: facts.SubscriptionFeed, binding: dict[str, object] | None) -> wire.TelegramAccess:
     """Publication source identity without subscription/history presentation."""
-    if binding and binding['kind'] in ('web', 'client'):
+    if binding and binding['kind'] == 'web':
         return wire.TelegramAccess.model_validate(binding)
     if binding and binding['kind']=='unconfigured':
         return wire.TelegramAccess.model_validate(binding)
@@ -267,20 +259,14 @@ def subscription(value: facts.SubscriptionFeed, binding: dict[str, object] | Non
     data.pop('initial_history', None)
     data['connection'] = 'ready' if data.get('connection') == 'connected' else data.get('connection', 'unavailable')
     if value.kind == 'telegram':
-        if binding and binding['kind'] in ('web', 'client'):
-            data['access'] = telegram_access(value,binding).model_dump(mode='json')
-            if binding['kind'] == 'client':
-                data['auto_read'], data['read_history'] = bool(value.auto_read), bool(value.read_history)
-        elif value.transport == 'telegram' and isinstance(value.telegram_account, str):
-            data['connection'] = 'deleting' if data['connection'] == 'deleting' else 'needs_profile_confirmation'
+        if binding and binding['kind'] == 'web':
             data['access'] = telegram_access(value,binding).model_dump(mode='json')
         else:
             data['connection'] = 'deleting' if data['connection'] == 'deleting' else 'needs_connection'
             data['access'] = telegram_access(value,binding).model_dump(mode='json')
         data.pop('transport', None)
     for key in ('telegram_account', 'telegram_peer', 'telegram_topic', 'telegram_username', 'read_history', 'auto_read'):
-        if key not in ('auto_read', 'read_history') or not binding or binding['kind'] != 'client':
-            data.pop(key, None)
+        data.pop(key, None)
     return wire.SubscriptionFeed.model_validate(data)
 
 

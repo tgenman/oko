@@ -1,33 +1,17 @@
-"""One Telegraph enrichment path shared by web and verified client collection."""
+"""Telegraph enrichment through public Telegram web collection."""
 from tests.support.cards import read_all_cards
 from tests.support.telegram import configure_fast_web
 import httpx
-import pytest
 
 from tests.support.app import create_app
-from tests.support.telegram import Telegram, settled
+from tests.support.telegram import settled
 from tests.support.telegram_web import page
 from tests.support.v3 import TestClient
 
 POST = 'Original post https://telegra.ph/One https://www.telegra.ph/One https://telegra.ph/Two'
 
 
-class TelegraphClient(Telegram):
-    post_text = POST
-    async def page(self, account, peer, after, since):
-        rows = (await super().page(account,peer,after,since))['messages']
-        rows[0]['text'] = self.post_text
-        return dict(messages=rows,more=False)
-
-    async def messages(self, account, peer, ids):
-        return (await self.page(account,peer,0,0))['messages']
-
-    async def history_page(self, account, peer, upper, before, since):
-        return dict(messages=(await self.page(account,peer,0,0))['messages'],upper=11,next_before=11,more=False)
-
-
-@pytest.mark.parametrize('access',['web','client'])
-def test_direct_articles_are_complete_local_and_unique_without_recursive_crawling(tmp_path,access):
+def test_direct_articles_are_complete_local_and_unique_without_recursive_crawling(tmp_path):
     calls = []
     async def response(request):
         calls.append(str(request.url))
@@ -44,14 +28,9 @@ def test_direct_articles_are_complete_local_and_unique_without_recursive_crawlin
         assert request.url.host == 't.me'
         return httpx.Response(200,text=page([(11,POST)]))
     options = dict(token='test',api_only=True,rss_transport=httpx.MockTransport(response))
-    if access == 'client':
-        options['telegram_client'] = TelegraphClient()
     with TestClient(create_app(tmp_path,**options),headers={'Authorization':'Bearer test'}) as client:
         configure_fast_web(client)
         body = dict(source_locator='@fixture',folder='Inbox')
-        if access == 'client':
-            client.put('/api/v3/telegram/profiles/personal',json={'configuration_ref':'fixture'})
-            body['access'] = {'kind':'client','profile':'personal'}
         assert client.post('/api/v3/telegram/connect',json=body).status_code == 200
         from tests.support.reader import wait_for
         identity=settled(client)[0]['id']
@@ -72,8 +51,7 @@ def test_direct_articles_are_complete_local_and_unique_without_recursive_crawlin
         assert sum('/getPage/Two?' in url for url in calls) == 1
 
 
-@pytest.mark.parametrize('access',['web','client'])
-def test_article_completion_and_retry_keep_previous_copy_without_false_edit(tmp_path,access):
+def test_article_completion_and_retry_keep_previous_copy_without_false_edit(tmp_path):
     import time
     post = 'Original https://telegra.ph/One'
     phase = [0]
@@ -89,17 +67,10 @@ def test_article_completion_and_retry_keep_previous_copy_without_false_edit(tmp_
         if request.url.host == 'cdn.example':
             return httpx.Response(200,content=b'known-article-image')
         return httpx.Response(200,text=page([(11,post)]))
-    telegram = TelegraphClient()
-    telegram.post_text = post
     options = dict(token='test',api_only=True,rss_transport=httpx.MockTransport(response))
-    if access=='client':
-        options['telegram_client'] = telegram
     with TestClient(create_app(tmp_path,**options),headers={'Authorization':'Bearer test'}) as client:
         configure_fast_web(client)
         body = dict(source_locator='@fixture',folder='Inbox')
-        if access=='client':
-            client.put('/api/v3/telegram/profiles/personal',json={'configuration_ref':'fixture'})
-            body['access'] = {'kind':'client','profile':'personal'}
         client.post('/api/v3/telegram/connect',json=body)
         deadline = time.monotonic()+2
         pending = None

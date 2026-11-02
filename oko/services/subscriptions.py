@@ -73,8 +73,6 @@ class SubscriptionService:
             result = repository.subscriptions.update_feed(identity, value)
             if result != previous and value.model_fields_set & {'folder_id', 'new_folder', 'importance', 'public_ai', 'transport'}:
                 repository.settings_changed('feed', identity)
-            if result != previous and value.model_fields_set & {'auto_read','read_history','transport'}:
-                repository.problems.sync_read_feed(identity,repository.wall_clock())
             source_fields = value.model_fields_set - {'title', 'folder_id', 'new_folder', 'importance', 'public_ai'}
             return result, any(result.get(field) != previous.get(field) for field in source_fields)
 

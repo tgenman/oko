@@ -4,13 +4,13 @@ import {productionReader} from './http-reader';
 import {artifactPath} from './artifacts';
 import {feedOptions} from './settings-actions';
 
-test('real HTTP Telegram web, profiles, duplicate, local removal and fresh re-add', {timeout:25000},async t=>{
+test('real HTTP Telegram web: connection, duplicate, local removal and fresh re-add', {timeout:25000},async t=>{
  const {page,api,origin,token}=await productionReader(t);
  const chooseFolder=async()=>{const picker=page.locator('#telegram-folder');if(await picker.locator('option').filter({hasText:/^News$/}).count())await picker.selectOption({label:'News'});else await page.locator('#telegram-folder-new').fill('News');};
  await api('v3/settings/oko/global','PATCH',{theses:false,prompt_filters:''});
  await page.goto(origin+'/#token='+token);
  await page.locator('#add-open').click();await page.locator('#add-telegram-tab').click();
- await expect(page.locator('#telegram-access')).toHaveValue('web');
+ await expect(page.locator('#telegram-access')).toHaveCount(0);
  await page.locator('#telegram-peer').fill('@fixture');
  await page.screenshot({path:artifactPath('telegram-connect-desktop.png')});
  await page.setViewportSize({width:390,height:844});
@@ -30,20 +30,6 @@ test('real HTTP Telegram web, profiles, duplicate, local removal and fresh re-ad
  await expect(page.locator('#text')).toContainText('Полный текст статьи сохранён локально.');
  await expect(page.locator('.telegraph-article img')).toBeVisible();
  await expect(page.locator('#completeness')).toContainText('External embed not saved locally');
- await page.locator('#settings-open').click();await page.locator('#settings-dialog').getByRole('button',{name:'Telegram',exact:true}).click();
- await page.locator('#telegram-profile-personal').selectOption('one');
- await page.locator('#telegram-profile-personal-save').click();
- await expect(page.locator('#telegram-profile-personal-state')).toContainText('9007199254740993');
- await page.locator('#telegram-profile-collection').selectOption('one');
- await page.locator('#telegram-profile-collection-save').click();
- await expect(page.locator('#telegram-profiles-message')).toContainText('аккаунт');
- await page.locator('#telegram-profile-collection').selectOption('two');
- await page.locator('#telegram-profile-collection-save').click();
- await expect(page.locator('#telegram-profile-collection-state')).toContainText('202');
- await page.screenshot({path:artifactPath('telegram-profiles-desktop.png')});
- await page.setViewportSize({width:390,height:844});
- await page.screenshot({path:artifactPath('telegram-profiles-mobile.png')});
- await page.locator('#settings-close').click();
  await page.locator('#add-open').click();await page.locator('#add-telegram-tab').click();
  await page.locator('#telegram-peer').fill('https://t.me/s/fixture/11');
  await chooseFolder();await page.locator('#telegram-add').click();
@@ -61,15 +47,5 @@ test('real HTTP Telegram web, profiles, duplicate, local removal and fresh re-ad
  const again=page.waitForResponse(r=>r.url().endsWith('/api/v3/telegram/connect')&&r.request().method()==='POST');await chooseFolder();await page.locator('#telegram-add').click();
  expect((await (await again).json()).feed_id).not.toBe(old);
  await expect(page.locator('#feeds-dialog')).toBeVisible();await page.locator('#feeds-close').click();
- for(const role of ['personal','collection']){
-  await page.locator('#add-open').click();await page.locator('#add-telegram-tab').click();
-  await page.locator('#telegram-access').selectOption(role);await page.locator('#telegram-peer').fill('@'+role);
-  const connected=page.waitForResponse(r=>r.url().endsWith('/api/v3/telegram/connect')&&r.request().method()==='POST');
-  await chooseFolder();await page.locator('#telegram-add').click();const response=await connected;
-  expect(response.status()).toBe(200);expect((await response.json()).access.role).toBe(role);
-  expect(response.request().postDataJSON().auto_read).toBe(false);
-  await expect(page.locator('#feeds-dialog')).toBeVisible();await feedOptions(page);
-  await expect(page.locator('#feed-auto')).toHaveValue('false');
-  await page.locator('#feeds-close').click();
- }
+
 });

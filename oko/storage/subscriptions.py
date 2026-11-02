@@ -110,14 +110,10 @@ class SubscriptionRepository:
         identities=[row['id'] for row in rows]
         if not identities:
             return []
-        bindings=self.telegram.bindings(identities)
-        profiles=self.telegram.profiles() if any(b['kind']=='client' for b in bindings.values()) else {}
         histories=self.history.statuses(identities)
         batch={}
         for row in rows:
-            binding=bindings.get(row['id'])
-            profile=profiles.get(binding['role']) if binding and binding['kind']=='client' else None
-            batch[row['id']]=self._feed_value(row,binding,histories.get(row['id']),row['avatar_digest'],profile)
+            batch[row['id']]=self._feed_value(row,histories.get(row['id']),row['avatar_digest'])
         previous=self._feed_batch
         self._feed_batch=batch
         try:
@@ -134,19 +130,13 @@ class SubscriptionRepository:
         row=self.db.execute('SELECT '+','.join(READER_FEED_COLUMNS)+' FROM feeds WHERE id = %s',(identity,)).fetchone()
         if row is None:
             raise LookupError('Фид не найден')
-        binding=self.telegram.binding(identity)
-        profile=self.telegram.profile(binding['role']) if binding and binding['kind']=='client' else None
-        return self._feed_value(row,binding,self.history.status(identity),row['avatar_digest'],profile)
+        return self._feed_value(row,self.history.status(identity),row['avatar_digest'])
 
     @staticmethod
-    def _feed_value(row: Row, binding: dict[str,Any] | None, history: dict[str,Any] | None,
-                    avatar: str | None, profile: dict[str,Any] | None) -> dict[str,Any]:
+    def _feed_value(row: Row, history: dict[str,Any] | None, avatar: str | None) -> dict[str,Any]:
         feed = feed_facts(row)
         if avatar:
             feed['avatar_url'] = '/api/v3/feeds/'+feed['id']+'/avatar/'+avatar
-        if binding and binding['kind'] == 'client' and feed['connection'] != 'deleting':
-            if not profile or profile['state'] != 'ready':
-                feed['connection'] = 'unavailable'
         feed['initial_history'] = history
         return feed
 
@@ -289,7 +279,7 @@ class SubscriptionRepository:
         self.check_owner('feed', feed_id)
         feed = next(f for f in self.feeds() if f['id'] == feed_id)
         values = patch.model_dump(exclude_unset=True)
-        if any(value is None for field, value in values.items() if field not in ('auto_read', 'transport')):
+        if any(value is None for field, value in values.items() if field != 'transport'):
             raise ValueError('Поле не может быть пустым')
         folder_title = values.pop('new_folder', None)
         if folder_title is not None:
@@ -300,13 +290,8 @@ class SubscriptionRepository:
                 raise ValueError('The feed is being deleted.')
         if 'folder_id' in values:
             self.check_owner('folder', values['folder_id'])
-        if any(field in values for field in ('read_history', 'auto_read')) and feed['kind'] != 'telegram':
-            raise ValueError('Отметки чтения применимы только к Telegram')
-        binding = self.telegram.binding(feed_id)
         if feed['kind'] == 'telegram' and 'transport' in values:
             raise ValueError('Способ доступа неизменяем; удалите фид и добавьте заново')
-        if binding and binding['kind'] == 'web' and set(values).intersection(('auto_read', 'read_history')):
-            raise ValueError('Веб-доступ не поддерживает отметки Telegram')
         transport = values.get('transport')
         if transport == 'telegram' and feed['kind'] != 'telegram':
             raise ValueError('Telegram-источник не распознан')

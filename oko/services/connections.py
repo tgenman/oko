@@ -13,22 +13,6 @@ class ConnectionService:
         self._storage = repository
 
     @repository_access
-    def profiles(self) -> dict[str, dict[str, Any]]:
-        return self._storage().subscriptions.telegram.profiles()
-
-    @repository_access
-    def profile(self, role: str) -> dict[str, Any] | None:
-        return self._storage().subscriptions.telegram.profile(role)
-
-    @repository_access
-    def save_profile(self, role: str, account: str, user_id: int, generation: int, checked: float) -> None:
-        self._storage().save_telegram_profile(role, account, user_id, generation, checked)
-
-    @repository_access
-    def checked(self, role: str, generation: int, user_id: int | None, checked: float) -> bool:
-        return self._storage().check_telegram_profile(role, generation, user_id, checked)
-
-    @repository_access
     def owners(self, claims: list[tuple[str, str]]) -> list[str]:
         return self._storage().subscriptions.telegram.owners(claims)
 

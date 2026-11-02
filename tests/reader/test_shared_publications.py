@@ -86,13 +86,14 @@ def test_shared_publication_respects_all_source_permissions_and_uses_one_result(
 
 def test_unreachable_link_cycle_does_not_retain_files_after_last_root_is_viewed(tmp_path):
     from tests.support.storage import Store
-    from tests.support.telegram import Telegram,connect_request
+    import httpx
+    from tests.support.telegram_web import page
     root=publication_root(tmp_path)
-    options=dict(token='test',api_only=True,telegram_client=Telegram())
+    options=dict(token='test',api_only=True,rss_transport=httpx.MockTransport(lambda request:httpx.Response(200,text=page([(11,'Public post')]))))
     with TestClient(create_app(root,**options),headers=HEADERS) as client:
         presence(client,'reader')
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
-        connect_request(client,json=dict(account='fixture',peer='@fixture',initial_history={'mode':'count','count':1}))
+        client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox',initial_history={'mode':'count','count':'1'}))
         item=wait_for(client,lambda:next(iter(read_all_cards(client, '/api/v3/cards')),None))['id']
     # Synthetic pre-existing graph. New adapters only add direct article links;
     # old/corrupt cycles still must not keep an unreachable local file alive.

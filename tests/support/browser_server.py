@@ -17,41 +17,9 @@ from tests.support.models import model_transport
 from tests.support.codex import CodexService
 from tests.support.youtube import PNG, History, feed_xml
 from oko.collection.contracts import SourceError
-from tests.support.telegram import Telegram
 from tests.support.telegram_web import page, external_page, AUDIO, VIDEO, mark_post_unavailable
 
 
-class BrowserTelegram(Telegram):
-    async def accounts(self):
-        return ['one', 'two']
-
-    async def identity(self, account):
-        return {'one': 9007199254740993, 'two': 202}[account]
-
-    async def info(self, account, peer):
-        if peer in ('@switchfixture',-1001234567899):
-            return dict(peer=-1001234567899,username='switchfixture',title='Switch channel',kind='channel',forum=False)
-        result = await super().info(account, peer)
-        result['peer'] = -100101 if str(peer).lstrip('@') == 'personal' else -100202
-        return result
-
-    async def page(self,account,peer,after,since):
-        if peer==-1001234567899:
-            return dict(messages=[dict(id=11,date=datetime.now(timezone.utc).timestamp()-60,text='Client original',group=None,
-                media=dict(kind='image',mime='image/png',extension='png'))],more=False,gap=None)
-        return await super().page(account,peer,after,since)
-
-    async def messages(self,account,peer,ids):
-        if peer==-1001234567899:
-            return (await self.page(account,peer,0,0))['messages']
-        return await super().messages(account,peer,ids)
-
-    async def download(self,account,peer,id):
-        return PNG if peer==-1001234567899 else await super().download(account,peer,id)
-
-    async def history_page(self, account, peer, upper, before, since):
-        result = await self.page(account, peer, 0, since)
-        return dict(messages=result['messages'], upper=11, next_before=11, more=False)
 
 
 def response(request):
@@ -195,7 +163,7 @@ def build_app(root, token, *, persistent=False, public_url=None,collection=True,
         return await models.handle_async_request(request)
     ai=httpx.MockTransport(delayed_model)
     return create_app(root, token=token, rss_enabled=collection, persistent=persistent, public_url=public_url, database_url=database_url,
-                     rss_transport=httpx.MockTransport(external), telegram_client=BrowserTelegram(), ai_transport=ai, codex_client=CodexService(),
+                     rss_transport=httpx.MockTransport(external), ai_transport=ai, codex_client=CodexService(),
                      youtube_history=History([f'v{n:010d}' for n in range(60, 0, -1)]), youtube_captions=Captions(),
                      wall_clock=lambda:time.time()+{'error':11,'missing':22,'ready':33}.get(youtube_state(),0),
                      lease=60, grace=60)

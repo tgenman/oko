@@ -220,8 +220,6 @@ class MediaFiles:
             from oko.storage.incomplete_index import save_class
             save_class(store.db,download.publication_id,content)
             store.subscriptions.history.saved(download.publication_id, bool(content['extra']['_reader']['full']))
-            store.read_sync.mark_item(download.publication_id)
-            store.read_sync.saved_publication(download.publication_id)
             if subtitles:
                 store.processing.reconcile_accepted_item(download.publication_id)
             publication_links.notify_parents(store,download.publication_id)

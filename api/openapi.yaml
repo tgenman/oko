@@ -4848,160 +4848,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
-  /api/v3/telegram/profiles:
-    get:
-      summary: Telegram profiles
-      operationId: telegram_profiles
-      description: Read the personal and collection roles and opaque references to existing configurations. This read does
-        not verify an account and never discloses session secrets or file paths. All operations require bearer or persistent
-        browser session authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before
-        mutation. Client cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown;
-        reconcile tracked commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate
-        scalar query parameters return 422.
-      tags:
-      - telegram
-      parameters: []
-      responses:
-        '200':
-          description: Read the personal and collection roles and opaque references to existing configurations. This read
-            does not verify an account and never discloses session secrets or file paths.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TelegramProfiles'
-              example:
-                personal:
-                  state: unconfigured
-                  role: personal
-                collection:
-                  state: unconfigured
-                  role: collection
-                configurations: []
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-              description: no-store
-            X-Oko-Action:
-              schema:
-                $ref: '#/components/schemas/CommandId'
-              description: Tracked mutation identity when applicable.
-        '403':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuthorizationErrors'
-              examples:
-                SessionRequiredError:
-                  value:
-                    code: session_required
-                    message: example
-                    details: null
-                    diagnostic_id: null
-                    command_id: null
-                HostNotAllowedError:
-                  value:
-                    code: host_not_allowed
-                    message: example
-                    details: null
-                    diagnostic_id: null
-                    command_id: null
-                OriginNotAllowedError:
-                  value:
-                    code: origin_not_allowed
-                    message: example
-                    details: null
-                    diagnostic_id: null
-                    command_id: null
-          headers:
-            X-Oko-Error:
-              schema:
-                type: string
-                minLength: 1
-              description: Diagnostic identity when recorded.
-            X-Oko-Action:
-              schema:
-                $ref: '#/components/schemas/CommandId'
-              description: Command correlation identity when known.
-        '422':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RequestInvalidError'
-              examples:
-                RequestInvalidError:
-                  value:
-                    code: request_invalid
-                    message: example
-                    details:
-                      violations:
-                      - location: body
-                        segments: []
-                        code: required
-                        message: example
-                    diagnostic_id: null
-                    command_id: null
-          headers:
-            X-Oko-Error:
-              schema:
-                type: string
-                minLength: 1
-              description: Diagnostic identity when recorded.
-            X-Oko-Action:
-              schema:
-                $ref: '#/components/schemas/CommandId'
-              description: Command correlation identity when known.
-        '500':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/InternalErrorError'
-              examples:
-                InternalErrorError:
-                  value:
-                    code: internal_error
-                    message: example
-                    details: null
-                    diagnostic_id: example
-                    command_id: null
-          headers:
-            X-Oko-Error:
-              schema:
-                type: string
-                minLength: 1
-              description: Diagnostic identity when recorded.
-            X-Oko-Action:
-              schema:
-                $ref: '#/components/schemas/CommandId'
-              description: Command correlation identity when known.
-        '503':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StorageUnavailableError'
-              examples:
-                StorageUnavailableError:
-                  value:
-                    code: storage_unavailable
-                    message: example
-                    details:
-                      retry_at: null
-                    diagnostic_id: null
-                    command_id: null
-          headers:
-            X-Oko-Error:
-              schema:
-                type: string
-                minLength: 1
-              description: Diagnostic identity when recorded.
-            X-Oko-Action:
-              schema:
-                $ref: '#/components/schemas/CommandId'
-              description: Command correlation identity when known.
   /api/v3/telegram/connect:
     post:
       summary: Telegram connect
@@ -5102,22 +4948,6 @@ paths:
                       feed_id: example
                     diagnostic_id: null
                     command_id: null
-                ProfileNotConfiguredError:
-                  value:
-                    code: profile_not_configured
-                    message: example
-                    details:
-                      role: personal
-                    diagnostic_id: null
-                    command_id: null
-                AccountIdentityMismatchError:
-                  value:
-                    code: account_identity_mismatch
-                    message: example
-                    details:
-                      role: personal
-                    diagnostic_id: null
-                    command_id: null
                 RuntimeStoppedError:
                   value:
                     code: runtime_stopped
@@ -5149,14 +4979,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/TelegramConnect503Errors'
               examples:
-                ProfileUnavailableError:
-                  value:
-                    code: profile_unavailable
-                    message: example
-                    details:
-                      retry_at: null
-                    diagnostic_id: null
-                    command_id: null
                 SourceUnavailableError:
                   value:
                     code: source_unavailable
@@ -7491,7 +7313,7 @@ paths:
       summary: Feed patch
       operationId: feed_patch
       description: Patch source configuration after resource-dependent admission. The five non-null fields reject null. Telegram
-        access/profile/account/peer are immutable; web never accepts auto_read/read_history. All operations require bearer
+        Telegram source identity is immutable. All operations require bearer
         authorization, allowed Host and, when present, matching Origin. Structural input errors are 422 before mutation. Client
         cancellation ends waiting, not already committed effects. A lost response leaves outcome unknown; reconcile tracked
         commands instead of replaying. Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query
@@ -7516,7 +7338,7 @@ paths:
       responses:
         '200':
           description: Patch source configuration after resource-dependent admission. The five non-null fields reject null.
-            Telegram access/profile/account/peer are immutable; web never accepts auto_read/read_history.
+            Telegram Telegram source identity is immutable.
           content:
             application/json:
               schema:
@@ -11127,235 +10949,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/CommandId'
               description: Command correlation identity when known.
-  /api/v3/telegram/profiles/{role}:
-    put:
-      summary: Telegram profile save
-      operationId: telegram_profile_save
-      description: Verify a real account through an existing opaque configuration reference before binding the role. The same
-        PUT rechecks the same account. Failed verification never persists a new unverified binding; dependent feeds prohibit
-        real-account replacement. All operations require bearer or persistent browser session authorization, allowed Host
-        and, when present, matching Origin. Structural input errors are 422 before mutation. Client cancellation ends waiting,
-        not already committed effects. A lost response leaves outcome unknown; reconcile tracked commands instead of replaying.
-        Standard HTTP headers remain allowed. Unknown query keys and duplicate scalar query parameters return 422.
-      tags:
-      - telegram
-      parameters:
-      - name: role
-        in: path
-        required: true
-        schema:
-          $ref: '#/components/schemas/TelegramRole'
-        description: URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
-      - name: X-Oko-Action
-        in: header
-        required: false
-        schema:
-          $ref: '#/components/schemas/CommandId'
-        description: Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid
-          value returns 422. Echoed for tracked mutations.
-      responses:
-        '200':
-          description: Verify a real account through an existing opaque configuration reference before binding the role. The
-            same PUT rechecks the same account. Failed verification never persists a new unverified binding; dependent feeds
-            prohibit real-account replacement.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TelegramProfileState'
-              example:
-                state: unconfigured
-                role: personal
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-              description: no-store
-            X-Oko-Action:
-              schema:
-                $ref: '#/components/schemas/CommandId'
-              description: Tracked mutation identity when applicable.
-        '409':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-          content:
-            application/json:
-              schema:
-                oneOf:
-                - $ref: '#/components/schemas/TelegramProfileSave409Errors'
-                - $ref: '#/components/schemas/RuntimeDisabledError'
-              examples:
-                ProfileInUseError:
-                  value:
-                    code: profile_in_use
-                    message: example
-                    details:
-                      role: personal
-                    diagnostic_id: null
-                    command_id: null
-                ProfileAccountConflictError:
-                  value:
-                    code: profile_account_conflict
-                    message: example
-                    details:
-                      role: personal
-                    diagnostic_id: null
-                    command_id: null
-                AccountIdentityMismatchError:
-                  value:
-                    code: account_identity_mismatch
-                    message: example
-                    details:
-                      role: personal
-                    diagnostic_id: null
-                    command_id: null
-                RuntimeDisabledError:
-                  value:
-                    code: runtime_disabled
-                    message: example
-                    details: null
-                    diagnostic_id: null
-                    command_id: null
-          headers:
-            X-Oko-Error:
-              schema:
-                type: string
-                minLength: 1
-              description: Diagnostic identity when recorded.
-            X-Oko-Action:
-              schema:
-                $ref: '#/components/schemas/CommandId'
-              description: Command correlation identity when known.
-        '503':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TelegramProfileSave503Errors'
-              examples:
-                ProfileUnavailableError:
-                  value:
-                    code: profile_unavailable
-                    message: example
-                    details:
-                      retry_at: null
-                    diagnostic_id: null
-                    command_id: null
-                StorageUnavailableError:
-                  value:
-                    code: storage_unavailable
-                    message: example
-                    details:
-                      retry_at: null
-                    diagnostic_id: null
-                    command_id: null
-          headers:
-            X-Oko-Error:
-              schema:
-                type: string
-                minLength: 1
-              description: Diagnostic identity when recorded.
-            X-Oko-Action:
-              schema:
-                $ref: '#/components/schemas/CommandId'
-              description: Command correlation identity when known.
-        '403':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuthorizationErrors'
-              examples:
-                SessionRequiredError:
-                  value:
-                    code: session_required
-                    message: example
-                    details: null
-                    diagnostic_id: null
-                    command_id: null
-                HostNotAllowedError:
-                  value:
-                    code: host_not_allowed
-                    message: example
-                    details: null
-                    diagnostic_id: null
-                    command_id: null
-                OriginNotAllowedError:
-                  value:
-                    code: origin_not_allowed
-                    message: example
-                    details: null
-                    diagnostic_id: null
-                    command_id: null
-          headers:
-            X-Oko-Error:
-              schema:
-                type: string
-                minLength: 1
-              description: Diagnostic identity when recorded.
-            X-Oko-Action:
-              schema:
-                $ref: '#/components/schemas/CommandId'
-              description: Command correlation identity when known.
-        '422':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RequestInvalidError'
-              examples:
-                RequestInvalidError:
-                  value:
-                    code: request_invalid
-                    message: example
-                    details:
-                      violations:
-                      - location: body
-                        segments: []
-                        code: required
-                        message: example
-                    diagnostic_id: null
-                    command_id: null
-          headers:
-            X-Oko-Error:
-              schema:
-                type: string
-                minLength: 1
-              description: Diagnostic identity when recorded.
-            X-Oko-Action:
-              schema:
-                $ref: '#/components/schemas/CommandId'
-              description: Command correlation identity when known.
-        '500':
-          description: Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/InternalErrorError'
-              examples:
-                InternalErrorError:
-                  value:
-                    code: internal_error
-                    message: example
-                    details: null
-                    diagnostic_id: example
-                    command_id: null
-          headers:
-            X-Oko-Error:
-              schema:
-                type: string
-                minLength: 1
-              description: Diagnostic identity when recorded.
-            X-Oko-Action:
-              schema:
-                $ref: '#/components/schemas/CommandId'
-              description: Command correlation identity when known.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TelegramProfileRequest'
-            example:
-              configuration_ref: example
   /api/v3/feeds/{feed}/avatar/{revision}:
     get:
       summary: Feed avatar
@@ -13662,29 +13255,6 @@ components:
       - kind: web
         username: example
         preview_url: https://example.test/post/1
-    TelegramClientAccess:
-      type: object
-      properties:
-        kind:
-          type: string
-          const: client
-        role:
-          $ref: '#/components/schemas/TelegramRole'
-        account_user_id:
-          $ref: '#/components/schemas/TelegramUserId'
-        peer_id:
-          $ref: '#/components/schemas/TelegramPeerId'
-      required:
-      - kind
-      - role
-      - account_user_id
-      - peer_id
-      additionalProperties: false
-      examples:
-      - kind: client
-        role: personal
-        account_user_id: '9007199254740993'
-        peer_id: '-1001234567890'
     TelegramUnconfiguredAccess:
       type: object
       properties:
@@ -13775,13 +13345,11 @@ components:
       oneOf:
       - $ref: '#/components/schemas/TelegramUnconfiguredAccess'
       - $ref: '#/components/schemas/TelegramWebAccess'
-      - $ref: '#/components/schemas/TelegramClientAccess'
       discriminator:
         propertyName: kind
         mapping:
           unconfigured: '#/components/schemas/TelegramUnconfiguredAccess'
           web: '#/components/schemas/TelegramWebAccess'
-          client: '#/components/schemas/TelegramClientAccess'
       examples:
       - kind: web
         username: example
@@ -13789,12 +13357,10 @@ components:
     TelegramConfirmedAccess:
       oneOf:
       - $ref: '#/components/schemas/TelegramWebAccess'
-      - $ref: '#/components/schemas/TelegramClientAccess'
       discriminator:
         propertyName: kind
         mapping:
           web: '#/components/schemas/TelegramWebAccess'
-          client: '#/components/schemas/TelegramClientAccess'
       examples:
       - kind: web
         username: example
@@ -13810,21 +13376,6 @@ components:
       additionalProperties: false
       examples:
       - kind: web
-    TelegramClientAccessRequest:
-      type: object
-      properties:
-        kind:
-          type: string
-          const: client
-        profile:
-          $ref: '#/components/schemas/TelegramRole'
-      required:
-      - kind
-      - profile
-      additionalProperties: false
-      examples:
-      - kind: client
-        profile: personal
     TelegramWebConnectRequest:
       type: object
       properties:
@@ -13855,47 +13406,9 @@ components:
       examples:
       - source_locator: example
         folder: example
-    TelegramClientConnectRequest:
-      type: object
-      properties:
-        feed_id:
-          $ref: '#/components/schemas/FeedId'
-          description: Explicitly change access for this existing Telegram feed. Preserve its settings and publications; verify
-            source identity before applying.
-        source_locator:
-          type: string
-          minLength: 1
-          maxLength: 4000
-        folder:
-          type: string
-          minLength: 1
-          maxLength: 200
-        initial_history:
-          $ref: '#/components/schemas/HistoryCountSelection'
-          default:
-            mode: count
-            count: '20'
-          description: Omitted entire field defaults to count 20. Explicit null or an incomplete object is invalid.
-        access:
-          $ref: '#/components/schemas/TelegramClientAccessRequest'
-        auto_read:
-          type: boolean
-          default: false
-      required:
-      - source_locator
-      - folder
-      - access
-      additionalProperties: false
-      examples:
-      - source_locator: example
-        folder: example
-        access:
-          kind: client
-          profile: personal
     TelegramConnectRequest:
       oneOf:
       - $ref: '#/components/schemas/TelegramWebConnectRequest'
-      - $ref: '#/components/schemas/TelegramClientConnectRequest'
       examples:
       - source_locator: example
         folder: example
@@ -13930,16 +13443,6 @@ components:
       examples:
       - configuration_ref: example
         label: example
-    TelegramProfileRequest:
-      type: object
-      properties:
-        configuration_ref:
-          $ref: '#/components/schemas/ConfigurationRef'
-      required:
-      - configuration_ref
-      additionalProperties: false
-      examples:
-      - configuration_ref: example
     TelegramProfileUnconfigured:
       type: object
       properties:
@@ -14071,30 +13574,6 @@ components:
       examples:
       - state: unconfigured
         role: personal
-    TelegramProfiles:
-      type: object
-      properties:
-        personal:
-          $ref: '#/components/schemas/PersonalTelegramProfileState'
-        collection:
-          $ref: '#/components/schemas/CollectionTelegramProfileState'
-        configurations:
-          type: array
-          items:
-            $ref: '#/components/schemas/TelegramProfileConfiguration'
-      required:
-      - personal
-      - collection
-      - configurations
-      additionalProperties: false
-      examples:
-      - personal:
-          state: unconfigured
-          role: personal
-        collection:
-          state: unconfigured
-          role: collection
-        configurations: []
     DemoSubscriptionFeed:
       type: object
       properties:
@@ -14459,87 +13938,6 @@ components:
           username: example
           preview_url: https://example.test/post/1
         connection: ready
-    TelegramClientSubscriptionFeed:
-      type: object
-      properties:
-        avatar_url:
-          $ref: '#/components/schemas/FeedAvatarUrl'
-        id:
-          $ref: '#/components/schemas/FeedId'
-        title:
-          type: string
-        folder_id:
-          $ref: '#/components/schemas/FolderId'
-        identity:
-          type: string
-          minLength: 1
-        original_urls:
-          type: array
-          items:
-            $ref: '#/components/schemas/SourceLocator'
-        importance:
-          $ref: '#/components/schemas/Importance'
-        initial_days:
-          type: integer
-          minimum: 1
-          maximum: 3650
-        public_ai:
-          anyOf:
-          - type: boolean
-          - type: 'null'
-        history:
-          $ref: '#/components/schemas/HistoryState'
-        kind:
-          type: string
-          const: telegram
-        access:
-          $ref: '#/components/schemas/TelegramClientAccess'
-        connection:
-          type: string
-          enum:
-          - ready
-          - unavailable
-          - deleting
-        auto_read:
-          type: boolean
-        read_history:
-          type: boolean
-      required:
-      - id
-      - title
-      - folder_id
-      - identity
-      - original_urls
-      - importance
-      - initial_days
-      - public_ai
-      - history
-      - kind
-      - access
-      - connection
-      - auto_read
-      - read_history
-      additionalProperties: false
-      examples:
-      - id: example
-        title: example
-        folder_id: example
-        identity: example
-        original_urls: []
-        importance: normal
-        initial_days: 1
-        public_ai: null
-        history:
-          state: absent
-        kind: telegram
-        access:
-          kind: client
-          role: personal
-          account_user_id: '9007199254740993'
-          peer_id: '-1001234567890'
-        connection: ready
-        auto_read: false
-        read_history: false
     SubscriptionFeed:
       oneOf:
       - $ref: '#/components/schemas/TelegramUnconfiguredSubscriptionFeed'
@@ -14548,7 +13946,6 @@ components:
       - $ref: '#/components/schemas/YoutubeSubscriptionFeed'
       - $ref: '#/components/schemas/UnresolvedSubscriptionFeed'
       - $ref: '#/components/schemas/TelegramWebSubscriptionFeed'
-      - $ref: '#/components/schemas/TelegramClientSubscriptionFeed'
       examples:
       - id: example
         title: example
@@ -14713,17 +14110,10 @@ components:
           maximum: 3650
         public_ai:
           type: boolean
-        read_history:
-          type: boolean
-        auto_read:
-          anyOf:
-          - type: boolean
-          - type: 'null'
         transport:
           anyOf:
           - type: string
             enum:
-            - telegram
             - rss
             - youtube
           - type: 'null'
@@ -20243,8 +19633,6 @@ components:
       - $ref: '#/components/schemas/IdentityUnconfirmedError'
       - $ref: '#/components/schemas/SourceIdentityConflictError'
       - $ref: '#/components/schemas/DeletionInProgressError'
-      - $ref: '#/components/schemas/ProfileNotConfiguredError'
-      - $ref: '#/components/schemas/AccountIdentityMismatchError'
       - $ref: '#/components/schemas/RuntimeStoppedError'
       discriminator:
         propertyName: code
@@ -20254,8 +19642,6 @@ components:
           identity_unconfirmed: '#/components/schemas/IdentityUnconfirmedError'
           source_identity_conflict: '#/components/schemas/SourceIdentityConflictError'
           deletion_in_progress: '#/components/schemas/DeletionInProgressError'
-          profile_not_configured: '#/components/schemas/ProfileNotConfiguredError'
-          account_identity_mismatch: '#/components/schemas/AccountIdentityMismatchError'
           runtime_stopped: '#/components/schemas/RuntimeStoppedError'
       examples:
       - code: duplicate_source
@@ -20272,17 +19658,15 @@ components:
         command_id: null
     TelegramConnect503Errors:
       oneOf:
-      - $ref: '#/components/schemas/ProfileUnavailableError'
       - $ref: '#/components/schemas/SourceUnavailableError'
       - $ref: '#/components/schemas/StorageUnavailableError'
       discriminator:
         propertyName: code
         mapping:
-          profile_unavailable: '#/components/schemas/ProfileUnavailableError'
           source_unavailable: '#/components/schemas/SourceUnavailableError'
           storage_unavailable: '#/components/schemas/StorageUnavailableError'
       examples:
-      - code: profile_unavailable
+      - code: source_unavailable
         message: example
         details:
           retry_at: null
@@ -20426,40 +19810,6 @@ components:
           resource:
             kind: material
             material_id: example
-        diagnostic_id: null
-        command_id: null
-    TelegramProfileSave409Errors:
-      oneOf:
-      - $ref: '#/components/schemas/ProfileInUseError'
-      - $ref: '#/components/schemas/ProfileAccountConflictError'
-      - $ref: '#/components/schemas/AccountIdentityMismatchError'
-      discriminator:
-        propertyName: code
-        mapping:
-          profile_in_use: '#/components/schemas/ProfileInUseError'
-          profile_account_conflict: '#/components/schemas/ProfileAccountConflictError'
-          account_identity_mismatch: '#/components/schemas/AccountIdentityMismatchError'
-      examples:
-      - code: profile_in_use
-        message: example
-        details:
-          role: personal
-        diagnostic_id: null
-        command_id: null
-    TelegramProfileSave503Errors:
-      oneOf:
-      - $ref: '#/components/schemas/ProfileUnavailableError'
-      - $ref: '#/components/schemas/StorageUnavailableError'
-      discriminator:
-        propertyName: code
-        mapping:
-          profile_unavailable: '#/components/schemas/ProfileUnavailableError'
-          storage_unavailable: '#/components/schemas/StorageUnavailableError'
-      examples:
-      - code: profile_unavailable
-        message: example
-        details:
-          retry_at: null
         diagnostic_id: null
         command_id: null
     HistoryDiscoveryProblem:

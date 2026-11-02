@@ -6,7 +6,6 @@ async function setup() {
  const r=await reader();
  await r.page.addInitScript(()=>{
   readerTransport.replies.set('/api/v3/subscriptions',{body:{folders:[],feeds:[]}});
-  readerTransport.replies.set('/api/v3/telegram/profiles',{body:{personal:{role:'personal',state:'ready',configuration_ref:'one',verified_user_id:'9007199254740993',checked_at:new Date().toISOString()},collection:{role:'collection',state:'unconfigured'},configurations:[{configuration_ref:'one',label:'Сессия один'},{configuration_ref:'two',label:'Сессия два'}]}});
   readerTransport.held.set('/api/v3/telegram/connect',true);
  });
  await r.start([]);
@@ -18,8 +17,8 @@ async function setup() {
 
 test('Telegram defaults to web without account or read controls and sends exact history',async()=>{
  const r=await setup();try{
-  await expect(r.page.locator('#telegram-access')).toHaveValue('web');
-  await expect(r.page.locator('#telegram-auto')).toBeHidden();
+  await expect(r.page.locator('#telegram-access')).toHaveCount(0);
+  await expect(r.page.locator('#telegram-auto')).toHaveCount(0);
   await r.page.locator('#telegram-peer').fill('https://t.me/s/channel/42');
   await expect(r.page.locator('#telegram-add')).toBeEnabled();
   await r.page.locator('#telegram-add').click();
@@ -32,21 +31,13 @@ test('Telegram defaults to web without account or read controls and sends exact 
  }finally{await r.close();}
 });
 
-test('Telegram client requires verified selected role; duplicate popup describes all typed owners',async()=>{
+test('duplicate public Telegram source remains visible',async()=>{
  const r=await setup();try{
   await r.page.locator('#telegram-peer').fill('@channel');
-  await r.page.locator('#telegram-access').selectOption('collection');
-  await expect(r.page.locator('#telegram-add')).toBeDisabled();
-  await r.page.locator('#telegram-access').selectOption('personal');
-  await expect(r.page.locator('#telegram-add')).toBeEnabled();
-  await expect(r.page.locator('#telegram-auto')).not.toBeChecked();
   await r.page.locator('#telegram-add').click();
   await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/telegram/connect'));
-  await r.page.evaluate(()=>readerTransport.release('/api/v3/telegram/connect',{code:'duplicate_source',message:'Уже добавлен',details:{existing_feeds:[{feed_id:'old',title:'Канал',access:{kind:'web',preview_url:'https://t.me/s/channel',username:'channel'}},{feed_id:'other',title:'Другой владелец',access:{kind:'client',role:'personal',account_user_id:'9007199254740993',peer_id:'-10042'}}]}},409));
-  await expect(r.page.getByRole('dialog',{name:'Source already added'})).toBeVisible();
-  await expect(r.page.locator('#telegram-duplicate')).toContainText('Web');
-  await expect(r.page.locator('#telegram-duplicate')).toContainText('Personal Account');
-  await expect(r.page.locator('#telegram-duplicate')).toContainText('Open feed settings');
+  await r.page.evaluate(()=>readerTransport.release('/api/v3/telegram/connect',{code:'duplicate_source',message:'Already added',details:{existing_feeds:[{feed_id:'old',title:'Channel',access:{kind:'web',preview_url:'https://t.me/s/channel',username:'channel'}}]}},409));
+  await expect(r.page.getByRole('dialog',{name:'Source already added'})).toContainText('Channel');
   await r.page.locator('#telegram-duplicate-close').click();
   await expect(r.page.locator('#telegram-peer')).toHaveValue('@channel');
   assert.deepEqual(r.errors,[]);

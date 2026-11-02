@@ -33,7 +33,7 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
             raw_feed, binding = current.feed(material.feed_id)
             owner = project.subscription(facts.SubscriptionFeed.model_validate(raw_feed), binding)
             fid, url = wire.FeedId(material.feed_id), wire.SourceUrl(material.url)
-            if isinstance(owner.root, (wire.TelegramWebSubscriptionFeed, wire.TelegramClientSubscriptionFeed, wire.TelegramUnconfiguredSubscriptionFeed)):
+            if isinstance(owner.root, (wire.TelegramWebSubscriptionFeed, wire.TelegramUnconfiguredSubscriptionFeed)):
                 source = wire.SourceReference(wire.TelegramSourceReference(kind='telegram', feed_id=fid, source_url=url, access=wire.TelegramAccess(owner.root.access), message_ids=[wire.TelegramMessageId(str(n)) for n in material.members] if isinstance(material.members, list) else []))
             elif owner.root.kind == 'youtube':
                 source = wire.SourceReference(wire.YoutubeSourceReference(kind='youtube', feed_id=fid, source_url=url, captions=material.captions if isinstance(material.captions, str) else 'not_requested'))
