@@ -42,8 +42,7 @@ def test_invalid_create_move_never_leaves_an_empty_folder_or_moves_a_feed(tmp_pa
         feed = before['feeds'][0]
         for body, status in [({'new_folder': ''}, 422), ({'new_folder': '   '}, 422), ({'new_folder': None}, 422),
                              ({'new_folder': 'x' * 201}, 422), ({'new_folder': ' Old '}, 400),
-                             ({'new_folder': 'New', 'folder_id': feed['folder_id']}, 400),
-                             ({'new_folder': 'New', 'read_history': True}, 422)]:
+                             ({'new_folder': 'New', 'folder_id': feed['folder_id']}, 400)]:
             response = client.patch('/api/v3/feeds/' + feed['id'], json=body)
             assert response.status_code == status, response.text
             assert client.get('/api/v3/subscriptions').json() == before

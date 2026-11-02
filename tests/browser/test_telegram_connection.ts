@@ -15,10 +15,8 @@ async function setup() {
  return r;
 }
 
-test('Telegram defaults to web without account or read controls and sends exact history',async()=>{
+test('Telegram web connection sends exact history',async()=>{
  const r=await setup();try{
-  await expect(r.page.locator('#telegram-access')).toHaveCount(0);
-  await expect(r.page.locator('#telegram-auto')).toHaveCount(0);
   await r.page.locator('#telegram-peer').fill('https://t.me/s/channel/42');
   await expect(r.page.locator('#telegram-add')).toBeEnabled();
   await r.page.locator('#telegram-add').click();

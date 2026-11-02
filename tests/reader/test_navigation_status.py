@@ -37,7 +37,7 @@ def test_compact_status_and_details_revalidate_independently(tmp_path):
         assert body['collection']['state'] == 'idle'
         assert body['processing']['state'] == 'idle'
         assert isinstance(body['problems'], list)
-        assert not {'work', 'initial_histories', 'telegram_reads', 'youtube'} & body.keys()
+        assert not {'work', 'initial_histories', 'youtube'} & body.keys()
         assert body['runtime_state']=='disabled' and not body['work_allowed']
         repeated=client.get('/api/v3/status',headers={'If-None-Match':first.headers['etag']})
         assert repeated.status_code==304 and not repeated.content

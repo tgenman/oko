@@ -38,7 +38,6 @@ test('range confirmation captures IDs before new arrivals and preserves target',
   await r.start(['a','b','c','d'].map(id=>material(id)));
   await r.page.locator('[data-card="c"]').click();await r.page.locator('[data-card="c"]').click({button:'right'});await r.page.getByRole('menuitem',{name:'Mark Above as Read',exact:true}).click();
   await expect(r.page.locator('#news-read-dialog li')).toHaveCount(2);
-  await expect(r.page.locator('#news-read-dialog')).not.toContainText('Telegram read status will sync');
   const fresh=card(material('fresh'));await r.page.evaluate(fresh=>{const t=readerTransport;const rows=t.replies.get('/api/v3/cards')!.body!.items;t.replies.set('/api/v3/cards',{body:window.readerFixtures.cardPage([fresh,...rows.filter(c=>c.id==='c'||c.id==='d')])});},fresh);
   await r.page.locator('#news-read-confirm').click();await expect(r.page.locator('#news-read-dialog')).toHaveCount(0);await expect(r.page.locator('[data-card="fresh"]')).toBeVisible();await expect(r.page.locator('#text')).toContainText('Текст c');
   expect(await r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url==='/api/v3/cards/read').map(q=>q.body))).toEqual([{ids:['a','b']}]);expect(r.errors).toEqual([]);

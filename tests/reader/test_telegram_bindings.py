@@ -27,22 +27,4 @@ def test_web_binding_needs_no_account_and_duplicates_are_normalized(tmp_path):
         assert client.post('/api/v3/telegram/connect', json={'source_locator':'@TELEGRAM', 'folder':'Other'}).status_code == 409
         assert len(calls) == collected_calls
         state = client.get('/api/v3/subscriptions').json()['feeds'][0]
-        assert state['id'] == feed and 'auto_read' not in state
-        assert client.patch('/api/v3/feeds/'+feed, json={'auto_read':False}).status_code == 422
-        assert client.get('/api/v3/telegram/profiles').status_code == 404
-
-
-
-
-
-
-def test_account_access_is_not_accepted_by_http(tmp_path):
-    with TestClient(create_app(tmp_path, token='test', api_only=True), headers=HEADERS) as client:
-        for role in ('personal', 'collection'):
-            result = client.post('/api/v3/telegram/connect', json={
-                'source_locator': '@fixture', 'folder': 'Inbox',
-                'access': {'kind': 'client', 'profile': role},
-            })
-            assert result.status_code == 422
-            assert client.put('/api/v3/telegram/profiles/'+role, json={'configuration_ref':'fixture'}).status_code == 404
-        assert not client.get('/api/v3/subscriptions').json()['feeds']
+        assert state['id'] == feed

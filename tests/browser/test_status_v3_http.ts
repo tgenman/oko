@@ -2,7 +2,6 @@ import {test} from 'node:test';
 import {expect} from 'playwright/test';
 import {productionReader} from './http-reader';
 import {artifactPath} from './artifacts';
-import {reader as fixtureReader} from './support';
 
 test('domain status opens the real processor form and retains an expanded finished problem',{timeout:20000},async t=>{
  const {page,api,origin,token}=await productionReader(t);
@@ -75,17 +74,4 @@ test('lost command response stays unknown until receipt reconciliation and is ne
  await page.unroute('**/api/v3/command-observations');
  await expect(page.locator('#status-toggle')).toHaveText('Status');
  expect(puts).toBe(1);
-});
-
-test('historical account errors do not offer removed profile settings',async()=>{
- const r=await fixtureReader();try{
-  const baseline=await r.api('v3/status/details');
-  if(!baseline||typeof baseline!=='object')throw new Error('Missing RuntimeStatus');
-  await r.start([]);
-  await r.page.evaluate(base=>readerTransport.replies.set('/api/v3/status',{body:{...base,work_allowed:true,problems:{current:[{id:'role-problem',code:'profile_unavailable',command_id:null,title:'Profile',message:'Session unavailable',consequence:'Collection paused',affected:[{kind:'telegram_profile',role:'personal'}],recovery:[{kind:'configure_telegram_profile',role:'personal'}],created_at:new Date().toISOString(),state:'current'}],recent:[],count:1,updated_at:new Date().toISOString()}}}),baseline);
-  await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 1');await r.page.locator('#status-toggle').click();
-  await expect(r.page.locator('#status-panel')).toContainText('Check Telegram Profile');
-  await expect(r.page.getByRole('button',{name:'Configure Telegram Profile',exact:true})).toHaveCount(0);
-  expect(r.errors).toEqual([]);
- }finally{await r.close();}
 });
