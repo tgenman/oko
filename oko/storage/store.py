@@ -1,8 +1,7 @@
 from oko.storage.publication_owners import owned_ids, owner_expr
 from oko.storage.database import expect_row, Connection, Row, INTEGRITY_ERRORS
 from oko.collection.external_media import saved_external, expected_incomplete
-from oko.collection.adapters import ExternalKey, ExternalReference, Platform, MediaReference, PublicationContent, PublicationMetadata
-from datetime import datetime, timezone
+from oko.collection.adapters import ExternalKey, ExternalReference, Platform
 from oko.collection.telegram.reading import saved_preview
 from oko.storage.collection_status import CollectionStatus
 from oko.storage import material_read, collection_jobs, publication_links, youtube_media
@@ -31,7 +30,7 @@ from oko.storage.composition import FolderContents, ReadingComposition
 from oko.collection.telegram.contracts import HistoryEnvelope
 from oko.storage.filter_results import FilterResults
 from oko.storage.processing_coordination import ProcessingState
-from oko.collection.contracts import ReplyPreview, SourceError, Material, Publication, SourceManifest
+from oko.collection.contracts import SourceError, Material, Publication, SourceManifest
 from oko.storage.subscriptions import SubscriptionRepository
 from oko.storage.job_writes import execute as job_write
 from oko.storage.transaction import begin_write, transaction
@@ -482,23 +481,17 @@ class Store:
         row = self.db.execute('SELECT * FROM publications WHERE id = %s AND viewed = 0', (item,)).fetchone()
         if row:
             header, text = self.publications.original(item) if row['complete'] else ({},'')
-            refs = tuple(MediaReference(m['resource_key'],m['source_locator'],m['name'],m['mime_type'],m['size_bytes'],m['resource_identity'])
-                for m in self.db.execute('SELECT * FROM media_files WHERE publication_id = %s',(item,)) if m['source_locator'])
-            last_description = PublicationContent(PublicationMetadata(ExternalReference(ExternalKey(Platform(row['platform']),row['external_id']),row['url']),
-                header.get('title',''),datetime.fromtimestamp(row['published_at'],timezone.utc) if row['published_at'] is not None else None),media=refs,
-                linked_publications=tuple(ExternalReference(ExternalKey(Platform(target['platform']),target['external_id']),target['url']) for target in self.db.execute('SELECT i . platform , i . external_id , i . url FROM publication_links l JOIN publications i ON i . id = l . target_publication_id WHERE l . source_publication_id = %s',(item,))))
-            teaser = Material(header.get('title',''),text,header.get('full',False),header.get('reason',''),
+            reference=ExternalReference(ExternalKey(Platform(row['platform']),row['external_id']),row['url'])
+            teaser = Material(header.get('title',''),header.get('full',False),header.get('reason',''),
                 members=tuple(json.loads(row['members'])),description=header.get('description',''),
-                source_manifest=SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if header.get('source_manifest') else None,
-                reply_preview=ReplyPreview.model_validate(header['reply_preview']) if header.get('reply_preview') else None,adapter_content=last_description) if row['complete'] else None
-            return Publication(row['external_id'],row['url'],row['published_at'] or 0.,teaser,tuple(json.loads(row['members'])),row['published_at'] is not None,adapter_reference=last_description.metadata.reference)
+                source_manifest=SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if header.get('source_manifest') else None) if row['complete'] else None
+            return Publication(row['external_id'],row['url'],row['published_at'] or 0.,teaser,tuple(json.loads(row['members'])),row['published_at'] is not None,adapter_reference=reference)
         return None
 
     def collect_material(self, item: str, material: Material, *, manual: bool = False) -> tuple[SourceError | None,CollectionEffects]:
         effects=CollectionEffects()
         if not self._has_unviewed(item):
             return None,effects
-        previous = self.publication(item)
         if material.source_manifest and material.source_manifest.post_web_unavailable:
             media=[dict(row) for row in self.db.execute('SELECT * FROM media_files WHERE publication_id = %s',(item,))]
             missing=[row for row in media if row['storage_key'] and existing_file(self.root,row['storage_key']) is None or row['status']=='unavailable' and row['reason']=='Локальный файл вложения недоступен']
@@ -518,20 +511,27 @@ class Store:
                     save_class(self.db,item,content)
                     self.collection_history(item,replace(material,collection_error=error))
                 return error,effects
-        if (material.source_manifest and material.source_manifest.post_web_unavailable
-                and previous and previous.teaser and previous.teaser.source_manifest):
-            retained = previous.teaser
-            manifest = retained.source_manifest
-            assert manifest is not None
-            accept_preview = (material.source_manifest.preview_fragment is not None
+        if material.source_manifest and material.source_manifest.post_web_unavailable:
+            saved=self.db.execute('SELECT complete FROM publications WHERE id=%s', (item,)).fetchone()
+            retained_header, retained_text = self.publications.original(item) if saved and saved['complete'] else ({}, '')
+            raw_manifest=retained_header.get('source_manifest')
+            manifest=SourceManifest.model_validate_json(json.dumps(raw_manifest)) if raw_manifest else None
+        else:
+            manifest=None
+        if manifest is not None:
+            observed_manifest=material.source_manifest
+            assert observed_manifest is not None
+            accept_preview = (observed_manifest.preview_fragment is not None
                 and (manifest.preview_fragment is not None or
-                     manifest.post.get('text') == material.source_manifest.post.get('text')
+                     manifest.post.get('text') == observed_manifest.post.get('text')
                      and all(r.status == 'unsupported' and r.sha256 is None
                          and r.reason == 'Пост не поддерживается публичным предпросмотром' for r in manifest.resources)))
-            if (retained.text.strip() or any(resource.status=='loaded' for resource in manifest.resources)) and not accept_preview:
-                material = replace(retained, full=False, members=material.members,
+            if (retained_text.strip() or any(resource.status=='loaded' for resource in manifest.resources)) and not accept_preview:
+                material = Material(retained_header.get('title',''), False,
+                    retained_header.get('reason',''), members=material.members,
+                    captions=retained_header.get('captions'), description=retained_header.get('description',''),
                     source_manifest=manifest.model_copy(update={'post_web_unavailable':True}),
-                    adapter_content=None, collection_error=material.collection_error)
+                    collection_error=material.collection_error)
         old_media={row['id']:dict(row) for row in self.db.execute('SELECT * FROM media_files WHERE publication_id = %s',(item,))} if manual else {}
         prepared=self.publications.prepare(item,material)
         fingerprint=publication_input.digest(prepared[0])

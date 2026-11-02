@@ -195,3 +195,27 @@ def test_missing_captions_are_downloaded_again_after_reader_detects_loss(tmp_pat
         client.get('/api/v3/publication/'+card['id'])
         wait_for(client,lambda: len(calls)>=2 and client.get('/api/v3/publication/'+card['id']).json()['text']=='Recovered captions.')
         assert calls==[VIDEO,VIDEO]
+
+
+def test_youtube_description_is_saved_as_common_block(tmp_path):
+    from tests.support.storage import database
+    root = publication_root(tmp_path)
+    async def response(request):
+        if request.url.path == '/feeds/videos.xml':
+            return httpx.Response(200, text=feed_xml().replace('<media:group>', '<summary>Saved description</summary><media:group>'))
+        return httpx.Response(200, content=PNG, headers={'content-type': 'image/png'})
+    class Captions:
+        async def fetch(self, video):
+            return 'Caption text'
+    with TestClient(create_app(root, token='test', api_only=True, rss_enabled=True,
+            rss_transport=httpx.MockTransport(response), youtube_captions=Captions(),
+            youtube_history=History([VIDEO])), headers=HEADERS) as client:
+        subscribe(client)
+        presence(client, 'reader')
+        card = wait_for(client, lambda: next(iter(read_all_cards(client, '/api/v3/cards')), None))
+        publication = wait_for(client, lambda: data if (data := client.get('/api/v3/publication/'+card['id']).json()).get('description') else None)
+        assert publication['description'] == 'Saved description'
+    with database(root) as db:
+        content = json.loads(db.execute('SELECT content FROM publications WHERE id=%s', (card['id'],)).fetchone()[0])
+        assert any(block.get('role') == 'description' and block.get('text') == 'Saved description' for block in content['blocks'])
+        assert 'description' not in content['extra']['_reader']

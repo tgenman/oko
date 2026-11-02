@@ -116,7 +116,8 @@ def test_v3_explicit_status_security_and_header_validation_do_not_execute_stop(t
 def test_neutral_last_close_cancels_resistant_external_wait_and_prevents_late_commit(tmp_path):
     import asyncio
     import threading
-    from oko.collection.contracts import Material, Publication
+    from oko.collection.contracts import Publication
+    from tests.support.synthetic_material import material as Material
 
     started, release = threading.Event(), threading.Event()
     class Source:

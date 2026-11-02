@@ -2,6 +2,7 @@ from __future__ import annotations
 from tests.support.collection_acceptance import save
 """Synthetic provider for behavioural scenarios, using the current adapter contract."""
 from dataclasses import dataclass,replace
+from tests.support.synthetic_material import SyntheticMaterial
 from datetime import datetime,timezone
 import hashlib
 import json
@@ -28,12 +29,6 @@ class Attachment:
     mime: str
 
 
-@dataclass(frozen=True)
-class SyntheticMaterial(Material):
-    images: tuple[Image,...]=()
-    attachments: tuple[Attachment,...]=()
-
-
 class StructuredSource:
 
     def __init__(self,source: Any) -> None:
@@ -54,9 +49,11 @@ class StructuredSource:
 
     def describe(self,publication: Publication,material: Material) -> Material:
         reference=self.reference(publication)
-        blocks: list[dict[str,JsonValue]]=[dict(type='text',role='body',text=material.text)]
-        if material.reply_preview:
-            blocks.append(dict(type='quote',**material.reply_preview.model_dump()))
+        text='\n\n'.join(b.get('text','') for b in (material.adapter_content.content.get('blocks',[]) if material.adapter_content else []) if b.get('type')=='text' and b.get('role')=='body')
+        blocks: list[dict[str,JsonValue]]=[dict(type='text',role='body',text=text)]
+        reply = material.source_manifest.post.get('reply_preview') if material.source_manifest else None
+        if isinstance(reply, dict):
+            blocks.append(dict(type='quote', **reply))
         refs=[]
         attachments: list[Image | Attachment]=[*material.images,*material.attachments] if isinstance(material,SyntheticMaterial) else []
         for attachment in attachments:

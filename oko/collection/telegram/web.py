@@ -252,8 +252,8 @@ def parse_page(data: bytes, username: str, *, partial: bool = False) -> WebPage:
             manifest = SourceManifest(post_web_unavailable=post_web_unavailable,source_url=f'https://t.me/{username}/{message}',post=dict(text=body,description=preview_text,reply_preview=reply_preview.model_dump(mode="json") if reply_preview else None,edited=edited,members=list(members),resources=[dict(key=m.id,kind=m.id.rsplit(':',1)[-1]) for m in media]),resources=resources)
             file_title = next((node.get_text(' ',strip=True) for node in wrapper.select('.tgme_widget_message_document_title') if node.get_text(' ',strip=True)), '')
             file_fallback = file_title or ('Файл доступен в Telegram' if any(m.kind=='document' for m in media) else '')
-            teaser = Material(('Пост доступен только в Telegram' if post_web_unavailable else own_title) or (body.split('\n')[0] or file_fallback or ('Ответ на сообщение' if reply_preview else 'Telegram · медиа')),body,False,
-                              'Вложения ещё не загружены' if media else '',description=preview_text,source_manifest=manifest,reply_preview=reply_preview)
+            teaser = Material(('Пост доступен только в Telegram' if post_web_unavailable else own_title) or (body.split('\n')[0] or file_fallback or ('Ответ на сообщение' if reply_preview else 'Telegram · медиа')),False,
+                              'Вложения ещё не загружены' if media else '',description=preview_text,source_manifest=manifest)
             posts.append(TelegramPublication(Publication(str(message),f'https://t.me/{username}/{message}',published or 0,teaser,members,published_known=published is not None),body,media))
         except (SourceError, ValueError) as error:
             if not partial:

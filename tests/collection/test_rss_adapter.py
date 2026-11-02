@@ -123,7 +123,7 @@ def test_rss_source_bridge_keeps_adapter_keys_and_ready_content_across_pages():
     boundary=asyncio.run(source.discover(None))
     assert boundary.publications==() and boundary.continuation is not None
     page=asyncio.run(source.discover(boundary.cursor))
-    assert [p.teaser.text for p in page.publications]==['First','Second']
+    assert [p.teaser.adapter_content.content['blocks'][0]['text'] for p in page.publications]==['First','Second']
     assert all(p.adapter_reference.key.platform==Platform.rss for p in page.publications)
     assert all(p.teaser.adapter_content.needs_fetch is False for p in page.publications)
     assert page.continuation is None and page.observation.description is None
@@ -179,14 +179,14 @@ def test_new_rss_history_run_freezes_its_count_and_resolves_an_archive_offset():
     source.initial_history={'mode':'count','count':1,'run':'first'}
     boundary=asyncio.run(source.discover(None))
     first=asyncio.run(source.discover(boundary.cursor))
-    assert [p.teaser.text for p in first.publications]==['Two']
+    assert [p.teaser.adapter_content.content['blocks'][0]['text'] for p in first.publications]==['Two']
     source.initial_history={'mode':'count','count':2,'run':'second'}
     boundary=asyncio.run(source.discover(first.cursor))
     assert boundary.publications==() and boundary.continuation is not None
     # The already admitted pass keeps its selection even if live settings move.
     source.initial_history={'mode':'count','count':1,'run':'second'}
     second=asyncio.run(source.discover(boundary.cursor))
-    assert [p.teaser.text for p in second.publications]==['One','Two']
+    assert [p.teaser.adapter_content.content['blocks'][0]['text'] for p in second.publications]==['One','Two']
 
 
 def test_invalid_rss_permalink_keeps_a_known_guid_and_healthy_records():

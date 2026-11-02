@@ -53,7 +53,8 @@ def test_claim_incomplete_event_rolls_back_and_clears_ephemeral_state(tmp_path,p
 
 
 def test_content_becoming_full_finishes_incomplete_before_status_get(tmp_path,postgres_url):
-    from oko.collection.contracts import Material,Publication
+    from oko.collection.contracts import Publication
+    from tests.support.synthetic_material import material as Material
     from tests.support.source import StructuredSource
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:

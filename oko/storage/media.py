@@ -192,8 +192,8 @@ class MediaFiles:
                     block['media_id']=identity
         if subtitles:
             content['extra']['youtube']['captions']='available'
+            content['extra']['_reader'].pop('captions', None)
             content['extra']['youtube']['captions_digest']=files.file_digest(saved)
-            content['extra']['_reader']['captions']='available'
         self.project_header(content, media)
         with store.db:
             memberships.lock_graph(store.db)
@@ -261,8 +261,8 @@ class MediaFiles:
             return
         content=json.loads(row['content'])
         content['extra']['youtube']['captions']='unavailable'
+        content['extra']['_reader'].pop('captions', None)
         content['extra']['youtube'].pop('captions_digest',None)
-        content['extra']['_reader']['captions']='unavailable'
         media=[dict(row) for row in store.db.execute('SELECT * FROM media_files WHERE publication_id = %s',(owner,))]
         previous=next(value for value in media if value['id']==media_id)
         identity=str(uuid4()) if previous['storage_key'] else media_id
@@ -320,7 +320,7 @@ class MediaFiles:
                 keep_file=bool(old and old['status']=='ready' and old['storage_key'] and existing_file(store.root,old['storage_key']) is not None)
                 if subtitles and not keep_file:
                     content['extra']['youtube']['captions']='error'
-                    content['extra']['_reader']['captions']='error'
+                    content['extra']['_reader'].pop('captions', None)
                 for value in media:
                     if value['id']==media_id:
                         value.update(reason=issue.message,status='ready' if keep_file else 'unavailable' if status=='unavailable' or changed else 'pending_download')

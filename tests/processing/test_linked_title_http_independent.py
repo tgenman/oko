@@ -1,6 +1,6 @@
 import asyncio
 from fastapi.testclient import TestClient
-from oko.collection.contracts import Material
+from tests.support.synthetic_material import material as Material
 from oko.collection.demo import DemoSource
 from oko.services.collection import CollectionService
 from oko.storage.transaction import transaction
@@ -32,7 +32,7 @@ def test_http_does_not_publish_late_summary_after_linked_title_roundtrip(tmp_pat
                 service=CollectionService(lambda:store)
                 old=store.publication('linked')
                 assert old and old.teaser
-                text=old.teaser.text
+                text=store.original('linked')[1]
                 for title in ('New title','Old title'):
                     with transaction(store.db):
                         material=StructuredSource(None).describe(store.publication('linked'),Material(title,text))

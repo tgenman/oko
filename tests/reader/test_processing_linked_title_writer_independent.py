@@ -7,7 +7,7 @@ from oko.storage.transaction import transaction
 def test_linked_title_change_rollback_restores_running_parent(tmp_path):
     import pytest
     from oko.services.collection import CollectionService
-    from oko.collection.contracts import Material
+    from tests.support.synthetic_material import material as Material
     from tests.support.source import StructuredSource
     store,item,execution,tasks=worker_library(tmp_path)
     try:
@@ -33,7 +33,7 @@ def test_linked_title_change_rollback_restores_running_parent(tmp_path):
 def test_linked_title_roundtrip_rejects_real_late_model_reply(tmp_path):
     import asyncio,httpx
     from oko.services.collection import CollectionService
-    from oko.collection.contracts import Material
+    from tests.support.synthetic_material import material as Material
     from tests.support.filters import transport
     from tests.support.source import StructuredSource
     from tests.support.worker_library import workers,saved

@@ -77,7 +77,8 @@ def test_confirmed_remote_deletion_keeps_local_copy_but_absence_is_not_deletion(
 
 
 def test_interrupted_version_publish_keeps_old_until_fresh_retry(tmp_path):
-    from oko.collection.contracts import Material, Publication
+    from oko.collection.contracts import Publication
+    from tests.support.synthetic_material import material as Material
     class Editable:
         changes = None
         text = 'Первая версия'
@@ -120,7 +121,8 @@ def test_late_ai_response_cannot_publish_theses_for_superseded_version(tmp_path)
     import asyncio
     import json
     import threading
-    from oko.collection.contracts import Material, Publication
+    from oko.collection.contracts import Publication
+    from tests.support.synthetic_material import material as Material
     from tests.support.models import model_transport
     class Editable:
         changes = None
@@ -196,7 +198,8 @@ def test_youtube_title_edit_is_visible_but_leaving_atom_window_is_not_deletion(t
 
 
 def test_revision_waits_for_public_ai_permission_instead_of_reusing_old_theses(tmp_path):
-    from oko.collection.contracts import Material, Publication
+    from oko.collection.contracts import Publication
+    from tests.support.synthetic_material import material as Material
     from tests.support.models import model_transport
     class Editable:
         changes = None

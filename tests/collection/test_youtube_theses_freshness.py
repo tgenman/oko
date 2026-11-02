@@ -8,7 +8,8 @@ from fastapi.testclient import TestClient
 
 from tests.support.app import create_app
 from tests.support.subscriptions import configured_sources
-from oko.collection.contracts import Material, Publication
+from oko.collection.contracts import Publication
+from tests.support.synthetic_material import material as Material
 from tests.support.storage import Store
 from tests.support.reader import HEADERS, wait_for
 from tests.support.models import model_transport

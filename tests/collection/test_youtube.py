@@ -404,3 +404,25 @@ class YouTubeTranscriptApi:
             raise AssertionError('Future live card was not discarded')
         assert client.get('/api/v3/diagnostics').json()['groups'] == []
         assert calls.read_text().splitlines() == [VIDEO]
+
+
+def test_description_uses_common_content_block():
+    from datetime import datetime, timezone
+    from oko.collection.adapters import ExternalKey, ExternalReference, Platform, PublicationContent, PublicationMetadata
+    from oko.collection.youtube.publication_source import YouTubeAdapterSource
+    from oko.storage.publication_document import header
+
+    ref = ExternalReference(ExternalKey(Platform.youtube, 'video'), 'https://youtube.test/video')
+    value = PublicationContent(PublicationMetadata(ref, 'Title', datetime.now(timezone.utc)),
+                               {'blocks': [{'type': 'text', 'role': 'description', 'text': 'Description'}],
+                                'extra': {'youtube': {'captions': 'pending'}}})
+    source = object.__new__(YouTubeAdapterSource)
+    source.want_captions = True
+    material = source._material(value)
+    assert material.description == 'Description'
+    assert 'description' not in header(material)
+    assert material.adapter_content.content['blocks'][0]['text'] == 'Description'
+    cleared = PublicationContent(value.metadata,
+                                 {'blocks': [{'type': 'text', 'role': 'description', 'text': ''}],
+                                  'extra': {'youtube': {'captions': 'pending'}}})
+    assert source._material(cleared, material).description == ''

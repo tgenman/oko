@@ -72,7 +72,6 @@ class ReplyPreview(BaseModel):
 @dataclass(frozen=True)
 class Material:
     title: str
-    text: str
     full: bool = True
     reason: str = ''
     members: tuple[int, ...] = ()
@@ -80,7 +79,6 @@ class Material:
     collection_error: 'SourceError | None' = None
     description: str = ''
     source_manifest: SourceManifest | None = None
-    reply_preview: ReplyPreview | None = None
     adapter_content: 'PublicationContent | None' = None
 
 
