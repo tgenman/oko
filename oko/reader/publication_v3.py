@@ -11,7 +11,8 @@ from oko.application.reader import ReaderApplication
 from oko.reader.api_v3 import no_query
 from oko.reader.generated import models as wire
 from oko.reader import snapshots as facts, projection_v3 as project
-from oko.reader.reading_v3 import identity, missing, completeness, saved_filter, theses_parts
+from pydantic import TypeAdapter
+from oko.reader.reading_v3 import identity, missing, completeness, provenance
 
 
 def register(app: FastAPI, runtime: ReaderApplication) -> None:
@@ -40,15 +41,29 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
                 source = wire.SourceReference(wire.DemoSourceReference(kind='demo', feed_id=fid, source_url=url))
             else:
                 source = wire.SourceReference(wire.RssSourceReference(kind='rss', feed_id=fid, source_url=url))
-            filtered = saved_filter(runtime, item, material.filter if isinstance(material.filter, facts.Filter) else None)
-            summarized = theses_parts(material.theses if isinstance(material.theses, facts.Summary) else None,
-                material.provenance if isinstance(material.provenance, (facts.CodexProvenance, facts.LocalProvenance, facts.UnknownProvenance)) else None,
-                material.ai if isinstance(material.ai, facts.AI) else None, runtime.processing_wait(item, 'theses'))
+            filtered = material.filter if isinstance(material.filter, facts.Filter) else None
+            summary = material.theses if isinstance(material.theses, facts.Summary) else None
+            ai = material.ai if isinstance(material.ai, facts.AI) else None
+            saved_origin = current.provenance(item, 'filter') if filtered and filtered.status == 'done' else None
+            origin_type = facts.CodexProvenance | facts.LocalProvenance | facts.UnknownProvenance
+            filter_origin = TypeAdapter(origin_type).validate_python(saved_origin) if saved_origin else None
+            summary_origin = material.provenance if isinstance(material.provenance, (facts.CodexProvenance, facts.LocalProvenance, facts.UnknownProvenance)) else None
+            def state(status: str, message: str | None, ready: bool) -> str:
+                if ready: return 'ready'
+                if status == 'running': return 'processing'
+                if message: return 'error'
+                return 'disabled' if status == 'off' else 'pending'
+            filter_message = filtered.error if filtered and isinstance(filtered.error, str) else None
+            filter_ready = bool(filtered and filtered.status == 'done')
+            filter_status = state(filtered.status if filtered else 'off', filter_message, filter_ready)
+            summary_status = state(ai.status if ai else 'off', ai.error if ai else None, bool(ai and ai.status == 'done' and summary))
+            filter_result = dict(hidden=filtered.hidden, reason=filtered.reason, removed=filtered.removed, provenance=provenance(filter_origin).model_dump(mode='json')) if filtered and filter_ready else None
+            summary_result = dict(points=[point.text for point in summary.points], references=[[dict(material_id=ref.id, source_url=ref.url) for ref in point.sources] for point in summary.points], provenance=provenance(summary_origin).model_dump(mode='json')) if summary else None
             value: dict[str, Any] = dict(id=material.id, title=material.title, feed_id=material.feed_id,
                 published_at=project.timestamp(material.published).root if material.published_known is not False else None,
-                source_url=material.url, source_position=material.source_order if isinstance(material.source_order, int) else None,
-                source=source.model_dump(mode='json'), originals=material.originals is not False,
-                filter=filtered.model_dump(mode='json'), theses=summarized.model_dump(mode='json'))
+                source_url=material.url, source=source.model_dump(mode='json'),
+                filter=dict(state=filter_status, result=filter_result, error=filter_message if filter_status=='error' else None),
+                theses=dict(state=summary_status, result=summary_result, error=ai.error if ai and summary_status=='error' else None))
             value['availability'] = 'available' if material.complete else 'pending'
             content: dict[str, Any] = {'loading': material.loading is not False}
             if material.complete:
@@ -69,27 +84,21 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
         original=content.get('text','')
         filtered=value['filter']
         summarized=value['theses']
-        def state(part: dict[str, Any]) -> str:
-            attempt=part['attempt']['state']
-            if attempt=='running':return 'processing'
-            if part.get('diagnostic_message') and attempt!='ready':return 'error'
-            return {'disabled':'disabled','queued':'pending','cancelled':'pending','waiting':'pending','running':'processing','ready':'ready'}[attempt]
-        f=filtered.get('result')
-        summary=summarized.get('result')
+        f=filtered['result']
+        summary=summarized['result']
         attachments=content.get('attachments',[])
         images=content.get('images',[])
-        media=[dict(id=url.rsplit('/',1)[-1],kind='image',url=url,mime=None,role='image') for url in images]
-        media.extend(dict(id=a['url'].rsplit('/',1)[-1],kind=a['kind'],url=a['url'],mime=a['mime'],role='attachment') for a in attachments)
+        media=[dict(kind='image',url=url,mime=None,role='image') for url in images]
+        media.extend(dict(kind=a['kind'],url=a['url'],mime=a['mime'],role='attachment') for a in attachments)
         body=dict(id=value['id'],title=value['title'],feed_id=value['feed_id'],published_at=value['published_at'],
-            source_url=value['source_url'],text=original,source=value['source'],source_position=value['source_position'],
-            originals=value['originals'],availability=value['availability'],
+            source_url=value['source_url'],text=original,source=value['source'],availability=value['availability'],
             description=content.get('description',''),revision_id=content.get('revision_id'),
             completeness=content.get('completeness'),loading=content.get('loading',False),
             changed=content.get('changed',False),source_deleted=content.get('source_deleted',False),
             linked_content=content.get('linked_content'),reply_preview=content.get('reply_preview'),
             post_web_unavailable=content.get('post_web_unavailable',False),external_attachments=content.get('external_attachments',[]),
-            filter=dict(state=state(filtered),result=dict(hidden=f['hidden'],reason=f['reason'],text=content.get('display_text',original),removed=f['removed'],provenance=f['provenance']) if f else None,error=filtered.get('diagnostic_message') if state(filtered)=='error' else None),
-            theses=dict(state=state(summarized),result=dict(points=[p['text'] for p in summary['points']],references=[p['references'] for p in summary['points']],provenance=summary['provenance']) if summary else None,error=summarized.get('diagnostic_message') if state(summarized)=='error' else None),
+            filter=dict(state=filtered['state'],result=dict(**f,text=content.get('display_text',original)) if f else None,error=filtered['error']),
+            theses=summarized,
             media=media)
         body=wire.PublicationResponse.model_validate(body).model_dump(mode='json')
         encoded=json.dumps(body,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()

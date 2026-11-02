@@ -39,6 +39,16 @@ declare global {
 }
 
 // Synthetic source snapshots used only by the fixture adapter.
-type SyntheticCommon = Pick<Wire.PublicationResponse, 'id' | 'title' | 'feed_id' | 'published_at' | 'source_url' | 'source' | 'source_position' | 'originals'> & {filter: Wire.FilterState; theses: Wire.ThesesState};
+type SyntheticCommon = Pick<Wire.PublicationResponse, 'id' | 'title' | 'feed_id' | 'published_at' | 'source_url' | 'source'> & {source_position: number | null; originals: boolean; filter: Wire.FilterReadyState | Wire.FilterAttemptState; theses: Wire.ThesesReadyState | Wire.ThesesAttemptState};
 export type SyntheticCard = SyntheticCommon & ({availability: 'pending'; loading: boolean} | {availability: 'available'; loading: boolean; changed: boolean; images: string[]; attachments: Wire.Attachment[]; post_web_unavailable?: boolean; external_attachment_kinds?: string[]});
-export type SyntheticOpened = SyntheticCommon & ({availability: 'pending'; content: Wire.PendingPublicationContent} | {availability: 'available'; content: Wire.AvailablePublicationContent});
+export type SyntheticOpened = SyntheticCommon & ({availability: 'pending'; content: {availability: 'pending'; loading: boolean}} | {availability: 'available'; content: SyntheticAvailableContent});
+
+// Historical source snapshots are fixture inputs, not public HTTP responses.
+type SyntheticAvailableContent = {
+  availability: 'available'; text: string; display_text: string; description: string;
+  revision_id: string; version: number; completeness: Wire.ContentCompleteness;
+  loading: boolean; changed: boolean; source_deleted: boolean;
+  linked_content?: Wire.LinkedContent | null; reply_preview: Wire.ReplyPreview | null;
+  post_web_unavailable?: boolean; external_attachments?: Wire.ExternalAttachment[];
+  images: string[]; attachments: Wire.Attachment[];
+};

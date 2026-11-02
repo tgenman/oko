@@ -18,7 +18,12 @@ def test_running_retry_takes_precedence_over_previous_processing_error(tmp_path)
             assert fetch and fetch.kind=='fetch'
             save_material(store,fetch,Material('Synthetic','Original text',captions='available'))
         client.portal.call(prepare)
-        assert client.get('/api/v3/publication/'+items[0]).status_code==200
+        response = client.get('/api/v3/publication/'+items[0])
+        assert response.status_code == 200
+        publication = response.json()
+        assert 'source_position' not in publication and 'originals' not in publication
+        assert all('id' not in media for media in publication['media'])
+        assert client.get('/api/v3/publication/'+items[0], headers={'If-None-Match': response.headers['etag']}).status_code == 304
         def fail():
             store=app.state.host.require_store()
             reconcile(store,'theses')
