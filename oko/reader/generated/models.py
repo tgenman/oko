@@ -1242,7 +1242,6 @@ class WaitingReason(
             "storage_unavailable",
             "client_presence_required",
             "retry_scheduled",
-            "telegram_read_frontier",
         ]
     ]
 ):
@@ -1257,7 +1256,6 @@ class WaitingReason(
         "storage_unavailable",
         "client_presence_required",
         "retry_scheduled",
-        "telegram_read_frontier",
     ] = Field(..., examples=["processor_unavailable"])
 
 
@@ -2443,16 +2441,6 @@ class TelegramProfileUnconfigured(WireModel):
     model_config = ConfigDict(extra="forbid")
     role: TelegramRole
     state: Literal["unconfigured"]
-
-
-class TelegramReadState(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    confirmed: TelegramMessageId | None
-    error: StrictStr | None
-    feed_id: FeedId
-    initial: TelegramMessageId | None
-    pending: StrictInt = Field(..., ge=0, le=9007199254740991)
-    waiting: WaitingReason | None
 
 
 class TelegramSourceReference(WireModel):
@@ -3791,7 +3779,6 @@ class RuntimeStatus(WireModel):
     ready_sources: StrictInt = Field(..., ge=0, le=9007199254740991)
     runtime_state: Literal["running", "disabled", "stopping", "stopped", "unavailable"]
     sources: list[SourceState]
-    telegram_reads: list[TelegramReadState]
     total_sources: StrictInt = Field(..., ge=0, le=9007199254740991)
     viewed_ids: list[MaterialId]
     work: list[WorkEntry]

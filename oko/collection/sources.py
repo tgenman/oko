@@ -80,8 +80,7 @@ class Sources:
                 assert access.username is not None
                 web_type=TelegramWebSource
                 source = previous if type(previous) is web_type else web_type(
-                    WebTelegram(access.username, self._telegram_transport), '', 0, config.initial_days, access.username,
-                    http_transport=self._telegram_transport)
+                    WebTelegram(access.username, self._telegram_transport), config.initial_days, access.username)
             elif config.transport == 'rss' and self._rss_enabled:
                 source_type = RSSAdapterSource
                 source = previous if type(previous) is source_type else source_type(config.url, config.initial_days, self._publication_transport)

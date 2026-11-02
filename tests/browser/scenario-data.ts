@@ -989,7 +989,6 @@ export type Status = {
     /**
      * Telegram Reads
      */
-    telegram_reads?: Array<TelegramRead>;
     /**
      * Total Sources
      */
@@ -1091,36 +1090,6 @@ export type Summary = {
      * Points
      */
     points: Array<Point>;
-};
-
-/**
- * TelegramRead
- */
-export type TelegramRead = {
-    /**
-     * Confirmed
-     */
-    confirmed: number;
-    /**
-     * Error
-     */
-    error: string;
-    /**
-     * Feed Id
-     */
-    feed_id: string;
-    /**
-     * Initial
-     */
-    initial: number | null;
-    /**
-     * Pending
-     */
-    pending: number;
-    /**
-     * Waiting
-     */
-    waiting: string;
 };
 
 /**

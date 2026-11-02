@@ -132,7 +132,7 @@ class TelegramAccess:
                     raise TelegramConflict('source_identity_conflict', dict(feed_id=feed), 'Сохранённый username принадлежит другому peer')
         return owners
 
-    def connect(self, binding: dict[str, Any], info: dict[str, Any], source: str, folder: str, history: Any, auto_read: bool, subscriptions: Any) -> dict[str, Any]:
+    def connect(self, binding: dict[str, Any], info: dict[str, Any], source: str, folder: str, history: Any, subscriptions: Any) -> dict[str, Any]:
         with self.db:
             begin_write(self.db)
             claims = self.claims(info)
@@ -160,8 +160,7 @@ class TelegramAccess:
         return dict(existing_feeds=[dict(feed_id=feed, title=expect_row(self.db.execute('SELECT title FROM feeds WHERE id = %s', (feed,)).fetchone())[0], access=self.binding(feed)) for feed in feeds])
 
 
-    def change_access(self, feed: str, binding: dict[str,Any], info: dict[str,Any],
-                      auto_read: bool | None, subscriptions: Any) -> dict[str,Any]:
+    def change_access(self, feed: str, binding: dict[str,Any], info: dict[str,Any], subscriptions: Any) -> dict[str,Any]:
         """Apply verified channel access inside Runtime's acceptance transaction."""
         subscriptions.check_owner('feed',feed)
         row=expect_row(self.db.execute('SELECT kind,transport,connection,telegram_peer,telegram_account,auto_read FROM feeds WHERE id = %s',(feed,)).fetchone())

@@ -165,7 +165,7 @@ class ReaderApplication:
         source_states = self._store.source_statuses() if self._store else []
         names = {f['id']: f['title'] for f in self._store.subscriptions.feeds()} if self._store else {}
         source_states = [dict(s, title=names.get(s['feed_id'], s['feed_id']), changes=self._source_description(s['feed_id'])) for s in source_states if s['feed_id'] in self._sources]
-        return dict(**state, initial_histories=[dict(feed_id=f['id'], **f['initial_history']) for f in self._store.subscriptions.feeds() if f['initial_history']] if self._store else [], telegram_reads=[], sources=source_states, error=self._error,
+        return dict(**state, initial_histories=[dict(feed_id=f['id'], **f['initial_history']) for f in self._store.subscriptions.feeds() if f['initial_history']] if self._store else [], sources=source_states, error=self._error,
                     ready_sources=self._store.ready_sources(list(self._sources)) if self._store and not self.stopped else 0,
                     total_sources=len(self._sources))
 
@@ -618,7 +618,7 @@ class ReaderApplication:
                     raise TelegramConflict('source_identity_conflict',dict(feed_id=feed_id),'Привязка изменилась во время проверки; повторите действие')
                 try:
                     with transaction(current.db):
-                        result=self.connections.change_access(feed_id,binding,info,None)
+                        result=self.connections.change_access(feed_id,binding,info)
                         self.jobs.change_adapter(feed_id)
                         self.jobs.invalidate({feed_id})
                 except INTEGRITY_ERRORS:
@@ -627,7 +627,7 @@ class ReaderApplication:
                 self._sources.pop(feed_id,None)
             else:
                 with transaction(current.db):
-                    result = self.connections.connect(binding, info, source, folder, history, False)
+                    result = self.connections.connect(binding, info, source, folder, history)
             self._sync_sources()
             return result
 

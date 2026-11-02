@@ -59,22 +59,20 @@ class Store:
     def is_integrity_failure(error: BaseException) -> bool:
         return isinstance(error, INTEGRITY_ERRORS)
 
-    def connect_telegram(self, binding: dict[str,Any], info: dict[str,Any], source: str, folder: str, history: InitialHistory | None, auto_read: bool) -> dict[str,Any]:
+    def connect_telegram(self, binding: dict[str,Any], info: dict[str,Any], source: str, folder: str, history: InitialHistory | None) -> dict[str,Any]:
         boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
         with boundary:
             membership_graph.lock_graph(self.db)
-            result = self.subscriptions.telegram.connect(binding,info,source,folder,history,auto_read,self.subscriptions)
+            result = self.subscriptions.telegram.connect(binding,info,source,folder,history,self.subscriptions)
             self.problems.sync_codex_feed_added(result['id'], self.wall_clock())
             return result
 
-    def change_telegram_access(self, feed: str, binding: dict[str,Any], info: dict[str,Any],
-                               auto_read: bool | None) -> dict[str,Any]:
+    def change_telegram_access(self, feed: str, binding: dict[str,Any], info: dict[str,Any]) -> dict[str,Any]:
         boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
         with boundary:
             begin_write(self.db)
             membership_graph.lock_graph(self.db)
-            previous=self.subscriptions.telegram.binding(feed)
-            result=self.subscriptions.telegram.change_access(feed,binding,info,auto_read,self.subscriptions)
+            result=self.subscriptions.telegram.change_access(feed,binding,info,self.subscriptions)
             self.publications.configure_feed(feed)
             self.publications.changed_adapter(feed)
         return result
@@ -240,8 +238,13 @@ class Store:
         # No uncommitted publication/file output is promoted on restart.
         staging=self.root/'staging'
         for path in staging.iterdir():
-            if path.name not in ('_media','_telegram'):
-                shutil.rmtree(path) if path.is_dir() else path.unlink()
+            if path.name != '_media':
+                if path.is_symlink():
+                    path.unlink()
+                elif path.is_dir():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink()
 
 
     def ensure_demo(self) -> None:
@@ -789,7 +792,7 @@ class Store:
             # the completed archive even when it has no problems.
             condition = """jobs.id IN (SELECT id FROM jobs WHERE status IN ('pending','running') OR error IS NOT NULL
                 UNION SELECT id FROM jobs WHERE problem_code IS NOT NULL OR error IS NOT NULL)"""
-        rows = self.db.execute(f"SELECT jobs . kind , jobs . status , jobs . problem_code , count ( * ) AS count , CASE WHEN jobs . kind IN ( 'discover' , 'read' , 'feed-delete' ) THEN NULLIF ( jobs . item , '' ) WHEN jobs . kind = 'download_media' THEN ( SELECT {owner_expr('i')} FROM media_files m JOIN publications i ON i . id = m . publication_id WHERE m . id = jobs . item ) ELSE {owner_expr('items')} END AS feed , min ( jobs . next ) AS next , sum ( CASE WHEN jobs . error IS NOT NULL THEN 1 ELSE 0 END ) AS errors FROM jobs LEFT JOIN publications items ON items . id = jobs . item WHERE {condition} GROUP BY jobs . kind , jobs . status , jobs . problem_code , feed ORDER BY min ( jobs . id )").fetchall()
+        rows = self.db.execute(f"SELECT jobs . kind , jobs . status , jobs . problem_code , count ( * ) AS count , CASE WHEN jobs . kind IN ( 'discover' , 'feed-delete' ) THEN NULLIF ( jobs . item , '' ) WHEN jobs . kind = 'download_media' THEN ( SELECT {owner_expr('i')} FROM media_files m JOIN publications i ON i . id = m . publication_id WHERE m . id = jobs . item ) ELSE {owner_expr('items')} END AS feed , min ( jobs . next ) AS next , sum ( CASE WHEN jobs . error IS NOT NULL THEN 1 ELSE 0 END ) AS errors FROM jobs LEFT JOIN publications items ON items . id = jobs . item WHERE {condition} GROUP BY jobs . kind , jobs . status , jobs . problem_code , feed ORDER BY min ( jobs . id )").fetchall()
         now, wall = self.clock(), self.wall_clock()
         return [WorkSummary(row['kind'],row['status'],row['feed'],row['count'],
                     row['problem_code'] or (row['kind']+'-failed' if row['errors'] else None),

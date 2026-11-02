@@ -190,8 +190,6 @@ def work(jobs: list['WorkSummary']) -> list[wire.WorkEntry]:
             result.append(wire.WorkEntry(wire.WorkProcessing(phase='processing',operation='filter' if job.kind=='filter' else 'theses',progress=progress)))
         elif job.kind in ('delete','feed-delete'):
             result.append(wire.WorkEntry(wire.WorkDeleting(phase='deleting',feed_id=feed,progress=progress)))
-        elif job.kind=='read':
-            result.append(wire.WorkEntry(wire.WorkWaiting(phase='waiting',reason=wire.WaitingReason('telegram_read_frontier'),retry_at=None)))
         else:
             result.append(wire.WorkEntry(wire.WorkCollecting(phase='collecting',feed_id=feed,progress=progress)))
     return result or [wire.WorkEntry(wire.WorkIdle(phase='idle'))]

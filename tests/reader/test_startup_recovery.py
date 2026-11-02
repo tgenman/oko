@@ -161,3 +161,36 @@ def test_background_reconciliation_failure_closes_work_admission_and_can_stop(po
             assert process.wait(timeout=3) == 0
     finally:
         cleanup(process)
+
+
+def test_startup_removes_owned_obsolete_telegram_staging_only(tmp_path, postgres_url):
+    from tests.support.storage import Store
+    root = tmp_path/'library'
+    old = root/'staging'/'_telegram'
+    old.mkdir(parents=True)
+    (old/'media.bin').write_bytes(b'synthetic temporary media')
+    session = tmp_path/'outside.session'
+    session.write_bytes(b'external session')
+    store = Store(root, lambda _: None, database_url=postgres_url)
+    try:
+        assert not old.exists()
+        assert session.read_bytes() == b'external session'
+    finally:
+        store.db.close()
+
+
+def test_obsolete_telegram_staging_symlink_never_removes_external_files(tmp_path, postgres_url):
+    from tests.support.storage import Store
+    root = tmp_path/'library'
+    staging = root/'staging'
+    staging.mkdir(parents=True)
+    outside = tmp_path/'outside'
+    outside.mkdir()
+    (outside/'session').write_bytes(b'external session')
+    (staging/'_telegram').symlink_to(outside, target_is_directory=True)
+    store = Store(root, lambda _: None, database_url=postgres_url)
+    try:
+        assert not (staging/'_telegram').exists()
+        assert (outside/'session').read_bytes() == b'external session'
+    finally:
+        store.db.close()

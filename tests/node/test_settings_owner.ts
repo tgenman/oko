@@ -6,7 +6,7 @@ import {createReaderApi} from '../../frontend/src/api/reader';
 import type {CommandContext,EffectiveSettingsSnapshot,EffectiveSettingsValues,RuntimeStatus,SettingsPatch} from '../../frontend/src/api/generated/types.gen';
 
 function deferred(){let resolve!:()=>void;const promise=new Promise<void>(ready=>{resolve=ready;});return {promise,resolve};}
-const status:RuntimeStatus={api_version:'3.0.0',runtime_state:'running',work_allowed:true,active_client_sessions:1,lifetime:{kind:'explicit'},initial_histories:[],sources:[],ready_sources:0,total_sources:0,work:[{phase:'idle'}],viewed_ids:[],telegram_reads:[],diagnostic_count:0,diagnostic_persistence_error:null,problems:{current:[],recent:[],count:0,updated_at:'2026-10-22T00:00:00Z'},youtube:{mode:'direct',address:'',has_password:false,has_username:false,admission:'ready',retry_at:null,strikes:0,reason:null}};
+const status:RuntimeStatus={api_version:'3.0.0',runtime_state:'running',work_allowed:true,active_client_sessions:1,lifetime:{kind:'explicit'},initial_histories:[],sources:[],ready_sources:0,total_sources:0,work:[{phase:'idle'}],viewed_ids:[],diagnostic_count:0,diagnostic_persistence_error:null,problems:{current:[],recent:[],count:0,updated_at:'2026-10-22T00:00:00Z'},youtube:{mode:'direct',address:'',has_password:false,has_username:false,admission:'ready',retry_at:null,strikes:0,reason:null}};
 function harness(fail=false){
  const patches=new Map<string,SettingsPatch>(),requests:{path:string;body:SettingsPatch}[]=[],contexts:CommandContext[]=[],discarded:string[]=[];
  const sent=deferred(),release=deferred();

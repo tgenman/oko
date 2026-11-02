@@ -1484,7 +1484,6 @@ paths:
                   strikes: 0
                   reason: null
                 initial_histories: []
-                telegram_reads: []
                 problems:
                   current: []
                   recent: []
@@ -12828,7 +12827,6 @@ components:
       - storage_unavailable
       - client_presence_required
       - retry_scheduled
-      - telegram_read_frontier
       examples:
       - processor_unavailable
     HistoryDiscovering:
@@ -19428,46 +19426,6 @@ components:
           waiting: '#/components/schemas/WorkWaiting'
       examples:
       - phase: idle
-    TelegramReadState:
-      type: object
-      properties:
-        feed_id:
-          $ref: '#/components/schemas/FeedId'
-        initial:
-          anyOf:
-          - $ref: '#/components/schemas/TelegramMessageId'
-          - type: 'null'
-        confirmed:
-          anyOf:
-          - $ref: '#/components/schemas/TelegramMessageId'
-          - type: 'null'
-        pending:
-          type: integer
-          minimum: 0
-          maximum: 9007199254740991
-        waiting:
-          anyOf:
-          - $ref: '#/components/schemas/WaitingReason'
-          - type: 'null'
-        error:
-          anyOf:
-          - type: string
-          - type: 'null'
-      required:
-      - feed_id
-      - initial
-      - confirmed
-      - pending
-      - waiting
-      - error
-      additionalProperties: false
-      examples:
-      - feed_id: example
-        initial: null
-        confirmed: null
-        pending: 0
-        waiting: null
-        error: null
     RuntimeStatus:
       type: object
       properties:
@@ -19512,10 +19470,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/FeedHistoryState'
-        telegram_reads:
-          type: array
-          items:
-            $ref: '#/components/schemas/TelegramReadState'
         problems:
           $ref: '#/components/schemas/ProblemSnapshot'
         diagnostic_count:
@@ -19542,7 +19496,6 @@ components:
       - total_sources
       - youtube
       - initial_histories
-      - telegram_reads
       - problems
       - diagnostic_count
       - diagnostic_persistence_error
@@ -19569,7 +19522,6 @@ components:
           strikes: 0
           reason: null
         initial_histories: []
-        telegram_reads: []
         problems:
           current: []
           recent: []

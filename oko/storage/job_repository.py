@@ -461,9 +461,9 @@ class JobRepository:
             placeholders = ','.join('%s' for _ in available) or "''"
             dependencies=available if dependency_feeds is None else dependency_feeds
             dependency_keys=','.join('%s' for _ in dependencies) or "''"
-            query += f""" AND kind IN ('delete','feed-delete','discover','read','fetch') AND id IN (WITH allowed AS MATERIALIZED (
+            query += f""" AND kind IN ('delete','feed-delete','discover','fetch') AND id IN (WITH allowed AS MATERIALIZED (
                 SELECT id FROM jobs WHERE status='pending' AND kind IN ('delete','feed-delete')
-                UNION SELECT id FROM jobs WHERE status='pending' AND kind IN ('discover','read') AND item IN ({placeholders})
+                UNION SELECT id FROM jobs WHERE status='pending' AND kind = 'discover' AND item IN ({placeholders})
                 UNION SELECT id FROM jobs WHERE status='pending' AND kind='fetch' AND item IN (
                     SELECT own.id FROM feed_publications owner JOIN publications own ON own.id=owner.publication_id
                         WHERE owner.is_primary AND owner.is_unviewed AND owner.feed_id IN ({placeholders}) AND own.viewed=0

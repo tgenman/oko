@@ -2224,7 +2224,6 @@ export type RuntimeStatus = {
     ready_sources: number;
     runtime_state: 'running' | 'disabled' | 'stopping' | 'stopped' | 'unavailable';
     sources: Array<SourceState>;
-    telegram_reads: Array<TelegramReadState>;
     total_sources: number;
     viewed_ids: Array<MaterialId>;
     work: Array<WorkEntry>;
@@ -2550,15 +2549,6 @@ export type TelegramProfileUnconfigured = {
     state: 'unconfigured';
 };
 
-export type TelegramReadState = {
-    confirmed: TelegramMessageId | null;
-    error: string | null;
-    feed_id: FeedId;
-    initial: TelegramMessageId | null;
-    pending: number;
-    waiting: WaitingReason | null;
-};
-
 export type TelegramRole = 'personal' | 'collection';
 
 export type TelegramSourceReference = {
@@ -2714,7 +2704,7 @@ export type VersionUnavailableErrorDetails = {
     number: number;
 };
 
-export type WaitingReason = 'processor_unavailable' | 'processor_not_configured' | 'public_ai_not_allowed' | 'source_unavailable' | 'youtube_rate_limited' | 'profile_unavailable' | 'storage_unavailable' | 'client_presence_required' | 'retry_scheduled' | 'telegram_read_frontier';
+export type WaitingReason = 'processor_unavailable' | 'processor_not_configured' | 'public_ai_not_allowed' | 'source_unavailable' | 'youtube_rate_limited' | 'profile_unavailable' | 'storage_unavailable' | 'client_presence_required' | 'retry_scheduled';
 
 export type WorkCollecting = {
     feed_id: FeedId | null;

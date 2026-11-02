@@ -25,12 +25,12 @@ class ConnectionService:
         return self._storage().publications.feed(feed)
 
     @repository_access
-    def change_access(self, feed: str, binding: dict[str, Any], info: dict[str, Any], auto_read: bool | None) -> dict[str, Any]:
-        return self._storage().change_telegram_access(feed, binding, info, auto_read)
+    def change_access(self, feed: str, binding: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]:
+        return self._storage().change_telegram_access(feed, binding, info)
 
     @repository_access
-    def connect(self, binding: dict[str, Any], info: dict[str, Any], source: str, folder: str, history: InitialHistory | None, auto_read: bool) -> dict[str, Any]:
-        return self._storage().connect_telegram(binding,info,source,folder,history,auto_read)
+    def connect(self, binding: dict[str, Any], info: dict[str, Any], source: str, folder: str, history: InitialHistory | None) -> dict[str, Any]:
+        return self._storage().connect_telegram(binding,info,source,folder,history)
 
     @repository_access
     def configure_processor(self, config: ProcessorConfig) -> bool:

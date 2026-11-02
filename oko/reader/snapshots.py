@@ -200,15 +200,6 @@ class SourceStatus(WireModel):
     gap: StrictStr | None | MISSING = Field(default=MISSING, title='Gap')
     title: StrictStr = Field(..., title='Title')
 
-class TelegramRead(WireModel):
-    model_config = ConfigDict(extra='forbid')
-    confirmed: StrictInt = Field(..., title='Confirmed')
-    error: StrictStr = Field(..., title='Error')
-    feed_id: StrictStr = Field(..., title='Feed Id')
-    initial: StrictInt | None = Field(..., title='Initial')
-    pending: StrictInt = Field(..., title='Pending')
-    waiting: StrictStr = Field(..., title='Waiting')
-
 class UnknownProvenance(WireModel):
     model_config = ConfigDict(extra='forbid')
     model: None = Field(..., title='Model')
@@ -330,7 +321,6 @@ class Status(WireModel):
     problems: ProblemSnapshot | MISSING = MISSING
     ready_sources: StrictInt = Field(..., title='Ready Sources')
     sources: list[SourceStatus] = Field(..., title='Sources')
-    telegram_reads: list[TelegramRead] | MISSING = Field(default=MISSING, title='Telegram Reads')
     total_sources: StrictInt = Field(..., title='Total Sources')
     viewed_ids: list[StrictStr] | MISSING = Field(default=MISSING, title='Viewed Ids')
     youtube: YouTube | None | MISSING = MISSING
