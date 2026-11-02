@@ -32,7 +32,6 @@ if TYPE_CHECKING:
 @dataclass
 class DiscoveryProjection:
     item: str
-    source_id: str
     delete_problem_job: int | None = None
     delete_problem_children: tuple[str,...] = ()
     fetch_problem_job: int | None = None
@@ -127,9 +126,8 @@ class Publications:
             self.store.incomplete_draft.mark_materials([item])
         if row['url'] != ref.url:
             status_changed(self.store.db)
-        self.store.db.execute('UPDATE publications SET platform = %s , external_id = %s , url = %s , published_at = %s , discovered_at = COALESCE ( discovered_at , %s ) WHERE id = %s',
-            (ref.key.platform.value, ref.key.external_id, ref.url, row['published'] if row['published_known'] else None,
-             self.store.wall_clock(), item))
+        self.store.db.execute('UPDATE publications SET platform = %s , external_id = %s , url = %s WHERE id = %s',
+            (ref.key.platform.value, ref.key.external_id, ref.url, item))
         if row['url'] != ref.url:
             self.store.jobs.invalidate_source_metadata_inputs(item)
 
@@ -151,23 +149,22 @@ class Publications:
                 raise ValueError('Adapter did not return a publication external key')
             if publication.id in plans:
                 continue
-            source_id = feed+':'+publication.id
             proposed_item=str(uuid4())
-            checked = self.store.db.execute("""SELECT id,source_id,ARRAY[]::bigint[] AS source_jobs FROM publications
-                WHERE (platform=%s AND external_id=%s) OR source_id=%s
-                UNION ALL SELECT NULL::text,NULL::text,ARRAY(SELECT id FROM jobs WHERE item=%s AND problem_code LIKE 'source-%%')""",
-                (ref.key.platform.value,ref.key.external_id,source_id,proposed_item)).fetchall()
+            checked = self.store.db.execute("""SELECT id,ARRAY[]::bigint[] AS source_jobs FROM publications
+                WHERE platform=%s AND external_id=%s
+                UNION ALL SELECT NULL::text,ARRAY(SELECT id FROM jobs WHERE item=%s AND problem_code LIKE 'source-%%')""",
+                (ref.key.platform.value,ref.key.external_id,proposed_item)).fetchall()
             new_source_jobs=next(row['source_jobs'] for row in checked if row['id'] is None)
             existing=[row for row in checked if row['id'] is not None]
             if not existing and publication.members:
                 placeholders = ','.join('%s' for _ in publication.members)
-                existing = list(self.store.db.execute(f'SELECT DISTINCT i . id , i . source_id FROM ({owned_ids("= %s")}) owner JOIN publications i ON i.id=owner.id CROSS JOIN jsonb_array_elements_text(i.members::jsonb) m(value) WHERE CAST ( m . value AS BIGINT ) IN ( {placeholders} )', (feed, feed, *publication.members)).fetchall())
+                existing = list(self.store.db.execute(f'SELECT DISTINCT i . id FROM ({owned_ids("= %s")}) owner JOIN publications i ON i.id=owner.id CROSS JOIN jsonb_array_elements_text(i.members::jsonb) m(value) WHERE CAST ( m . value AS BIGINT ) IN ( {placeholders} )', (feed, feed, *publication.members)).fetchall())
             if len(existing)>1:
                 raise ValueError('Conflicting publication identity or Telegram album membership')
             if publication.observed_only and not existing:
                 continue
             item=existing[0]['id'] if existing else proposed_item
-            plan=DiscoveryProjection(item,existing[0]['source_id'] if existing else source_id)
+            plan=DiscoveryProjection(item)
             if not existing:plan.new_source_jobs=tuple(new_source_jobs)
             current=self.store.db.execute("""SELECT viewed,members,complete,
                 EXISTS (SELECT 1 FROM jobs j WHERE j.item=publications.id AND j.problem_code LIKE 'source-%%') OR EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=publications.id AND j.problem_code LIKE 'source-%%') OR EXISTS (SELECT 1 FROM publication_links l JOIN jobs j ON j.item=l.target_publication_id AND j.problem_code LIKE 'source-%%' WHERE l.source_publication_id=publications.id) OR EXISTS (SELECT 1 FROM publication_links l JOIN media_files m ON m.publication_id=l.target_publication_id JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE l.source_publication_id=publications.id AND j.problem_code LIKE 'source-%%') AS source_problem_exists,

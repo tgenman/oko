@@ -79,6 +79,7 @@ class StructuredSource:
         publications=[]
         for publication in result.publications:
             self.publications[publication.id]=publication
+            self.publications[self.reference(publication).key.external_id]=publication
             publications.append(replace(publication,adapter_reference=self.reference(publication),
                 teaser=self.describe(publication,publication.teaser) if publication.teaser else None))
         state=json.dumps(dict(synthetic_cursor=result.cursor,history_enroll=[p.id for p in publications],scan_complete=result.continuation is None))

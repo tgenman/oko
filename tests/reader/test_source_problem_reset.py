@@ -17,7 +17,7 @@ def test_release_discards_old_source_history_and_recovers_current_error(tmp_path
     with psycopg.connect(postgres_database_url, autocommit=True) as db:
         migrate(db, previous)
         db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
-        db.execute("INSERT INTO publications(id) VALUES ('p')")
+        db.execute("INSERT INTO publications(id,platform,external_id,published_known,discovered_at) VALUES ('p','other_web','p',0,1)")
         db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
         db.execute("INSERT INTO jobs(kind,item,status,error,problem_code,source_event_owned) VALUES ('fetch','p','failed','network failure','source-network',true)")
         body = dict(code='source-network', operation='producer:status', objects=[dict(kind='material', id='p')],

@@ -7,8 +7,8 @@ def test_saved_result_must_not_use_new_attempt_sources_as_its_provenance(tmp_pat
     store,item,execution,tasks=worker_library(tmp_path,database_url=postgres_url)
     try:
         with transaction(store.db):
-            store.db.execute("""INSERT INTO publications(id,source_id,url,platform,external_id,complete,content,title)
-                SELECT 'linked','linked:linked','https://example.org/linked','other_web','linked',1,content,title FROM publications WHERE id=%s""",(item,))
+            store.db.execute("""INSERT INTO publications(id,url,platform,external_id,complete,content,title,discovered_at)
+                SELECT 'linked','https://example.org/linked','other_web','linked',1,content,title,discovered_at FROM publications WHERE id=%s""",(item,))
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES (%s,'linked')",(item,))
             store.processing.reconcile_accepted_item(item)
         asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))

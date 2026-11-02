@@ -17,8 +17,8 @@ def test_http_does_not_publish_late_summary_after_linked_title_roundtrip(tmp_pat
             def link():
                 store=app.state.host.require_store()
                 with transaction(store.db):
-                    store.db.execute("""INSERT INTO publications(id,source_id,url,platform,external_id,complete,content,title,published_known)
-                        SELECT 'linked','linked:linked','https://example.org/linked','other_web','linked',1,content,'Old title',0 FROM publications WHERE id=%s""",(item,))
+                    store.db.execute("""INSERT INTO publications(id,url,platform,external_id,complete,content,title,discovered_at)
+                        SELECT 'linked','https://example.org/linked','other_web','linked',1,content,'Old title',discovered_at FROM publications WHERE id=%s""",(item,))
                     store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES (%s,'linked')",(item,))
                     store.processing.reconcile_accepted_item(item)
             client.portal.call(link)

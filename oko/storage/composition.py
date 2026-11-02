@@ -47,8 +47,8 @@ class ReadingComposition:
             'feed': 'EXISTS (SELECT 1 FROM feed_publications m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE m.publication_id=i.id AND m.feed_id=%(owner)s)',
             'folder': 'EXISTS (SELECT 1 FROM feed_publications m JOIN feeds owner_feed ON owner_feed.id=m.feed_id WHERE m.publication_id=i.id AND owner_feed.folder_id=%(owner)s)',
         }[scope]
-        selected=f"SELECT i.id, i.published, i.published_known FROM publications i JOIN feeds f ON f.id={owner_expr('i')} WHERE i.viewed=0 AND (%(hidden)s=1 OR i.status IS DISTINCT FROM 'filter_out') AND {membership}"
-        cte=f"WITH selected AS ({selected}), ordered AS (SELECT id, CASE WHEN published_known=0 THEN 1 ELSE 0 END AS missing, CASE WHEN published_known=0 THEN 0 WHEN %(sort)s='oldest' THEN published ELSE -published END AS stamp FROM selected)"
+        selected=f"SELECT i.id, i.published_at FROM publications i JOIN feeds f ON f.id={owner_expr('i')} WHERE i.viewed=0 AND (%(hidden)s=1 OR i.status IS DISTINCT FROM 'filter_out') AND {membership}"
+        cte=f"WITH selected AS ({selected}), ordered AS (SELECT id, CASE WHEN published_at IS NULL THEN 1 ELSE 0 END AS missing, CASE WHEN published_at IS NULL THEN 0 WHEN %(sort)s='oldest' THEN published_at ELSE -published_at END AS stamp FROM selected)"
         args=dict(owner=target.get('feed_id',target.get('folder_id','')),sort=options['sort'],hidden=int(options['show_hidden']),cursor=cursor,limit=limit+1)
         db=self._store.db
         total=expect_row(db.execute(cte+' SELECT count(*) FROM ordered',args).fetchone())[0]

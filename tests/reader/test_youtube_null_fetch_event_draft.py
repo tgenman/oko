@@ -9,7 +9,7 @@ def test_pause_rolls_back_timer_occurrence_and_flags_together(tmp_path,postgres_
         with transaction(store.db):
             store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id) VALUES ('p')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','other_web','p')")
             store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,error) VALUES ('fetch','p','failed','waiting') RETURNING id").fetchone()[0]
         store.problems.recover_youtube_null_fetch()

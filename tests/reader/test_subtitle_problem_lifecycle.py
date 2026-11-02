@@ -7,7 +7,7 @@ def test_success_during_wait_cancels_future_occurrence(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO publications(id,platform) VALUES ('p','youtube')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','youtube','p')")
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','youtube:subtitles','x','f','pending_download')")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('download_media','m','running',1) RETURNING id").fetchone()[0]
             store.youtube.start(100)
@@ -26,7 +26,7 @@ def test_timer_pause_and_reserved_episode_roll_back_atomically(tmp_path,postgres
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO publications(id) VALUES ('p')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','other_web','p')")
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','youtube:subtitles','x','f','pending_download')")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('download_media','m','running',1) RETURNING id").fetchone()[0]
             store.jobs.defer_captions(Job(job,'download_media','m',1),100,10,'waiting')
@@ -51,7 +51,7 @@ def test_event_owned_subtitle_etag_changes_exactly_at_deadline(tmp_path,postgres
         def setup():
             store=app.state.host.require_store()
             with transaction(store.db):
-                store.db.execute("INSERT INTO publications(id,platform) VALUES ('p','youtube')")
+                store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','youtube','p')")
                 store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','youtube:subtitles','x','f','pending_download')")
                 job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('download_media','m','running',1) RETURNING id").fetchone()[0]
                 store.youtube.start(100)
@@ -76,7 +76,7 @@ def test_restart_after_deadline_preserves_reserved_virtual_id(tmp_path,postgres_
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:clock[0])
     try:
         with transaction(store.db):
-            store.db.execute("INSERT INTO publications(id) VALUES ('p')")
+            store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','other_web','p')")
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','youtube:subtitles','x','f','pending_download')")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('download_media','m','running',1) RETURNING id").fetchone()[0]
             store.youtube.start(100)

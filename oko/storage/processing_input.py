@@ -58,13 +58,13 @@ def sources(store: 'Store', item: str, kind: str) -> tuple['InputSource', ...]:
         groups.setdefault(block.get('source_publication_id',item),[]).append(block)
     result=[]
     for identity,parts in groups.items():
-        record=expect_row(store.db.execute('SELECT title , url , published FROM publications WHERE id = %s',(identity,)).fetchone())
+        record=expect_row(store.db.execute('SELECT title , url , published_at FROM publications WHERE id = %s',(identity,)).fetchone())
         text='\n\n'.join(part['text'] for part in parts if part['type']=='text')
         quotes=[part for part in parts if part['type']=='quote']
         quote=ReplyPreview(text='\n\n'.join(part['text'] for part in quotes),
             author=quotes[0].get('author'),source_url=quotes[0].get('source_url')) if quotes else None
         result.append(InputSource(id=identity,version=digest(parts),url=record['url'],title=record['title'],
-                                  text=text,published=record['published'] or 0.,reply_preview=quote))
+                                  text=text,published=record['published_at'] or 0.,reply_preview=quote))
     return tuple(result)
 
 

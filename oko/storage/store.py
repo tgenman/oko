@@ -334,14 +334,12 @@ class Store:
                     publication_links.capture_processing_problems(self,effects,{item})
                 if plan.processing_problem_children:
                     publication_links.capture_processing_problems(self,effects,set(plan.processing_problem_children))
-                item_status_changed |= bool(self.db.execute('INSERT INTO publications ( id , source_id , url , published , members , published_known ) VALUES ( %s , %s , %s , %s , %s , %s ) ON CONFLICT DO NOTHING',
-                    (item,plan.source_id,publication.url,publication.published,json.dumps(publication.members),publication.published_known)).rowcount)
+                if publication.adapter_reference is None:
+                    raise ValueError('Adapter did not return a publication external key')
+                ref = publication.adapter_reference
+                item_status_changed |= bool(self.db.execute('INSERT INTO publications (id, url, members, platform, external_id, published_at, discovered_at) VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING',
+                    (item, publication.url, json.dumps(publication.members), ref.key.platform.value, ref.key.external_id, publication.published if publication.published_known else None, self.wall_clock())).rowcount)
                 membership=membership_graph.add(self.db,feed,item)
-                # A link-only placeholder has no source-local identity. Once
-                # observed through a feed, retain the adapter's real identity.
-                if plan.source_id == 'linked:'+item:
-                    self.db.execute('UPDATE publications SET source_id=%s WHERE id=%s AND source_id=%s',
-                                    (feed+':'+publication.id,item,plan.source_id))
                 if membership:
                     added_memberships.append(item)
                     saved_items.add(item)
@@ -360,8 +358,8 @@ class Store:
                         completed_links.add(item)
                     saved_items.add(item)
                 row=expect_row(self.db.execute('SELECT * FROM publications WHERE id = %s',(item,)).fetchone())
-                if publication.published_known and not row['published_known']:
-                    self.db.execute('UPDATE publications SET published = %s , published_known = 1 , published_at = %s WHERE id = %s',(publication.published,publication.published,item))
+                if publication.published_known and row['published_at'] is None:
+                    self.db.execute('UPDATE publications SET published_at = %s WHERE id = %s',(publication.published,item))
                     item_status_changed = True
                 if publication.id in enrolled:
                     history_items.append(item)
@@ -487,13 +485,13 @@ class Store:
             refs = tuple(MediaReference(m['resource_key'],m['source_locator'],m['name'],m['mime_type'],m['size_bytes'],m['resource_identity'])
                 for m in self.db.execute('SELECT * FROM media_files WHERE publication_id = %s',(item,)) if m['source_locator'])
             last_description = PublicationContent(PublicationMetadata(ExternalReference(ExternalKey(Platform(row['platform']),row['external_id']),row['url']),
-                header.get('title',''),datetime.fromtimestamp(row['published'],timezone.utc) if row['published_known'] else None),media=refs,
+                header.get('title',''),datetime.fromtimestamp(row['published_at'],timezone.utc) if row['published_at'] is not None else None),media=refs,
                 linked_publications=tuple(ExternalReference(ExternalKey(Platform(target['platform']),target['external_id']),target['url']) for target in self.db.execute('SELECT i . platform , i . external_id , i . url FROM publication_links l JOIN publications i ON i . id = l . target_publication_id WHERE l . source_publication_id = %s',(item,))))
             teaser = Material(header.get('title',''),text,header.get('full',False),header.get('reason',''),
                 members=tuple(json.loads(row['members'])),description=header.get('description',''),
                 source_manifest=SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if header.get('source_manifest') else None,
                 reply_preview=ReplyPreview.model_validate(header['reply_preview']) if header.get('reply_preview') else None,adapter_content=last_description) if row['complete'] else None
-            return Publication(row['source_id'].split(':',1)[1],row['url'],row['published'],teaser,tuple(json.loads(row['members'])),bool(row['published_known']),adapter_reference=last_description.metadata.reference)
+            return Publication(row['external_id'],row['url'],row['published_at'] or 0.,teaser,tuple(json.loads(row['members'])),row['published_at'] is not None,adapter_reference=last_description.metadata.reference)
         return None
 
     def collect_material(self, item: str, material: Material, *, manual: bool = False) -> tuple[SourceError | None,CollectionEffects]:
@@ -756,8 +754,8 @@ class Store:
         """Saved publication facts without reader-specific text projections."""
         item = row['id']
         settings = self.subscriptions.effective('feed', row['feed_id'], details=False)
-        base = dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published'],
-                    published_known=bool(row['published_known']), source_order=row['source_order'],
+        base = dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published_at'] or 0.,
+                    published_known=row['published_at'] is not None, source_order=row['source_order'],
                     members=json.loads(row['members']), complete=bool(row['complete']),
                     originals=settings['effective']['originals']['value'])
         fetch = material_read.jobs(self.db, item).get('fetch')

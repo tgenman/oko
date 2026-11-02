@@ -50,7 +50,7 @@ def card(store: 'Store', identity: str) -> dict[str, Any] | None:
     else:
         hidden=row['status']=='filter_out'
     result: dict[str, Any] = dict(id=identity,feed_id=row['feed_id'],title='Материал загружается',
-        published_at=row['published'] if row['published_known'] else None,
+        published_at=row['published_at'],
         source_url=row['url'],loading=True,changed=False,preview_url=None,hidden=hidden,
         post_web_unavailable=False,external_attachment_kinds=[])
 
