@@ -26,6 +26,7 @@
     "react-dom": "19.3.0"
   },
   "scripts": {
+    "prototype:admin": "node frontend/src/status/admin.prototype.mjs",
     "build": "node --import tsx scripts/build-frontend.mts",
     "dev": "node --import tsx scripts/build-frontend.mts --watch",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.browser-tests.json && tsc -p tsconfig.tooling.json",

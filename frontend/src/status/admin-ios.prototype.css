@@ -1,0 +1,58 @@
+/* Selected A: original overview geometry, iPhone-style client colors and icons. */
+.ap-root.ap-ios {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f2f2f7;
+  color: #1c1c1e;
+}
+.ap-ios .ap-header { background: #f2f2f7f2; border-color: #e5e5ea; }
+.ap-ios .ap-header strong { letter-spacing: -.7px; }
+.ap-ios .ap-header button { background: #fff; border: 0; border-radius: 12px; min-height: 44px; }
+.ap-ios .ap-header .ap-back { background: transparent; color: #007aff; }
+.ap-ios .ap-breadcrumb, .ap-ios .ap-muted { color: #8e8e93; }
+.ap-ios .ap-overview h2 { color: #1c1c1e; }
+.ap-ios .ap-overview :is(.ap-eyebrow,.ap-note) { color: #8e8e93; }
+.ap-ios .ap-command { border-color: #e5e5ea; }
+.ap-ios .ap-overview button { background: #fff; border: 0; color: #007aff; border-radius: 12px; }
+.ap-ios .ap-overview button:hover { background: #e9e9ee; }
+.ap-ios .ap-overview .ap-ios-command { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: flex-start; gap: 9px; height: 48px; padding: 0 15px; color: #1c1c1e; white-space: nowrap; line-height: 1; }
+.ap-ios-command .ap-command-label { flex: 0 0 auto; white-space: nowrap; }
+.ap-ios-command .settings-icon { flex: 0 0 29px; width: 29px; height: 29px; }
+.ap-ios .ap-overview .ap-ios-stop { color: #ff3b30; }
+.ap-ios .ap-badge { background: #e8f7ed; border: 0; color: #248a3d; }
+.ap-ios .ap-badge.paused { background: #e5e5ea; color: #636366; }
+.ap-ios .ap-progress { background: #fff; border: 0; border-radius: 12px; }
+.ap-ios .ap-progress p { color: #8e8e93; }
+.ap-ios .ap-box { background: #fff; border: 0; border-radius: 12px; }
+.ap-ios .ap-line { border-color: #e5e5ea; }
+.ap-ios .ap-section-title > span { background: #fff3df; color: #bd6a00; }
+.ap-ios .ap-overlay { background: #26302755; backdrop-filter: blur(5px); }
+.ap-ios .ap-drawer { background: #f2f2f7; color: #1c1c1e; box-shadow: -10px 0 40px #0001; }
+.ap-ios .ap-drawer h2, .ap-ios .ap-drawer h3 { color: #1c1c1e; }
+.ap-ios .ap-drawer .ap-section-title { border-bottom: 1px solid #e5e5ea; padding-bottom: 16px; }
+.ap-ios .ap-drawer .ap-section-title h2 { font-size: 17px; }
+.ap-ios .ap-drawer button { background: #fff; border: 0; color: #007aff; border-radius: 10px; }
+.ap-ios .ap-drawer .ap-section-title button { background: transparent; }
+.ap-ios .ap-drawer .ap-issue { background: #fff; border: 0; border-radius: 12px; padding: 20px; }
+.ap-ios .ap-drawer details { background: #f2f2f7; }
+.ap-ios .ap-drawer .ap-eyebrow { color: #ff9500; }
+.ap-ios .ap-drawer .ap-line { border-color: #e5e5ea; }
+.ap-ios .ap-drawer .ap-source { border-color: #e5e5ea; background: #fff; }
+.ap-ios .ap-drawer .ap-source.chosen { background: #e7f1ff; }
+.ap-ios .ap-drawer .ap-clear { background: #fff; border-radius: 12px; }
+.ap-ios .ap-text { color: #007aff; }
+.ap-ios .ap-toast { background: #fff; border: 0; color: #1c1c1e; border-radius: 12px; box-shadow: 0 8px 30px #0002; }
+.ap-ios .ap-toast button { background: #f2f2f7; border: 0; color: #8e8e93; }
+.ap-ios .ap-folders { background: #f2f2f7; border-color: #e5e5ea; }
+.ap-ios .ap-card-list, .ap-ios .ap-reading { background: #fff; border-color: #e5e5ea; }
+.ap-ios .ap-card.chosen { background: #e7f1ff; }
+.ap-ios .ap-card, .ap-ios .ap-card-list { border-color: #e5e5ea; }
+.ap-ios .ap-reader h2, .ap-ios .ap-reader h3 { color: #1c1c1e; }
+.ap-ios .ap-reader :is(small,.ap-note,.ap-eyebrow) { color: #636366; }
+.ap-ios .ap-menu { background: #fff; border-color: #e5e5ea; }
+.ap-ios .ap-menu button { color: #007aff; }
+.ap-ios .ap-switcher { background: #252529; }
+.ap-ios .ap-switcher button, .ap-ios .ap-switcher details { background: #3a3a3c; }
+.ap-ios .ap-switcher small { color: #c7c7cc; }
+@media(max-width:720px) {
+  .ap-ios .ap-header .ap-back { font-size: 15px; }
+}
