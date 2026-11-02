@@ -1,7 +1,8 @@
 """Real temporary storage for worker transaction and recovery scenarios."""
 import json
 from tests.support.storage import Store
-from oko.collection.contracts import Publication,Material
+from oko.collection.contracts import Publication
+from tests.support.synthetic_material import material as Material
 from oko.subscriptions.subscriptions import Overrides
 from oko.processing.llamacpp import ProcessorConfig
 from oko.execution import Execution

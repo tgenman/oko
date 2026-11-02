@@ -20,7 +20,12 @@ def group_key(item: str, owner: str | None, content: str) -> str | None:
         if header.get('full',True):return None
         manifest=SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if header.get('source_manifest') else None
         if expected_incomplete(manifest):return None
-        cause=header.get('captions')
+        youtube=data['extra'].get('youtube')
+        if isinstance(youtube,dict):
+            from oko.storage.publication_document import caption_state
+            cause=caption_state(youtube,header)
+        else:
+            cause=header.get('captions')
     except (ValueError,TypeError,KeyError,AttributeError) as exc:
         raise UnknownIncompleteGroup('Unrecognized publication header') from exc
     return 'incomplete:'+owner+':'+(cause if cause in ('missing','error') else item)

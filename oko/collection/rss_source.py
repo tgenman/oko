@@ -10,10 +10,8 @@ from oko.collection.adapter_errors import source_error
 
 
 def material(value: PublicationContent) -> Material:
-    text='\n\n'.join(block.get('text','') for block in value.content.get('blocks',[])
-                     if block['type']=='quote' or block['type']=='text' and block.get('role')=='body')
     external=any(block['type']=='external_media' for block in value.content.get('blocks',[]))
-    return Material(value.metadata.title,text,not value.needs_fetch and not value.media and not external,
+    return Material(value.metadata.title,not value.needs_fetch and not value.media and not external,
         'External embed not saved locally' if external else 'Вложения ещё не загружены' if value.media else '',adapter_content=value)
 
 

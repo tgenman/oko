@@ -90,9 +90,10 @@ def content(post: TelegramPublication, *, linked_descriptions: bool = False) -> 
     blocks: list[dict[str, Any]] = []
     if post.text:
         blocks.append(dict(type='text', role='body', text=post.text))
-    if teaser.reply_preview:
-        blocks.append(dict(type='quote', text=teaser.reply_preview.text,
-            author=teaser.reply_preview.author, source_url=teaser.reply_preview.source_url))
+    reply = teaser.source_manifest.post.get('reply_preview')
+    if isinstance(reply, dict):
+        blocks.append(dict(type='quote', text=reply['text'],
+            author=reply.get('author'), source_url=reply.get('source_url')))
     media = []
     issues = []
     for item, resource in zip(post.media, teaser.source_manifest.resources):

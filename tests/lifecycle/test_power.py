@@ -68,7 +68,8 @@ def test_power_rejects_late_download_and_resumes_interrupted_material(tmp_path):
     import asyncio
     import threading
     import time
-    from oko.collection.contracts import DiscoveryResult, FetchResult, Material, Publication
+    from oko.collection.contracts import DiscoveryResult, FetchResult, Publication
+    from tests.support.synthetic_material import material as Material
     from tests.support.presence import presence
     from tests.support.reader import wait_for
 

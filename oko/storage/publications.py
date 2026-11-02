@@ -222,6 +222,10 @@ class Publications:
         row=self.store.db.execute('SELECT content FROM publications WHERE id = %s',(item,)).fetchone()
         if row and row[0]!='{}':
             content=json.loads(row[0])
+            previous_header=content.get('extra', {}).get('_reader', {})
+            previous_quote=previous_header.get('reply_preview')
+            if previous_quote:
+                header['reply_preview']=previous_quote
             content['extra'].update(_reader=header,_collection_reason=material.reason)
             if material.adapter_content is None:
                 content['extra']['_links']=[dict(platform=row['platform'],external_id=row['external_id'],url=row['url'])
@@ -237,6 +241,13 @@ class Publications:
         value=material.adapter_content
         assert value is not None
         content=deepcopy(value.content)
+        telegram=content.get('extra', {}).get('telegram')
+        if isinstance(telegram, dict) and header.get('source_manifest'):
+            # The mutable source manifest is owned by the saved reader facts;
+            # the adapter copy is an input, not a second persisted snapshot.
+            telegram.pop('manifest', None)
+            telegram.pop('members', None)
+            telegram.pop('description', None)
         media=[]
         identities={}
         known={row['resource_key']:dict(row) for row in self.store.db.execute('SELECT * FROM media_files WHERE publication_id = %s',(item,))}
@@ -286,7 +297,6 @@ class Publications:
                 block.clear()
                 block.update(type='media',role=resource['kind'],ref={'$media':resource['key']})
         if youtube is not None:
-            header['captions']={'available':'available','unavailable':'unavailable','not_requested':'not_requested'}.get(youtube.get('captions'),'error')
             if youtube.get('captions')=='not_requested':
                 for block in content['blocks']:
                     if block.get('role')=='subtitles':
@@ -337,7 +347,8 @@ class Publications:
         links=content['extra'].pop('_links',[])
         links_changed=publication_links.sync(store,item,tuple(ExternalReference(ExternalKey(Platform(ref['platform']),ref['external_id']),ref['url']) for ref in links),effects)
         previous = json.loads(old['content'])
-        same = not links_changed and publication_input.blocks(previous)==publication_input.blocks(content) and previous.get('extra',{}).get('_reader',{}).get('title')==content['extra']['_reader']['title']
+        previous_title=previous.get('extra',{}).get('_reader',{}).get('title',old['title'])
+        same = not links_changed and publication_input.blocks(previous)==publication_input.blocks(content) and previous_title==content['extra']['_reader']['title']
         if 'youtube' in content.get('extra',{}):
             before=previous.get('extra',{}).get('youtube',{})
             after=content['extra']['youtube']
@@ -349,7 +360,7 @@ class Publications:
         source_changed=bool(previous.get('blocks')) and (
             embeds(old_header)!=embeds(content['extra']['_reader']) or
             '\n\n'.join(block['text'] for block in publication_input.blocks(previous))!='\n\n'.join(block['text'] for block in publication_input.blocks(content))
-            or old_header.get('title')!=content['extra']['_reader']['title']
+            or previous_title!=content['extra']['_reader']['title']
             or bool(old_header.get('attachments')) and
                 [block.get('media_id') for block in previous.get('blocks',[]) if block['type']=='media']!=
                 [block.get('media_id') for block in content.get('blocks',[]) if block['type']=='media'])
@@ -374,8 +385,10 @@ class Publications:
         for row in media:
             if row['resource_key']=='youtube:cover' and row['status']=='ready':
                 effects.revalidate[row['id']]=False
+        persisted=deepcopy(content)
+        persisted['extra']['_reader'].pop('title',None)
         store.db.execute('UPDATE publications SET content = %s , media_ids = %s , title = %s , status = %s WHERE id = %s',
-            (json.dumps(content, ensure_ascii=False), json.dumps([r['id'] for r in media]),
+            (json.dumps(persisted, ensure_ascii=False), json.dumps([r['id'] for r in media]),
              content['extra']['_reader']['title'], 'pending_filtering', item))
         if old['title']!=content['extra']['_reader']['title']:
             before_youtube=previous.get('extra',{}).get('youtube',{})
@@ -386,12 +399,12 @@ class Publications:
             store.jobs.invalidate_source_metadata_inputs(item,title=True,preserve_cancelled=title_only)
         from oko.storage.incomplete_index import save_class
         save_class(store.db,item,content)
-        if previous and old['platform'] != 'youtube' and old_header.get('title') != content['extra']['_reader']['title']:
+        if previous and old['platform'] != 'youtube' and previous_title != content['extra']['_reader']['title']:
             metadata_row = expect_row(store.db.execute('SELECT processing_metadata FROM publications WHERE id = %s', (item,)).fetchone())
             metadata = json.loads(metadata_row[0])
             for operation in ('filter', 'summary'):
                 if operation in metadata:
-                    metadata[operation].setdefault('source_title', old_header.get('title'))
+                    metadata[operation].setdefault('source_title', previous_title)
             store.db.execute('UPDATE publications SET processing_metadata=%s WHERE id=%s',
                              (json.dumps(metadata, ensure_ascii=False), item))
         if same and previous:
@@ -409,6 +422,17 @@ class Publications:
         assert row is not None
         content=saved_content(row['content'])
         header=deepcopy(content['extra']['_reader'])
+        header.setdefault('title',row['title'])
+        youtube=content.get('extra', {}).get('youtube')
+        if isinstance(youtube, dict):
+            from oko.storage.publication_document import caption_state
+            header['captions']=caption_state(youtube, header)
+        descriptions=[block['text'] for block in content.get('blocks', []) if block.get('type')=='text' and block.get('role')=='description']
+        if descriptions and 'description' not in header:
+            header['description']='\n\n'.join(descriptions)
+        quote=next((block for block in content.get('blocks', []) if block.get('type')=='quote'), None)
+        if quote is not None and 'reply_preview' not in header:
+            header['reply_preview']={key:quote.get(key) for key in ('text','author','source_url')}
         text='\n\n'.join(b['text'] for b in content.get('blocks',[]) if b['type']=='text' and b['role']=='body')
         return header,text
 

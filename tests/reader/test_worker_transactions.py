@@ -7,7 +7,7 @@ import httpx
 from tests.support.storage import Store
 from oko.storage.transaction import transaction
 from oko.services.collection import CollectionService
-from oko.collection.contracts import Material
+from tests.support.synthetic_material import material as Material
 from tests.support.worker_library import worker_library,workers,pass_worker,saved
 from tests.support.filters import transport
 from tests.support.source import StructuredSource
@@ -382,3 +382,150 @@ def test_failed_delete_problem_follows_job_without_status_read(tmp_path, postgre
         assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s',(problem['id'],)).fetchone()['outcome']=='resolved'
     finally:
         store.db.close()
+
+
+@pytest.mark.parametrize('case',['same', 'changed', 'header_only'])
+def test_legacy_quote_migration_reconciles_saved_processing_after_restart(tmp_path, case):
+    from pathlib import Path
+    import psycopg
+    from tests.support.storage import database_url
+
+    store,item,execution,tasks=worker_library(tmp_path)
+    original=dict(type='quote',text='Original quote',author=None,source_url=None)
+    with store.db:
+        row=store.db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()
+        content=json.loads(row[0])
+        if case != 'header_only':
+            content['blocks'].append(original)
+        store.db.execute('UPDATE publications SET content=%s WHERE id=%s',(json.dumps(content),item))
+        store.processing.reconcile_accepted_item(item)
+    filter_worker,summary_worker=workers(execution,tasks)
+    asyncio.run(pass_worker(filter_worker,tasks))
+    asyncio.run(pass_worker(summary_worker,tasks))
+    assert store.filters.read(item)['status']=='done'
+    assert store.processing.theses.read(item) is not None
+    old_metadata=saved(store,item)['processing_metadata']
+    store.db.close()
+    with psycopg.connect(database_url(tmp_path),autocommit=True) as db:
+        content=json.loads(db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()[0])
+        content['extra']['_reader']['reply_preview']=dict(text='Changed quote' if case == 'changed' else 'Original quote',author=None,source_url=None)
+        db.execute('UPDATE publications SET content=%s WHERE id=%s',(json.dumps(content),item))
+        sql=(Path(__file__).parents[2]/'oko/storage/postgres/096-normalize-publication-content.sql').read_text()
+        db.execute(sql)
+        db.execute((Path(__file__).parents[2]/'oko/storage/postgres/097-normalize-publication-titles.sql').read_text())
+    reopened=Store(tmp_path,lambda _:None)
+    try:
+        reopened.processing.recover()
+        if case != 'same':
+            assert reopened.filters.read(item)['status'] != 'done'
+            assert reopened.processing.theses.read(item) is None
+            assert reopened.db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()[0] == 'pending'
+        else:
+            assert reopened.filters.read(item)['status'] == 'done'
+            assert reopened.processing.theses.read(item) is not None
+            assert saved(reopened,item)['processing_metadata']['filter'] == old_metadata['filter']
+    finally:
+        reopened.db.close()
+
+
+def test_legacy_linked_quote_migration_invalidates_parent_after_restart(tmp_path):
+    from pathlib import Path
+    import psycopg
+    from tests.support.storage import database_url
+    from oko.storage import memberships
+
+    store,item,execution,tasks=worker_library(tmp_path)
+    with transaction(store.db):
+        memberships.lock_graph(store.db)
+        row=store.db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()
+        content=json.loads(row[0])
+        content['blocks'].append(dict(type='quote',text='Original linked quote',author=None,source_url=None))
+        store.db.execute("""INSERT INTO publications(id,source_id,url,platform,external_id,complete,content,title)
+            VALUES ('linked','linked-source','https://example.org/linked','rss','linked',1,%s,'Linked')""",(json.dumps(content),))
+        store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES (%s,'linked')",(item,))
+        store.processing.reconcile_accepted_item(item)
+    filter_worker,summary_worker=workers(execution,tasks)
+    asyncio.run(pass_worker(filter_worker,tasks))
+    asyncio.run(pass_worker(summary_worker,tasks))
+    assert store.filters.read(item)['status']=='done'
+    assert store.processing.theses.read(item) is not None
+    store.db.close()
+    with psycopg.connect(database_url(tmp_path),autocommit=True) as db:
+        content=json.loads(db.execute("SELECT content FROM publications WHERE id='linked'").fetchone()[0])
+        content['extra']['_reader']['reply_preview']=dict(text='Updated linked quote',author=None,source_url=None)
+        db.execute("UPDATE publications SET content=%s WHERE id='linked'",(json.dumps(content),))
+        db.execute((Path(__file__).parents[2]/'oko/storage/postgres/096-normalize-publication-content.sql').read_text())
+        db.execute((Path(__file__).parents[2]/'oko/storage/postgres/097-normalize-publication-titles.sql').read_text())
+    reopened=Store(tmp_path,lambda _:None)
+    try:
+        reopened.processing.recover()
+        assert reopened.filters.read(item)['status'] != 'done'
+        assert reopened.processing.theses.read(item) is None
+        assert reopened.db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()[0]=='pending'
+    finally:
+        reopened.db.close()
+
+
+def test_conflicting_legacy_title_remains_visible_after_content_migration(tmp_path):
+    from pathlib import Path
+    import psycopg
+    from tests.support.storage import database_url
+
+    store,item,execution,tasks=worker_library(tmp_path)
+    filter_worker,summary_worker=workers(execution,tasks)
+    asyncio.run(pass_worker(filter_worker,tasks))
+    asyncio.run(pass_worker(summary_worker,tasks))
+    assert store.filters.read(item)['status']=='done'
+    store.db.close()
+    with psycopg.connect(database_url(tmp_path),autocommit=True) as db:
+        content=json.loads(db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()[0])
+        content['extra']['_reader']['title']='Legacy visible title'
+        db.execute('UPDATE publications SET content=%s WHERE id=%s',(json.dumps(content),item))
+        db.execute((Path(__file__).parents[2]/'oko/storage/postgres/096-normalize-publication-content.sql').read_text())
+        db.execute((Path(__file__).parents[2]/'oko/storage/postgres/097-normalize-publication-titles.sql').read_text())
+    reopened=Store(tmp_path,lambda _:None)
+    try:
+        reopened.processing.recover()
+        assert reopened.original(item)[0]['title']=='Legacy visible title'
+        assert reopened.filters.read(item)['status']!='done'
+        assert reopened.processing.theses.read(item) is None
+    finally:
+        reopened.db.close()
+
+
+def test_legacy_linked_title_migration_invalidates_parent_after_restart(tmp_path):
+    from pathlib import Path
+    import psycopg
+    from tests.support.storage import database_url
+    from oko.storage import memberships
+
+    store,item,execution,tasks=worker_library(tmp_path)
+    with transaction(store.db):
+        memberships.lock_graph(store.db)
+        row=store.db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()
+        content=json.loads(row[0])
+        content['extra']['_reader']['title']='Legacy displayed title'
+        store.db.execute("""INSERT INTO publications(id,source_id,url,platform,external_id,complete,content,title)
+            VALUES ('linked','linked-source','https://example.org/linked','rss','linked',1,%s,'Old source title')""",(json.dumps(content),))
+        store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES (%s,'linked')",(item,))
+        store.processing.reconcile_accepted_item(item)
+    filter_worker,summary_worker=workers(execution,tasks)
+    asyncio.run(pass_worker(filter_worker,tasks))
+    asyncio.run(pass_worker(summary_worker,tasks))
+    assert store.filters.read(item)['status']=='done'
+    assert store.processing.theses.read(item) is not None
+    store.db.close()
+    with psycopg.connect(database_url(tmp_path),autocommit=True) as db:
+        db.execute((Path(__file__).parents[2]/'oko/storage/postgres/096-normalize-publication-content.sql').read_text())
+        db.execute((Path(__file__).parents[2]/'oko/storage/postgres/097-normalize-publication-titles.sql').read_text())
+        title,raw=db.execute("SELECT title,content FROM publications WHERE id='linked'").fetchone()
+        assert title=='Legacy displayed title'
+        assert 'title' not in json.loads(raw)['extra']['_reader']
+    reopened=Store(tmp_path,lambda _:None)
+    try:
+        reopened.processing.recover()
+        assert reopened.filters.read(item)['status'] != 'done'
+        assert reopened.processing.theses.read(item) is None
+        assert reopened.db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()[0]=='pending'
+    finally:
+        reopened.db.close()

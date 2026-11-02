@@ -3,7 +3,9 @@ from tests.support.collection_acceptance import discovered
 from contextvars import ContextVar
 import time
 
-from oko.collection.contracts import Material, Publication
+from oko.collection.contracts import Publication
+
+from tests.support.synthetic_material import material as Material
 from oko.storage.publication_owners import owner_expr, owned_ids
 from tests.support.storage import Store
 from oko.subscriptions.subscriptions import AddFeed

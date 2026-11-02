@@ -34,7 +34,8 @@ def test_refresh_retries_incomplete_and_unavailable_once_preserving_saved_copy(t
     import time
     from collections import Counter
     from oko.collection.demo import DemoSource
-    from oko.collection.contracts import DiscoveryResult, Publication, FetchResult, Material, SourceDeleted, SourceError
+    from oko.collection.contracts import DiscoveryResult, Publication, FetchResult, SourceDeleted, SourceError
+    from tests.support.synthetic_material import material as Material
     class Source(DemoSource):
         def __init__(self):
             self.calls=Counter()

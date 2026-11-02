@@ -22,7 +22,7 @@ def _preview_source(store: 'Store', identity: str) -> tuple[dict[str, Any], str]
     own = content['extra']['_reader']
     # Copy only the two collections extended by linked publications. Large
     # manifests, reply previews and source documents remain borrowed facts.
-    header = dict(own, attachments=list(own.get('attachments', [])),
+    header = dict(own, title=own.get('title', row['title']), attachments=list(own.get('attachments', [])),
                   _media_urls=dict(own.get('_media_urls', {})))
     for child in publication_links.children(store, identity):
         if child['complete']:

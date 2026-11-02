@@ -18,12 +18,17 @@ class YouTubeAdapterSource(YouTubeSource):
         return self._api
 
     def _material(self, value: PublicationContent, previous: Material | None = None) -> Material:
-        description=value.content['extra']['youtube'].get('description',previous.description if previous else '')
+        descriptions=[block['text'] for block in value.content.get('blocks', []) if block.get('type')=='text' and block.get('role')=='description']
+        description='\n\n'.join(descriptions) if descriptions else previous.description if previous else ''
+        if not descriptions and description:
+            content=json.loads(json.dumps(value.content))
+            content['blocks'].insert(0,dict(type='text',role='description',text=description))
+            value=replace(value,content=content)
         if not self.want_captions:
             content=json.loads(json.dumps(value.content))
             content['extra']['youtube']['captions']='not_requested'
             value=replace(value,content=content)
-        return Material(value.metadata.title or (previous.title if previous else ''),'',False,
+        return Material(value.metadata.title or (previous.title if previous else ''),False,
             'Субтитры ещё не загружены' if self.want_captions else 'Субтитры не запрошены',
             captions='error' if self.want_captions else 'not_requested',description=description,adapter_content=value)
 
