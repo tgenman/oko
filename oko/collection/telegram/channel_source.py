@@ -32,15 +32,18 @@ def material(value: PublicationContent, previous: Material | None = None) -> Mat
         text = '\n\n'.join(part for part in (text, preview) if part)
         reason = ('Сохранён фрагмент предпросмотра; полная публикация недоступна для веб-просмотра'
                   if preview else 'Фрагмент предпросмотра недоступен; откройте пост в Telegram')
+    content=deepcopy(value.content)
     if manifest.preview_fragment!=observed_preview:
-        content=deepcopy(value.content)
-        content['extra']['telegram']['manifest']=manifest.model_dump(mode='json')
         bodies=[block for block in content['blocks'] if block['type']=='text' and block.get('role')=='body']
         if len(bodies)==1:
             bodies[0]['text']=text
         elif not bodies and text:
             content['blocks'].insert(0,dict(type='text',role='body',text=text))
-        value=replace(value,content=content)
+    # These fields have been consumed into the collection facts. They are not
+    # publication content and must not be carried as a second snapshot.
+    for field in ('manifest', 'members', 'description'):
+        content['extra']['telegram'].pop(field, None)
+    value=replace(value,content=content)
     return Material(title, False, reason,
                     members=tuple(extra['members']), description=extra['description'],
                     source_manifest=manifest, adapter_content=value)

@@ -59,3 +59,20 @@ def test_recorded_album_parser_does_not_create_individual_publications_for_parts
     assert len(albums) == 1
     assert albums[0].publication.members == tuple(range(373, 382))
     assert not any(p.publication.members == (member,) for p in posts for member in range(374, 382))
+
+
+def test_collection_facts_do_not_duplicate_adapter_manifest():
+    from copy import deepcopy
+    from oko.collection.telegram.adapter import content
+    from oko.collection.telegram.channel_source import material
+    from oko.collection.telegram.web import parse_page
+
+    post=next(post for post in parse_page((ROOT/'public.html').read_bytes(),'telegram').posts if post.publication.teaser)
+    described=content(post)
+    before=deepcopy(described.content)
+    result=material(described)
+    assert result.source_manifest is not None
+    assert result.adapter_content is not None
+    assert result.adapter_content.content['blocks']==before['blocks']
+    assert all(key not in result.adapter_content.content['extra']['telegram'] for key in ('manifest','members','description'))
+    assert described.content==before
