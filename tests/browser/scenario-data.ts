@@ -217,10 +217,6 @@ export type EffectiveValues = {
 export type Feed = {
     has_unviewed?: boolean;
     /**
-     * Auto Read
-     */
-    auto_read?: boolean | null;
-    /**
      * Connection
      */
     connection?: string;
@@ -261,22 +257,6 @@ export type Feed = {
      * Public Ai
      */
     public_ai?: boolean | null;
-    /**
-     * Read History
-     */
-    read_history?: boolean | null;
-    /**
-     * Telegram Account
-     */
-    telegram_account?: string | null;
-    /**
-     * Telegram Peer
-     */
-    telegram_peer?: number | null;
-    /**
-     * Telegram Topic
-     */
-    telegram_topic?: number | null;
     /**
      * Telegram Username
      */
@@ -987,9 +967,6 @@ export type Status = {
      */
     stopped?: boolean;
     /**
-     * Telegram Reads
-     */
-    /**
      * Total Sources
      */
     total_sources: number;
@@ -1004,10 +981,6 @@ export type Status = {
  * Feed
  */
 export type SubscriptionFeed = {
-    /**
-     * Auto Read
-     */
-    auto_read?: boolean | null;
     /**
      * Connection
      */
@@ -1045,18 +1018,6 @@ export type SubscriptionFeed = {
      * Public Ai
      */
     public_ai?: boolean | null;
-    /**
-     * Read History
-     */
-    read_history?: boolean | null;
-    /**
-     * Telegram Account
-     */
-    telegram_account?: string | null;
-    /**
-     * Telegram Peer
-     */
-    telegram_peer?: number | null;
     /**
      * Telegram Username
      */

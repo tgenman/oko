@@ -53,7 +53,7 @@ def archive_evidence():
 
 
 def background_evidence():
-    output={'background':[],'feeds':[],'telegram':[]}
+    output={'background':[],'feeds':[]}
     for count in [26,100]:
      with TemporaryDirectory() as d:
       root=Path(d);feeds,items=library(root,[count]*4);s=Store(root,lambda _:None)
@@ -75,18 +75,6 @@ def background_evidence():
        tracing(c,app)
        old=c.get('/api/v3/publication/'+items[0]);new=c.get('/api/v3/publication/'+items[0])
        output['feeds'].append(dict(feeds=count,old_get_sql=int(old.headers['X-Test-SQL']),publication_get_sql=int(new.headers['X-Test-SQL'])))
-    for count in [5,20,50]:
-     with TemporaryDirectory() as d:
-      s=Store(Path(d),lambda _:None)
-      with s.db:
-       s.db.execute("INSERT INTO folders VALUES ('folder','Synthetic',0)")
-       for i in range(count):
-        feed=f'{i:032x}'
-        s.db.execute("INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport , telegram_peer , auto_read ) VALUES ( %s , %s , %s , 'telegram' , 'folder' , ARRAY[]::text[] , 'connected' , 'telegram' , %s , 0 )",(feed,feed,feed,-1000000-i))
-        s.db.execute('INSERT INTO telegram_bindings VALUES ( %s , %s )',(feed,json.dumps(dict(kind='client',role='personal',peer_id=str(-1000000-i)))))
-        s.db.execute('INSERT INTO telegram_read_state ( feed , since ) VALUES ( %s , 0 )',(feed,))
-      q=[];s.db.set_trace_callback(q.append);s.jobs.sync_reads();s.db.set_trace_callback(None)
-      output['telegram'].append(dict(feeds=count,sql=len(q)));s.db.close()
     return output
 
 

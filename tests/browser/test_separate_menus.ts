@@ -12,7 +12,6 @@ test('three menus keep reading position and addition tabs, Escape restores openi
     await r.page.evaluate(() => {
       readerTransport.replies.set('/api/v3/subscriptions', {body: {folders: [], feeds: []}});
       readerTransport.replies.set('/api/v3/processors/llamacpp', {body: null});
-      readerTransport.replies.set('/api/v3/telegram/accounts', {body: ['personal']});
     });
     await r.page.locator('#cards button').click();
     await expect(r.page.locator('#title')).toHaveText('one');

@@ -20,8 +20,6 @@ test('synthetic reader surfaces screenshots and geometry',async()=>{
    await r.page.evaluate(()=>{
     const t=readerTransport;
     t.replies.set('/api/v3/subscriptions',{body:{folders:[{id:'f',title:'Наука'}],feeds:[]}});
-    t.replies.set('/api/v3/telegram/accounts',{body:['synthetic']});
-    t.replies.set('/api/v3/telegram/topics',{body:[{id:1,title:'Общее'},{id:30,title:'Наука'}]});
     t.replies.set('/api/v3/import/preview',{body:{folders:[{title:'Наука'}],feeds:[]}});
     t.replies.set('/api/v3/feeds/verify',{body:{url:'https://example.org/feed.xml',title:'Синтетический источник',kind:'rss',verification:'verified'}});
     t.replies.set('/api/v3/image',{mime:'image/png',base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR9sAAAAASUVORK5CYII='});
@@ -61,10 +59,8 @@ test('synthetic reader surfaces screenshots and geometry',async()=>{
    await r.page.locator('#rss-history-mode').selectOption('date');await shot('rss-date','#add-dialog');
    await r.page.locator('#rss-url').fill('https://example.org/error');await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/feeds/verify',{status:400,body:{detail:'Синтетическая ошибка проверки фида. '+ 'Длинное пояснение '.repeat(8)}}));
    await r.page.locator('#rss-check').click();await expect(r.page.locator('#rss-message')).toContainText('Синтетическая ошибка');await shot('rss-error','#add-dialog');
-   await r.page.locator('#add-telegram-tab').click();await expect(r.page.locator('#telegram-access')).toHaveValue('web');
+   await r.page.locator('#add-telegram-tab').click();
    await r.page.locator('#telegram-peer').fill('@synthetic');
-   await expect(r.page.locator('#telegram-topic')).toHaveCount(0);
-   await expect(r.page.locator('#telegram-auto')).toBeHidden();
    await shot('telegram','#add-dialog');
    await r.page.locator('#add-close').click();await expect(r.page.locator('#add-open')).toBeFocused();
    for(const id of ['plain','video','theses','hidden','media']){

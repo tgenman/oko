@@ -10,7 +10,6 @@ test('real HTTP Telegram web: connection, duplicate, local removal and fresh re-
  await api('v3/settings/oko/global','PATCH',{theses:false,prompt_filters:''});
  await page.goto(origin+'/#token='+token);
  await page.locator('#add-open').click();await page.locator('#add-telegram-tab').click();
- await expect(page.locator('#telegram-access')).toHaveCount(0);
  await page.locator('#telegram-peer').fill('@fixture');
  await page.screenshot({path:artifactPath('telegram-connect-desktop.png')});
  await page.setViewportSize({width:390,height:844});
@@ -22,7 +21,6 @@ test('real HTTP Telegram web: connection, duplicate, local removal and fresh re-
  const old=(await (await created).json()).feed_id;
  await expect(page.locator('#feeds-dialog')).toBeVisible();await feedOptions(page);
  await expect(page.locator('#feed-options')).toContainText('Web Access');
- await expect(page.locator('#feed-auto')).toHaveCount(0);
  await expect(page.locator('#history-progress')).toContainText('20');
  await page.locator('#feeds-close').click();
  await page.locator('[data-card]').first().click();

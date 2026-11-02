@@ -32,20 +32,10 @@ def test_v3_exact_history_and_absence_are_distinct():
 def test_settings_reset_is_not_feed_patch_null():
     for payload in [{}, {'theses': False}, {'theses': None}]:
         assert accepts('SettingsPatch', payload)
-    for key in ['folder_id', 'importance', 'initial_days', 'public_ai', 'read_history']:
+    for key in ['folder_id', 'importance', 'initial_days', 'public_ai']:
         assert not accepts('FeedPatchRequest', {key: None})
     assert not accepts('SettingsPatch', {'theses': 'false'})
     assert not accepts('SettingsPatch', {'events': True})
-
-
-def test_telegram_legacy_is_response_only_and_web_does_not_accept_auto_read():
-    legacy = {'kind': 'legacy_client', 'alias': 'old', 'source_locator': '@example', 'peer_id': None}
-    assert not accepts('TelegramAccess', legacy)
-    assert not accepts('TelegramAccess', dict(legacy, role='personal'))
-    assert not accepts('TelegramConnectRequest', {'source_locator': '@example', 'folder': 'News', 'access': legacy})
-    assert accepts('TelegramConnectRequest', {'source_locator': '@example', 'folder': 'News'})
-    assert not accepts('TelegramConnectRequest', {'source_locator': '@example', 'folder': 'News', 'auto_read': False})
-    assert not accepts('TelegramConnectRequest', {'source_locator': '-100123', 'folder': 'News', 'access': {'kind': 'client', 'profile': 'personal'}, 'auto_read': False})
 
 
 def test_explicit_lifetime_cannot_contain_client_presence_timers():
@@ -109,7 +99,6 @@ def test_existing_reading_fields_and_demo_position_are_preserved():
     assert not accepts('ReadingComposition', {'folders': [], 'feeds': []})
 
 
-
 def test_saved_subscription_transport_and_unresolved_connection_are_preserved():
     feed = contract()['components']['schemas']['UnresolvedSubscriptionFeed']['examples'][0]
     assert accepts('SubscriptionFeed', dict(feed, transport=None, connection='ambiguous', original_urls=['@saved_name', '-100123']))
@@ -169,12 +158,10 @@ def test_discriminator_mappings_use_wire_literals_for_every_variant():
 def test_recovery_variants_require_their_domain_targets_and_reject_reconnect():
     for invalid in [
         {'kind':'reconnect_feed','feed_id':'old'},
-        {'kind':'configure_telegram_profile'},
         {'kind':'retry_material'},
         {'kind':'retry_material','material_ids':[]},
         {'kind':'change_setting','target':{'scope':'oko','owner':'global'}},
         {'kind':'retry_collection','target':{'scope':'feed'}},
     ]:
         assert not accepts('RecoveryIntent',invalid)
-    assert accepts('RecoveryIntent',{'kind':'configure_telegram_profile','role':'personal'})
     assert accepts('RecoveryIntent',{'kind':'retry_collection','target':{'scope':'feed','feed_id':'saved'}})
