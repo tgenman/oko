@@ -1,5 +1,6 @@
 """Release migration failures and concurrency on an actual, isolated PostgreSQL."""
 from contextlib import contextmanager
+import json
 
 import psycopg
 import pytest
