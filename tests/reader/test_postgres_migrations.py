@@ -289,7 +289,7 @@ def test_telegram_removal_keeps_historical_account_problems_out_of_current_statu
         db.execute("INSERT INTO feeds(id,kind,identity,title,connection) VALUES ('web','telegram','web','Web','connected')")
         db.execute("INSERT INTO telegram_bindings(feed,binding) VALUES ('web',%s::jsonb)",
                    (json.dumps(dict(kind='web',username='fixture',preview_url='https://t.me/s/fixture')),))
-        db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('discover','web','failed','Old profile unavailable','profile_unavailable'),('fetch','unrelated','failed','Other failure','source-network')")
+        db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('discover','web','failed','Old profile unavailable','profile_unavailable'),('fetch','legacy','failed','Old binding unconfirmed','identity-unconfirmed'),('fetch','unrelated','failed','Other failure','source-network')")
         context = {'operation':'telegram_profile_save','role':'personal'}
         action_identity = json.dumps(context)
         account_context = json.dumps({'context':context,'error':None})
@@ -308,6 +308,7 @@ def test_telegram_removal_keeps_historical_account_problems_out_of_current_statu
                    (action_identity,json.dumps(receipt)))
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT status,error,problem_code FROM jobs WHERE kind='discover' AND item='web'").fetchone() == ('pending',None,None)
+        assert db.execute("SELECT status,error,problem_code FROM jobs WHERE kind='fetch' AND item='legacy'").fetchone() == ('pending',None,None)
         assert db.execute("SELECT status,error,problem_code FROM jobs WHERE kind='fetch' AND item='unrelated'").fetchone() == ('failed','Other failure','source-network')
     with TestClient(create_app(tmp_path, token='test', database_url=postgres_database_url, api_only=True), headers=HEADERS) as client:
         snapshot = client.get('/api/v3/status/details')

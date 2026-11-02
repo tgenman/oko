@@ -52,7 +52,7 @@ BEGIN
         wait_scope=NULL, identity_event_owned=false
     WHERE kind IN ('discover','fetch','download_media')
       AND status NOT IN ('done','cancelled')
-      AND problem_code IN ('profile_not_configured','profile_unavailable','account_identity_mismatch');
+      AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch');
     DELETE FROM telegram_read_members;
     DELETE FROM telegram_read_state;
     DELETE FROM telegram_profiles;
