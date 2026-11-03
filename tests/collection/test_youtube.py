@@ -260,7 +260,7 @@ def test_late_captions_cannot_publish_after_reader_action(tmp_path, action):
     with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=transport([]), youtube_captions=captions, **clock.options()), headers=HEADERS) as client:
         try:
             # Keep setup's temporary session from cancelling the tested attempt.
-            assert presence(client, 'reader').status_code == 201
+            assert presence(client, 'reader').status_code == 200
             subscribe(client)
             assert captions.started.wait(3)
             item = read_all_cards(client, '/api/v3/cards')[0]['id']
@@ -276,7 +276,7 @@ def test_late_captions_cannot_publish_after_reader_action(tmp_path, action):
             elif action == 'stop':
                 assert client.post('/api/v3/stop').status_code == 200
             else:
-                assert close_presence(client, 'reader').status_code == 200
+                assert client.put('/api/v3/power', json={'enabled':False}).status_code == 200
                 assert client.get('/api/v3/status').json()['work_allowed'] is False
             assert captions.cancelled.wait(3)
         finally:

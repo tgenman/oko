@@ -118,7 +118,7 @@ Folder completion uses the server's full composition, including hidden and not-y
 
 | Profile | Lifetime and purpose |
 | --- | --- |
-| Default checkout | Reader heartbeats; pauses and exits after loss of presence and grace period |
+| Default checkout | Explicit lifetime; collection and processing continue with no browser tabs |
 | `--persistent` | Explicit lifetime with remembered browser sign-in; available without open tabs |
 | `--api-only` | Explicit lifetime without the web reader |
 | Managed Docker release | Persistent reader container and separate host Codex process on macOS |

@@ -55,7 +55,7 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
             raise ValueError('Public URL must be a local HTTP or explicit HTTPS origin')
         public_host = parsed.netloc
     password_access = PasswordAccess(root, wall_clock) if persistent or (public_url and urlsplit(public_url).scheme == 'https') else None
-    lifetime = Lifetime('explicit' if api_only or persistent else 'client_presence', clock=clock, wall_clock=wall_clock, lease=lease, grace=grace)
+    lifetime = Lifetime('explicit', clock=clock, wall_clock=wall_clock, lease=lease, grace=grace)
     token = token or secrets.token_urlsafe(32)
     instance_id = secrets.token_hex(16)
     runtime = Host(root, source, clock, fault, shutdown, lifetime.admitted, lifetime.should_stop, source_feed, rss_enabled, rss_transport, ai_transport, codex_client, youtube_captions, youtube_history, wall_clock, database_url)

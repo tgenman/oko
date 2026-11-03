@@ -1,3 +1,4 @@
+import {openAdmin,openReading} from './admin-navigation';
 import {test} from 'node:test';
 import {reader,material} from './support';
 import {expect} from 'playwright/test';
@@ -13,7 +14,7 @@ test('feed context menu supports settings, nested folder move, read all and conf
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin+'/#token='+token);await expect(page.locator('#cards button')).toHaveCount(3);
  const row=(id:string)=>page.locator('#folders [data-feed="'+id+'"]');
- await row(beta.id).click();await page.locator('#cards button').click();await expect(page.locator('#text')).toContainText('Открылась библиотека');
+ await row(beta.id).click();await openReading(page);await page.locator('#cards button').click();await expect(page.locator('#text')).toContainText('Открылась библиотека');
  await row(alpha.id).click({button:'right'});await expect(row(beta.id)).toHaveAttribute('aria-pressed','true');
  expect(await page.locator('#feed-context-menu > button').allTextContents()).toEqual(['↻Refresh','✓Mark All as Read','⚙Settings…','⌫Delete…']);
  await page.keyboard.press('Escape');await expect(row(alpha.id)).toBeFocused();await expect(page.locator('#feed-context-menu')).toHaveCount(0);
@@ -47,7 +48,7 @@ test('late feed completion cannot close a newer dialog or clear a sibling materi
  await row(alpha.id).click({button:'right'});await page.getByRole('menuitem',{name:'Mark All as Read',exact:true}).click();await expect(page.locator('#feed-action-confirm')).toBeEnabled();await page.locator('#feed-action-confirm').click();await expect.poll(()=>committed).toBe(true);
  // Server completion may already remove Alpha from the tree; only its response is held.
  if(await page.locator('#feed-action-cancel').count())await page.locator('#feed-action-cancel').click();
- await row(beta.id).click();await page.locator('#cards button').click();await expect(page.locator('#text')).toContainText('Открылась библиотека');
+ await row(beta.id).click();await openReading(page);await page.locator('#cards button').click();await expect(page.locator('#text')).toContainText('Открылась библиотека');
  await row(beta.id).click({button:'right'});await page.getByRole('menuitem',{name:'Delete…',exact:true}).click();release();
  await expect(page.locator('#feed-action-heading')).toContainText('Delete Feed · Beta');await expect(page.locator('#text')).toContainText('Открылась библиотека');await expect(page.locator('#feed-action-confirm')).toBeEnabled();
  await page.locator('#feed-action-cancel').click();
@@ -63,7 +64,7 @@ test('unknown feed completion disables the old confirmation and reopening requir
   await expect(r.page.locator('#feed-action-dialog')).toContainText('Action outcome unknown');await expect(r.page.locator('#feed-action-confirm')).toBeDisabled();
   expect(await r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url==='/api/v3/feeds/feed/completion').length)).toBe(1);
   await r.page.locator('#feed-action-cancel').click();
-  await r.page.locator('#status-toggle').click();await expect(r.page.locator('#status-panel')).toContainText('Action outcome unknown');await r.page.keyboard.press('Escape');
+  await openAdmin(r.page);await r.page.locator('#status-toggle').click();await expect(r.page.locator('#status-panel')).toContainText('Action outcome unknown');await r.page.keyboard.press('Escape');await openReading(r.page);
   await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/feeds/feed/completion/preview',{body:{token:'fresh',cards_count:2,publications_count:2}}));
   await r.page.locator('[data-feed="feed"]').click({button:'right'});await r.page.getByRole('menuitem',{name:'Mark All as Read',exact:true}).click();await expect(r.page.locator('#feed-completion-count')).toContainText('Items: 2');await expect(r.page.locator('#feed-action-confirm')).toBeEnabled();
   expect(await r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url==='/api/v3/feeds/feed/completion/preview').length)).toBe(2);

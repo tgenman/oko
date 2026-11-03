@@ -1,3 +1,4 @@
+import {createAdminPage} from './admin/page';
 import {createCollectionPanel} from './status/collection';
 import {createReadingCoordination} from './reading/coordination';
 import {createMenus} from './settings/menus';
@@ -14,6 +15,7 @@ import {ReaderShell} from './shell';
 import {errorMessage} from './api/errors';
 import {regenerate,retryMaterial,retryTheses,retryFilter} from './api/generated/sdk.gen';
 initializeReaderShell(<ReaderShell/>);
+const admin=createAdminPage();
 const token = new URLSearchParams(location.hash.slice(1)).get('token');
 const fetchReader = browserFetch(window.fetch.bind(window), location.origin,()=>{reading?.stopAccess();disposeReaderShell();});
 const transport = createTransport({fetch:fetchReader, token, origin:location.origin});
@@ -33,8 +35,8 @@ const actions = createReaderActions({readerApi,onChanged:()=>statusPanel?.redraw
 readerApi.setActionTracker(actions);
 const api={discardDraft:async(path:string,field:string,method?:string)=>{await statusPanel.discardDraft(path,field,method);void reading.refresh();}};
 const menus = createMenus({api, readerApi, fetchMedia:transport.media, onChanged: () => {void reading.changed();}});
-statusPanel = createStatusPanel({debug, actions,resourceName:resource=>reading.resourceName(resource),onAvailability:available=>{commandsAvailable=available;renderCommands();}, onSettings:(target,trigger)=>menus.openStatus(target,trigger),
-  onMaterial:id=>reading.openMaterial(id), onRetry:async(target)=>{
+statusPanel = createStatusPanel({debug, actions,onOpen:()=>admin.showAdmin(),onSummary:admin.update,resourceName:resource=>reading.resourceName(resource),onAvailability:available=>{commandsAvailable=available;renderCommands();}, onSettings:(target,trigger)=>menus.openStatus(target,trigger),
+  onMaterial:id=>{admin.showReader();reading.openMaterial(id);}, onRetry:async(target)=>{
     if(target.kind==='retry_collection')await readerApi.collect(target.target);
     else if('material_ids'in target){
       for(const id of target.material_ids){const options={client:readerApi.client,path:{item:id}};
@@ -67,4 +69,5 @@ function renderCommands(){for(const [id,label,run] of [
 }}
 renderCommands();
 document.querySelector('.reader-toolbar-scroll')!.addEventListener('focusin',event=>{const control=event.target instanceof Element?event.target.closest('button'):null;control?.scrollIntoView({block:'nearest',inline:'nearest'});});
+admin.bindProblems(()=>statusPanel.open(),()=>{statusPanel.close();collectionPanel.close();});
 reading.start();

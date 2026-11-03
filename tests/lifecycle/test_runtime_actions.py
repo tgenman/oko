@@ -45,20 +45,14 @@ def test_stop_does_not_wait_for_connect_and_rejects_late_metadata(tmp_path: Path
         assert client.get('/api/v3/subscriptions').json()['feeds'] == []
 
 
-def test_repeated_close_does_not_extend_shutdown_grace(tmp_path: Path):
+def test_retired_close_cannot_stop_background_work(tmp_path: Path):
     from tests.support.reader import Clock
     clock = Clock()
     with TestClient(create_app(tmp_path, token='test-token', clock=clock), headers=HEADERS) as client:
-        presence(client, 'a')
-        close_presence(client, 'a')
-        clock.now += 10
-        close_presence(client, 'a')
-        clock.now += 5
-        for _ in range(100):
-            if client.get('/api/v3/status').json()['runtime_state'] == 'stopped':
-                break
-            time.sleep(.01)
-        assert client.get('/api/v3/status').json()['runtime_state'] == 'stopped'
+        assert close_presence(client, 'a').status_code == 409
+        clock.now += 100
+        assert close_presence(client, 'a').status_code == 409
+        assert client.get('/api/v3/status').json()['runtime_state'] == 'running'
 
 
 def test_reload_restores_missing_local_media_without_stopping_reader(tmp_path: Path):

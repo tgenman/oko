@@ -262,7 +262,7 @@ test('removed cards and connection loss keep loaded text, reload drops it',async
     await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/cards',{body:window.readerFixtures.cardPage([])}));
     await expect(r.page.locator('#cards button')).toHaveCount(0);await expect(r.page.locator('#text')).toHaveText('Текст A');
     await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/status',{status:503,body:{detail:'Offline'}}));
-    await expect(r.page.locator('#collection-progress')).toContainText('Нет связи');await expect(r.page.locator('#text')).toHaveText('Текст A');
+    await expect(r.page.locator('#collection-progress')).toContainText('No connection');await expect(r.page.locator('#text')).toHaveText('Текст A');
     await r.page.reload();await expect(r.page.locator('#material')).toBeHidden();
     assert.deepEqual(r.errors,[]);
   }finally{await r.close();}
@@ -317,7 +317,6 @@ test('reply context is a compact separate card with safe navigation and local ex
     await r.page.screenshot({path:artifactPath('telegram-reply-compact-desktop.png')});
     // Local expansion must not request unrelated content. Collection status,
     // version polling and the browser presence lease run independently.
-    const heartbeat=await r.api('client-sessions','POST');
     const requests=await r.page.evaluate(()=>readerTransport.requests);
     const foreground=(q:(typeof requests)[number])=>!(q.method==='PUT'&&/^\/api\/v3\/client-sessions\/[^/]+$/.test(q.url)||q.method==='GET'&&(q.url.startsWith('/api/v3/cards?')||q.url.startsWith('/api/v3/publication/')||['/api/v3/status','/api/v3/navigation','/api/v3/collection-status'].includes(q.url)));
     const start=await r.page.evaluate(()=>readerTransport.requests.length);
@@ -327,7 +326,6 @@ test('reply context is a compact separate card with safe navigation and local ex
     await expect(card.getByRole('button',{name:'Свернуть'})).toHaveAttribute('aria-expanded','true');
     assert.equal(await card.locator('.reply-preview-text').textContent(),excerpt);
 
-    await r.page.evaluate(async({id,token})=>{const reply=await fetch('/api/v3/client-sessions/'+id,{method:'PUT',headers:{Authorization:'Bearer '+token}});if(!reply.ok)throw new Error('Heartbeat failed: '+reply.status);},{id:heartbeat.id,token:r.token});
     await r.page.evaluate(async token=>{
       for(const path of ['/api/v3/status','/api/v3/navigation']){
         const reply=await fetch(path,{headers:{Authorization:'Bearer '+token}});
@@ -335,7 +333,6 @@ test('reply context is a compact separate card with safe navigation and local ex
       }
     },r.token);
     const observed=await r.page.evaluate(()=>readerTransport.requests);
-    assert.ok(observed.some(q=>q.method==='PUT'&&q.url==='/api/v3/client-sessions/'+heartbeat.id));
     assert.deepEqual(observed.filter(foreground),requests.filter(foreground));
     assert.ok(observed.slice(start).filter(q=>q.url.startsWith('/api/v3/publication/')).every(q=>q.method==='GET'&&q.url==='/api/v3/publication/A'));
     const polls=await r.page.evaluate(start=>readerTransport.requests.slice(start).filter(q=>['/api/v3/status','/api/v3/navigation'].includes(q.url)),start);

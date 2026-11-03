@@ -10,8 +10,7 @@ def test_navigation_counts_loading_publications_and_empty_feeds(tmp_path):
     from tests.support.reader import wait_for
     with TestClient(create_app(tmp_path, source=LateSource(), token='test'), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global', json={'theses': False})
-        assert client.get('/api/v3/reading-composition').json()['count'] == 0
-        presence(client, 'a')
+        # Collection is already active without a browser.
         wait_for(client, lambda: len(read_all_cards(client, '/api/v3/cards')) == 3)
         assert all(card['loading'] for card in read_all_cards(client, '/api/v3/cards'))
         assert client.get('/api/v3/reading-composition').json()['count'] == 3

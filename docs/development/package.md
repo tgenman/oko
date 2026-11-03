@@ -12,7 +12,7 @@ uv run --locked python -m oko --demo --database-url-file "$OKO_DATABASE_URL_FILE
 валидацию. Команда не перезапускает Око. Подробности:
 [обновление и проверки](check-workflow.md).
 
-В работающем Око `/docs` показывает Swagger, `/openapi.json` — canonical contract. Кнопка Authorize принимает token локальной сессии; после неё Try it out → Execute отправляет запрос. Авторизация находится в памяти страницы и пропадает после загрузки нового документа. Swagger не получает token автоматически и не создаёт reader lease. Поэтому прежняя остановка Око без живой вкладки читателя действует и при открытой документации.
+В работающем Око `/docs` показывает Swagger, `/openapi.json` — canonical contract. Кнопка Authorize принимает token локальной сессии; после неё Try it out → Execute отправляет запрос. Авторизация находится в памяти страницы и пропадает после загрузки нового документа. Swagger не получает token автоматически и не создаёт reader lease. Око продолжает работу независимо от открытых страниц.
 
 Когда читатель остановлен, используйте самостоятельный просмотр:
 
@@ -28,7 +28,7 @@ npm run api:docs
 uv run --locked python -m oko --api-only --demo --database-url-file "$OKO_DATABASE_URL_FILE"
 ```
 
-Explicit-профиль работает до `POST /api/v3/stop`, без веб-сборки, Node и heartbeat. Обычный запуск читателя использует нейтральные client sessions; параметры lease/grace/renew приходят из status. Remote auth и мобильное приложение не поставляются. Проверка копии кода без assets/PATH находится в `tests/lifecycle/test_independent_lifetime.py`; она не означает наличие wheel/install workflow, который сейчас удалён.
+Explicit-профиль работает до `POST /api/v3/stop`, без веб-сборки, Node и heartbeat. Обычный и persistent-запуск также используют explicit lifetime. Client-session endpoints возвращают прежний типизированный 409 lifetime_policy_incompatible; браузер их не вызывает. Remote auth и мобильное приложение не поставляются. Проверка копии кода без assets/PATH находится в `tests/lifecycle/test_independent_lifetime.py`; она не означает наличие wheel/install workflow, который сейчас удалён.
 
 ## Откат перехода API
 

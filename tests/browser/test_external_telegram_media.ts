@@ -17,7 +17,7 @@ test('external Telegram media show typed badges and cards without false download
  await expect(page.locator('#images img')).toHaveCount(0);
  await expect(page.locator('#external-attachments a')).toHaveAttribute('href','https://t.me/externalmedia/12');
  await expect(page.locator('#retry')).toBeHidden();
- await expect(page.locator('#status-toggle')).toHaveText('Status');
+ await expect(page.locator('#status-toggle')).toHaveText('Problems · 0');
  await page.screenshot({path:artifactPath('external-video-desktop.png')});
  await page.setViewportSize({width:390,height:844});
  await page.locator('#external-attachments').screenshot({path:artifactPath('external-video-mobile.png')});

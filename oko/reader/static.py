@@ -74,7 +74,7 @@ def install_frontend(app: FastAPI) -> None:
             root = (FRONTEND_ROOT / 'generations' / manifest['generation']).resolve()
         except (OSError, ValueError, KeyError):
             raise HTTPException(503, 'Сборка интерфейса недоступна') from None
-        relative = Path(asset or 'index.html')
+        relative = Path('index.html' if asset in ('', 'admin') else asset)
         if not relative.parts or relative.is_absolute() or any(part.startswith('.') for part in relative.parts) or relative.parts[0] == 'api':
             raise HTTPException(404, 'Файл недоступен')
         try:

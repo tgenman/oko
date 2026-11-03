@@ -2,7 +2,7 @@
 
 ## Действующая архитектура
 
-React + strict TypeScript находятся в frontend/src; Vite собирает готовые assets. frontend/src/main.tsx связывает модуль согласования чтения с владельцами настроек и состояния; shell.tsx задаёт структуру, renderer.tsx держит один React root и его именованные portals. Владельцы хранят локальное состояние и управляют своими ресурсами; универсальный application store/router не вводился. reader-session.ts единолично владеет heartbeat/polling/BroadcastChannel/page events; cleanup не отправляет stop/close.
+React + strict TypeScript находятся в frontend/src; Vite собирает готовые assets. frontend/src/main.tsx связывает модуль согласования чтения с владельцами настроек и состояния; shell.tsx задаёт структуру, renderer.tsx держит один React root и его именованные portals. Владельцы хранят локальное состояние и управляют своими ресурсами; универсальный application store/router не вводился. reader-session.ts единолично владеет polling/BroadcastChannel/page events; cleanup не отправляет stop/close.
 
 Редактируемый HTTP-контракт — [OpenAPI](../../api/openapi.yaml). Generated Python DTO используются в входных и выходных handlers; доменная валидация выполняется в ReaderApplication и доменных сервисах; Store сохраняет данные. Generated TypeScript SDK задаёт операции. APIreader настраивает отдельный Fetch client и учитывает исходы команд; общие errors/transport сохраняют diagnostic headers, unknown network outcomes и bearer только своего origin. Binary operations выводятся из canonical metadata и читаются как Blob, а media links используют авторизованный raw fetch.
 
@@ -33,7 +33,7 @@ Seam между фронтендом и бэкендом — HTTP interface чи
 загрузки состояния, навигации и карточек, допуск поздних ответов и согласование
 последствий действий. `main.tsx` не хранит поколения запросов, выбранные ID области
 или копию каталога. Сессия браузера продолжает единолично владеть опросом,
-heartbeat, BroadcastChannel и событиями страницы.
+BroadcastChannel и событиями страницы.
 
 Согласованные границы и проверяемое поведение:
 [согласование чтения](reading-coordination.md).
@@ -58,3 +58,13 @@ heartbeat, BroadcastChannel и событиями страницы.
 После потерянного ответа интерфейс не объявляет сохранение неуспешным: он
 сообщает о неподтверждённом исходе и разрешает явный безопасный повтор того же
 набора. Автоматического повтора нет. Остальные команды сохраняют правила receipts.
+
+## Админка
+
+`/admin` отдаёт тот же entrypoint и сохраняет проверку доступа. Владелец admin/page
+управляет URL и видимой страницей; владельцы чтения и настроек сохраняют выбор и черновики.
+Глобальные Refresh Sources, Start/Stop, Problems и подробности сбора находятся в админке.
+Читатель сохраняет контекстное обновление фида/папки и компактный индикатор проблем.
+Переход к читателю закрывает Problems; переход из Problems к публикации открывает читатель.
+Прямые ссылки локального запуска сохраняют token в hash. Произвольные пути не получают SPA fallback.
+Все подписи админки и панели сбора — английские; пользовательские названия и исходные ошибки не переводятся.

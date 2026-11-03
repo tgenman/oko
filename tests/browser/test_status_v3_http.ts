@@ -1,3 +1,4 @@
+import {openAdmin,openReading} from './admin-navigation';
 import {test} from 'node:test';
 import {expect} from 'playwright/test';
 import {productionReader} from './http-reader';
@@ -9,7 +10,7 @@ test('domain status opens the real processor form and retains an expanded finish
  const requests:string[]=[];page.on('request',request=>requests.push(new URL(request.url()).pathname));
  await page.goto(origin+'/#token='+token);
  await expect(page.locator('#status-toggle')).toContainText('Problems');
- await page.locator('#status-toggle').click();
+ await openAdmin(page);await page.locator('#status-toggle').click();
  const problem=page.locator('.status-problem').first();
  const id=await problem.getAttribute('data-problem-id');
  await page.screenshot({path:artifactPath('status-v3-current-desktop.png')});
@@ -26,7 +27,7 @@ test('domain status opens the real processor form and retains an expanded finish
  await expect(finished).toContainText('Resolved');
  await expect(finished.locator('details')).toHaveAttribute('open','');
  await expect(finished).toHaveAttribute('data-section','action');
- await expect(page.locator('#status-toggle')).toHaveText('Status');
+ await expect(page.locator('#status-toggle')).toHaveText('Problems · 0');
  await page.screenshot({path:artifactPath('status-v3-desktop.png')});
  await page.setViewportSize({width:390,height:844});
  await page.screenshot({path:artifactPath('status-v3-mobile.png')});
@@ -40,14 +41,14 @@ test('confirmed command failure is retained until its actual draft is discarded'
  await page.goto(origin+'/#token='+token);
  await expect.poll(async()=>{const state=await api('v3/status/details');return !!state&&typeof state==='object'&&'work_allowed'in state&&state.work_allowed===true;}).toBe(true);
  await api('v3/processors/codex','PUT',config);
- await page.locator('#settings-open').click();
+ await openReading(page);await page.locator('#settings-open').click();
  await page.locator('#settings-dialog [data-settings-target="models"]').click();
  await page.locator('#settings-dialog [data-settings-target="codex"]').click();
  await page.route('**/api/v3/processors/codex',async route=>{if(route.request().method()==='PUT')await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({code:'processor_unavailable',message:'Synthetic confirmed rejection',details:{retry_at:null},diagnostic_id:null,command_id:null})});else await route.continue();});
  await page.locator('#codex-save').click();
  await expect(page.locator('#status-toggle')).toHaveText('Problems · 1');
  await page.locator('#codex-discard').click();
- await expect(page.locator('#status-toggle')).toHaveText('Status');
+ await expect(page.locator('#status-toggle')).toHaveText('Problems · 0');
  await expect.poll(async()=>(await api('v3/status/details')).problems.count).toBe(0);
  const snapshot=await api('v3/status/details');
  expect(snapshot).toHaveProperty('problems.count',0);
@@ -60,7 +61,7 @@ test('lost command response stays unknown until receipt reconciliation and is ne
  await page.goto(origin+'/#token='+token);
  await expect.poll(async()=>{const state=await api('v3/status/details');return !!state&&typeof state==='object'&&'work_allowed'in state&&state.work_allowed===true;}).toBe(true);
  await api('v3/processors/codex','PUT',config);
- await page.locator('#settings-open').click();
+ await openReading(page);await page.locator('#settings-open').click();
  await page.locator('#settings-dialog [data-settings-target="models"]').click();
  await page.locator('#settings-dialog [data-settings-target="codex"]').click();
  let puts=0;
@@ -68,10 +69,10 @@ test('lost command response stays unknown until receipt reconciliation and is ne
  await page.route('**/api/v3/processors/codex',async route=>{if(route.request().method()==='PUT'){puts++;const reply=await route.fetch();expect(reply.status()).toBe(200);await route.abort('failed');}else await route.continue();});
  await page.locator('#codex-save').click();
  await expect(page.locator('#status-toggle')).toHaveText('Problems · 1');
- await page.locator('#settings-close').click();await page.locator('#status-toggle').click();
+ await page.locator('#settings-close').click();await openAdmin(page);await page.locator('#status-toggle').click();
  await expect(page.locator('#status-panel')).toContainText('Action outcome unknown');
  await expect(page.locator('#status-panel')).toContainText('is not retried automatically');
  await page.unroute('**/api/v3/command-observations');
- await expect(page.locator('#status-toggle')).toHaveText('Status');
+ await expect(page.locator('#status-toggle')).toHaveText('Problems · 0');
  expect(puts).toBe(1);
 });

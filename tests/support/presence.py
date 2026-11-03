@@ -1,28 +1,18 @@
-"""A synthetic client owns opaque presence sessions, just like a real client."""
-from weakref import WeakKeyDictionary
-from httpx import Client, Response
+"""Legacy scenario checkpoints; browser presence no longer controls execution.
 
-_sessions: WeakKeyDictionary[Client, dict[str, str]] = WeakKeyDictionary()
-_closed: WeakKeyDictionary[Client, dict[str, str]] = WeakKeyDictionary()
+Kept while unrelated scenario setups migrate to explicit status observations.
+Lifecycle tests exercise retired session endpoints directly.
+"""
+from httpx import Client, Response
 
 
 def presence(client: Client, name: str = 'reader') -> Response:
-    sessions = _sessions.setdefault(client, {})
-    if name in sessions:
-        return client.put('/api/v3/client-sessions/' + sessions[name])
-    reply = client.post('/api/v3/client-sessions')
-    if reply.status_code == 201:
-        sessions[name] = reply.json()['id']
-    return reply
+    return client.get('/api/v3/status')
 
 
 def close_presence(client: Client, name: str = 'reader') -> Response:
-    sessions=_sessions.get(client,{})
-    identity=sessions.pop(name,None) or _closed.get(client,{}).get(name,'absent')
-    _closed.setdefault(client,{})[name]=identity
-    return client.delete('/api/v3/client-sessions/' + identity)
+    return client.delete('/api/v3/client-sessions/' + name)
 
 
 def new_presence(client: Client, name: str = 'reader') -> Response:
-    _sessions.setdefault(client,{}).pop(name,None)
-    return presence(client,name)
+    return presence(client, name)

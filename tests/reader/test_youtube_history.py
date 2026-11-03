@@ -62,6 +62,10 @@ def test_history_materials_survive_restart_without_per_video_list_requests(tmp_p
     history, requests = HistoryFixture(), []
     with reader(tmp_path, history, requests) as client:
         feed = client.get('/api/v3/subscriptions').json()['feeds'][0]['id']
+        # Separate the automatic startup refresh from the history request budget.
+        from tests.support.reader import wait_for
+        wait_for(client, lambda: bool(history.calls) and client.get('/api/v3/status').json()['collection']['state'] == 'idle')
+        requests.clear()
         client.patch('/api/v3/settings/feed/' + feed, json={'theses': False})
         response = client.post('/api/v3/feeds/' + feed + '/history', json={'mode': 'count', 'count': '6'})
         assert response.status_code == 200, response.text

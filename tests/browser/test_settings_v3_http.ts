@@ -1,3 +1,4 @@
+import {openAdmin,openReading} from './admin-navigation';
 import {test} from 'node:test';
 import {expect} from 'playwright/test';
 import {productionReader} from './http-reader.ts';
@@ -17,7 +18,7 @@ test('lost v3 settings response is reconciled without replay and keeps a newer d
     await route.abort();
   });
   await page.goto(origin+'/#token='+token);
-  await page.locator('#settings-open').click();
+  await openReading(page);await page.locator('#settings-open').click();
   await page.locator('[data-settings-target="prompts"]').click();
   await page.locator('[data-settings-target="field/prompt_theses"]:visible').click();
   await page.locator('#setting-prompt_theses').fill('Сохранённый текст');
@@ -28,7 +29,7 @@ test('lost v3 settings response is reconciled without replay and keeps a newer d
   await expect(page.locator('#setting-save-prompt_theses')).toBeEnabled();
   await expect(page.locator('#setting-prompt_theses')).toHaveValue('Более новый черновик');
   await page.locator('#settings-close').click();
-  await page.locator('#status-toggle').click();
+  await openAdmin(page);await page.locator('#status-toggle').click();
   await expect(page.locator('#status-panel')).toContainText('Action outcome unknown');
   const screenshot=artifactPath('settings-v3-desktop.png');
   await page.screenshot({path:screenshot,fullPage:true});
@@ -40,7 +41,7 @@ test('lost v3 settings response is reconciled without replay and keeps a newer d
   });
   online=true;
   await expect(page.locator('#status-panel')).not.toContainText('Action outcome unknown',{timeout:8000});
-  await expect(page.locator('#status-toggle')).toHaveText('Status');
+  await expect(page.locator('#status-toggle')).toHaveText('Problems · 0');
   expect(sent).toBe(1);
   const response=await page.request.get(origin+'/api/v3/settings/oko/global',{headers:{Authorization:'Bearer '+token}});
   expect((await response.json()).effective.prompt_theses.value).toBe('Сохранённый текст');
@@ -52,7 +53,7 @@ test('filter switch saves independently from the filtering prompt', {timeout:200
   const saved=await page.request.patch(origin+'/api/v3/settings/oko/global',{headers,data:{prompt_filters:'Keep useful text',filter_enabled:true}});
   expect(saved.status()).toBe(200);
   await page.goto(origin+'/#token='+token);
-  await page.locator('#settings-open').click();
+  await openReading(page);await page.locator('#settings-open').click();
   await page.locator('[data-settings-target="filters"]').click();
   await page.locator('[data-settings-target="field/filter_enabled"]').click();
   await page.locator('#setting-filter_enabled').uncheck();
