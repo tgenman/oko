@@ -1,3 +1,4 @@
+import {openAdmin} from './admin-navigation';
 import {test} from 'node:test';
 import {reader, expect, material} from './support';
 import {artifactPath} from './artifacts';
@@ -14,18 +15,18 @@ test('collection dialog explains a waiting source, shows raw errors and preserve
   await r.start([material('one')]);
   await r.page.evaluate(({snapshot,details})=>{readerTransport.replies.set('/api/v3/collection-status',{body:snapshot});readerTransport.replies.set('/api/v3/collection-status/feed',{body:details});},{snapshot,details});
   await r.page.locator('#cards button').click();
-  const trigger=r.page.getByRole('button',{name:/Архив лекций.*Подробнее/});
-  await trigger.click();
-  const dialog=r.page.getByRole('dialog',{name:'Обновление источников'});
+  const trigger=r.page.getByRole('button',{name:/Архив лекций.*Details/});
+  await openAdmin(r.page);await trigger.click();
+  const dialog=r.page.getByRole('dialog',{name:'Source collection'});
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText('Архив лекций');
-  await dialog.getByRole('button',{name:'Подробности',exact:true}).click();
+  await dialog.getByRole('button',{name:'Details',exact:true}).click();
   await expect(dialog).toContainText('<script>throw new Error("unsafe")</script> timed out');
   await expect(dialog.getByRole('link',{name:'https://example.org/media/video.mp4',exact:true})).toHaveAttribute('target','_blank');
   await expect(dialog.locator('script')).toHaveCount(0);
-  await dialog.getByRole('searchbox',{name:'Найти источник'}).fill('несуществующий');
-  await expect(dialog).toContainText('Нет совпадений');
-  await dialog.getByRole('searchbox',{name:'Найти источник'}).fill('');
+  await dialog.getByRole('searchbox',{name:'Find a source'}).fill('несуществующий');
+  await expect(dialog).toContainText('No matches');
+  await dialog.getByRole('searchbox',{name:'Find a source'}).fill('');
   await expect(dialog).toContainText('ReadTimeout');
   const path=artifactPath('source-collection-desktop.png');await r.page.screenshot({path});console.info('Collection status screenshot:',path);
   await r.page.keyboard.press('Escape');await expect(dialog).toBeHidden();await expect(trigger).toBeFocused();
@@ -33,7 +34,7 @@ test('collection dialog explains a waiting source, shows raw errors and preserve
   await trigger.click();await expect(dialog).toContainText('ReadTimeout');
   await r.page.setViewportSize({width:390,height:844});
   const mobile=artifactPath('source-collection-mobile.png');await r.page.screenshot({path:mobile});console.info('Collection status mobile:',mobile);
-  await dialog.getByRole('button',{name:'Закрыть'}).click();await expect(dialog).toBeHidden();
+  await dialog.getByRole('button',{name:'Close'}).click();await expect(dialog).toBeHidden();
   expect(r.errors).toEqual([]);
  }finally{await r.close();}
 });

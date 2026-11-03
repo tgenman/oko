@@ -32,7 +32,7 @@ type Options = {
 };
 
 // Coordinates accepted reading changes. Local owners retain DOM, scroll, drafts
-// and media; the session alone owns polling, presence and browser resources.
+// and media; the session alone owns polling and browser resources.
 export function createReadingCoordination({readerApi, fetchMedia, debug, menus, statusPanel, actions, progress, onCollectionPoll, onStopped, onPowerState}: Options) {
   const resources=createReadingResources(readerApi);
   const pages=createCardPages(readerApi);
@@ -291,21 +291,9 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
   }
 
   const session = createReaderSession({
-    api: readerApi,
     onRefresh: updateReader,
     onMessage: readerMessage,
-    onUnavailable: error => {
-      reportError(error, 'Oko interface');
-      if (!stopped) {
-        onPowerState(true,false);menus.workAllowed(false);opened.workAllowed(false);
-        opened.disconnected();
-        statusPanel.unavailable();
-        list.error(errorMessage(error));
-        progress('No connection to Oko');
-      }
-    },
     onClosed: () => {detailRequest?.abort();detailRequest=undefined;newsActions.close(false); invalidate(); opened.clear(); list.clear();},
-    onCloseError: error => reportError(error, 'Closing tab'),
   });
   input('sort').onchange = () => {newsActions.close(false); void changed();};
   input('show-hidden').onchange = () => {newsActions.close(false); void changed();};

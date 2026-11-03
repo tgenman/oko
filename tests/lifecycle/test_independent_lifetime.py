@@ -2,6 +2,7 @@
 from tests.support.cards import read_all_cards
 from oko.collection.contracts import DiscoveryResult, FetchResult
 import time
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -12,11 +13,12 @@ from tests.support.reader import Clock, wait_for
 HEADERS = {'Authorization': 'Bearer test'}
 
 
-def test_explicit_execution_collects_without_presence_until_stop(tmp_path):
+@pytest.mark.parametrize('api_only', [False, True])
+def test_explicit_execution_collects_without_presence_until_stop(tmp_path, api_only):
     clock = Clock()
     exits = []
     with TestClient(create_app(tmp_path, token='test', source=DemoSource(), clock=clock,
-                               api_only=True, shutdown=lambda: exits.append(True)), headers=HEADERS) as client:
+                               api_only=api_only, shutdown=lambda: exits.append(True)), headers=HEADERS) as client:
         cards = wait_for(client, lambda: read_all_cards(client, '/api/v3/cards'))
         assert len(cards) == 3
         clock.now += 100
@@ -61,35 +63,11 @@ def test_api_only_process_runs_without_frontend_or_node_and_reuses_own_profile(t
             different = subprocess.run([part for part in command if part != '--api-only'] + ['--no-browser'],
                                        cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=10)
             assert different.returncode != 0
-            assert 'explicit' in different.stderr
+            assert 'api-only' in different.stderr
             assert client.post('/api/v3/stop').status_code == 200
         assert process.wait(timeout=3) == 0
     finally:
         cleanup(process)
-
-
-def test_neutral_sessions_expire_and_cannot_be_revived(tmp_path):
-    clock = Clock()
-    exits = []
-    with TestClient(create_app(tmp_path, token='test', clock=clock, shutdown=lambda: exits.append(True)), headers=HEADERS) as client:
-        created = client.post('/api/v3/client-sessions')
-        assert created.status_code == 201, created.text
-        first = created.json()
-        assert first['renew_after_seconds'] == 2
-        assert first['expires_at'].endswith('Z')
-        second = client.post('/api/v3/client-sessions').json()
-        assert second['id'] != first['id']
-        assert client.delete('/api/v3/client-sessions/' + first['id']).status_code == 200
-        clock.now += 5
-        assert client.put('/api/v3/client-sessions/' + second['id']).status_code == 200
-        clock.now += 7
-        expired = client.put('/api/v3/client-sessions/' + second['id'])
-        assert expired.status_code == 410
-        assert expired.json()['code'] == 'client_session_expired'
-        replacement = client.post('/api/v3/client-sessions')
-        assert replacement.status_code == 201
-        assert replacement.json()['id'] not in (first['id'], second['id'])
-        assert exits == []
 
 
 def test_v3_explicit_status_security_and_header_validation_do_not_execute_stop(tmp_path):
@@ -111,42 +89,6 @@ def test_v3_explicit_status_security_and_header_validation_do_not_execute_stop(t
         assert response.status_code == 200
         assert response.json() == {'ok': True, 'command_id': 'stop-command'}
         assert client.get('/api/v3/status', headers=HEADERS).json()['runtime_state'] == 'stopped'
-
-
-def test_neutral_last_close_cancels_resistant_external_wait_and_prevents_late_commit(tmp_path):
-    import asyncio
-    import threading
-    from oko.collection.contracts import Publication
-    from tests.support.synthetic_material import material as Material
-
-    started, release = threading.Event(), threading.Event()
-    class Source:
-        changes = None
-        async def discover(self, cursor):
-            return DiscoveryResult(tuple([Publication('late', 'https://synthetic.test/late', 100)]), 'done')
-
-        async def fetch(self, publication):
-            started.set()
-            while not release.is_set():
-                try:
-                    await asyncio.sleep(.005)
-                except asyncio.CancelledError:
-                    continue
-            return FetchResult(Material('Late', 'Must never be committed'))
-
-    with TestClient(create_app(tmp_path, token='test', source=Source()), headers=HEADERS) as client:
-        session = client.post('/api/v3/client-sessions').json()
-        try:
-            assert started.wait(2)
-            response = client.delete('/api/v3/client-sessions/' + session['id'])
-            assert response.status_code == 200
-            assert client.get('/api/v3/status').json()['work_allowed'] is False
-        finally:
-            release.set()
-        time.sleep(.05)
-        cards = read_all_cards(client, '/api/v3/cards')
-        assert all(not (client.get('/api/v3/publication/' + card['id']).json()['availability'] == 'available') for card in cards)
-        assert 'Must never be committed' not in client.get('/api/v3/cards').text
 
 
 def test_standalone_client_reads_configures_reconciles_lost_reply_and_stops(tmp_path):
@@ -180,19 +122,3 @@ def test_standalone_client_reads_configures_reconciles_lost_reply_and_stops(tmp_
         assert process.wait(timeout=3)==0
     finally:
         cleanup(process)
-
-
-def test_reader_clock_options_keep_both_clocks_controlled(tmp_path, monkeypatch):
-    import time
-    from tests.support.reader import Clock
-    clock = Clock()
-    with TestClient(create_app(tmp_path, token='test', lease=1, grace=10, **clock.options()),
-                    headers={'Authorization':'Bearer test'}) as client:
-        identity = client.post('/api/v3/client-sessions').json()['id']
-        wall = time.time()
-        monkeypatch.setattr(time, 'time', lambda: wall + 86400)
-        assert client.put('/api/v3/client-sessions/'+identity).status_code == 200
-        clock.now += 2
-        reply = client.put('/api/v3/client-sessions/'+identity)
-        assert reply.status_code == 410
-        assert reply.json()['code'] == 'client_session_expired'

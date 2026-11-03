@@ -1,3 +1,4 @@
+import {openAdmin,openReading} from './admin-navigation';
 import {test} from 'node:test';
 import {reader, material, card, expect} from './support.ts';
 
@@ -35,17 +36,17 @@ test('keyboard focus does not open content and viewing focuses next without open
   await expect(r.page.locator('#material')).toBeHidden();
   await r.page.keyboard.press('Enter');
   await expect(r.page.locator('#title')).toHaveText('two');
-  await r.page.locator('#viewed').click();
+  await openReading(r.page);await r.page.locator('#viewed').click();
   await expect(r.page.locator('[data-card="two"]')).toHaveCount(0);
   await expect(r.page.locator('[data-card="three"]')).toBeFocused();
   await expect(r.page.locator('#text')).toHaveText('Текст two');
   await expect(r.page.locator('#material-retained')).toBeVisible();
   await r.page.keyboard.press('Enter');
   await expect(r.page.locator('#title')).toHaveText('three');
-  await r.page.locator('#viewed').click();
+  await openReading(r.page);await r.page.locator('#viewed').click();
   await expect(r.page.locator('[data-card="one"]')).toBeFocused();
   await r.page.keyboard.press('Enter');
-  await r.page.locator('#viewed').click();
+  await openReading(r.page);await r.page.locator('#viewed').click();
   await expect(r.page.locator('#list-status')).toHaveText('No items');
   await expect(r.page.locator('#list-menu-toggle')).toBeFocused();
   expect(r.errors).toEqual([]);
@@ -138,7 +139,7 @@ test('failed refresh keeps rows and retry updates current area, late failed sele
   await expect(r.page.locator('#list-retry')).toBeHidden();
   await expect(r.page.locator('#list-title')).toHaveText('second');
   await expect(r.page.locator('#cards button')).toHaveCount(1);
-  await r.page.locator('#status-toggle').click();
+  await openAdmin(r.page);await r.page.locator('#status-toggle').click();
     await r.page.locator('#status-journal-open').click();
   await expect(r.page.locator('#debug-errors')).toContainText('Сбой списка');
   expect(r.errors).toEqual([]);

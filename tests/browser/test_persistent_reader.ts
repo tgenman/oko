@@ -1,3 +1,4 @@
+import {openAdmin,openReading} from './admin-navigation';
 import {test} from 'node:test';
 import {expect} from 'playwright/test';
 import {productionReader} from './http-reader';
@@ -18,11 +19,11 @@ test('remembered browser reopens without token and survives a reader restart', {
   await expect(page.locator('#stop')).toBeEnabled();
   await expect(page).toHaveURL(origin+'/');
   await expect(page.locator('#cards button')).toHaveCount(1);
-  await page.locator('#cards button').click();
+  await openReading(page);await page.locator('#cards button').click();
   await expect(page.locator('#copy')).toBeVisible();
   await page.locator('#copy').click();
   await expect(page.locator('#message')).toHaveText('Link copied');
-  await page.locator('#stop').click();
+  await openAdmin(page);await page.locator('#stop').click();
   await expect(page.locator('#stop')).toHaveText('Start');
   const reopened=await context.newPage();
   await reopened.goto(origin+'/');
@@ -33,7 +34,7 @@ test('remembered browser reopens without token and survives a reader restart', {
   await reopened.getByRole('button',{name:'Reload Oko'}).click();
   await expect(reopened.locator('#stop')).toBeEnabled();
   await expect(reopened.locator('#stop')).toHaveText('Start');
-  await reopened.locator('#stop').click();
+  await openAdmin(reopened);await reopened.locator('#stop').click();
   await expect(reopened.locator('#stop')).toHaveText('Stop');
   await reopened.screenshot({path:artifactPath('persistent-reader.png'),fullPage:true});
   const outcomes=await reopened.evaluate(async()=>{

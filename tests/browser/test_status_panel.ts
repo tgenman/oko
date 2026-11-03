@@ -1,3 +1,4 @@
+import {openAdmin,openReading} from './admin-navigation';
 import type {Problem} from './scenario-data';
 import type {ReaderFixture} from './support.ts';
 import {test} from 'node:test';
@@ -17,7 +18,7 @@ test('late status-target opening cannot navigate a reopened settings menu',async
   try {
     await r.start([]);await status(r,[modelProblem]);
     await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 1');
-    await r.page.locator('#status-toggle').click();
+    await openAdmin(r.page);await r.page.locator('#status-toggle').click();
     await r.page.evaluate(()=>readerTransport.held.set('/api/v3/subscriptions',true));
     await r.page.getByRole('button',{name:'Configure Model',exact:true}).click();
     await expect.poll(()=>r.page.evaluate(()=>readerTransport.pending.has('/api/v3/subscriptions'))).toBe(true);
@@ -28,7 +29,7 @@ test('late status-target opening cannot navigate a reopened settings menu',async
       readerTransport.pending.delete('/api/v3/subscriptions');readerTransport.held.delete('/api/v3/subscriptions');
     });
     await r.page.locator('#status-close').click();
-    await r.page.locator('#settings-open').click();
+    await openReading(r.page);await r.page.locator('#settings-open').click();
     await expect(r.page.locator('#settings-dialog')).toHaveAttribute('data-settings-view','home');
     await r.page.evaluate(()=>window.releaseOldMenu());
     await r.page.waitForTimeout(150);
@@ -41,7 +42,7 @@ test('offline state keeps last problems without a false zero and distinguishes a
   try {
     await r.start([]);await status(r,[modelProblem]);
     await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 1');
-    await r.page.locator('#status-toggle').click();
+    await openAdmin(r.page);await r.page.locator('#status-toggle').click();
     await expect(r.page.locator('.status-problem')).toHaveCount(1);
     await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/status',{status:503,body:{detail:'offline'}}));
     await expect(r.page.locator('#status-panel')).toContainText('Status may be outdated');
@@ -52,8 +53,8 @@ test('offline state keeps last problems without a false zero and distinguishes a
     await r.page.locator('#status-close').click();
     await expect(r.page.locator('#status-panel')).toBeHidden();
     await r.page.evaluate(()=>readerTransport.replies.get('/api/v3/status')!.body!.stopped=true);
-    await expect(r.page.locator('#collection-progress')).toContainText('Око остановлено');
-    await r.page.locator('#status-toggle').click();
+    await expect(r.page.locator('#collection-progress')).toContainText('Oko stopped');
+    await openAdmin(r.page);await r.page.locator('#status-toggle').click();
     await expect(r.page.locator('#status-panel')).toContainText('Oko stopped');
     await expect(r.page.locator('.status-action')).toBeDisabled();
     expect(r.errors).toEqual([]);
@@ -65,10 +66,10 @@ test('expanded completion stays in place until collapsed and new problems do not
   try {
     await r.start([]);await status(r,[modelProblem]);
     await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 1');
-    await r.page.locator('#status-toggle').click();
+    await openAdmin(r.page);await r.page.locator('#status-toggle').click();
     const summary=r.page.locator('.status-details summary');await summary.click();
     await status(r,[],[{...modelProblem,state:'finished',finished_at:1800000010,outcome:'resolved'}]);
-    await expect(r.page.locator('#status-toggle')).toHaveText('Status');
+    await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 0');
     await expect(summary).toBeFocused();
     await expect(r.page.locator('.status-group .status-finished')).toHaveCount(1);
     await summary.click();
@@ -83,11 +84,11 @@ test('viewing in another tab removes expanded and stale problem references',asyn
   try {
     await r.start([material('one')]);const other=await r.context.newPage();await r.start([material('one')],other);
     const problem: Problem={...modelProblem,id:'source',code:'material-incomplete',section:'object',objects:[{kind:'material',id:'one',label:'Заголовок удаляемого материала'}],action:{kind:'material',id:'one'}};
-    await status(r,[problem]);await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 1');await r.page.locator('#status-toggle').click();await r.page.locator('.status-details summary').click();
-    await other.locator('#cards button').click();
+    await status(r,[problem]);await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 1');await openAdmin(r.page);await r.page.locator('#status-toggle').click();await r.page.locator('.status-details summary').click();
+    await openReading(other);await other.locator('#cards button').click();
     await other.evaluate(()=>readerTransport.replies.set('POST /api/v3/materials/one/viewed',{body:{ok:true},next:[['/api/v3/cards',{body:window.readerFixtures.cardPage([])}]]}));
     await other.getByRole('button',{name:'Mark as Read',exact:true}).click();
-    await expect(r.page.locator('#status-toggle')).toHaveText('Status');
+    await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 0');
     await expect(r.page.locator('#status-panel')).not.toContainText('Заголовок удаляемого материала');
     await status(r,[problem]);
     await expect(r.page.locator('.status-object')).toHaveCount(0);

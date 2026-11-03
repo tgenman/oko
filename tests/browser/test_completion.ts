@@ -1,3 +1,4 @@
+import {openAdmin} from './admin-navigation';
 import {test} from 'node:test';
 import {reader,material,card,expect,type ReaderFixture} from './support';
 import {artifactPath} from './artifacts';
@@ -68,7 +69,7 @@ test('unknown folder completion cannot reuse its old token and remains visible i
     await open(r,'folder');await expect(c.confirm).toBeEnabled();await c.confirm.click();await r.page.waitForFunction(url=>readerTransport.pending.has(url),url);
     await r.page.evaluate(url=>{readerTransport.pending.get(url)!(Promise.reject(new TypeError('Connection lost')));readerTransport.pending.delete(url);readerTransport.held.delete(url);},url);
     await expect(c.dialog).toContainText('Action outcome unknown');await expect(c.confirm).toBeDisabled();await c.cancel.click();
-    await r.page.locator('#status-toggle').click();await expect(r.page.locator('#status-panel')).toContainText('Action outcome unknown');await r.page.keyboard.press('Escape');
+    await openAdmin(r.page);await r.page.locator('#status-toggle').click();await expect(r.page.locator('#status-panel')).toContainText('Action outcome unknown');await r.page.keyboard.press('Escape');
     await r.page.evaluate(url=>readerTransport.replies.set(url+'/preview',{body:{token:'fresh',cards_count:2,publications_count:2}}),url);
     await open(r,'folder');await expect(c.count).toContainText('Cards: 2');await expect(c.confirm).toBeEnabled();
     expect(await r.page.evaluate(url=>readerTransport.requests.filter(q=>q.url===url).map(q=>q.body!.token),url)).toEqual(['first']);

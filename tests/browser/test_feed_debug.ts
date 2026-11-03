@@ -1,3 +1,4 @@
+import {openAdmin,openReading} from './admin-navigation';
 import {material, reader, expect} from './support.ts';
 import {artifactPath} from './artifacts.ts';
 import {test} from 'node:test';
@@ -14,7 +15,7 @@ test('add URL uses one form and automatically shows YouTube connection', async (
       t.replies.set('/api/v3/feeds/verify', {body: {url: feed.original_urls[0], title: '3Blue1Brown', kind: 'youtube', verification: 'checked', existing: null}});
       t.replies.set('/api/v3/settings/feed/youtube', {body: {...t.replies.get('/api/v3/settings/oko/global')!.body, feed}});
     });
-    await r.page.locator('#add-open').click();
+    await openReading(r.page);await r.page.locator('#add-open').click();
     await r.page.locator('#rss-url').fill('https://www.youtube.com/feeds/videos.xml?channel_id=UCYO_jab_esuFRV4b17AJtAw');
     await expect(r.page.locator('#rss-add')).toBeDisabled();
     await r.page.locator('#rss-check').click();
@@ -26,7 +27,7 @@ test('add URL uses one form and automatically shows YouTube connection', async (
     await expect(r.page.locator('#feed-options')).toContainText('YouTube connected');
     const request = await r.page.evaluate(() => readerTransport.requests.find(r => r.url === '/api/v3/feeds' && r.method === 'POST'));
     await r.page.keyboard.press('Escape');
-    await r.page.locator('#add-open').click();
+    await openReading(r.page);await r.page.locator('#add-open').click();
     await expect(r.page.locator('#rss-url')).toHaveValue('');
     await expect(r.page.locator('#rss-url')).toBeEnabled();
     await expect(r.page.locator('#rss-checked-fields')).toBeHidden();
@@ -41,9 +42,9 @@ test('debug toggle shows server traceback and caught browser errors are sent whi
     await r.api('diagnostics', 'POST', {source:'collector', message:'broken source', traceback:'RuntimeError at discover', error_type:'RuntimeError', location:'discover:42'});
     await r.page.evaluate(() => readerTransport.replies.set('/api/v3/collect', {status: 500, body: {detail: 'collection failed'}}));
     await expect(r.page.locator('#debug-panel')).toBeHidden();
-    await r.page.locator('#collect').click();
+    await openAdmin(r.page);await r.page.locator('#collect').click();
     await r.page.waitForFunction(() => readerTransport.requests.some(r => r.url === '/api/v3/diagnostics' && r.method === 'POST' && r.body!.message === 'collection failed'));
-    await r.page.locator('#status-toggle').click();
+    await openAdmin(r.page);await r.page.locator('#status-toggle').click();
     await r.page.locator('#status-journal-open').click();
     await expect(r.page.locator('#debug-panel')).toBeVisible();
     await expect(r.page.locator('#debug-errors')).toContainText('broken source');
@@ -65,7 +66,7 @@ test('changing URL rejects late verification, errors retry and duplicate opens e
       t.replies.set('/api/v3/processors/llamacpp', {body: null});
       t.held.set('/api/v3/feeds/verify', true);
     });
-    await r.page.locator('#add-open').click();
+    await openReading(r.page);await r.page.locator('#add-open').click();
     await r.page.locator('#rss-url').fill('https://source.test/old');
     await r.page.locator('#rss-check').click();
     await r.page.waitForFunction(() => readerTransport.pending.has('/api/v3/feeds/verify'));
@@ -93,7 +94,7 @@ test('offline browser errors group, retain material scroll, and retry the same d
   const r = await reader();
   try {
     await r.start([material('one', {text: 'Длинный текст. '.repeat(4000)})]);
-    await r.page.locator('#cards button').click();
+    await openReading(r.page);await r.page.locator('#cards button').click();
     await expect(r.page.locator('#title')).toHaveText('one');
     await r.page.evaluate(() => {
       document.querySelector('article')!.scrollTop = 500;
@@ -101,7 +102,7 @@ test('offline browser errors group, retain material scroll, and retry the same d
       for (let i = 0; i < 3; i++) window.dispatchEvent(new ErrorEvent('error', {error: new Error('offline-js'), message: 'offline-js'}));
     });
     const scroll = await r.page.locator('article').evaluate(node => node.scrollTop);
-    await r.page.locator('#status-toggle').click();
+    await openAdmin(r.page);await r.page.locator('#status-toggle').click();
     await r.page.locator('#status-journal-open').click();
     await expect(r.page.locator('#debug-errors')).toContainText('offline-js');
     await expect(r.page.locator('#debug-errors')).toContainText('×3');
@@ -127,7 +128,7 @@ test('browser pending diagnostics mask quoted passwords and Basic credentials', 
       const message = 'password="correct horse battery staple" Authorization: Basic dXNlcjpwYXNz';
       window.dispatchEvent(new ErrorEvent('error', {error: new Error(message), message}));
     });
-    await r.page.locator('#status-toggle').click();
+    await openAdmin(r.page);await r.page.locator('#status-toggle').click();
     await r.page.locator('#status-journal-open').click();
     await expect(r.page.locator('#debug-errors')).toContainText('[hidden]');
     await expect(r.page.locator('#debug-errors')).not.toContainText('horse');

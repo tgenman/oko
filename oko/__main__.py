@@ -26,7 +26,10 @@ def existing(root: Path, browser: bool, *, api_only: bool = False, persistent: b
             from oko.reader.control import status as control_status
             status = control_status(data, timeout=.2)
             if status:
-                expected = 'explicit' if api_only or persistent else 'client_presence'
+                expected_profile = 'api-only' if api_only else 'persistent' if persistent else 'reader'
+                if data.get('profile') is not None and data['profile'] != expected_profile:
+                    raise SystemExit(f'Running instance uses {data["profile"]}; requested {expected_profile}. Stop it explicitly before changing profiles.')
+                expected = 'explicit'
                 actual = status['lifetime']['kind']
                 if actual != expected:
                     raise SystemExit(f'Запущенный экземпляр использует {actual}; запрошен {expected}. Завершите его явно перед сменой профиля.')
@@ -60,8 +63,8 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
     parser.add_argument('--codex-socket', type=Path, help='Приватный Unix socket host-helper (Linux)')
     parser.add_argument('--codex-token-file', type=Path)
     parser.add_argument('--port', type=int, default=0)
-    parser.add_argument('--lease', type=float, default=6, help='Срок клиентской сессии, секунд')
-    parser.add_argument('--grace', type=float, default=15, help='Ожидание переподключения, секунд')
+    parser.add_argument('--lease', type=float, default=6, help=argparse.SUPPRESS)
+    parser.add_argument('--grace', type=float, default=15, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if bool(args.tls_cert) != bool(args.tls_key):
         parser.error('--tls-cert and --tls-key must be supplied together')
@@ -136,7 +139,7 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
                     temporary = root / 'runtime.tmp'
                     version = json.loads((Path(__file__).parent / 'reader/generated/openapi.json').read_text())['info']['version']
                     temporary.write_text(json.dumps(dict(url=url, control_url=control_url, token=token, pid=os.getpid(),
-                                                         lifetime='explicit' if args.api_only or args.persistent else 'client_presence', api_version=version)))
+                                                         lifetime='explicit', profile='api-only' if args.api_only else 'persistent' if args.persistent else 'reader', api_version=version)))
                     os.replace(temporary, root / 'runtime.json')
                     print(f'Око запущено: {url} (источник: {"тестовый" if args.demo else "RSS / Telegram"}).', flush=True)
                     if not (args.no_browser or args.api_only):

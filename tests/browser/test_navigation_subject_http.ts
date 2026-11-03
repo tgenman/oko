@@ -1,3 +1,4 @@
+import {openAdmin} from './admin-navigation';
 import {test} from 'node:test';
 import {expect} from 'playwright/test';
 import {productionReader} from './http-reader';
@@ -21,10 +22,10 @@ test('status details are fetched on demand and stop polling when the panel close
  const details:string[]=[],checks:string[]=[];
  page.on('request',r=>{const path=new URL(r.url()).pathname;if(path==='/api/v3/status/details')details.push(path);if(path==='/api/v3/reading/check')checks.push(path);});
  await page.goto(origin+'/#token='+token);
- await expect(page.locator('#status-toggle')).toHaveText('Status');
+ await expect(page.locator('#status-toggle')).toHaveText('Problems · 0');
  await page.waitForTimeout(1200);
  expect(details).toHaveLength(0);
- await page.locator('#status-toggle').click();
+ await openAdmin(page);await page.locator('#status-toggle').click();
  await expect.poll(()=>details.length).toBeGreaterThan(0);
  await expect(page.locator('#status-summary')).toHaveText('No problems · ready to read');
  await page.locator('#status-close').click();

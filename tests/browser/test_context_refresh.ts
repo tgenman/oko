@@ -1,3 +1,4 @@
+import {openAdmin,openReading} from './admin-navigation';
 import {test} from 'node:test';
 import {expect} from 'playwright/test';
 import {productionReader} from './http-reader';
@@ -28,7 +29,7 @@ test('feed and folder Refresh submit their scope and history has no manual pause
  await page.getByRole('button',{name:'Connection and Options',exact:true}).click();
  await expect(page.locator('#history-toggle')).toHaveCount(0);
  await page.locator('#feeds-close').click();
- await page.locator('#stop').click();await expect(page.locator('#stop')).toHaveText(/Start/);
- await feed.click({button:'right'});await expect(page.getByRole('menuitem',{name:'Refresh',exact:true})).toBeDisabled();
+ await openAdmin(page);await page.locator('#stop').click();await expect(page.locator('#stop')).toHaveText(/Start/);
+ await openReading(page);await feed.click({button:'right'});await expect(page.getByRole('menuitem',{name:'Refresh',exact:true})).toBeDisabled();
  expect(errors).toEqual([]);
 });
