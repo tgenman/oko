@@ -102,8 +102,8 @@ def worker_details(capture: Capture) -> dict[str, Any]:
 @contextmanager
 def request(url: str, *, purpose: str, original_url: str | None = None,
             method: str = 'GET') -> Iterator[None]:
-    stage({'feed': 'Получение публикаций', 'publication': 'Загрузка содержимого',
-           'attachment': 'Загрузка вложения', 'worker': 'Ожидание worker'}.get(purpose, purpose))
+    stage({'feed': 'Fetching publications', 'publication': 'Downloading content',
+           'attachment': 'Downloading attachment', 'worker': 'Waiting for worker'}.get(purpose, purpose))
     token = active_response.set(None)
     try:
         yield

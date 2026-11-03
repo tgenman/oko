@@ -174,7 +174,7 @@ class CollectionStatus:
             state = 'collecting' if collecting else 'waiting' if wait else 'error' if job['status'] in ('done','failed','unavailable') and job['error'] else 'queued'
             if not allowed and state != 'error':
                 state = 'paused'
-            stage = (running['stage'] if running else '') or ('Поиск публикаций' if job['kind']=='discover' else 'Загрузка вложения' if job['kind']=='download_media' else 'Загрузка содержимого')
+            stage = (running['stage'] if running else '') or ('Finding publications' if job['kind']=='discover' else 'Downloading attachment' if job['kind']=='download_media' else 'Downloading content')
             elapsed = running['elapsed_seconds'] if collecting and running else data.get('elapsed_seconds') if state in ('paused','error') else max(0.,wall-data['finished_at']) if state=='waiting' and data.get('finished_at') else max(0.,wall-job['queued_wall']) if state=='queued' and job['queued_wall'] is not None else None
             groups.setdefault(job['feed'], []).append(dict(operation_id=f"{job['kind']}:{job['item']}", attempt_id=data.get('attempt_id'), kind='fetch' if job['kind']=='download_media' else job['kind'],
                 state=state, stage=stage, reason=redact(reason if state=='paused' else job['error'] or ''),
