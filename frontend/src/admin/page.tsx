@@ -30,9 +30,9 @@ export function createAdminPage(){
   if(!menu.open)return;
   const trigger=menu.querySelector('summary')!.getBoundingClientRect();
   const scrollport=document.querySelector('.reader-toolbar-scroll')!.getBoundingClientRect();
-  if(trigger.left<scrollport.left||trigger.right>scrollport.right){menu.open=false;return;}
+  if(trigger.right<=scrollport.left||trigger.left>=scrollport.right){menu.open=false;return;}
   menu.style.setProperty('--menu-top',`${trigger.bottom+6}px`);
-  menu.style.setProperty('--menu-right',`${Math.max(8,window.innerWidth-trigger.right)}px`);
+  menu.style.setProperty('--menu-right',`${Math.max(8,Math.min(window.innerWidth-168,window.innerWidth-trigger.right))}px`);
  }
  menu.addEventListener('toggle',positionMenu);
  document.querySelector('.reader-toolbar-scroll')!.addEventListener('scroll',positionMenu);
