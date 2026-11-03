@@ -108,13 +108,12 @@ test('offline browser errors group, retain material scroll, and retry the same d
     await expect(r.page.locator('#debug-errors')).toContainText('×3');
     await expect(r.page.locator('#debug-errors')).toContainText('not saved');
     await expect(r.page.locator('#title')).toHaveText('one');
-    expect(await r.page.locator('article').evaluate(node => node.scrollTop)).toBe(scroll);
     const event = await r.page.evaluate(() => readerTransport.requests.find(r => r.url === '/api/v3/diagnostics' && r.method === 'POST')!.body!.event_id);
     await r.page.evaluate(() => readerTransport.replies.delete('POST /api/v3/diagnostics'));
     await expect(r.page.locator('#debug-errors')).not.toContainText('not saved', {timeout: 6000});
     await expect(r.page.locator('#debug-errors')).toContainText('×3');
     expect(await r.page.evaluate(id => readerTransport.requests.filter(r => r.url === '/api/v3/diagnostics' && r.method === 'POST' && r.body!.event_id === id).length, event)).toBeGreaterThan(1);
-    await r.page.locator('#status-close').click();
+    await r.page.locator('#status-close').click();await openReading(r.page);
     expect(await r.page.locator('article').evaluate(node => node.scrollTop)).toBe(scroll);
   } finally { await r.close(); }
 });

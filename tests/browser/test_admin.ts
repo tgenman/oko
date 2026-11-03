@@ -21,10 +21,10 @@ test('admin direct URL, navigation, power and status use the real server without
  await page.locator('#admin-problems').click();await expect(page.locator('#status-body')).toBeVisible();await expect(page.locator('#status-journal')).toBeHidden();
  await page.goBack();await expect(page.locator('#status-panel')).toBeHidden();await expect(page.locator('#reading-page')).toBeVisible();
  const adminHref=await page.locator('#admin-link').getAttribute('href');assert.ok(adminHref?.includes('#token='));
- const other=await context.newPage();await other.goto(origin+adminHref!);await expect(other.locator('#stop')).toBeEnabled();await other.close();
+ const other=await context.newPage();await other.goto(new URL(adminHref!,origin).href);await expect(other.locator('#stop')).toBeEnabled();await other.close();
  await openAdmin(page);
 
- await page.locator('#collection-progress').click();await expect(page.locator('.collection-dialog')).toBeVisible();await page.locator('.collection-close').click();
+ await page.locator('#collection-progress').click();await expect(page.locator('.collection-dialog')).toBeVisible();await page.goBack();await expect(page.locator('.collection-dialog')).toBeHidden();await openAdmin(page);
  await page.screenshot({path:artifactPath('admin-desktop.png'),fullPage:true});
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:artifactPath('admin-mobile.png'),fullPage:true});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);

@@ -9,3 +9,6 @@
 
 html:has(#reader-shell.show-admin){background:#f2f2f7}
 #admin-controls #status-toggle:not(.has-problems)::before{background-color:#34c759}
+#admin-page #progress{display:block;max-width:none;white-space:normal;overflow:visible}
+#admin-page .collection-trigger{display:flex;justify-content:space-between;align-items:center;gap:20px;width:100%;max-width:none}
+#admin-page .collection-trigger b{float:none;flex:none;color:#007aff}

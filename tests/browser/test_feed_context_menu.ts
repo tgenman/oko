@@ -64,7 +64,7 @@ test('unknown feed completion disables the old confirmation and reopening requir
   await expect(r.page.locator('#feed-action-dialog')).toContainText('Action outcome unknown');await expect(r.page.locator('#feed-action-confirm')).toBeDisabled();
   expect(await r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url==='/api/v3/feeds/feed/completion').length)).toBe(1);
   await r.page.locator('#feed-action-cancel').click();
-  await openAdmin(r.page);await r.page.locator('#status-toggle').click();await expect(r.page.locator('#status-panel')).toContainText('Action outcome unknown');await r.page.keyboard.press('Escape');
+  await openAdmin(r.page);await r.page.locator('#status-toggle').click();await expect(r.page.locator('#status-panel')).toContainText('Action outcome unknown');await r.page.keyboard.press('Escape');await openReading(r.page);
   await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/feeds/feed/completion/preview',{body:{token:'fresh',cards_count:2,publications_count:2}}));
   await r.page.locator('[data-feed="feed"]').click({button:'right'});await r.page.getByRole('menuitem',{name:'Mark All as Read',exact:true}).click();await expect(r.page.locator('#feed-completion-count')).toContainText('Items: 2');await expect(r.page.locator('#feed-action-confirm')).toBeEnabled();
   expect(await r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url==='/api/v3/feeds/feed/completion/preview').length)).toBe(2);

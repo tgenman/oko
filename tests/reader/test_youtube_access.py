@@ -154,21 +154,24 @@ def test_proxy_configuration_redacts_preserves_and_clears_secrets(tmp_path):
         assert 'private-' not in json.dumps(client.get('/api/v3/diagnostics').json())
 
 
-def test_viewed_waiting_material_and_closed_reader_do_not_resume(tmp_path):
+def test_closed_browser_allows_retry_but_viewed_material_does_not_resume(tmp_path):
     clock = Clock()
-    captions = Captions(clock, [CaptionsBlocked()])
+    captions = Captions(clock, [CaptionsBlocked(), CaptionsBlocked()])
     with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
+        # Isolate pending-caption cancellation from a later automatic rescan.
+        assert client.patch('/api/v3/settings/oko/global', json={'feed_refresh_minutes':1440}).status_code == 200
         add(client)
         heartbeat(client)
         item = eventually(lambda: next((m for m in materials(client) if len(captions.calls)==1 and m['source'].get('captions') == 'error' and not m['loading']), None))
-        close_presence(client, 'reader')
+        assert close_presence(client, 'reader').status_code == 409
         clock.advance(900)
-        time.sleep(.1)
-        assert len(captions.calls) == 1
+        eventually(lambda: len(captions.calls) == 2 and any(m['source'].get('captions') == 'error' and not m['loading'] for m in materials(client)))
+        assert client.get('/api/v3/status').json()['work_allowed'] is True
         client.put('/api/v3/power',json={'enabled':False})
         client.post('/api/v3/materials/' + item['id'] + '/viewed')
-        heartbeat(client)
+        assert client.put('/api/v3/power',json={'enabled':True}).status_code == 200
+        clock.advance(900)
         time.sleep(.1)
         assert client.get('/api/v3/publication/'+item['id']).status_code==404
         assert read_all_cards(client, '/api/v3/cards') == []
-        assert len(captions.calls) == 1
+        assert len(captions.calls) == 2

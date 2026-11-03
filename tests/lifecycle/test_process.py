@@ -101,8 +101,7 @@ def test_single_instance_and_real_shutdown(tmp_path: Path):
         cleanup(process)
 
 
-@pytest.mark.parametrize('action', ['stop'])
-def test_stop_exits_even_if_source_ignores_cancellation(tmp_path: Path, action):
+def test_stop_exits_even_if_source_ignores_cancellation(tmp_path: Path):
     from tests.support.processes import ProcessClock
     clock = ProcessClock(tmp_path)
     process = launch(tmp_path, 'resist_cancel', clock=clock, lease='.2', grace='.3')
@@ -115,10 +114,8 @@ def test_stop_exits_even_if_source_ignores_cancellation(tmp_path: Path, action):
                 time.sleep(.02)
             assert (tmp_path / 'fetch-started').exists()
             started = time.monotonic()
-            reply = client.post('/api/v3/stop') if action == 'stop' else close_presence(client,'a')
+            reply = client.post('/api/v3/stop')
             assert reply.status_code == 200
-            if action == 'last-close':
-                clock.advance(.31)
         assert process.wait(timeout=3) == 0
         assert time.monotonic() - started < 3
     finally:

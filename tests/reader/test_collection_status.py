@@ -28,6 +28,7 @@ def test_collection_attempt_is_shared_and_refresh_does_not_restart_it(tmp_path):
         source = next(s for s in state['sources'] if s['feed_id'] == 'demo')
         assert source['state'] == 'collecting'
         assert source['operation']['kind'] == 'discover'
+        assert source['operation']['stage'] == 'Finding publications'
         attempt = source['operation']['attempt_id']
         assert attempt
         assert source['operation']['elapsed_seconds'] >= 0
@@ -66,6 +67,7 @@ def test_collection_wait_keeps_error_across_power_restart_and_resolves_on_succes
         assert client.put('/api/v3/power', json={'enabled':False}).status_code == 200
         paused = client.get('/api/v3/collection-status').json()['sources'][0]
         assert paused['state'] == 'paused'
+        assert paused['operation']['reason'] == 'Oko is stopped'
         value=client.get('/api/v3/collection-status/demo').json()
         assert (value['last_error'] or value['operations'][0]['last_error'])['message'] == 'temporary source failure'
     clock.now += 100
