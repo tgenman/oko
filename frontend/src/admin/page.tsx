@@ -25,6 +25,18 @@ export function createAdminPage(){
   (node(id) as HTMLAnchorElement).hash=location.hash;
   node(id).onclick=event=>{if(event instanceof MouseEvent&&(event.metaKey||event.ctrlKey||event.shiftKey||event.altKey))return;event.preventDefault();navigate(admin,problems);};
  }
+ const menu=node('app-menu') as HTMLDetailsElement;
+ function positionMenu(){
+  if(!menu.open)return;
+  const trigger=menu.querySelector('summary')!.getBoundingClientRect();
+  const scrollport=document.querySelector('.reader-toolbar-scroll')!.getBoundingClientRect();
+  if(trigger.right<=scrollport.left||trigger.left>=scrollport.right){menu.open=false;return;}
+  menu.style.setProperty('--menu-top',`${trigger.bottom+6}px`);
+  menu.style.setProperty('--menu-right',`${Math.max(8,Math.min(window.innerWidth-168,window.innerWidth-trigger.right))}px`);
+ }
+ menu.addEventListener('toggle',positionMenu);
+ document.querySelector('.reader-toolbar-scroll')!.addEventListener('scroll',positionMenu);
+ window.addEventListener('resize',positionMenu);
  node('admin-problems').onclick=()=>onProblems();
  window.addEventListener('popstate',()=>{apply();if(location.pathname==='/admin'&&new URLSearchParams(location.search).has('problems'))onProblems();});
  apply();
