@@ -11,23 +11,12 @@ from oko.execution import ActionError
 from oko.storage.collection_status import timestamp
 
 
-def operation(value: dict[str, Any]) -> dict[str, Any]:
-    # Translate application labels, not source titles or original diagnostics.
-    stages = {'Поиск публикаций':'Finding publications', 'Получение публикаций':'Fetching publications',
-              'Загрузка содержимого':'Downloading content', 'Загрузка вложения':'Downloading attachment',
-              'Ожидание worker':'Waiting for worker'}
-    reasons = {'Око выключено':'Oko is stopped', 'Работа приостановлена':'Work is paused'}
-    return dict(value, stage=stages.get(value['stage'], value['stage']),
-                reason=reasons.get(value['reason'], value['reason']))
-
-
 def source(value: dict[str, Any]) -> dict[str, Any]:
     row = {key: val for key, val in value.items() if key not in ('operations', 'last_error')}
     if row['operation']:
-        row['operation'] = dict(operation(row['operation']), last_error=None)
+        row['operation'] = dict(row['operation'], last_error=None)
     history = row['history']
     row['history'] = f"History · loaded {history.get('loaded', 0)} · viewed {history.get('viewed', 0)}" if history else None
-    row['access'] = {'Веб':'Web'}.get(row['access'], row['access'])
     return row
 
 
@@ -60,6 +49,6 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
         last_error = row['last_error']
         if last_error and any(op['last_error'] and op['last_error']['attempt_id']==last_error['attempt_id'] for op in row['operations']):
             last_error = None
-        return wire.CollectionDetails.model_validate(dict(**meta, source=source(row), operations=[operation(op) for op in row['operations']], last_error=last_error))
+        return wire.CollectionDetails.model_validate(dict(**meta, source=source(row), operations=row['operations'], last_error=last_error))
 
     app.include_router(router)
