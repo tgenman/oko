@@ -10,7 +10,7 @@ def test_fetch_failure_retry_and_finish_without_status_read(tmp_path,postgres_ur
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','other_web','article')")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','article',true)")
+            store.db.execute("UPDATE publications SET feed_id='feed' WHERE id='article'")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','article','running',1) RETURNING id").fetchone()[0]
         store.jobs.retry(Job(job_id,'fetch','article',1),1,'failure',code='article-limit')
         row=store.db.execute("SELECT id,body FROM reader_problems WHERE identity='job:article-limit:feed:fetch:article' AND finished IS NULL").fetchone()
@@ -24,25 +24,25 @@ def test_fetch_failure_retry_and_finish_without_status_read(tmp_path,postgres_ur
     finally:store.db.close()
 
 
-def test_owner_transfer_and_problem_change_rollback_together(tmp_path,postgres_url):
+def test_owner_removal_and_problem_change_rollback_together(tmp_path,postgres_url):
     import pytest
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected',ARRAY[]::text[]),('b','b','B','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','rss','x')")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('a','article',true),('b','article',false)")
+            store.db.execute("UPDATE publications SET feed_id='a' WHERE id='article'")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','article','failed','failure','article-limit') RETURNING id").fetchone()[0]
             store.problems.sync_fetch(job_id,[],1)
             before=store.db.execute("SELECT id,body FROM reader_problems WHERE identity='job:article-limit:a:fetch:article' AND finished IS NULL").fetchone()
         with pytest.raises(ValueError,match='rollback'):
             with transaction(store.db):
                 store.remove_feed('a')
-                assert store.db.execute("SELECT 1 FROM reader_problems WHERE identity='job:article-limit:b:fetch:article' AND finished IS NULL").fetchone()
+                assert store.db.execute("SELECT feed_id FROM publications WHERE id='article'").fetchone()[0] is None
                 raise ValueError('rollback')
         after=store.db.execute("SELECT id,body FROM reader_problems WHERE identity='job:article-limit:a:fetch:article' AND finished IS NULL").fetchone()
         assert tuple(after)==tuple(before)
-        assert store.db.execute("SELECT is_primary FROM feed_publications WHERE feed_id='a' AND publication_id='article'").fetchone()[0]
+        assert store.db.execute("SELECT feed_id FROM publications WHERE id='article'").fetchone()[0] == 'a'
     finally:store.db.close()
 
 
@@ -52,7 +52,7 @@ def test_linked_fetch_failure_updates_all_owners_and_resolves_together(tmp_path,
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('x','x','X','default','rss','rss','connected',ARRAY[]::text[]),('y','y','Y','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('root-x','other_web','root-x'),('root-y','other_web','root-y'),('article','other_web','article')")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('x','root-x',true),('y','root-y',true)")
+            store.db.execute("UPDATE publications SET feed_id=CASE id WHEN 'root-x' THEN 'x' WHEN 'root-y' THEN 'y' END WHERE id IN ('root-x','root-y')")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root-x','article'),('root-y','article')")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','article','running',1) RETURNING id").fetchone()[0]
         store.jobs.retry(Job(job_id,'fetch','article',1),1,'failure',code='article-limit')
@@ -72,7 +72,7 @@ def test_http_status_reads_recovered_fetch_without_mutation(tmp_path,postgres_ur
     with psycopg.connect(postgres_url,autocommit=True) as db:
         db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
         db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','other_web','article')")
-        db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','article',true)")
+        db.execute("UPDATE publications SET feed_id='feed' WHERE id='article'")
         db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','article','failed','failure','article-limit')")
     with TestClient(create_app(tmp_path,token='test',database_url=postgres_url,api_only=True),headers=HEADERS) as client:
         with psycopg.connect(postgres_url,autocommit=True) as db:

@@ -1,4 +1,5 @@
 """Experimental group projection; not wired into runtime."""
+from oko.storage.reading import saved_content
 import json
 from typing import Any
 from oko.storage.incomplete_index import content_class
@@ -15,7 +16,7 @@ def group_key(item: str, owner: str | None, content: str) -> str | None:
     if classification==1 or owner is None:return None
     if classification!=0:raise UnknownIncompleteGroup('Unrecognized publication completeness')
     try:
-        data=json.loads(content)
+        data=saved_content(content)
         header=data['extra']['_reader']
         if header.get('full',True):return None
         manifest=SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if header.get('source_manifest') else None
@@ -110,7 +111,7 @@ def group_candidates(store: Any, keys: list[str], now: float, sticky: set[str] |
                   WHERE file.publication_id=p.id AND mj.status IN ('pending','running') AND mj.error IS NULL AND mj.problem_code IS NULL) AS media_waiting,
           CASE WHEN p.platform='youtube' THEN EXISTS(SELECT 1 FROM media_files file JOIN jobs mj ON mj.kind='download_media' AND mj.item=file.id
                   WHERE file.publication_id=p.id AND file.resource_key='youtube:subtitles' AND mj.status='pending' AND mj.problem_code IS NULL) ELSE FALSE END AS caption_waiting
-        FROM publications p JOIN feed_publications m ON m.publication_id=p.id AND m.is_primary JOIN feeds f ON f.id=m.feed_id
+        FROM publications p JOIN (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m ON m.id=p.id JOIN feeds f ON f.id=m.feed_id
         LEFT JOIN jobs j ON j.kind='fetch' AND j.item=p.id WHERE p.incomplete_group_key COLLATE "C"=ANY(%s) AND p.viewed=0 AND p.complete=1 AND NOT p.source_deleted
         ORDER BY p.incomplete_group_key,p.id''',(keys,)).fetchall()
     if not rows:return {}
@@ -123,7 +124,7 @@ def group_candidates(store: Any, keys: list[str], now: float, sticky: set[str] |
     for row in rows:
         key=row['incomplete_group_key']
         if row['id'] in suppressed:continue
-        header=store.problems.header(json.dumps(json.loads(row['content'])['extra']['_reader']))
+        header=store.problems.header(json.dumps(saved_content(row['content'])['extra']['_reader']))
         if header.get('full',True) or (youtube['paused'] and row['feed_kind']=='youtube') or header.get('expected_incomplete'):continue
         if row['caption_waiting'] and youtube['next_at']>now:continue
         active=row['fetch_status'] in ('pending','running')

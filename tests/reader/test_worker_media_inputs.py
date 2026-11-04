@@ -1,10 +1,11 @@
 """Independent fetch/media completion must not lose a newer resource description."""
+from tests.support.collection_acceptance import apply_simulated_collection, running_collection_job
 import asyncio
 from dataclasses import replace
 import json
 import pytest
 from oko.collection.adapters import AdapterException,AdapterIssue,AdapterErrorKind
-from oko.services.collection import CollectionService
+from oko.workers.collection import collection_service
 from tests.support.source import StructuredSource,SyntheticMaterial,Image
 from tests.support.worker_library import worker_library, collection_worker
 
@@ -15,9 +16,10 @@ def image_material(source,store,item,text='Useful text'):
 
 def accept_material(store,service,item,material):
     with store.jobs.transaction(lambda:True):
+        job_for_collection=running_collection_job(store,'fetch',item)
         error,effects=service.collected(item,material,manual=False)
         assert error is None
-        store.jobs.apply_collection(effects)
+        apply_simulated_collection(store,effects,job=job_for_collection)
 
 
 @pytest.mark.parametrize('failed',[False,True])
@@ -64,7 +66,7 @@ def test_old_download_success_or_error_cannot_replace_a_refreshed_locator(tmp_pa
 def test_media_key_cannot_read_outside_library(tmp_path, kind):
     store,item,execution,tasks=worker_library(tmp_path/'library')
     try:
-        service=CollectionService(execution.require_store)
+        service=collection_service(execution.require_store)
         source=StructuredSource(None)
         accept_material(store,service,item,image_material(source,store,item))
         job=store.jobs.next_job(store.clock(),feeds=['fixture'],media_only=True)
@@ -96,7 +98,7 @@ def test_reader_http_does_not_serve_a_media_key_outside_the_library(tmp_path):
     root = tmp_path/'library'
     store,item,execution,tasks=worker_library(root)
     try:
-        service=CollectionService(execution.require_store)
+        service=collection_service(execution.require_store)
         source=StructuredSource(None)
         accept_material(store,service,item,image_material(source,store,item))
         job=store.jobs.next_job(store.clock(),feeds=['fixture'],media_only=True)

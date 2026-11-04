@@ -5,7 +5,7 @@ from typing import Any, TYPE_CHECKING
 from uuid import uuid4
 
 from oko.collection.adapters import ExternalReference
-from oko.domain.collection import CollectionEffects
+from oko.storage.collection_diagnostics import CollectionDiagnostics
 from oko.storage.reading import reading_value, saved_content
 from oko.storage import memberships
 from oko.storage.reader_status import changed as status_changed
@@ -20,13 +20,13 @@ def children(store: 'Store',item: str) -> list[Row]:
     inputs = current(store.db)
     if inputs is not None and item in inputs.children:
         return inputs.children[item]
-    return list(store.db.execute(f"SELECT i . * , {owner_expr('i')} AS feed_id , j . error AS fetch_error FROM publication_links l JOIN publications i ON i . id = l . target_publication_id LEFT JOIN jobs j ON j . kind = 'fetch' AND j . item = i . id WHERE l . source_publication_id = %s AND i . viewed = 0 ORDER BY l . rowid",(item,)).fetchall())
+    return list(store.db.execute(f"SELECT i . * , {owner_expr('i')} AS reader_feed_id , j . error AS fetch_error FROM publication_links l JOIN publications i ON i . id = l . target_publication_id LEFT JOIN jobs j ON j . kind = 'fetch' AND j . item = i . id WHERE l . source_publication_id = %s AND i . viewed = 0 ORDER BY l . rowid",(item,)).fetchall())
 
 
-def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], effects: CollectionEffects) -> bool:
+def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], effects: CollectionDiagnostics) -> bool:
     memberships.lock_graph(store.db)
-    owner=expect_row(store.db.execute(f"SELECT i.*, {owner_expr('i')} AS feed_id FROM publications i WHERE i.id = %s",(item,)).fetchone())
-    if owner['feed_id'] is None:
+    owner=expect_row(store.db.execute(f"SELECT i.*, {owner_expr('i')} AS reader_feed_id FROM publications i WHERE i.id = %s",(item,)).fetchone())
+    if owner['reader_feed_id'] is None:
         return False
     previous_rows=store.db.execute("""SELECT l.target_publication_id,
         EXISTS (SELECT 1 FROM jobs j WHERE j.item=l.target_publication_id AND j.problem_code LIKE 'source-%%') OR
@@ -57,7 +57,7 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
     for ref in references:
         if (ref.key.platform.value,ref.key.external_id)==(owner['platform'],owner['external_id']):
             continue
-        row=store.db.execute(f"SELECT i.*, {owner_expr('i')} AS feed_id, (SELECT j.id FROM jobs j WHERE j.kind='delete' AND j.item=i.id AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)) AS delete_problem_job, (SELECT j.id FROM jobs j WHERE j.kind='fetch' AND j.item=i.id AND ((j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config')))) AS fetch_problem_job, (EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=i.id AND (((m.resource_key='youtube:subtitles' OR j.media_null_owned) AND j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%'))) OR EXISTS (SELECT 1 FROM jobs j WHERE j.kind='download_media' AND j.item=i.id AND ((j.media_null_owned AND j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.identity_event_owned AND j.problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'))))) AS media_problem_exists, EXISTS (SELECT 1 FROM jobs j WHERE j.kind IN ('filter','theses') AND j.item=i.id AND (((j.problem_code='' OR (j.problem_code IS NULL AND j.error IS NOT NULL))) OR (j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('processor-config','ai-permission','codex-choice','youtube-admission')))) AS processing_problem_exists FROM publications i WHERE i.platform = %s AND i.external_id = %s",
+        row=store.db.execute(f"SELECT i.*, {owner_expr('i')} AS reader_feed_id, (SELECT j.id FROM jobs j WHERE j.kind='delete' AND j.item=i.id AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)) AS delete_problem_job, (SELECT j.id FROM jobs j WHERE j.kind='fetch' AND j.item=i.id AND ((j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config')))) AS fetch_problem_job, (EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=i.id AND (((m.resource_key='youtube:subtitles' OR j.media_null_owned) AND j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%'))) OR EXISTS (SELECT 1 FROM jobs j WHERE j.kind='download_media' AND j.item=i.id AND ((j.media_null_owned AND j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.identity_event_owned AND j.problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'))))) AS media_problem_exists, EXISTS (SELECT 1 FROM jobs j WHERE j.kind IN ('filter','theses') AND j.item=i.id AND (((j.problem_code='' OR (j.problem_code IS NULL AND j.error IS NOT NULL))) OR (j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('processor-config','ai-permission','codex-choice','youtube-admission')))) AS processing_problem_exists FROM publications i WHERE i.platform = %s AND i.external_id = %s",
                              (ref.key.platform.value,ref.key.external_id)).fetchone()
         if row is None:
             identity=str(uuid4())
@@ -84,7 +84,7 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
                 effects.delete_problems_checked.add(identity)
             if row['url']!=ref.url:
                 raise ValueError('Conflicting linked publication identity')
-            if row['viewed'] and row['feed_id'] is None:
+            if row['viewed'] and row['reader_feed_id'] is None:
                 store.set_processor_viewed([identity],False)
                 effects.fetch[identity]=True
             elif owner['platform']=='rss':
@@ -128,7 +128,7 @@ def notify_parents_many(store: 'Store', items: set[str], *, preserve_cancelled: 
         store.processing.reconcile_accepted_item(row[0],preserve_cancelled=preserve_cancelled)
 
 
-def capture_processing_problems(store: 'Store', effects: CollectionEffects, items: set[str], *, kinds: tuple[str,...] = ('filter','theses')) -> None:
+def capture_processing_problems(store: 'Store', effects: CollectionDiagnostics, items: set[str], *, kinds: tuple[str,...] = ('filter','theses')) -> None:
     from oko.storage.processing_job_problems import managed_candidates_many
     ordered=sorted(items)
     for start in range(0,len(ordered),400):
@@ -145,7 +145,7 @@ def capture_processing_problems(store: 'Store', effects: CollectionEffects, item
             effects.processing_problems_before.update({job_id:groups.get(job_id,[]) for job_id in ids if groups.get(job_id) or job_id in marked})
 
 
-def capture_media_problems(store: 'Store', effects: CollectionEffects, items: set[str]) -> None:
+def capture_media_problems(store: 'Store', effects: CollectionDiagnostics, items: set[str]) -> None:
     from oko.storage.media_job_problems import previous_candidates
     ordered=sorted(items)
     for start in range(0,len(ordered),400):
@@ -166,7 +166,7 @@ def capture_media_problems(store: 'Store', effects: CollectionEffects, items: se
             if previous or row['identity_event_owned'] or row['media_null_owned']:effects.media_problems_before[row['id']]=previous
 
 
-def capture_fetch_problems(store: 'Store', effects: CollectionEffects, items: set[str]) -> None:
+def capture_fetch_problems(store: 'Store', effects: CollectionDiagnostics, items: set[str]) -> None:
     from oko.storage.fetch_job_problems import managed_candidates,previous_candidates
     for start in range(0,len(items),400):
         batch=sorted(items)[start:start+400]
@@ -179,7 +179,7 @@ def capture_fetch_problems(store: 'Store', effects: CollectionEffects, items: se
             if candidates or (row['problem_code'] is None and row['error'] is not None):effects.fetch_problems_before[row['id']]=candidates
 
 
-def capture_deletion_problems(store: 'Store', effects: CollectionEffects, items: set[str]) -> None:
+def capture_deletion_problems(store: 'Store', effects: CollectionDiagnostics, items: set[str]) -> None:
     missing = sorted(items - effects.delete_problems_checked)
     effects.delete_problems_checked.update(missing)
     for start in range(0,len(missing),400):
@@ -187,7 +187,7 @@ def capture_deletion_problems(store: 'Store', effects: CollectionEffects, items:
             effects.delete_problem_ids_before[row['item']] = store.problems.deletion_problem_ids(row['id'],store.wall_clock())
 
 
-def capture_source_groups(store: 'Store', effects: CollectionEffects, roots: set[str], *, kinds: tuple[str,...]=('fetch','download_media','filter','theses','delete','feed-delete')) -> None:
+def capture_source_groups(store: 'Store', effects: CollectionDiagnostics, roots: set[str], *, kinds: tuple[str,...]=('fetch','download_media','filter','theses','delete','feed-delete')) -> None:
     from oko.storage import source_groups
     ordered=sorted(roots)
     for start in range(0,len(ordered),400):
@@ -209,7 +209,7 @@ def capture_source_groups(store: 'Store', effects: CollectionEffects, roots: set
             for key,objects in evidence.items():effects.source_evidence_before.setdefault(key,set()).update(objects)
 
 
-def capture_root_deletion_problems(store: 'Store', effects: CollectionEffects, roots: set[str]) -> None:
+def capture_root_deletion_problems(store: 'Store', effects: CollectionDiagnostics, roots: set[str]) -> None:
     ordered = sorted(roots)
     for start in range(0,len(ordered),400):
         batch = ordered[start:start+400]
@@ -249,7 +249,7 @@ def capture_root_deletion_problems(store: 'Store', effects: CollectionEffects, r
                 effects.delete_problem_ids_before[row['item']] = store.problems.deletion_problem_ids(row['id'],store.wall_clock())
 
 
-def prune(store: 'Store', candidates: set[str], *, effects: CollectionEffects | None = None) -> None:
+def prune(store: 'Store', candidates: set[str], *, effects: CollectionDiagnostics | None = None) -> None:
     if not candidates:
         return
     memberships.lock_graph(store.db)
@@ -264,7 +264,7 @@ def prune(store: 'Store', candidates: set[str], *, effects: CollectionEffects | 
     ), needed(id) AS (
         SELECT root.id FROM component c CROSS JOIN LATERAL (
             SELECT i.id FROM publications i WHERE i.id=c.id AND i.viewed=0
-                AND EXISTS (SELECT 1 FROM feed_publications f WHERE f.publication_id=i.id) OFFSET 0
+                AND i.feed_id IS NOT NULL OFFSET 0
         ) root
         UNION
         SELECT edge.id FROM needed n CROSS JOIN LATERAL (

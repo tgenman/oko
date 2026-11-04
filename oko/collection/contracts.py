@@ -124,7 +124,6 @@ class DiscoveryResult:
     observation: SourceObservation = SourceObservation()
     continuation: float | None = None
     retry_error: 'SourceError | None' = None
-    source_order: tuple['ExternalKey', ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, 'publications', deepcopy(self.publications))

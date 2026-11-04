@@ -15,7 +15,7 @@ def test_failure_claim_and_stale_attempt_keep_one_problem(tmp_path, postgres_url
         with transaction(store.db):
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','other_web','article')")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','article',true)")
+            store.db.execute("UPDATE publications SET feed_id='feed' WHERE id='article'")
             if kind in ('filter', 'theses'):
                 store.db.execute("UPDATE publications SET status=%s WHERE id='article'", ('pending_filtering' if kind == 'filter' else 'pending_summary',))
             if kind == 'download_media':

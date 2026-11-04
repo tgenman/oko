@@ -80,9 +80,9 @@ def _stage(store: 'Store', batch: list[str], kind: Kind, *, preserve_cancelled: 
                 status = 'done' if satisfied else 'pending' if enabled else 'blocked'
                 upsert.append((item,status,json.dumps(dict(input_revision=revision)),json.dumps(dict(signature=signature))))
     changed=set(unblock)|set(block)|set(cancel)|{row[0] for row in upsert}
-    from oko.domain.collection import CollectionEffects
+    from oko.storage.collection_diagnostics import CollectionDiagnostics
     from oko.storage.publication_links import capture_processing_problems,capture_source_groups
-    effects=CollectionEffects()
+    effects=CollectionDiagnostics()
     if changed:capture_processing_problems(store,effects,changed,kinds=(kind,))
     if changed:capture_source_groups(store,effects,changed,kinds=(kind,))
     if unblock:

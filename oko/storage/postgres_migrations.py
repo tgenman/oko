@@ -26,10 +26,16 @@ class Migration:
     version: int
     name: str
     sql: str
+    prelude_sql: str = ''
+    prelude_start: int = 0
+    prelude_before: int = 0
 
     @property
     def checksum(self) -> str:
-        return hashlib.sha256(self.sql.encode('utf-8')).hexdigest()
+        source = self.sql.encode('utf-8')
+        if self.prelude_sql:
+            source += b'\0' + str(self.prelude_start).encode() + b'\0' + str(self.prelude_before).encode() + b'\0' + self.prelude_sql.encode('utf-8')
+        return hashlib.sha256(source).hexdigest()
 
 
 def _validate(migrations: Sequence[Migration]) -> None:
@@ -37,6 +43,10 @@ def _validate(migrations: Sequence[Migration]) -> None:
         raise ValueError('Schema migrations must be consecutive, starting at 1')
     if any(not migration.name or not migration.sql.strip() for migration in migrations):
         raise ValueError('Schema migrations need a name and SQL')
+    if any((migration.prelude_sql and not 0 < migration.prelude_start <= migration.prelude_before < migration.version) or
+           (not migration.prelude_sql and (migration.prelude_start or migration.prelude_before))
+           for migration in migrations):
+        raise ValueError('Invalid migration prelude')
 
 
 def _installed(db: psycopg.Connection[Any], migrations: Sequence[Migration]) -> int:
@@ -71,7 +81,14 @@ def migrate(db: psycopg.Connection[Any], migrations: Sequence[Migration]) -> Non
                 version integer PRIMARY KEY, name text NOT NULL, checksum text NOT NULL,
                 applied_at timestamptz NOT NULL DEFAULT clock_timestamp())''')
             installed = _installed(db, migrations)
+            # A later migration may carry a checksummed prelude that must run
+            # before immutable legacy migrations in this same transaction.
+            pending_preludes = [migration for migration in migrations[installed:]
+                                if migration.prelude_sql and installed < migration.prelude_before]
             for migration in migrations[installed:]:
+                for later in pending_preludes:
+                    if migration.version == max(later.prelude_start, installed + 1):
+                        db.execute(later.prelude_sql, prepare=False)
                 if (migration.version, migration.name) == (10, 'feed-details'):
                     # Older writers could populate feeds.created_at before details.created.
                     schema = db.execute('SELECT current_schema()').fetchone()

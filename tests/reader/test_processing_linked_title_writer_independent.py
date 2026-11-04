@@ -1,12 +1,13 @@
+from tests.support.collection_acceptance import apply_simulated_collection, running_collection_job
 from tests.support.worker_library import worker_library
-from oko.services.processing import ProcessingService
+from oko.workers.processing_service import processing_service
 from oko.storage import publication_links
 from oko.storage.transaction import transaction
 
 
 def test_linked_title_change_rollback_restores_running_parent(tmp_path):
     import pytest
-    from oko.services.collection import CollectionService
+    from oko.workers.collection import collection_service
     from tests.support.synthetic_material import material as Material
     from tests.support.source import StructuredSource
     store,item,execution,tasks=worker_library(tmp_path)
@@ -17,13 +18,14 @@ def test_linked_title_change_rollback_restores_running_parent(tmp_path):
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES (%s,'linked')",(item,))
             store.processing.reconcile_accepted_item(item)
             job=store.jobs.claim_processing('filter',store.clock())
-            prepared=ProcessingService(execution.require_store).prepare(item,'filter')
+            prepared=processing_service(execution.require_store).prepare(item,'filter')
             assert job and prepared.input;store.jobs.save_input(job,prepared.input)
         with pytest.raises(RuntimeError,match='rollback'):
             with transaction(store.db):
                 material=StructuredSource(None).describe(store.publication('linked'),Material('New title','Useful text'))
-                _,effects=CollectionService(execution.require_store).collected('linked',material,manual=False)
-                store.jobs.apply_collection(effects)
+                job_for_collection=running_collection_job(store,'fetch','linked')
+                _,effects=collection_service(execution.require_store).collected('linked',material,manual=False)
+                apply_simulated_collection(store,effects,job=job_for_collection)
                 assert not store.jobs.valid(job)
                 raise RuntimeError('rollback')
         assert store.jobs.valid(job)
@@ -32,7 +34,7 @@ def test_linked_title_change_rollback_restores_running_parent(tmp_path):
 
 def test_linked_title_roundtrip_rejects_real_late_model_reply(tmp_path):
     import asyncio,httpx
-    from oko.services.collection import CollectionService
+    from oko.workers.collection import collection_service
     from tests.support.synthetic_material import material as Material
     from tests.support.filters import transport
     from tests.support.source import StructuredSource
@@ -56,8 +58,9 @@ def test_linked_title_roundtrip_rejects_real_late_model_reply(tmp_path):
             for title in ('New title','Old title'):
                 with transaction(store.db):
                     material=StructuredSource(None).describe(store.publication('linked'),Material(title,'Useful text'))
-                    _,effects=CollectionService(execution.require_store).collected('linked',material,manual=False)
-                    store.jobs.apply_collection(effects)
+                    job_for_collection=running_collection_job(store,'fetch','linked')
+                    _,effects=collection_service(execution.require_store).collected('linked',material,manual=False)
+                    apply_simulated_collection(store,effects,job=job_for_collection)
             assert old_job and not store.jobs.valid(old_job)
             release.set();await tasks._ai
             assert saved(store,item)['filtered_content']=={}

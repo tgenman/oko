@@ -42,7 +42,7 @@ def current(db: Database) -> Inputs | None:
     return value if value is not None and value.db is db else None
 
 
-_ITEM = f"SELECT i.*, {owner_expr('i')} AS feed_id, CASE WHEN i.status='filter_out' THEN 1 ELSE 0 END AS reader_hidden FROM publications i"
+_ITEM = f"SELECT i.*, {owner_expr('i')} AS reader_feed_id, CASE WHEN i.status='filter_out' THEN 1 ELSE 0 END AS reader_hidden FROM publications i"
 _FEED_COLUMNS = ','.join('f.' + name for name in READER_FEED_COLUMNS)
 _FEED = 'SELECT ' + _FEED_COLUMNS + ', b.binding AS reader_binding,b.binding_raw AS reader_binding_raw FROM feeds f LEFT JOIN telegram_bindings b ON b.feed = f.id'
 _BATCH_FEED = 'SELECT ' + _FEED_COLUMNS + ''', b.binding AS reader_binding,b.binding_raw AS reader_binding_raw,
@@ -61,7 +61,7 @@ def item(db: Database, identity: str) -> Row | None:
             return value.items[identity]
         if identity in value.related_items:
             return value.related_items[identity]
-    return db.execute(f"SELECT i.*, {owner_expr('i')} AS feed_id FROM publications i WHERE i.id = %s", (identity,)).fetchone()
+    return db.execute(f"SELECT i.*, {owner_expr('i')} AS reader_feed_id FROM publications i WHERE i.id = %s", (identity,)).fetchone()
 
 
 
@@ -108,16 +108,16 @@ def material_inputs(db: Database, identities: set[str], *, include_subtitles: bo
             else:
                 value.jobs.setdefault(r['reader_item'],{})[r['kind']]=r
         value.children.update({identity: [] for identity in batch})
-        for row in db.execute(f"SELECT l . source_publication_id AS reader_source , i . * , {owner_expr('i')} AS feed_id , j . error AS fetch_error FROM publication_links l JOIN publications i ON i . id = l . target_publication_id LEFT JOIN jobs j ON j . kind = 'fetch' AND j . item = i . id WHERE l . source_publication_id = ANY ( %s ) AND i . viewed = 0 ORDER BY l . rowid", (batch,)):
+        for row in db.execute(f"SELECT l . source_publication_id AS reader_source , i . * , {owner_expr('i')} AS reader_feed_id , j . error AS fetch_error FROM publication_links l JOIN publications i ON i . id = l . target_publication_id LEFT JOIN jobs j ON j . kind = 'fetch' AND j . item = i . id WHERE l . source_publication_id = ANY ( %s ) AND i . viewed = 0 ORDER BY l . rowid", (batch,)):
             value.children[row['reader_source']].append(row)
             value.related_items[row['id']] = row
         value.memberships.update({identity: [] for identity in batch})
-        for row in db.execute('SELECT publication_id,feed_id FROM feed_publications WHERE publication_id=ANY(%s) ORDER BY publication_id,is_primary DESC,feed_id', (batch,)):
+        for row in db.execute('SELECT id AS publication_id,feed_id FROM publications WHERE feed_id IS NOT NULL AND id=ANY(%s) ORDER BY id', (batch,)):
             value.memberships[row['publication_id']].append(row['feed_id'])
         value.owners.update({identity: set() for identity in batch})
-        for row in db.execute('SELECT m . publication_id AS reader_source , m . feed_id FROM feed_publications m WHERE m . publication_id = ANY ( %s ) UNION SELECT l . source_publication_id AS reader_source , m . feed_id FROM publication_links l JOIN feed_publications m ON m . publication_id = l . target_publication_id WHERE l . source_publication_id = ANY ( %s )', (batch, batch)):
+        for row in db.execute('SELECT m.id AS reader_source , m . feed_id FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m WHERE m.id = ANY ( %s ) UNION SELECT l . source_publication_id AS reader_source , m . feed_id FROM publication_links l JOIN (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m ON m.id = l . target_publication_id WHERE l . source_publication_id = ANY ( %s )', (batch, batch)):
             value.owners[row['reader_source']].add(row['feed_id'])
-    feeds = sorted({r['feed_id'] for r in value.items.values() if r['feed_id'] is not None}
+    feeds = sorted({r['reader_feed_id'] for r in value.items.values() if r['reader_feed_id'] is not None}
                    | {feed for owners in value.owners.values() for feed in owners})
     for start in range(0, len(feeds), 400):
         batch = feeds[start:start+400]

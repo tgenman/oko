@@ -1,4 +1,5 @@
 """Individual local files: job ownership, durable acceptance and reader projection."""
+from oko.storage.reading import saved_content
 import asyncio
 from io import BufferedWriter
 from collections.abc import Callable
@@ -177,7 +178,7 @@ class MediaFiles:
         row = store.db.execute('SELECT content FROM publications WHERE id = %s AND viewed = 0', (download.publication_id,)).fetchone()
         if row is None:
             raise ValueError('Media owner changed')
-        content = deepcopy(json.loads(row['content']))
+        content = saved_content(row['content'],mutable=True)
         media = [dict(r) for r in store.db.execute('SELECT * FROM media_files WHERE publication_id = %s', (download.publication_id,))]
         for value in media:
             if value['id']==media_id:
@@ -259,7 +260,7 @@ class MediaFiles:
         row=store.db.execute('SELECT content FROM publications WHERE id = %s AND viewed = 0',(owner,)).fetchone()
         if row is None:
             return
-        content=json.loads(row['content'])
+        content=saved_content(row['content'],mutable=True)
         content['extra']['youtube']['captions']='unavailable'
         content['extra']['_reader'].pop('captions', None)
         content['extra']['youtube'].pop('captions_digest',None)
@@ -313,7 +314,7 @@ class MediaFiles:
         if owner:
             publication = store.db.execute('SELECT content FROM publications WHERE id = %s AND viewed = 0', (owner,)).fetchone()
             if publication:
-                content = json.loads(publication['content'])
+                content = saved_content(publication['content'],mutable=True)
                 subtitles=youtube_media.subtitle_id(content)==media_id
                 media = [dict(r) for r in store.db.execute('SELECT * FROM media_files WHERE publication_id = %s', (owner,))]
                 old=next((value for value in media if value['id']==media_id),None)

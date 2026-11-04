@@ -15,6 +15,7 @@ import psycopg
 from psycopg.pq import TransactionStatus
 
 from oko.storage.rows import Record
+from oko.storage.transaction_context import TransactionContext
 from oko.storage.postgres_migrations import verify, verify_reader_permissions, schema_lock_key
 from oko.storage.postgres_schema import MIGRATIONS
 
@@ -54,6 +55,7 @@ class PostgresConnection:
         self.access_lock = RLock()
         self._trace: Callable[[str], None] | None = None
         self.transaction_depth = 0
+        self.transaction_context: TransactionContext | None = None
         self._read_only = False
         self.transaction_failed = False
         self.commit_callbacks: list[Callable[[], None]] = []

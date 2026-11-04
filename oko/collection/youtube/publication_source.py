@@ -69,8 +69,7 @@ class YouTubeAdapterSource(YouTubeSource):
                 published_known=value.metadata.published_at is not None,adapter_reference=value.metadata.reference) for value in page.publications)
             self.gap='; '.join(dict.fromkeys(issue.message for issue in page.issues)) or None
             return DiscoveryResult(publications,json.dumps(state),SourceObservation(self.gap,self.changes),
-                                   continuation=(60 if retry else 0) if page.has_more else None,
-                                   source_order=api.window_order(feed,page.next_cursor))
+                                   continuation=(60 if retry else 0) if page.has_more else None)
         except AdapterException as error:
             raise source_error(error)
 

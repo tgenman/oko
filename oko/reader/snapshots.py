@@ -417,7 +417,6 @@ class Material(WireModel):
     published_known: StrictBool | MISSING = Field(default=MISSING, title='Published Known')
     reason: StrictStr | MISSING = Field(default=MISSING, title='Reason')
     source_deleted: StrictBool | MISSING = Field(default=MISSING, title='Source Deleted')
-    source_order: StrictInt | None | MISSING = Field(default=MISSING, title='Source Order')
     text: StrictStr = Field(..., title='Text')
     theses: Summary | None | MISSING = MISSING
     title: StrictStr = Field(..., title='Title')

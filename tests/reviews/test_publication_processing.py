@@ -40,7 +40,7 @@ def coordinated_transport(calls):
 def stored(root,item):
     with database(root) as db:
         row=dict(db.execute('SELECT * FROM publications WHERE id = %s',(item,)).fetchone())
-    for key in ('content','filtered_content','summarized_content','processing_metadata'):
+    for key in ('filtered_content','summarized_content','processing_metadata'):
         row[key]=json.loads(row[key])
     return row
 

@@ -120,10 +120,6 @@ export type Card = {
      * Source Deleted
      */
     source_deleted?: boolean;
-    /**
-     * Source Order
-     */
-    source_order?: number | null;
     theses?: Summary | null;
     /**
      * Title
@@ -680,10 +676,6 @@ export type Material = {
      * Source Deleted
      */
     source_deleted?: boolean;
-    /**
-     * Source Order
-     */
-    source_order?: number | null;
     /**
      * Text
      */

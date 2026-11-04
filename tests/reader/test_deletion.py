@@ -55,6 +55,10 @@ def test_delete_failure_is_visible_and_retried_without_content_in_errors(tmp_pat
         assert client.get(f'/api/v3/publication/{item}').status_code == 404
         assert any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status/details').json()['problems']['current'])
         assert retained(tmp_path,item)
+        from tests.support.storage import database
+        from oko.storage.material_read import item as stored_item
+        with database(tmp_path) as db:
+            assert stored_item(db,item)['reader_feed_id'] == cards[0]['feed_id']
         fail = False
         clock.now += 1.1
         wait_for(client, lambda: not any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status/details').json()['problems']['current']))

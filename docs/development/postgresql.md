@@ -51,6 +51,13 @@ checksums, and rejects missing, incomplete, modified or newer release histories.
 All pending migrations and ledger updates commit as one transaction. Migration
 SQL is trusted release code and must not contain its own transaction control.
 
+Migration 103 also carries a checksummed SQL prelude. When upgrading from a
+schema before 97, the migrator runs that prelude before the still-pending 96/97
+migrations in the same transaction. It locks `publications` and protects the
+canonical title and quote from older migration rules; a conflict or malformed
+value aborts the complete release. The prelude contents and execution range are
+included in migration 103's ledger checksum.
+
 Migration takes an exclusive, schema-scoped advisory lock. A live Store holds a
 shared lease that blocks migrations, plus an exclusive instance lease that
 prevents another reader from recovering the same schema, even with a different

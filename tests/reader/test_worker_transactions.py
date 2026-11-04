@@ -1,12 +1,14 @@
 """Real SQL failure boundaries for the three independent cron workers."""
+from tests.support.collection_acceptance import apply_simulated_collection, running_collection_job
+from oko.storage.job_types import Job
 import asyncio
 import json
 from tests.support.storage import database
 import pytest
 import httpx
 from tests.support.storage import Store
-from oko.storage.transaction import transaction
-from oko.services.collection import CollectionService
+from oko.storage.transaction import TransactionAborted, transaction
+from oko.workers.collection import collection_service
 from tests.support.synthetic_material import material as Material
 from tests.support.worker_library import worker_library,workers,pass_worker,saved
 from tests.support.filters import transport
@@ -66,7 +68,9 @@ def test_new_input_rejects_old_success_and_old_error_without_harming_replacement
         old_revision=saved(store,item)['processing_metadata']['_revision']
         source=StructuredSource(None)
         with store.jobs.transaction(execution._live):
-            CollectionService(execution.require_store).collected(item,source.describe(store.publication(item),Material('Title','New input')),manual=False)
+            job_for_collection=running_collection_job(store,'fetch',item)
+            _,effects=collection_service(execution.require_store).collected(item,source.describe(store.publication(item),Material('Title','New input')),manual=False)
+            apply_simulated_collection(store,effects,job=job_for_collection)
         changed=saved(store,item)
         assert changed['processing_metadata']['_revision']!=old_revision
         with store.jobs.transaction(execution._live):
@@ -96,13 +100,12 @@ def test_claim_and_saved_context_are_one_transaction_and_survive_restart(tmp_pat
     reopened.db.close()
 
 
-def test_shared_filter_winner_keeps_its_feed_for_summary_after_restart(tmp_path):
+def test_other_feed_settings_do_not_change_publication_processing_after_restart(tmp_path):
     from oko.subscriptions.subscriptions import AddFeed, Overrides
     store, item, execution, tasks = worker_library(tmp_path)
     try:
         second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other', title='Other', folder='Other', verification='synthetic'))['id']
         with transaction(store.db):
-            store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
             store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=False,theses=True,prompt_theses='Other feed rules'))
             store.processing.reconcile_accepted_item(item)
         asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
@@ -127,7 +130,6 @@ def test_competing_workers_commit_one_shared_processing_context(tmp_path):
         try:
             second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other',title='Other',folder='Other',verification='synthetic'))['id']
             with transaction(store.db):
-                store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
                 store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=False,theses=True))
                 store.processing.reconcile_accepted_item(item)
             filter_worker, summary_worker = workers(execution,tasks,transport(calls,theses=True))
@@ -135,7 +137,7 @@ def test_competing_workers_commit_one_shared_processing_context(tmp_path):
             if tasks._ai:
                 await tasks._ai
             chosen = saved(store,item)['processing_metadata']['_pass']['feed_id']
-            assert chosen in ('fixture',second)
+            assert chosen == 'fixture'
             assert len([call for call in calls if call.url.path=='/v1/chat/completions']) == 1
             completed = store.db.execute("SELECT kind,input_snapshot->>'feed_id' AS feed FROM jobs WHERE item=%s AND kind IN ('filter','theses') AND status='done'", (item,)).fetchall()
             assert len(completed)==1 and completed[0]['feed']==chosen
@@ -158,7 +160,7 @@ def test_late_result_from_deleted_selected_feed_is_rejected(tmp_path):
         try:
             second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other',title='Other',folder='Other',verification='synthetic'))['id']
             with transaction(store.db):
-                store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
+                store.db.execute('UPDATE publications SET feed_id=%s WHERE id=%s', (second,item))
                 store.subscriptions.update_settings('feed','fixture',Overrides(filter_enabled=False))
                 store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=True))
                 store.processing.reconcile_accepted_item(item)
@@ -179,26 +181,25 @@ def test_late_result_from_deleted_selected_feed_is_rejected(tmp_path):
     asyncio.run(scenario())
 
 
-def test_no_feed_is_chosen_when_every_candidate_is_disallowed(tmp_path):
-    from oko.subscriptions.subscriptions import AddFeed, Overrides
-    store, item, _, _ = worker_library(tmp_path)
+def test_processing_waits_when_publication_feed_disallows_processor(tmp_path):
+    from oko.subscriptions.subscriptions import Overrides
+    store, item, execution, tasks = worker_library(tmp_path)
     try:
-        second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other', title='Other', folder='Other', verification='synthetic'))['id']
         with transaction(store.db):
-            store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
             store.subscriptions.update_settings('feed','fixture',Overrides(processor='codex'))
-            store.subscriptions.update_settings('feed',second,Overrides(processor='codex'))
+            store.settings_changed('feed','fixture')
             store.processing.reconcile_accepted_item(item)
+        worker = workers(execution,tasks)[0]
+        asyncio.run(pass_worker(worker,tasks))
+        job = store.db.execute("SELECT status,problem_code FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()
+        assert job['problem_code'] == 'ai-permission'
+        assert saved(store,item)['filtered_content'] == {}
         with transaction(store.db):
-            assert store.jobs.claim_processing('filter',store.clock()) is None
-            assert not saved(store,item)['processing_metadata'].get('_pass')
-        with transaction(store.db):
-            store.subscriptions.update_settings('feed',second,Overrides(processor='llamacpp'))
-            store.settings_changed('feed',second)
+            store.subscriptions.update_settings('feed','fixture',Overrides(processor='llamacpp'))
+            store.settings_changed('feed','fixture')
             store.processing.reconcile_accepted_item(item)
-            job = store.jobs.claim_processing('filter',store.clock())
-            assert job is not None
-            assert saved(store,item)['processing_metadata']['_pass']['feed_id'] == second
+        asyncio.run(pass_worker(worker,tasks))
+        assert store.filters.read(item)['status'] == 'done'
     finally:
         store.db.close()
 
@@ -270,7 +271,7 @@ def test_linked_source_privacy_change_reconciles_parent_job_atomically(tmp_path)
             memberships.lock_graph(store.db)
             store.db.execute("""INSERT INTO publications(id,url,platform,external_id,complete,content,title,discovered_at)
                 SELECT 'linked','https://example.org/linked','rss','linked',1,content,title,discovered_at FROM publications WHERE id=%s""", (item,))
-            memberships.add(store.db,other,'linked')
+            memberships.add(store.db,other,'linked',newly_created=True)
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES (%s,'linked')", (item,))
             store.processing.reconcile_accepted_item(item)
         before = store.db.execute("SELECT generation,input_snapshot->>'signature' FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()[:]
@@ -326,7 +327,7 @@ def test_missing_subtitle_repair_is_rediscovered_after_restart(tmp_path):
     store, item, _, _ = worker_library(tmp_path)
     try:
         with store.db:
-            content = json.loads(store.db.execute('SELECT content FROM publications WHERE id=%s', (item,)).fetchone()[0])
+            content = store.db.execute('SELECT content FROM publications WHERE id=%s', (item,)).fetchone()[0]
             content['extra']['youtube'] = {'captions':'available','captions_digest':'missing'}
             content['blocks'].append(dict(type='media',role='subtitles',media_id='missing-caption'))
             store.db.execute("UPDATE publications SET platform='youtube',content=%s WHERE id=%s", (json.dumps(content),item))
@@ -394,7 +395,7 @@ def test_legacy_quote_migration_reconciles_saved_processing_after_restart(tmp_pa
     original=dict(type='quote',text='Original quote',author=None,source_url=None)
     with store.db:
         row=store.db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()
-        content=json.loads(row[0])
+        content=row[0]
         if case != 'header_only':
             content['blocks'].append(original)
         store.db.execute('UPDATE publications SET content=%s WHERE id=%s',(json.dumps(content),item))
@@ -407,16 +408,14 @@ def test_legacy_quote_migration_reconciles_saved_processing_after_restart(tmp_pa
     old_metadata=saved(store,item)['processing_metadata']
     store.db.close()
     with psycopg.connect(database_url(tmp_path),autocommit=True) as db:
-        content=json.loads(db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()[0])
+        content=db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()[0]
         content['extra']['_reader']['reply_preview']=dict(text='Changed quote' if case == 'changed' else 'Original quote',author=None,source_url=None)
         db.execute('UPDATE publications SET content=%s WHERE id=%s',(json.dumps(content),item))
-        sql=(Path(__file__).parents[2]/'oko/storage/postgres/096-normalize-publication-content.sql').read_text()
-        db.execute(sql)
-        db.execute((Path(__file__).parents[2]/'oko/storage/postgres/097-normalize-publication-titles.sql').read_text())
+        db.execute((Path(__file__).parents[2]/'oko/storage/postgres/103-publication-reader-blocks.sql').read_text())
     reopened=Store(tmp_path,lambda _:None)
     try:
         reopened.processing.recover()
-        if case != 'same':
+        if case == 'header_only':
             assert reopened.filters.read(item)['status'] != 'done'
             assert reopened.processing.theses.read(item) is None
             assert reopened.db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()[0] == 'pending'
@@ -428,7 +427,7 @@ def test_legacy_quote_migration_reconciles_saved_processing_after_restart(tmp_pa
         reopened.db.close()
 
 
-def test_legacy_linked_quote_migration_invalidates_parent_after_restart(tmp_path):
+def test_legacy_linked_quote_copy_does_not_invalidate_parent_after_restart(tmp_path):
     from pathlib import Path
     import psycopg
     from tests.support.storage import database_url
@@ -438,7 +437,7 @@ def test_legacy_linked_quote_migration_invalidates_parent_after_restart(tmp_path
     with transaction(store.db):
         memberships.lock_graph(store.db)
         row=store.db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()
-        content=json.loads(row[0])
+        content=row[0]
         content['blocks'].append(dict(type='quote',text='Original linked quote',author=None,source_url=None))
         store.db.execute("""INSERT INTO publications(id,url,platform,external_id,complete,content,title)
             VALUES ('linked','https://example.org/linked','rss','linked',1,%s,'Linked')""",(json.dumps(content),))
@@ -451,22 +450,20 @@ def test_legacy_linked_quote_migration_invalidates_parent_after_restart(tmp_path
     assert store.processing.theses.read(item) is not None
     store.db.close()
     with psycopg.connect(database_url(tmp_path),autocommit=True) as db:
-        content=json.loads(db.execute("SELECT content FROM publications WHERE id='linked'").fetchone()[0])
+        content=db.execute("SELECT content FROM publications WHERE id='linked'").fetchone()[0]
         content['extra']['_reader']['reply_preview']=dict(text='Updated linked quote',author=None,source_url=None)
         db.execute("UPDATE publications SET content=%s WHERE id='linked'",(json.dumps(content),))
-        db.execute((Path(__file__).parents[2]/'oko/storage/postgres/096-normalize-publication-content.sql').read_text())
-        db.execute((Path(__file__).parents[2]/'oko/storage/postgres/097-normalize-publication-titles.sql').read_text())
+        db.execute((Path(__file__).parents[2]/'oko/storage/postgres/103-publication-reader-blocks.sql').read_text())
     reopened=Store(tmp_path,lambda _:None)
     try:
         reopened.processing.recover()
-        assert reopened.filters.read(item)['status'] != 'done'
-        assert reopened.processing.theses.read(item) is None
-        assert reopened.db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()[0]=='pending'
+        assert reopened.filters.read(item)['status'] == 'done'
+        assert reopened.processing.theses.read(item) is not None
     finally:
         reopened.db.close()
 
 
-def test_conflicting_legacy_title_remains_visible_after_content_migration(tmp_path):
+def test_publication_title_wins_after_content_migration(tmp_path):
     from pathlib import Path
     import psycopg
     from tests.support.storage import database_url
@@ -478,22 +475,21 @@ def test_conflicting_legacy_title_remains_visible_after_content_migration(tmp_pa
     assert store.filters.read(item)['status']=='done'
     store.db.close()
     with psycopg.connect(database_url(tmp_path),autocommit=True) as db:
-        content=json.loads(db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()[0])
+        content=db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()[0]
         content['extra']['_reader']['title']='Legacy visible title'
         db.execute('UPDATE publications SET content=%s WHERE id=%s',(json.dumps(content),item))
-        db.execute((Path(__file__).parents[2]/'oko/storage/postgres/096-normalize-publication-content.sql').read_text())
-        db.execute((Path(__file__).parents[2]/'oko/storage/postgres/097-normalize-publication-titles.sql').read_text())
+        db.execute((Path(__file__).parents[2]/'oko/storage/postgres/103-publication-reader-blocks.sql').read_text())
     reopened=Store(tmp_path,lambda _:None)
     try:
         reopened.processing.recover()
-        assert reopened.original(item)[0]['title']=='Legacy visible title'
-        assert reopened.filters.read(item)['status']!='done'
-        assert reopened.processing.theses.read(item) is None
+        assert reopened.original(item)[0]['title']=='Title'
+        assert reopened.filters.read(item)['status']=='done'
+        assert reopened.processing.theses.read(item) is not None
     finally:
         reopened.db.close()
 
 
-def test_legacy_linked_title_migration_invalidates_parent_after_restart(tmp_path):
+def test_publication_linked_title_wins_after_content_migration(tmp_path):
     from pathlib import Path
     import psycopg
     from tests.support.storage import database_url
@@ -503,7 +499,7 @@ def test_legacy_linked_title_migration_invalidates_parent_after_restart(tmp_path
     with transaction(store.db):
         memberships.lock_graph(store.db)
         row=store.db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()
-        content=json.loads(row[0])
+        content=row[0]
         content['extra']['_reader']['title']='Legacy displayed title'
         store.db.execute("""INSERT INTO publications(id,url,platform,external_id,complete,content,title)
             VALUES ('linked','https://example.org/linked','rss','linked',1,%s,'Old source title')""",(json.dumps(content),))
@@ -516,16 +512,388 @@ def test_legacy_linked_title_migration_invalidates_parent_after_restart(tmp_path
     assert store.processing.theses.read(item) is not None
     store.db.close()
     with psycopg.connect(database_url(tmp_path),autocommit=True) as db:
-        db.execute((Path(__file__).parents[2]/'oko/storage/postgres/096-normalize-publication-content.sql').read_text())
-        db.execute((Path(__file__).parents[2]/'oko/storage/postgres/097-normalize-publication-titles.sql').read_text())
+        db.execute((Path(__file__).parents[2]/'oko/storage/postgres/103-publication-reader-blocks.sql').read_text())
         title,raw=db.execute("SELECT title,content FROM publications WHERE id='linked'").fetchone()
-        assert title=='Legacy displayed title'
-        assert 'title' not in json.loads(raw)['extra']['_reader']
+        assert title=='Old source title'
+        assert 'title' not in raw['extra']['_reader']
     reopened=Store(tmp_path,lambda _:None)
     try:
         reopened.processing.recover()
-        assert reopened.filters.read(item)['status'] != 'done'
-        assert reopened.processing.theses.read(item) is None
-        assert reopened.db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()[0]=='pending'
+        assert reopened.filters.read(item)['status'] == 'done'
+        assert reopened.processing.theses.read(item) is not None
     finally:
         reopened.db.close()
+
+
+def test_changed_telegram_album_key_is_rejected_without_duplicate_or_rekey(tmp_path):
+    from dataclasses import replace
+    from oko.collection.adapters import ExternalKey, ExternalReference, Platform
+    from oko.collection.contracts import Publication
+    from oko.domain.publication import PublicationIdentityConflict
+    from tests.support.synthetic_material import material as Material
+    from tests.support.source import StructuredSource
+
+    store,item,_,_=worker_library(tmp_path)
+    old='https://t.me/fixture/6'
+    new='https://t.me/fixture/5'
+    try:
+        with transaction(store.db):
+            store.db.execute("UPDATE publications SET platform='telegram',external_id=%s,url=%s,members='[6]' WHERE id=%s", (old,old,item))
+        ref=ExternalReference(ExternalKey(Platform.telegram,new),new)
+        incoming=Publication('5',new,100,members=(5,6),adapter_reference=ref)
+        with pytest.raises(PublicationIdentityConflict):
+            with transaction(store.db):
+                store.discovery.accept([incoming],'{}','fixture')
+        assert store.db.execute("SELECT id,external_id FROM publications WHERE platform='telegram'").fetchall() == [(item,old)]
+        material=StructuredSource(None).describe(store.publication(item),Material('Title','New text'))
+        material=replace(material,adapter_content=replace(material.adapter_content,
+            metadata=replace(material.adapter_content.metadata,reference=ref)))
+        with pytest.raises(PublicationIdentityConflict):
+            with transaction(store.db):
+                store.collected_publication.accept(item,material)
+        assert store.db.execute('SELECT external_id FROM publications WHERE id=%s',(item,)).fetchone()[0]==old
+    finally:
+        store.db.close()
+
+
+def test_existing_telegram_album_cannot_absorb_another_saved_publication(tmp_path):
+    from oko.collection.adapters import ExternalKey, ExternalReference, Platform
+    from oko.collection.contracts import Publication
+    from oko.domain.publication import PublicationIdentityConflict
+
+    store,item,_,_=worker_library(tmp_path)
+    first='https://t.me/fixture/5'
+    second='https://t.me/fixture/6'
+    try:
+        with transaction(store.db):
+            store.db.execute("UPDATE publications SET platform='telegram',external_id=%s,url=%s,members='[6]' WHERE id=%s", (second,second,item))
+            store.db.execute("INSERT INTO publications(id,platform,external_id,url,feed_id,members) VALUES ('first','telegram',%s,%s,'fixture','[5]')", (first,first))
+        ref=ExternalReference(ExternalKey(Platform.telegram,first),first)
+        incoming=Publication('5',first,100,members=(5,6),adapter_reference=ref)
+        with pytest.raises(PublicationIdentityConflict):
+            with transaction(store.db):
+                store.discovery.accept([incoming],'{}','fixture')
+        rows=store.db.execute("SELECT id,members FROM publications WHERE platform='telegram'").fetchall()
+        assert {row['id']:row['members'] for row in rows} == {item:'[6]', 'first':'[5]'}
+    finally:
+        store.db.close()
+
+
+def test_collection_diagnostics_are_scoped_to_owning_transaction(tmp_path):
+    from oko.collection.contracts import Publication
+    from tests.support.source import publication_packet
+
+    store,_,_,_=worker_library(tmp_path)
+    try:
+        with pytest.raises(ValueError,match='rollback'):
+            with transaction(store.db):
+                job_for_collection=running_collection_job(store,'discover','fixture')
+                effects=store.discovery.accept([publication_packet(Publication('new','https://example.test/new',100))],'{}','fixture')
+                assert not hasattr(effects,'fetch_problems_before')
+                raise ValueError('rollback')
+        with pytest.raises(TransactionAborted):
+            with transaction(store.db):
+                with pytest.raises(RuntimeError,match='no capture'):
+                    store.jobs.apply_collection(effects,job=Job(0,'discover','fixture',0))
+        assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/new'").fetchone() is None
+    finally:
+        store.db.close()
+
+
+@pytest.mark.parametrize('ending', ['commit','rollback'])
+def test_collection_capture_does_not_outlive_failed_transaction_callback(tmp_path, ending):
+    from oko.collection.contracts import Publication
+    from tests.support.source import publication_packet
+
+    store,_,_,_=worker_library(tmp_path)
+    def broken_callback():
+        raise RuntimeError('synthetic callback failure')
+    try:
+        with pytest.raises(RuntimeError,match='synthetic callback failure'):
+            with transaction(store.db):
+                if ending == 'commit':
+                    store.db.after_commit(broken_callback)
+                job_for_collection=running_collection_job(store,'discover','fixture')
+                effects=store.discovery.accept([publication_packet(Publication('new','https://example.test/new',100))],'{}','fixture')
+                if ending == 'commit':
+                    apply_simulated_collection(store,effects,job=job_for_collection)
+                if ending == 'rollback':
+                    store.db.after_rollback(broken_callback)
+                    raise ValueError('force rollback')
+        with pytest.raises(TransactionAborted):
+            with transaction(store.db):
+                with pytest.raises(RuntimeError,match='no capture'):
+                    store.jobs.apply_collection(effects,job=Job(0,'discover','fixture',0))
+    finally:
+        store.db.close()
+
+
+def test_unapplied_collection_effects_abort_publication_and_cursor_commit(tmp_path):
+    from oko.collection.contracts import Publication
+    from tests.support.source import publication_packet
+
+    store,_,_,_=worker_library(tmp_path)
+    try:
+        previous=store.db.execute("SELECT cursor FROM feeds WHERE id='fixture'").fetchone()[0]
+        with pytest.raises(RuntimeError,match='Collection effects were not applied'):
+            with transaction(store.db):
+                job_for_collection=running_collection_job(store,'discover','fixture')
+                store.discovery.accept([publication_packet(Publication('unapplied','https://example.test/unapplied',100))],'changed-cursor','fixture')
+        assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/unapplied'").fetchone() is None
+        assert store.db.execute("SELECT cursor FROM feeds WHERE id='fixture'").fetchone()[0] == previous
+    finally:
+        store.db.close()
+
+
+def test_caught_collection_effect_failure_still_aborts_transaction(tmp_path):
+    from oko.collection.contracts import Publication
+    from tests.support.source import publication_packet
+    fail=[False]
+    def fault(point):
+        if fail[0] and point == 'collection_effects_before_completion':
+            raise RuntimeError('synthetic effects failure')
+    store,_,_,_=worker_library(tmp_path,fault=fault)
+    try:
+        previous=store.db.execute("SELECT cursor FROM feeds WHERE id='fixture'").fetchone()[0]
+        with pytest.raises(TransactionAborted):
+            with transaction(store.db):
+                job=running_collection_job(store,'discover','fixture')
+                effects=store.discovery.accept([publication_packet(Publication('failed','https://example.test/failed',100))],'failed-cursor','fixture')
+                fail[0]=True
+                try:
+                    store.jobs.apply_collection(effects,job=job)
+                except RuntimeError as error:
+                    assert str(error)=='synthetic effects failure'
+        assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/failed'").fetchone() is None
+        assert store.db.execute("SELECT cursor FROM feeds WHERE id='fixture'").fetchone()[0] == previous
+    finally:
+        store.db.close()
+
+
+def test_retrying_caught_effect_failure_cannot_commit_partial_transaction(tmp_path):
+    from oko.collection.contracts import Publication
+    from oko.storage.transaction import TransactionAborted
+    from tests.support.source import publication_packet
+    fail=[False]
+    def fault(point):
+        if fail[0] and point == 'collection_effects_before_completion':
+            raise RuntimeError('synthetic effects failure')
+    store,_,_,_=worker_library(tmp_path,fault=fault)
+    try:
+        with pytest.raises(TransactionAborted):
+            with transaction(store.db):
+                job=running_collection_job(store,'discover','fixture')
+                effects=store.discovery.accept([publication_packet(Publication('failed','https://example.test/retried',100))],'{}','fixture')
+                fail[0]=True
+                with pytest.raises(RuntimeError,match='synthetic effects failure'):
+                    store.jobs.apply_collection(effects,job=job)
+                fail[0]=False
+                store.jobs.apply_collection(effects,job=job)
+                store.jobs.finish(job)
+        assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/retried'").fetchone() is None
+    finally:
+        store.db.close()
+
+
+def test_caught_discovery_conflict_cannot_commit_earlier_page_items(tmp_path):
+    from oko.collection.contracts import Publication
+    from oko.domain.publication import PublicationOwnershipConflict
+    from oko.storage.transaction import TransactionAborted
+    from tests.support.source import publication_packet
+
+    store,item,_,_=worker_library(tmp_path)
+    try:
+        with transaction(store.db):
+            store.db.execute("INSERT INTO feeds(id,platform,external_id) VALUES ('other','rss','other')")
+            store.db.execute("UPDATE publications SET feed_id='other' WHERE id=%s",(item,))
+        existing=store.publication(item)
+        before=store.db.execute("SELECT cursor FROM feeds WHERE id='fixture'").fetchone()[0]
+        with pytest.raises(TransactionAborted):
+            with transaction(store.db):
+                job_for_collection=running_collection_job(store,'discover','fixture')
+                try:
+                    store.discovery.accept([publication_packet(Publication('new','https://example.test/page-new',100)),existing], 'changed','fixture')
+                except PublicationOwnershipConflict:
+                    pass
+        assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/page-new'").fetchone() is None
+        assert store.db.execute("SELECT cursor FROM feeds WHERE id='fixture'").fetchone()[0] == before
+    finally:
+        store.db.close()
+
+
+@pytest.mark.parametrize('ending',['forgotten','rejected'])
+def test_collection_requires_original_job_outcome_before_commit(tmp_path, ending):
+    from dataclasses import replace
+    from oko.collection.contracts import Publication
+    from oko.storage.job_types import Job
+    from oko.storage.job_repository import JobRejected
+    from tests.support.source import publication_packet
+
+    store,_,_,_=worker_library(tmp_path)
+    try:
+        with transaction(store.db):
+            row=store.db.execute("UPDATE jobs SET status='running',generation=generation+1 WHERE kind='discover' AND item='fixture' RETURNING id,generation").fetchone()
+            job=Job(row['id'],'discover','fixture',row['generation'])
+        expected = TransactionAborted if ending == 'rejected' else RuntimeError
+        message = 'A repository aborted this transaction' if ending == 'rejected' else 'Collection Job was not completed'
+        with pytest.raises(expected,match=message):
+            with transaction(store.db):
+                store.jobs.begin_collection(job)
+                effects=store.discovery.accept([publication_packet(Publication('new','https://example.test/job-outcome',100))],'changed','fixture')
+                store.jobs.apply_collection(effects,job=job)
+                if ending=='rejected':
+                    with pytest.raises(JobRejected):
+                        store.jobs.finish(replace(job,generation=job.generation+1))
+        assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/job-outcome'").fetchone() is None
+        assert store.jobs.valid(job)
+    finally:
+        store.db.close()
+
+
+def test_caught_collected_publication_failure_cannot_commit_partial_content(tmp_path):
+    from oko.storage.transaction import TransactionAborted
+    from tests.support.synthetic_material import material as Material
+    from tests.support.source import StructuredSource
+    fail=[False]
+    def fault(point):
+        if fail[0] and point == 'collection_after_publication_write':
+            raise RuntimeError('synthetic write failure')
+    store,item,_,_=worker_library(tmp_path,fault=fault)
+    try:
+        before=store.db.execute('SELECT content,title FROM publications WHERE id=%s',(item,)).fetchone()[:]
+        material=StructuredSource(None).describe(store.publication(item),Material('Changed','Changed body'))
+        with pytest.raises(TransactionAborted):
+            with transaction(store.db):
+                job_for_collection=running_collection_job(store,'fetch',item)
+                fail[0]=True
+                try:
+                    store.collected_publication.accept(item,material)
+                except RuntimeError as error:
+                    assert str(error)=='synthetic write failure'
+        assert store.db.execute('SELECT content,title FROM publications WHERE id=%s',(item,)).fetchone()[:] == before
+    finally:
+        store.db.close()
+
+
+@pytest.mark.parametrize('kind,target',[('discover','other'),('fetch','fixture')])
+def test_collection_rejects_job_for_another_operation_or_target(tmp_path, kind, target):
+    from oko.collection.contracts import Publication
+    from oko.storage.job_repository import JobRejected
+    from tests.support.source import publication_packet
+
+    store,_,_,_=worker_library(tmp_path)
+    try:
+        with pytest.raises(TransactionAborted):
+            with transaction(store.db):
+                job=running_collection_job(store,kind,target,bind=False)
+                correct=running_collection_job(store,'discover','fixture')
+                effects=store.discovery.accept([publication_packet(Publication('new','https://example.test/wrong-job',100))],'changed','fixture')
+                with pytest.raises(JobRejected,match='does not own this result'):
+                    store.jobs.apply_collection(effects,job=job)
+                store.jobs.finish(job)
+        assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/wrong-job'").fetchone() is None
+    finally:
+        store.db.close()
+
+
+def test_retry_after_wrong_collection_job_cannot_commit(tmp_path):
+    from oko.collection.contracts import Publication
+    from oko.storage.job_repository import JobRejected
+    from oko.storage.transaction import TransactionAborted
+    from tests.support.source import publication_packet
+
+    store,_,_,_=worker_library(tmp_path)
+    try:
+        with pytest.raises(TransactionAborted):
+            with transaction(store.db):
+                wrong=running_collection_job(store,'discover','other',bind=False)
+                correct=running_collection_job(store,'discover','fixture')
+                effects=store.discovery.accept([publication_packet(Publication('new','https://example.test/wrong-then-right',100))],'changed','fixture')
+                with pytest.raises(JobRejected):
+                    store.jobs.apply_collection(effects,job=wrong)
+                store.jobs.apply_collection(effects,job=correct)
+                store.jobs.finish(correct)
+        assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/wrong-then-right'").fetchone() is None
+    finally:
+        store.db.close()
+
+
+def test_collection_result_cannot_move_to_new_job_generation(tmp_path):
+    from dataclasses import replace
+    from oko.collection.contracts import Publication
+    from oko.storage.job_repository import JobRejected
+    from oko.storage.transaction import TransactionAborted
+    from tests.support.source import publication_packet
+
+    store,_,_,_=worker_library(tmp_path)
+    try:
+        with pytest.raises(TransactionAborted):
+            with transaction(store.db):
+                job=running_collection_job(store,'discover','fixture')
+                effects=store.discovery.accept([publication_packet(Publication('new','https://example.test/new-generation',100))],'changed','fixture')
+                store.db.execute("UPDATE jobs SET generation=generation+1 WHERE id=%s",(job.id,))
+                replacement=replace(job,generation=job.generation+1)
+                with pytest.raises(JobRejected):
+                    store.jobs.apply_collection(effects,job=replacement)
+                store.jobs.finish(replacement)
+        assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/new-generation'").fetchone() is None
+    finally:
+        store.db.close()
+
+
+def test_retry_after_rejected_collection_finish_cannot_commit(tmp_path):
+    from dataclasses import replace
+    from oko.collection.contracts import Publication
+    from oko.storage.job_repository import JobRejected
+    from tests.support.source import publication_packet
+
+    store,_,_,_=worker_library(tmp_path)
+    try:
+        with pytest.raises(TransactionAborted):
+            with transaction(store.db):
+                job=running_collection_job(store,'discover','fixture')
+                effects=store.discovery.accept([publication_packet(Publication('new','https://example.test/stale-finish',100))],'changed','fixture')
+                store.jobs.apply_collection(effects,job=job)
+                with pytest.raises(JobRejected):
+                    store.jobs.finish(replace(job,generation=job.generation+1))
+                store.jobs.finish(job)
+        assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/stale-finish'").fetchone() is None
+    finally:
+        store.db.close()
+
+
+@pytest.mark.parametrize('kind,target',[(None,None),('discover','other'),('fetch','fixture')])
+def test_collection_accept_requires_matching_bound_job(tmp_path, kind, target):
+    from oko.collection.contracts import Publication
+    from oko.storage.job_repository import JobRejected
+    from tests.support.source import publication_packet
+
+    store,_,_,_=worker_library(tmp_path)
+    try:
+        with pytest.raises(JobRejected,match='does not own this result'):
+            with transaction(store.db):
+                if kind is not None:
+                    running_collection_job(store,kind,target)
+                store.discovery.accept([publication_packet(Publication('new','https://example.test/unbound',100))],'changed','fixture')
+        assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/unbound'").fetchone() is None
+    finally:
+        store.db.close()
+
+
+def test_collection_result_and_retry_outcome_commit_together(tmp_path):
+    from oko.collection.contracts import Publication
+    from tests.support.source import publication_packet
+
+    store,_,_,_=worker_library(tmp_path)
+    try:
+        with transaction(store.db):
+            job=running_collection_job(store,'discover','fixture')
+            effects=store.discovery.accept([publication_packet(Publication('retry','https://example.test/retry',100))],'retry-cursor','fixture')
+            store.jobs.apply_collection(effects,job=job)
+            store.jobs.retry(job,store.clock(),'temporary failure',code='source-temporary')
+        assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/retry'").fetchone()
+        assert store.db.execute("SELECT cursor FROM feeds WHERE id='fixture'").fetchone()[0]=='retry-cursor'
+        row=store.db.execute('SELECT status,generation,error FROM jobs WHERE id=%s',(job.id,)).fetchone()
+        assert row[:] == ('pending',job.generation,'temporary failure')
+    finally:
+        store.db.close()

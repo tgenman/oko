@@ -1,4 +1,5 @@
 """Current reader obstacles; identity and recovery are independent of message text."""
+from oko.storage.reading import saved_content
 from oko.storage.publication_owners import owner_expr
 from oko.storage.database import expect_row, Row
 import json
@@ -716,7 +717,7 @@ class Problems:
         """Restartable recovery; subsequent writes update projections transactionally."""
         if self.db.execute("SELECT 1 FROM state WHERE key='youtube-null-fetch-recovered-v1'").fetchone():return
         cursor: int | None=None
-        many_youtube_members=bool(self.db.execute('''SELECT 1 FROM feeds f JOIN feed_publications m ON m.feed_id=f.id AND m.is_primary
+        many_youtube_members=bool(self.db.execute('''SELECT 1 FROM feeds f JOIN (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m ON m.feed_id=f.id
             WHERE f.kind='youtube' OFFSET 100 LIMIT 1''').fetchone())
         many_jobs=bool(self.db.execute("""SELECT 1 FROM jobs WHERE kind='fetch' AND item IS NOT NULL AND item<>''
             AND problem_code IS NULL AND error IS NOT NULL OFFSET 100 LIMIT 1""").fetchone()) if many_youtube_members else False
@@ -724,12 +725,12 @@ class Problems:
         while True:
             sql="""WITH youtube_feeds AS MATERIALIZED (SELECT id FROM feeds WHERE kind='youtube'),
                 candidates AS (
-                    SELECT j.id FROM youtube_feeds f JOIN feed_publications m ON m.feed_id=f.id AND m.is_primary
-                    JOIN jobs j ON md5(j.item)=md5(m.publication_id) AND j.item=m.publication_id
+                    SELECT j.id FROM youtube_feeds f JOIN (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m ON m.feed_id=f.id
+                    JOIN jobs j ON md5(j.item)=md5(m.id) AND j.item=m.id
                     WHERE j.kind='fetch' AND j.item IS NOT NULL AND j.item<>'' AND j.status IN ('pending','running','failed','unavailable','blocked') AND j.problem_code IS NULL AND j.error IS NOT NULL
                     UNION
-                    SELECT j.id FROM youtube_feeds f JOIN feed_publications m ON m.feed_id=f.id AND m.is_primary
-                    JOIN publication_links l ON l.source_publication_id=m.publication_id
+                    SELECT j.id FROM youtube_feeds f JOIN (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m ON m.feed_id=f.id
+                    JOIN publication_links l ON l.source_publication_id=m.id
                     JOIN jobs j ON md5(j.item)=md5(l.target_publication_id) AND j.item=l.target_publication_id
                     WHERE j.kind='fetch' AND j.item IS NOT NULL AND j.item<>'' AND j.status IN ('pending','running','failed','unavailable','blocked') AND j.problem_code IS NULL AND j.error IS NOT NULL
                     UNION
@@ -2730,16 +2731,16 @@ class Problems:
                 active={(row['item'] or '',row['code']) for row in self.db.execute("SELECT item,coalesce(problem_code,'work-discover') AS code FROM jobs WHERE kind='discover' AND item=ANY(%s) AND status IN ('pending','running','failed','unavailable','blocked') AND (error IS NOT NULL OR problem_code IS NOT NULL)",(aliases,))} if aliases else set()
                 legacy_active: set[tuple[str,str]] = set()
                 if all_feeds:
-                    legacy_active.update((row['feed_id'],row['code']) for row in self.db.execute("""SELECT owner.feed_id,coalesce(j.problem_code,'work-discover') AS code FROM feed_publications owner
-                        JOIN jobs j ON j.item=owner.publication_id AND j.kind='discover'
-                        WHERE owner.feed_id=ANY(%s) AND owner.is_primary AND j.status IN ('pending','running','failed','unavailable','blocked')
+                    legacy_active.update((row['feed_id'],row['code']) for row in self.db.execute("""SELECT owner.feed_id,coalesce(j.problem_code,'work-discover') AS code FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) owner
+                        JOIN jobs j ON j.item=owner.id AND j.kind='discover'
+                        WHERE owner.feed_id=ANY(%s) AND j.status IN ('pending','running','failed','unavailable','blocked')
                           AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)""",(sorted(all_feeds),)))
-                    legacy_active.update((row['feed_id'],row['code']) for row in self.db.execute("""SELECT owner.feed_id,coalesce(j.problem_code,'work-discover') AS code FROM feed_publications owner
-                        JOIN publications root ON root.id=owner.publication_id AND root.viewed=0 JOIN publication_links link ON link.source_publication_id=root.id
+                    legacy_active.update((row['feed_id'],row['code']) for row in self.db.execute("""SELECT owner.feed_id,coalesce(j.problem_code,'work-discover') AS code FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) owner
+                        JOIN publications root ON root.id=owner.id AND root.viewed=0 JOIN publication_links link ON link.source_publication_id=root.id
                         JOIN jobs j ON j.item=link.target_publication_id AND j.kind='discover'
-                        WHERE owner.feed_id=ANY(%s) AND owner.is_primary AND j.status IN ('pending','running','failed','unavailable','blocked')
+                        WHERE owner.feed_id=ANY(%s) AND j.status IN ('pending','running','failed','unavailable','blocked')
                           AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)
-                          AND NOT EXISTS (SELECT 1 FROM feed_publications target WHERE target.publication_id=j.item AND target.is_primary)""",(sorted(all_feeds),)))
+                          AND NOT EXISTS (SELECT 1 FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) target WHERE target.id=j.item)""",(sorted(all_feeds),)))
                 present={row['id'] for row in self.db.execute("SELECT id FROM feeds WHERE id=ANY(%s) AND connection!='deleting'",(sorted(all_feeds),))} if all_feeds else set()
                 profile_feeds={feed for record,code,feeds in parsed if code in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') for feed in feeds if (feed,code) in active}
                 bindings={row['feed']:row['indexed_role'] for row in self.db.execute('SELECT feed,indexed_role FROM telegram_bindings WHERE feed=ANY(%s)',(sorted(profile_feeds),))} if profile_feeds else {}
@@ -2764,15 +2765,15 @@ class Problems:
         params=(owner,excluded_job,code)
         query="""SELECT 1 FROM jobs j WHERE j.kind='discover' AND j.item=%s AND j.id!=%s AND j.status IN ('pending','running','failed','unavailable','blocked') AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL) AND coalesce(j.problem_code,'work-discover')=%s LIMIT 1"""
         if self.db.execute(query,params).fetchone():return True
-        query="""SELECT 1 FROM feed_publications owner JOIN jobs j ON j.item=owner.publication_id AND j.kind='discover'
-            WHERE owner.feed_id=%s AND owner.is_primary AND j.id!=%s AND j.status IN ('pending','running','failed','unavailable','blocked')
+        query="""SELECT 1 FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) owner JOIN jobs j ON j.item=owner.id AND j.kind='discover'
+            WHERE owner.feed_id=%s AND j.id!=%s AND j.status IN ('pending','running','failed','unavailable','blocked')
               AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL) AND coalesce(j.problem_code,'work-discover')=%s LIMIT 1"""
         if self.db.execute(query,params).fetchone():return True
-        query="""SELECT 1 FROM feed_publications owner JOIN publications root ON root.id=owner.publication_id AND root.viewed=0
+        query="""SELECT 1 FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) owner JOIN publications root ON root.id=owner.id AND root.viewed=0
             JOIN publication_links link ON link.source_publication_id=root.id JOIN jobs j ON j.item=link.target_publication_id AND j.kind='discover'
-            WHERE owner.feed_id=%s AND owner.is_primary AND j.id!=%s AND j.status IN ('pending','running','failed','unavailable','blocked')
+            WHERE owner.feed_id=%s AND j.id!=%s AND j.status IN ('pending','running','failed','unavailable','blocked')
               AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL) AND coalesce(j.problem_code,'work-discover')=%s
-              AND NOT EXISTS (SELECT 1 FROM feed_publications target WHERE target.publication_id=j.item AND target.is_primary) LIMIT 1"""
+              AND NOT EXISTS (SELECT 1 FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) target WHERE target.id=j.item) LIMIT 1"""
         return self.db.execute(query,params).fetchone() is not None
 
     def discover_legacy_owners(self, row: Any) -> list[str]:
@@ -3499,8 +3500,8 @@ class Problems:
             youtube_feeds=[feed_id for feed_id,feed in feeds.items() if feed.get('kind')=='youtube']
             if youtube_feeds and scope_items is None:
                 rows=self.db.execute(f"""WITH affected(id) AS (
-                    SELECT publication_id FROM feed_publications WHERE is_primary AND feed_id=ANY(%s)
-                    UNION SELECT l.target_publication_id FROM feed_publications m JOIN publication_links l ON l.source_publication_id=m.publication_id WHERE m.is_primary AND m.feed_id=ANY(%s)
+                    SELECT id FROM publications WHERE feed_id=ANY(%s)
+                    UNION SELECT l.target_publication_id FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m JOIN publication_links l ON l.source_publication_id=m.id WHERE m.feed_id=ANY(%s)
                     UNION SELECT item FROM jobs WHERE kind='fetch' AND feed_id=ANY(%s) AND status IN ('pending','running') AND problem_code IN ('','work-fetch')
                 ) SELECT DISTINCT coalesce(root.id,j.item) AS affected FROM affected a JOIN jobs j ON j.kind='fetch' AND j.item=a.id
                 LEFT JOIN publications items ON items.id=j.item LEFT JOIN publication_links l ON l.target_publication_id=items.id
@@ -3529,7 +3530,7 @@ class Problems:
         saved = self.db.execute("SELECT i . id , i . feed_id AS feed_id , i.content AS content_raw , f . status AS fetch_status , f . problem_code AS fetch_code , EXISTS ( SELECT 1 FROM media_files m WHERE m . publication_id = i . id AND EXISTS ( SELECT 1 FROM jobs j WHERE j . item = m . id AND j . kind = 'download_media' AND j . status IN ( 'pending' , 'running' ) AND j . error IS NULL AND j . problem_code IS NULL ) ) AS media_waiting , CASE WHEN i . platform = 'youtube' THEN EXISTS ( SELECT 1 FROM media_files m JOIN jobs j ON j . item = m . id AND j . kind = 'download_media' WHERE m . publication_id = i . id AND m . resource_key = 'youtube:subtitles' AND j . status = 'pending' AND j . problem_code IS NULL ) ELSE FALSE END AS caption_waiting FROM publications i LEFT JOIN jobs f ON f . item = i . id AND f . kind = 'fetch' WHERE i . viewed = 0 AND i . feed_id IS NOT NULL AND i . complete = 1 AND NOT i . source_deleted AND i.incomplete_class IS DISTINCT FROM 1".replace('i . feed_id', owner_expr('i'))).fetchall()
         for row in saved:
             from oko.storage.incomplete_index import content_class
-            raw_content=json.loads(row['content_raw'])
+            raw_content=saved_content(row['content_raw'])
             classification=content_class(row['content_raw'])
             if classification==1:
                 continue

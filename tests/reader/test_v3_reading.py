@@ -1,3 +1,4 @@
+import pytest
 from tests.support.cards import read_all_cards, read_publications_for_cards
 from tests.support.v3 import TestClient
 from tests.support.synthetic_source import SyntheticSource
@@ -99,3 +100,91 @@ def test_public_codex_denial_has_domain_waiting_reason(tmp_path):
         wait_for(client, lambda: any(w.get('reason') == 'public_ai_not_allowed' for w in client.get('/api/v3/status/details').json()['work']))
         wait_for(client, lambda: 'Запрещена публичная' in (client.get('/api/v3/publication/' + item).json()['theses']['error'] or ''))
         assert client.get('/api/v3/publication/' + item).json()['theses']['result'] is None
+
+
+def test_cards_sort_unknown_publication_dates_by_discovery_time(tmp_path):
+    from tests.support.storage import database
+    with TestClient(create_app(tmp_path, token='test', api_only=True, source=SyntheticSource()), headers=HEADERS) as client:
+        setup_reader(client, theses=False)
+        ids = sorted(card['id'] for card in read_all_cards(client, '/api/v3/cards'))
+        with database(tmp_path) as db:
+            db.execute('UPDATE publications SET published_at=%s, discovered_at=%s WHERE id=%s', (1000, 100, ids[0]))
+            db.execute('UPDATE publications SET published_at=NULL, discovered_at=%s WHERE id=%s', (2000, ids[1]))
+            db.execute('UPDATE publications SET published_at=NULL, discovered_at=%s WHERE id=%s', (500, ids[2]))
+        newest = read_all_cards(client, '/api/v3/cards?sort=newest')
+        assert [card['id'] for card in newest] == [ids[1], ids[0], ids[2]]
+        assert newest[0]['published_at'] is None and newest[2]['published_at'] is None
+        oldest = read_all_cards(client, '/api/v3/cards?sort=oldest')
+        assert [card['id'] for card in oldest] == [ids[2], ids[0], ids[1]]
+        with database(tmp_path) as db:
+            db.execute('UPDATE publications SET discovered_at=%s WHERE id=%s', (2000, ids[2]))
+        paged = read_all_cards(client, '/api/v3/cards?sort=newest', params={'limit': 1})
+        assert [card['id'] for card in paged] == [ids[1], ids[2], ids[0]]
+
+
+@pytest.mark.parametrize('prior_owner', ['other', None])
+def test_discovery_reports_conflicting_publication_owner(tmp_path, prior_owner):
+    from tests.support.storage import database
+    from tests.support.reader import wait_for
+
+    class ReplaySource(SyntheticSource):
+        async def discover(self, cursor):
+            return await super().discover(None)
+
+    with TestClient(create_app(tmp_path, token='test', api_only=True, source=ReplaySource()), headers=HEADERS) as client:
+        publication = setup_reader(client, theses=False)
+        with database(tmp_path) as db:
+            original_feed = db.execute('SELECT feed_id FROM publications WHERE id=%s', (publication,)).fetchone()[0]
+            db.execute("INSERT INTO feeds(id,platform,external_id) VALUES ('other','rss','https://other.test/feed')")
+            db.execute('UPDATE publications SET feed_id=%s WHERE id=%s', (prior_owner, publication))
+            db.execute("UPDATE feeds SET cursor='' WHERE id=%s", (original_feed,))
+        response = client.post('/api/v3/collect', json={'scope':'feed','feed_id':original_feed})
+        assert response.status_code == 200, response.text
+
+        def failed():
+            with database(tmp_path) as db:
+                return db.execute("SELECT status,error,problem_code FROM jobs WHERE kind='discover' AND item=%s AND status='failed'", (original_feed,)).fetchone()
+        status = wait_for(client, failed)
+        assert status['problem_code'] == 'publication-ownership-conflict'
+        assert all(text in status['error'] for text in (publication, str(prior_owner), original_feed, 'https://example.org/oko/'))
+        details = client.get('/api/v3/status/details')
+        assert details.status_code == 200
+        assert publication in details.text and str(prior_owner) in details.text
+        with database(tmp_path) as db:
+            assert db.execute('SELECT feed_id FROM publications WHERE id=%s', (publication,)).fetchone()[0] == prior_owner
+            assert db.execute("SELECT count(*) FROM publications WHERE platform='other_web' AND external_id LIKE 'https://example.org/oko/%%'").fetchone()[0] == 3
+
+
+def test_rediscovery_by_same_feed_keeps_publication_ids(tmp_path):
+    from tests.support.reader import wait_for
+    from tests.support.storage import database
+
+    class ReplaySource(SyntheticSource):
+        async def discover(self, cursor):
+            return await super().discover(None)
+
+    with TestClient(create_app(tmp_path, token='test', api_only=True, source=ReplaySource()), headers=HEADERS) as client:
+        item = setup_reader(client, theses=False)
+        before = {card['id'] for card in read_all_cards(client, '/api/v3/cards')}
+        with database(tmp_path) as db:
+            feed = db.execute('SELECT feed_id FROM publications WHERE id=%s', (item,)).fetchone()[0]
+            db.execute("UPDATE feeds SET cursor='' WHERE id=%s", (feed,))
+        response = client.post('/api/v3/collect', json={'scope':'feed','feed_id':feed})
+        assert response.status_code == 200, response.text
+        wait_for(client, lambda: client.get('/api/v3/status').json()['collection']['state'] == 'idle')
+        assert {card['id'] for card in read_all_cards(client, '/api/v3/cards')} == before
+        with database(tmp_path) as db:
+            assert db.execute('SELECT count(*) FROM publications WHERE feed_id=%s', (feed,)).fetchone()[0] == 3
+
+
+def test_distinct_external_keys_are_not_merged_by_member_number(tmp_path):
+    from dataclasses import replace
+
+    class OverlappingMembers(SyntheticSource):
+        async def discover(self, cursor):
+            result = await super().discover(cursor)
+            return replace(result, publications=tuple(replace(publication, members=(17,)) for publication in result.publications))
+
+    with TestClient(create_app(tmp_path, token='test', api_only=True, source=OverlappingMembers()), headers=HEADERS) as client:
+        setup_reader(client, theses=False)
+        assert len({card['id'] for card in read_all_cards(client, '/api/v3/cards')}) == 3

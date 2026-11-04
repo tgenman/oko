@@ -9,7 +9,6 @@ from oko.storage import memberships as membership_graph
 from oko.storage import processing_input as publication_input
 from oko.storage.reading import reading_snapshot, reading_value, retry_time, reader_now, saved_content
 from oko.diagnostics import record_caught
-from dataclasses import dataclass, replace
 import json
 from pathlib import Path
 import shutil
@@ -27,7 +26,6 @@ from oko.storage.postgres_connection import PostgresConnection
 from oko.storage.problems import Problems
 from oko.storage.youtube import YouTubeAccess
 from oko.storage.composition import FolderContents, ReadingComposition
-from oko.collection.telegram.contracts import HistoryEnvelope
 from oko.storage.filter_results import FilterResults
 from oko.storage.processing_coordination import ProcessingState
 from oko.collection.contracts import SourceError, Material, Publication, SourceManifest
@@ -36,20 +34,13 @@ from oko.storage.job_writes import execute as job_write
 from oko.storage.transaction import begin_write, transaction
 from oko.storage.media_paths import existing_file
 from oko.storage.job_repository import JobRepository
-from oko.domain.collection import CollectionEffects
+from oko.storage.collection_diagnostics import CollectionDiagnostics
 from oko.subscriptions.history import InitialHistory
 from oko.processing.llamacpp import ProcessorConfig
 from oko.processing.execution import CodexSettings
 
 
-@dataclass(frozen=True)
-class WorkSummary:
-    kind: str
-    status: str
-    feed: str | None
-    count: int
-    error_code: str | None
-    retry_at: float | None
+from oko.domain.reader import WorkSummary
 
 
 class Store:
@@ -180,6 +171,16 @@ class Store:
                     self.incomplete_draft.mark_youtube_groups(pause=True)
             self.recover_files()
             self.read_versions = ReaderVersions(self)
+            from oko.storage.collection_effects import CollectionEffectCapture
+            from oko.storage.discovery import DiscoveryRepository
+            from oko.storage.collected_publication import CollectedPublicationRepository
+            effects = CollectionEffectCapture(self)
+            self.discovery = DiscoveryRepository(db=self.db, publications=self.publications, subscriptions=self.subscriptions,
+                versions=self.read_versions, effects=effects, needs_collection=self._needs_collection,
+                original=self.original, clock=self.wall_clock, fault=self.fault)
+            self.collected_publication = CollectedPublicationRepository(db=self.db, root=self.root,
+                publications=self.publications, media=self.media, capture=effects,
+                collection_history=self.collection_history, fault=self.fault)
             self.processing.background = defer_recovery
             self.processing.recovering = True
             self._recovery: Generator[None,None,None] | None = self._recover_steps()
@@ -266,133 +267,6 @@ class Store:
         row=self.db.execute('SELECT cursor FROM feeds WHERE id = %s',(feed,)).fetchone()
         return str(row[0]) or None if row else None
 
-    def collect_discovery(self,publications: list[Publication],cursor: str,feed: str,namespace: str = '',*,description: str | None = None,successful: bool = True,source_order: tuple[ExternalKey,...] = ()) -> CollectionEffects:
-        effects=CollectionEffects()
-        with self.db:
-            membership_graph.lock_graph(self.db)
-            history_items=[]
-            item_status_changed = False
-            saved_items: set[str] = set()
-            added_memberships: list[str] = []
-            completed_links: set[str] = set()
-            envelope=HistoryEnvelope.decode(cursor,adapter='web') if namespace=='telegram-web' else None
-            selection=json.loads(cursor) if not envelope and self.subscriptions.history.status(feed) else {}
-            enrolled=set(envelope.selection.enrolled_ids) if envelope else set(selection.get('history_enroll',[]))
-            ordered=source_order
-            known={ExternalKey(platform,row['external_id']):row['source_order'] for platform in {key.platform for key in ordered}
-                for row in self.db.execute('SELECT external_id , source_order FROM publications WHERE platform = %s AND source_order IS NOT NULL AND external_id = ANY(%s)',
-                    (platform.value,[key.external_id for key in ordered if key.platform==platform]))}
-            anchor=next((index for index in reversed(range(len(ordered))) if ordered[index] in known),None)
-            # Positive ranks leave room for later uploads and earlier history.
-            base_order=known[ordered[anchor]]+anchor if anchor is not None else 1_000_000_000
-            orders={key:base_order-index for index,key in enumerate(ordered)}
-            for publication in publications:
-                # Earlier entries can create linked identities in this page.
-                plan=self.publications.plan(feed,[publication]).get(publication.id)
-                if plan is None:
-                    continue
-                item=plan.item
-                if plan.new_source_jobs:
-                    from oko.storage import source_groups
-                    source_ids=[job_id for job_id in plan.new_source_jobs if job_id not in effects.source_groups_before]
-                    for start in range(0,len(source_ids),400):
-                        group=source_ids[start:start+400]
-                        effects.source_groups_before.update(source_groups.job_keys_many(self,group))
-                        evidence=source_groups.job_evidence_many(self,[(job_id,None) for job_id in group])
-                        for key,objects in evidence.items():effects.source_evidence_before.setdefault(key,set()).update(objects)
-                if item not in effects.delete_problems_checked:
-                    if plan.delete_problem_job is not None:
-                        effects.delete_problem_ids_before[item] = self.problems.deletion_problem_ids(plan.delete_problem_job,self.wall_clock())
-                    effects.delete_problems_checked.add(item)
-                if plan.delete_problem_children:
-                    publication_links.capture_deletion_problems(self,effects,set(plan.delete_problem_children))
-                if plan.fetch_problem_job is not None and plan.fetch_problem_job not in effects.fetch_problems_checked:
-                    from oko.storage.fetch_job_problems import managed_candidates,previous_candidates
-                    effects.fetch_problems_checked.add(plan.fetch_problem_job)
-                    previous_fetch=managed_candidates(self,plan.fetch_problem_job,self.wall_clock())
-                    if any(candidate.get('fetch_youtube_event') for candidate in previous_fetch):
-                        previous_fetch=previous_candidates(self,plan.fetch_problem_job,self.wall_clock())
-                    if previous_fetch:effects.fetch_problems_before[plan.fetch_problem_job]=previous_fetch
-                if plan.fetch_problem_children:
-                    publication_links.capture_fetch_problems(self,effects,set(plan.fetch_problem_children))
-                if plan.media_problem_exists:
-                    publication_links.capture_media_problems(self,effects,{item})
-                if plan.media_problem_children:
-                    publication_links.capture_media_problems(self,effects,set(plan.media_problem_children))
-                if plan.source_problem_exists:
-                    publication_links.capture_source_groups(self,effects,{item})
-                if plan.processing_problem_exists:
-                    publication_links.capture_processing_problems(self,effects,{item})
-                if plan.processing_problem_children:
-                    publication_links.capture_processing_problems(self,effects,set(plan.processing_problem_children))
-                if publication.adapter_reference is None:
-                    raise ValueError('Adapter did not return a publication external key')
-                ref = publication.adapter_reference
-                item_status_changed |= bool(self.db.execute('INSERT INTO publications (id, url, members, platform, external_id, published_at, discovered_at) VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING',
-                    (item, publication.url, json.dumps(publication.members), ref.key.platform.value, ref.key.external_id, publication.published if publication.published_known else None, self.wall_clock())).rowcount)
-                membership=membership_graph.add(self.db,feed,item)
-                if membership:
-                    added_memberships.append(item)
-                    saved_items.add(item)
-                if publication.adapter_reference is None:
-                    raise ValueError('Adapter did not return a publication external key')
-                rank=orders.get(publication.adapter_reference.key)
-                if rank is not None and not publication.published_known:
-                    item_status_changed |= bool(self.db.execute('UPDATE publications SET source_order = %s WHERE id = %s AND source_order IS DISTINCT FROM %s',(rank,item,rank)).rowcount)
-                self.publications.identify(item,publication.adapter_reference)
-                if plan.content is not None:
-                    assert plan.fingerprint is not None
-                    self.publications.publish(item,plan.content,plan.fingerprint,effects)
-                    completed = bool(self.db.execute('UPDATE publications SET complete = 1 WHERE id = %s AND complete IS DISTINCT FROM 1',(item,)).rowcount)
-                    item_status_changed |= completed
-                    if completed:
-                        completed_links.add(item)
-                    saved_items.add(item)
-                row=expect_row(self.db.execute('SELECT * FROM publications WHERE id = %s',(item,)).fetchone())
-                if publication.published_known and row['published_at'] is None:
-                    self.db.execute('UPDATE publications SET published_at = %s WHERE id = %s',(publication.published,item))
-                    item_status_changed = True
-                if publication.id in enrolled:
-                    history_items.append(item)
-                needs_fetch=publication.teaser is None or publication.teaser.adapter_content is None or publication.teaser.adapter_content.needs_fetch
-                if publication.members and set(publication.members)!=set(json.loads(row['members'])):
-                    needs_fetch=True
-                if publication.observed_only:
-                    needs_fetch=self._needs_collection(item,publication.teaser)
-                if needs_fetch and not self.publications.source_deleted(item):
-                    members=sorted(set(json.loads(row['members']))|set(publication.members))
-                    if members!=json.loads(row['members']):
-                        self.db.execute('UPDATE publications SET members = %s WHERE id = %s',(json.dumps(members),item))
-                        item_status_changed = True
-                        saved_items.add(item)
-                        effects.fetch[item]=True
-                    effects.fetch.setdefault(item,False)
-            if item_status_changed:
-                status_changed(self.db)
-            self.read_versions.memberships_changed(added_memberships)
-            if envelope or 'history_enroll' in selection:
-                self.subscriptions.history.enroll(feed,history_items,envelope.selection.scan_complete if envelope else selection['scan_complete'])
-                if envelope:
-                    self.subscriptions.history.telegram_state(feed,envelope.selection)
-                for item in history_items:
-                    row=expect_row(self.db.execute('SELECT complete FROM publications WHERE id = %s',(item,)).fetchone())
-                    if self.publications.source_deleted(item):
-                        self.subscriptions.history.failed(item,unavailable=True)
-                    elif row['complete']:
-                        self.subscriptions.history.saved(item,bool(self.original(item)[0].get('full')))
-            if selection:
-                self.subscriptions.history.discovery_state(feed,selection)
-            for item in saved_items:
-                self.processing.reconcile_accepted_item(item)
-            publication_links.notify_parents_many(self, set(added_memberships) | completed_links)
-            if successful:
-                self.subscriptions.details.record(feed,'updated')
-            self.subscriptions.details.description(feed,description)
-            self.fault('before_discovery_commit')
-            self.db.execute('UPDATE feeds SET cursor = %s WHERE id = %s',(cursor,feed))
-
-        return effects
-
     def source_http_until(self, scope: str) -> float:
         row=self.db.execute('SELECT value FROM state WHERE key = %s',('source-http:'+scope,)).fetchone()
         return float(row[0]) if row else 0.
@@ -441,16 +315,17 @@ class Store:
             row = material_read.item(self.db,owner) if owner else None
         if row is None:
             raise LookupError('Publication not found')
-        if row['feed_id'] is None:
+        if row['reader_feed_id'] is None:
             root=self.db.execute(f"SELECT {owner_expr('i')} AS feed_id FROM publication_links l JOIN publications i ON i.id=l.source_publication_id WHERE l.target_publication_id = %s AND i.viewed = 0 AND {owner_expr('i')} IS NOT NULL ORDER BY i.id LIMIT 1",(item,)).fetchone()
             if root:
                 return str(root[0])
             return ''
-        return str(row['feed_id'])
+        return str(row['reader_feed_id'])
 
     def feed_status(self, feed: str, **state: Any) -> None:
-        with self.db:
-            self.db.execute('INSERT INTO state VALUES ( %s , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value', ('feed-status:' + feed, json.dumps(state)))
+        if not self.db.in_transaction:
+            raise RuntimeError('Feed status requires an owning transaction')
+        self.db.execute('INSERT INTO state VALUES ( %s , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value', ('feed-status:' + feed, json.dumps(state)))
 
     def source_statuses(self) -> list[dict[str, Any]]:
         return [dict(feed_id=row['key'].split(':', 1)[1], **json.loads(row['value']))
@@ -480,79 +355,6 @@ class Store:
             return Publication(row['external_id'],row['url'],row['published_at'] or 0.,teaser,tuple(json.loads(row['members'])),row['published_at'] is not None,adapter_reference=reference)
         return None
 
-    def collect_material(self, item: str, material: Material, *, manual: bool = False) -> tuple[SourceError | None,CollectionEffects]:
-        effects=CollectionEffects()
-        if not self._has_unviewed(item):
-            return None,effects
-        if material.source_manifest and material.source_manifest.post_web_unavailable:
-            media=[dict(row) for row in self.db.execute('SELECT * FROM media_files WHERE publication_id = %s',(item,))]
-            missing=[row for row in media if row['storage_key'] and existing_file(self.root,row['storage_key']) is None or row['status']=='unavailable' and row['reason']=='Локальный файл вложения недоступен']
-            if missing:
-                error=SourceError('Локальный файл вложения недоступен',code='media-unavailable',retryable=False)
-                content=json.loads(expect_row(self.db.execute('SELECT content FROM publications WHERE id = %s',(item,)).fetchone())[0])
-                content['extra']['_reader']['source_manifest']['post_web_unavailable']=True
-                for row in missing:
-                    row.update(status='unavailable',reason=error.label,storage_key=None)
-                self.media.project_header(content,media)
-                with self.db:
-                    membership_graph.lock_graph(self.db)
-                    for row in missing:
-                        self.db.execute("UPDATE media_files SET status = 'unavailable' , reason = %s , storage_key = NULL WHERE id = %s",(error.label,row['id']))
-                    self.db.execute('UPDATE publications SET content = %s WHERE id = %s',(json.dumps(content,ensure_ascii=False),item))
-                    from oko.storage.incomplete_index import save_class
-                    save_class(self.db,item,content)
-                    self.collection_history(item,replace(material,collection_error=error))
-                return error,effects
-        if material.source_manifest and material.source_manifest.post_web_unavailable:
-            saved=self.db.execute('SELECT complete FROM publications WHERE id=%s', (item,)).fetchone()
-            retained_header, retained_text = self.publications.original(item) if saved and saved['complete'] else ({}, '')
-            raw_manifest=retained_header.get('source_manifest')
-            manifest=SourceManifest.model_validate_json(json.dumps(raw_manifest)) if raw_manifest else None
-        else:
-            manifest=None
-        if manifest is not None:
-            observed_manifest=material.source_manifest
-            assert observed_manifest is not None
-            accept_preview = (observed_manifest.preview_fragment is not None
-                and (manifest.preview_fragment is not None or
-                     manifest.post.get('text') == observed_manifest.post.get('text')
-                     and all(r.status == 'unsupported' and r.sha256 is None
-                         and r.reason == 'Пост не поддерживается публичным предпросмотром' for r in manifest.resources)))
-            if (retained_text.strip() or any(resource.status=='loaded' for resource in manifest.resources)) and not accept_preview:
-                material = Material(retained_header.get('title',''), False,
-                    retained_header.get('reason',''), members=material.members,
-                    captions=retained_header.get('captions'), description=retained_header.get('description',''),
-                    source_manifest=manifest.model_copy(update={'post_web_unavailable':True}),
-                    collection_error=material.collection_error)
-        old_media={row['id']:dict(row) for row in self.db.execute('SELECT * FROM media_files WHERE publication_id = %s',(item,))} if manual else {}
-        prepared=self.publications.prepare(item,material)
-        fingerprint=publication_input.digest(prepared[0])
-        self.fault('after_file_move')
-        with self.db:
-            membership_graph.lock_graph(self.db)
-            if not self._has_unviewed(item):
-                return None,effects
-            if material.adapter_content and material.adapter_content.metadata.reference.key.platform==Platform.telegram:
-                self.publications.identify(item,material.adapter_content.metadata.reference)
-            self.publications.publish(item,prepared,fingerprint,effects)
-            item_status_changed = bool(self.db.execute('UPDATE publications SET complete = 1 WHERE id = %s AND complete IS DISTINCT FROM 1',(item,)).rowcount)
-            if material.members:
-                item_status_changed |= bool(self.db.execute('UPDATE publications SET members = %s WHERE id = %s AND members IS DISTINCT FROM %s',(json.dumps(material.members),item,json.dumps(material.members))).rowcount)
-            if item_status_changed:
-                status_changed(self.db)
-            publication_links.notify_parents(self,item,preserve_cancelled=item in effects.title_only_changes)
-            for row in prepared[1]:
-                old=old_media.get(row['id'])
-                if row['status']=='ready' and old and not (row['resource_identity'] is not None and old['source_locator']!=row['source_locator']):
-                    effects.revalidate[row['id']]=True
-            self.collection_history(item,material)
-            self.processing.reconcile_accepted_item(item)
-        self.processing.sync()
-        with self.db:
-            self.publications.status(item)
-
-        return material.collection_error,effects
-
     def collection_history(self, item: str, material: Material) -> None:
         if not material.collection_error or not self.subscriptions.history.member(item):
             self.subscriptions.history.saved(item,material.full)
@@ -566,7 +368,7 @@ class Store:
     def set_processor_viewed(self, items: list[str], viewed: bool) -> None:
         """Keep processor visibility in the same graph transaction."""
         membership_graph.lock_graph(self.db)
-        source_effects=CollectionEffects()
+        source_effects=CollectionDiagnostics()
         publication_links.capture_source_groups(self,source_effects,set(items))
         affected=self.problems.processor_jobs_for_materials(items)
         previous=self.problems.prepare_processor_change(affected,self.wall_clock())
@@ -593,11 +395,11 @@ class Store:
                 marks = ','.join('%s' for _ in batch)
                 rows.update({row['id']: row for row in self.db.execute(
                     f'SELECT i.id , i.members , {owner_expr("i")} AS feed_id FROM publications i WHERE i.id IN ( {marks} )', batch)})
-                for row in self.db.execute(f'SELECT m . publication_id , m . feed_id FROM feed_publications m JOIN publications i ON i . id = m . publication_id WHERE i . viewed = 0 AND m . publication_id IN ( {marks} )', batch):
+                for row in self.db.execute(f'SELECT i.id AS publication_id, i.feed_id FROM publications i WHERE i.viewed=0 AND i.feed_id IS NOT NULL AND i.id IN ( {marks} )', batch):
                     memberships.setdefault(row['publication_id'], []).append(row['feed_id'])
             if len(rows) != len(members):
                 return False
-            effects = CollectionEffects()
+            effects = CollectionDiagnostics()
             publication_links.capture_root_deletion_problems(self,effects,set(members))
             eligibility: dict[str, set[int]] = {}
             for member, feeds in memberships.items():
@@ -632,9 +434,9 @@ class Store:
         with boundary:
             membership_graph.lock_graph(self.db)
             binding = self.subscriptions.telegram.binding(feed)
-            effects = CollectionEffects()
-            selected = [r[0] for r in self.db.execute("""SELECT i.id FROM feed_publications m JOIN publications i ON i.id=m.publication_id
-                WHERE m.feed_id=%s AND i.processing_metadata::jsonb->'_pass'->>'feed_id'=%s""", (feed,feed))]
+            effects = CollectionDiagnostics()
+            selected = [r[0] for r in self.db.execute("""SELECT i.id FROM publications i
+                WHERE i.feed_id=%s AND i.processing_metadata::jsonb->'_pass'->>'feed_id'=%s""", (feed,feed))]
             if selected:
                 publication_links.capture_processing_problems(self,effects,set(selected))
                 affected=[row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE item=ANY(%s) AND kind IN ('filter','theses') AND status!='done' AND (processor_visible OR problem_code='processor-config')",(selected,))]
@@ -650,12 +452,12 @@ class Store:
             shared=[r[0] for r in self.db.execute(f'SELECT p.id FROM ({owned_ids("= %s")}) owner JOIN publications p ON p.id=owner.id WHERE p.platform IS NOT NULL',(feed,feed))]
             # NULL-platform legacy roots can also own a timed fetch projection.
             # Capture only dependent timed jobs while the old graph still exists.
-            timed_fetch_items={row['item'] for row in self.db.execute("""SELECT DISTINCT j.item FROM feed_publications m
-                JOIN publication_links l ON l.source_publication_id=m.publication_id
+            timed_fetch_items={row['item'] for row in self.db.execute("""SELECT DISTINCT j.item FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m
+                JOIN publication_links l ON l.source_publication_id=m.id
                 JOIN jobs j ON md5(j.item)=md5(l.target_publication_id) AND j.item=l.target_publication_id AND j.kind='fetch' AND j.fetch_youtube_sensitive
-                WHERE m.feed_id=%s AND m.is_primary
-                UNION SELECT j.item FROM feed_publications m JOIN jobs j ON md5(j.item)=md5(m.publication_id) AND j.item=m.publication_id AND j.kind='fetch' AND j.fetch_youtube_sensitive
-                WHERE m.feed_id=%s AND m.is_primary""",(feed,feed))}
+                WHERE m.feed_id=%s
+                UNION SELECT j.item FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m JOIN jobs j ON md5(j.item)=md5(m.id) AND j.item=m.id AND j.kind='fetch' AND j.fetch_youtube_sensitive
+                WHERE m.feed_id=%s AND TRUE""",(feed,feed))}
             if timed_fetch_items:publication_links.capture_fetch_problems(self,effects,timed_fetch_items)
             self.incomplete_draft.mark_materials(sorted(set(shared) | set(selected)))
             publication_links.capture_root_deletion_problems(self,effects,set(shared))
@@ -747,7 +549,7 @@ class Store:
         item = row['id']
         settings = self.subscriptions.effective('feed', row['feed_id'], details=False)
         base = dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published_at'] or 0.,
-                    published_known=row['published_at'] is not None, source_order=row['source_order'],
+                    published_known=row['published_at'] is not None,
                     members=json.loads(row['members']), complete=bool(row['complete']),
                     originals=settings['effective']['originals']['value'])
         fetch = material_read.jobs(self.db, item).get('fetch')

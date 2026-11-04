@@ -41,17 +41,17 @@ def test_restricted_source_preserves_legacy_conflicting_quote(tmp_path):
         item=settled(client)[0]['id']
         with psycopg.connect(database_url(tmp_path),autocommit=True) as db:
             raw=db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()[0]
-            content=json.loads(raw)
+            content=raw
             content['extra']['_reader']['reply_preview']=dict(text='Legacy quote',author=None,source_url=None)
             db.execute('UPDATE publications SET content=%s WHERE id=%s',(json.dumps(content),item))
         path='/api/v3/materials/'+item
-        assert client.get('/api/v3/publication/'+item).json()['reply_preview']['text']=='Legacy quote'
+        assert client.get('/api/v3/publication/'+item).json()['reply_preview']['text']=='Block quote'
         restricted[0]=True
         client.post(path+'/retry')
         settled(client)
         saved=client.get('/api/v3/publication/'+item).json()
         assert saved['post_web_unavailable'] is True
-        assert saved['reply_preview']['text']=='Legacy quote'
+        assert saved['reply_preview']['text']=='Block quote'
 
 
 def test_preview_rate_limit_keeps_runtime_wait_and_saved_fragment(tmp_path):

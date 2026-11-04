@@ -19,19 +19,19 @@ class ProcessingRepository:
 
     def candidates(self, kind: Kind, *, item: str) -> list[tuple[str,str | None]]:
         # Reconciliation is publication-owned; there is no stage queue to scan.
-        query = "SELECT i.id FROM publications i WHERE i.id=%s AND i.viewed=0 AND i.platform IS NOT NULL AND EXISTS (SELECT 1 FROM feed_publications m WHERE m.publication_id=i.id AND m.is_primary) AND i.complete=1"
+        query = "SELECT i.id FROM publications i WHERE i.id=%s AND i.viewed=0 AND i.platform IS NOT NULL AND i.feed_id IS NOT NULL AND i.complete=1"
         parameters: tuple[str | int, ...] = (item,)
         rows=self.store.db.execute(query,parameters).fetchall()
         operation=self.store.filters if kind=='filter' else self.store.processing.theses
         return [(row[0],operation.signature(row[0])) for row in rows]
 
     def prepare(self, item: str, kind: Kind) -> ProcessingPreparation:
-        row=self.store.db.execute(f"SELECT i.*, {owner_expr('i')} AS feed_id FROM publications i WHERE i.id = %s AND i.viewed = 0",(item,)).fetchone()
+        row=self.store.db.execute("SELECT i.* FROM publications i WHERE i.id = %s AND i.viewed = 0",(item,)).fetchone()
         if row is None or row['feed_id'] is None:return ProcessingPreparation('disabled',reason='not_eligible')
         enabled = publication_input.stage_enabled(self.store, item, kind)
         if not enabled:return ProcessingPreparation('disabled',reason='stage_disabled')
         selected=publication_input.content(self.store,item)
-        if not row['complete'] or row['content']=='{}' or publication_input.awaiting_input(selected) or publication_input.awaiting_linked_input(self.store,item,selected):
+        if not row['complete'] or not row['content'] or publication_input.awaiting_input(selected) or publication_input.awaiting_linked_input(self.store,item,selected):
             return ProcessingPreparation('waiting',reason='input_pending')
         if kind=='theses':
             filtered=self.store.filters.read(item)
@@ -75,6 +75,12 @@ class ProcessingRepository:
         row=self.store.db.execute('SELECT processing_metadata FROM publications WHERE id = %s',(item,)).fetchone()
         if row and json.loads(row[0]).get('filter' if kind=='filter' else 'summary',{}).get('reason')=='no_input':return False
         return True
+
+    def reconcile(self) -> None:
+        self.store.processing.sync()
+
+    def feed(self, item: str) -> str:
+        return publication_input.processing_feed(self.store, item)
 
     def revision(self, item: str) -> str:
         return publication_input.revision(self.store,item)

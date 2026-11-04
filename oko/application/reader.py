@@ -25,10 +25,13 @@ from oko.diagnostics import Journal, diagnostic_source, record_caught
 from oko.execution import Execution, ActionError, _ExternalCheck
 from oko.workers.control import JobControl
 from oko.storage.transaction import transaction
-from oko.services.subscriptions import SubscriptionService
-from oko.services.queries import ReadingQueries
+from oko.application.subscription_service import subscription_service
+from oko.application.reader_queries import reader_queries
 from oko.services.reading import ReadingService
+from oko.storage.reading_mutations import ReadingMutations
+from oko.storage.reader_facts import ReaderFacts
 from oko.services.connections import ConnectionService
+from oko.storage.connection_repositories import TelegramConnections, ProcessorConnections
 from oko.services.commands import CommandJournal
 
 
@@ -41,12 +44,17 @@ class StatusSnapshot:
 class ReaderApplication:
     def __init__(self, execution: Execution, jobs: JobControl, *, clock: Callable[[], float], wall_clock: Callable[[], float], sources: dict[str, Source], bindings: dict[str, TelegramBinding], sync_sources: Callable[[], None], interval_changed: Callable[[float], None], source_description: Callable[[str], str | None], rss_transport: httpx.AsyncBaseTransport | None, ai_transport: httpx.AsyncBaseTransport | None, telegram_http: TelegramHTTP, codex: CodexClient, stop: Callable[[], Awaitable[None]], admission_changed: Callable[[], Awaitable[None]], set_power: Callable[[bool], Awaitable[None]]) -> None:
         self.execution, self.jobs = execution, jobs
-        self.subscriptions = SubscriptionService(execution.require_store)
-        self.queries = ReadingQueries(execution.require_store)
-        self.reading = ReadingService(execution.require_store)
-        self.connections = ConnectionService(execution.require_store)
-        self.commands = CommandJournal(execution.require_store, wall_clock)
-        self.final_queries = ReadingQueries(execution.retained_store)
+        self.subscriptions = subscription_service(execution.require_store)
+        self.queries = reader_queries(execution.require_store)
+        self.reading = ReadingService(access=lambda: execution.require_store().db.access_lock,
+            contents=lambda: execution.require_store().reading,
+            mutations=lambda: ReadingMutations(execution.require_store()))
+        self.connections = ConnectionService(access=lambda: execution.require_store().db.access_lock,
+            telegram=lambda: TelegramConnections(execution.require_store()),
+            processor=lambda: ProcessorConnections(execution.require_store()), youtube=lambda: execution.require_store().youtube)
+        self.commands = CommandJournal(access=lambda: execution.require_store().db.access_lock,
+            records=lambda: execution.require_store().problems, facts=ReaderFacts(execution.require_store), clock=wall_clock)
+        self.final_queries = reader_queries(execution.retained_store)
         self._actions, self._clock, self._wall_clock = execution._actions, clock, wall_clock
         self._sources, self._telegram_bindings = sources, bindings
         self._sync_sources, self._interval_changed = sync_sources, interval_changed

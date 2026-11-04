@@ -75,7 +75,7 @@ def group_snapshot(store: 'Store', identity: str, kind: str, now: float, *, excl
     if not pairs:return None,False,set()
     codes=[p[0] for p in pairs];owners=[p[1] for p in pairs]
     rows=store.db.execute(f"""WITH source_groups AS MATERIALIZED (SELECT code,owner FROM unnest(%s::text[],%s::text[]) AS g(code,owner)),
-        source_members AS MATERIALIZED (SELECT feed_id,publication_id FROM feed_publications WHERE is_primary AND feed_id=ANY(%s::text[])),
+        source_members AS MATERIALIZED (SELECT feed_id,id AS publication_id FROM publications WHERE feed_id=ANY(%s::text[])),
         items AS MATERIALIZED (
             SELECT g.code,g.owner,g.owner AS item FROM source_groups g
             UNION SELECT g.code,g.owner,m.publication_id FROM source_groups g JOIN source_members m ON m.feed_id=g.owner

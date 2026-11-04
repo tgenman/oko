@@ -75,7 +75,6 @@ def test_history_materials_survive_restart_without_per_video_list_requests(tmp_p
         cards = read_all_cards(client, '/api/v3/cards', params={'feed': feed})
         assert len(cards) == 6
         assert {c['title'] for c in cards} == {f'Video {n}' for n in range(55,61)}
-        assert [c['id'] for c in cards] == sorted(c['id'] for c in cards)
         assert all(c['published_at'] is None for c in cards)
         assert 2<=len(history.calls)<=3
         history_calls=len(history.calls)

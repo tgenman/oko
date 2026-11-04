@@ -1,12 +1,11 @@
 """Preparation and acceptance of domain results; workers own attempts and models."""
 from collections.abc import Callable
-from typing import Any
+from contextlib import AbstractContextManager
+from typing import Any, Protocol
 from oko.processing.execution import CodexSettings
 from oko.processing.llamacpp import ProcessorConfig
-from oko.storage.store import Store
 from oko.domain.processing import Kind, ProcessingInput, ProcessingPreparation
-from oko.storage.processing_state import ProcessingRepository
-from oko.storage.access import repository_access
+from oko.services.access import repository_access
 from oko.storage.reading import reading_snapshot
 from oko.processing.contracts import FilterResult, Theses
 
@@ -15,24 +14,40 @@ class StaleInput(Exception):
     """The attempted input no longer represents the publication."""
 
 
+class ProcessingOperations(Protocol):
+    def candidates(self, kind: Kind, *, item: str) -> list[tuple[str, str | None]]: ...
+    def satisfied(self, item: str, kind: Kind) -> bool: ...
+    def revision(self, item: str) -> str: ...
+    def prepare(self, item: str, kind: Kind) -> ProcessingPreparation: ...
+    def current(self, value: ProcessingInput) -> bool: ...
+    def apply(self, value: ProcessingInput, result: FilterResult | Theses | None, origin: dict[str, Any] | None) -> None: ...
+    def processor_config(self) -> ProcessorConfig | None: ...
+    def codex_config(self) -> CodexSettings | None: ...
+    def refresh(self, item: str) -> None: ...
+    def regenerate(self, item: str, kind: Kind) -> bool: ...
+    def reconcile(self) -> None: ...
+    def feed(self, item: str) -> str: ...
+
+
 class ProcessingService:
-    def __init__(self, storage: Callable[[], Store]) -> None:
-        self._storage = storage
+    def __init__(self, *, access: Callable[[], AbstractContextManager[Any]],
+                 repository: Callable[[], ProcessingOperations]) -> None:
+        self._access, self._repository = access, repository
 
     @repository_access
     @reading_snapshot()
     def candidates(self, kind: Kind, *, item: str) -> list[tuple[str, str | None, bool, str]]:
-        repository=ProcessingRepository(self._storage())
+        repository=self._repository()
         return [(identity,signature,repository.satisfied(identity,kind),repository.revision(identity)) for identity,signature in repository.candidates(kind,item=item)]
 
     @repository_access
     def prepare(self, item: str, kind: Kind) -> ProcessingPreparation:
-        return ProcessingRepository(self._storage()).prepare(item,kind)
+        return self._repository().prepare(item,kind)
 
     @repository_access
     @reading_snapshot()
     def current(self, value: ProcessingInput) -> bool:
-        return ProcessingRepository(self._storage()).current(value)
+        return self._repository().current(value)
 
     @repository_access
     def accept(self, value: ProcessingInput, result: FilterResult | Theses | None, origin: dict[str, Any] | None) -> None:
@@ -40,29 +55,28 @@ class ProcessingService:
             raise StaleInput
         if result is not None:
             result.validate_sources(value.request)
-        ProcessingRepository(self._storage()).apply(value,result,origin)
+        self._repository().apply(value,result,origin)
 
     @repository_access
     def processor_config(self) -> ProcessorConfig | None:
-        return ProcessingRepository(self._storage()).processor_config()
+        return self._repository().processor_config()
 
     @repository_access
     def codex_config(self) -> CodexSettings | None:
-        return ProcessingRepository(self._storage()).codex_config()
+        return self._repository().codex_config()
 
     @repository_access
     def refresh(self, item: str) -> None:
-        ProcessingRepository(self._storage()).refresh(item)
+        self._repository().refresh(item)
 
     @repository_access
     def regenerate(self, item: str, kind: Kind) -> bool:
-        return ProcessingRepository(self._storage()).regenerate(item,kind)
+        return self._repository().regenerate(item,kind)
 
     @repository_access
     def reconcile(self) -> None:
-        self._storage().processing.sync()
+        self._repository().reconcile()
 
     @repository_access
     def feed(self, item: str) -> str:
-        from oko.storage.processing_input import processing_feed
-        return processing_feed(self._storage(),item)
+        return self._repository().feed(item)

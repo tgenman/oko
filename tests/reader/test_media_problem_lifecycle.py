@@ -1,3 +1,4 @@
+from tests.support.collection_acceptance import apply_simulated_collection, running_collection_job
 import json
 from oko.collection.adapters import AdapterIssue,AdapterErrorKind
 from oko.storage.job_types import Job
@@ -11,7 +12,7 @@ def test_media_failure_and_finish_without_status_read(tmp_path,postgres_url):
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','other_web','article')")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','article',true)")
+            store.db.execute("UPDATE publications SET feed_id='feed' WHERE id='article'")
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('file','article','image:1','https://example.test/file','file','pending_download')")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('download_media','file','running',1) RETURNING id").fetchone()[0]
             store.jobs.fail_media(Job(job,'download_media','file',1),AdapterIssue('media-too-large','failure',AdapterErrorKind.permanent))
@@ -29,7 +30,7 @@ def test_two_files_on_one_publication_keep_separate_errors(tmp_path,postgres_url
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','other_web','article')")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','article',true)")
+            store.db.execute("UPDATE publications SET feed_id='feed' WHERE id='article'")
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('one','article','image:1','https://example.test/1','one','pending_download'),('two','article','image:2','https://example.test/2','two','pending_download')")
             jobs=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('download_media','one','running',1),('download_media','two','running',1) RETURNING id,item").fetchall()
             for row in jobs:store.jobs.fail_media(Job(row['id'],'download_media',row['item'],1),AdapterIssue('media-too-large','failure',AdapterErrorKind.permanent))
@@ -49,7 +50,8 @@ def test_real_material_replacement_rolls_back_file_job_and_problem(tmp_path,post
     try:
         ensure_fixture(store.db);publication=Publication('p','https://example.test/p',1)
         with transaction(store.db):
-            effects=store.collect_discovery([publication_packet(publication)],'{}','fixture');store.jobs.apply_collection(effects)
+            job_for_collection=running_collection_job(store,'discover','fixture')
+            effects=store.discovery.accept([publication_packet(publication)],'{}','fixture');apply_simulated_collection(store,effects,job=job_for_collection)
         item=store.db.execute("SELECT id FROM publications WHERE url='https://example.test/p'").fetchone()[0]
         file='00000000-0000-4000-8000-000000000001'
         with store.db:
@@ -59,8 +61,9 @@ def test_real_material_replacement_rolls_back_file_job_and_problem(tmp_path,post
         before=store.db.execute("SELECT id,body,finished FROM reader_problems WHERE body::jsonb->>'media_job_id'=%s",(str(job),)).fetchone()
         with pytest.raises(ValueError,match='rollback'):
             with transaction(store.db):
-                _,effects=store.collect_material(item,StructuredSource(None).describe(publication,Material('New','New text')))
-                store.jobs.apply_collection(effects)
+                job_for_collection=running_collection_job(store,'fetch',item)
+                _,effects=store.collected_publication.accept(item,StructuredSource(None).describe(publication,Material('New','New text')))
+                apply_simulated_collection(store,effects,job=job_for_collection)
                 assert store.db.execute('SELECT 1 FROM media_files WHERE id=%s',(file,)).fetchone() is None
                 raise ValueError('rollback')
         assert store.db.execute('SELECT 1 FROM media_files WHERE id=%s',(file,)).fetchone()

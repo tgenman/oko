@@ -61,11 +61,11 @@ def test_failed_viewed_write_keeps_the_card_page_unchanged(tmp_path):
             db=app.state.host.require_store().db
             with db.access_lock:
                 db._db.execute("CREATE FUNCTION pg_temp.reject_page_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic write failure'; END $$")
-                db._db.execute('CREATE TRIGGER synthetic_page_failure BEFORE DELETE ON feed_publications FOR EACH ROW EXECUTE FUNCTION pg_temp.reject_page_delete()')
+                db._db.execute('CREATE TRIGGER synthetic_page_failure BEFORE UPDATE OF feed_id ON publications FOR EACH ROW EXECUTE FUNCTION pg_temp.reject_page_delete()')
         def remove():
             db=app.state.host.require_store().db
             with db.access_lock:
-                db._db.execute('DROP TRIGGER synthetic_page_failure ON feed_publications')
+                db._db.execute('DROP TRIGGER synthetic_page_failure ON publications')
         client.portal.call(install)
         try:
             assert client.post('/api/v3/cards/read',json={'ids':[identity]}).status_code==500
@@ -121,7 +121,7 @@ def test_card_etag_tracks_linked_content_without_parent_version_write(tmp_path):
             def change_child():
                 store = app.state.host.require_store()
                 with store.db:
-                    store.db.execute("UPDATE publications SET content=jsonb_set(content::jsonb,'{extra,_reader,changed}','true'::jsonb)::text WHERE id='linked'")
+                    store.db.execute("UPDATE publications SET content=jsonb_set(content,'{extra,_reader,changed}','true'::jsonb) WHERE id='linked'")
             client.portal.call(change_child)
             after = client.get('/api/v3/cards', headers={'If-None-Match':first.headers['ETag']})
             assert after.status_code == 200 and after.json()['items'][0]['changed'] is True

@@ -10,8 +10,7 @@ test('Admin menu remains clickable at narrow viewport', {timeout:30000}, async t
  await page.locator('#app-menu summary').click();
  const link=page.locator('#admin-link');
  await expect(link).toBeVisible();
- const exposed=await link.evaluate(el=>{const r=el.getBoundingClientRect();return el.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2));});
- expect(exposed).toBe(true);
+ await expect.poll(()=>link.evaluate(el=>{const r=el.getBoundingClientRect();return el.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2));})).toBe(true);
  await page.screenshot({path:artifactPath('admin-menu-mobile.png')});
  await page.locator('.reader-toolbar-scroll').evaluate(el=>{const button=el.querySelector('#app-menu summary')!.getBoundingClientRect();const bounds=el.getBoundingClientRect();el.scrollLeft-=bounds.right-button.right+button.width/2;});
  await expect(link).toBeVisible();

@@ -51,13 +51,15 @@ def _decoded_content(serialized: str) -> dict[str, Any]:
     return cast(dict[str, Any], json.loads(serialized))
 
 
-def saved_content(serialized: str, *, mutable: bool = False) -> dict[str, Any]:
+def saved_content(serialized: str | dict[str, Any], *, mutable: bool = False) -> dict[str, Any]:
     """Borrow decoded publication facts, or request an owned mutable copy.
 
     Facts live only in the current synchronous snapshot. Without a snapshot the
     decoder already returns a fresh owned value: copying it would penalize writes
     and background processing. Read projections must not mutate borrowed values.
     """
+    if isinstance(serialized, dict):
+        return deepcopy(serialized) if mutable else serialized
     value = _decoded_content(serialized)
     return deepcopy(value) if mutable and _values.get() is not None else value
 
