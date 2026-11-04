@@ -75,7 +75,7 @@ jobs:
           chmod 600 "$RUNNER_TEMP/oko-smoke-dsn"
           sudo chown 10001:10001 "$RUNNER_TEMP/oko-smoke-dsn"
           docker run --rm --network oko-release-smoke-net -v "$RUNNER_TEMP/oko-smoke-dsn:/run/secrets/database-url:ro" --entrypoint python "$IMAGE:$RELEASE_SHA" -m oko.storage.postgres_migrations --database-url-file /run/secrets/database-url
-          docker run -d --name oko-release-smoke --network oko-release-smoke-net --read-only --cap-drop ALL --security-opt no-new-privileges --init --tmpfs /data:uid=10001,gid=10001,mode=0700 --tmpfs /tmp:mode=1777 -v "$RUNNER_TEMP/oko-smoke-dsn:/run/secrets/database-url:ro" "$IMAGE:$RELEASE_SHA" --api-only --demo --host 127.0.0.1 --port 8765 --database-url-file /run/secrets/database-url --data /data --no-browser
+          docker run -d --name oko-release-smoke --network oko-release-smoke-net --read-only --cap-drop ALL --security-opt no-new-privileges --init --tmpfs /data:uid=10001,gid=10001,mode=0700 --tmpfs /tmp:mode=1777 -v "$RUNNER_TEMP/oko-smoke-dsn:/run/secrets/database-url:ro" "$IMAGE:$RELEASE_SHA" --api-only --host 127.0.0.1 --port 8765 --database-url-file /run/secrets/database-url --data /data --no-browser
           for attempt in $(seq 1 30); do
             state=$(docker inspect --format '{{.State.Health.Status}}' oko-release-smoke)
             if [ "$state" = healthy ]; then break; fi
