@@ -1,4 +1,4 @@
-"""Isolated occurrence prototype; does not yet own status or event projection."""
+"""Persist and project the shared YouTube admission problem."""
 import json
 import uuid
 from typing import Any

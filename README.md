@@ -4,7 +4,7 @@
 
 **Your sources. One place to read.**
 
-A local reader for RSS, Telegram, and YouTube, with optional AI filtering and summaries.
+A reader for RSS, Telegram, and YouTube, with optional AI filtering and summaries.
 
 [Quick start](#quick-start) · [User guide](docs/guide.md) · [Architecture](docs/architecture/README.md) · [Contributing](#contributing)
 
@@ -12,7 +12,7 @@ A local reader for RSS, Telegram, and YouTube, with optional AI filtering and su
 
 ---
 
-Oko collects publications from sources you choose and organizes them into topic folders. Read saved articles, browse Telegram posts with their media, and turn available YouTube captions into summaries. Your library lives in a local data directory; you choose whether and how a model processes it.
+Oko collects publications from sources you choose and organizes them into topic folders. Read saved articles, browse Telegram posts with their media, and turn available YouTube captions into summaries. Your library uses PostgreSQL and a data directory for media; you choose whether and how a model processes it.
 
 The interface follows a simple flow: **folders → cards → material**. Opening a card keeps its content. Explicitly marking it viewed finishes it and deletes its saved content, media, and generated summaries.
 
@@ -51,7 +51,7 @@ PostgreSQL is the only supported Oko storage. The current release does not impor
 
 Add a feed in the reader and choose its topic folder and initial history. Model connections are optional and configured separately in settings.
 
-By default, the server pauses work after losing its reader-tab heartbeat and exits after the reconnection grace period. For an instance that stays available without open tabs:
+The server continues running when browser tabs close. For a fixed port and remembered browser sign-in:
 
 ```sh
 uv run --locked python -m oko --persistent --port 8765 --database-url-file /path/to/private-reader-dsn --data ./data
@@ -102,7 +102,7 @@ Browser tests use Playwright with temporary data and synthetic integrations. See
 | [Architecture overview](docs/architecture/README.md) | Components, ownership, lifecycle, and design invariants |
 | [HTTP API](api/README.md) | OpenAPI contract, code generation, and API rules |
 | [Source checkout](docs/development/package.md) | Frontend delivery and local launch |
-| [macOS Docker installation](docs/development/docker.md) | Managed releases, host Codex bridge, backup, and rollback |
+| [Docker and PostgreSQL](docs/development/docker.md) | Cloud releases, backup, rollback, and local development |
 | [Domain glossary](GLOSSARY.md) | Canonical product terms |
 | [Verification reports](docs/verification/) | Checks performed for specific changes and integration limits |
 
@@ -112,7 +112,7 @@ The deeper design documents, glossary, and operational runbooks are currently in
 
 Oko is under active development. RSS extraction is heuristic and does not execute page JavaScript. Telegram collection depends on publicly available web pages. YouTube collection saves metadata, previews, and available captions, **not full video or audio**. Oko does not transcribe audio or video.
 
-Real integrations have had bounded acceptance checks, documented in the verification reports. Those checks do not guarantee source availability or model quality for every subscription. The managed Docker release targets macOS with Linux ARM64 containers and a separate host process for Codex; it is not a generic cross-platform installer.
+Real integrations have had bounded acceptance checks, documented in the verification reports. Those checks do not guarantee source availability or model quality for every subscription. The working release runs in the cloud; see the deployment and backup runbooks for its operating requirements.
 
 ## Contributing
 

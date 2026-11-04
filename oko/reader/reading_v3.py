@@ -88,12 +88,12 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
                 access = None
                 if feed['kind']=='telegram':
                     binding = bindings.get(feed['id'])
-                    if binding and binding['kind'] in ('web','client'):
+                    if binding and binding['kind'] == 'web':
                         access = binding['kind']
                     else:
                         access = 'unconfigured'
                         if connection!='deleting':
-                            connection = 'needs_profile_confirmation' if feed.get('transport')=='telegram' and isinstance(feed.get('telegram_account'),str) else 'needs_connection'
+                            connection = 'needs_connection'
                 group['feeds'].append(dict(id=feed['id'],title=feed['title'],avatar_url=feed.get('avatar_url'),
                     count=feed['count'],kind=feed['kind'],has_unviewed=feed['has_unviewed'],connection=connection,
                     telegram_access=access))

@@ -6,10 +6,9 @@ this boundary. Remaining operations migrate with their domain consumers.
 """
 from collections.abc import Callable
 from datetime import datetime, timezone
-import secrets
 import hashlib
 import json
-from typing import Literal
+from typing import Literal, NoReturn
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, Response
@@ -18,7 +17,6 @@ from oko.diagnostics import Journal
 from oko.reader import projection_v3 as project
 from oko.reader import snapshots as facts
 from oko.reader.generated import models as wire
-from oko.reader.lifetime import Lifetime
 from oko.application.reader import ReaderApplication
 from oko.storage.reading import stable_reader_time
 
@@ -58,7 +56,7 @@ def error_response(status: int, value: wire.ErrorEnvelope) -> JSONResponse:
     return JSONResponse(value.model_dump(mode='json'), status_code=status, headers={'Cache-Control': 'no-store'})
 
 
-def register(app: FastAPI, runtime: ReaderApplication, lifetime: Lifetime, wall_clock: Callable[[], float], journal: Journal) -> None:
+def register(app: FastAPI, runtime: ReaderApplication, wall_clock: Callable[[], float], journal: Journal) -> None:
     from oko.reader import settings_v3, commands_v3, processors_v3, diagnostics_v3, reading_v3, connections_v3
     from oko.reader import telegram_v3
     from oko.reader import collection_v3
@@ -75,26 +73,10 @@ def register(app: FastAPI, runtime: ReaderApplication, lifetime: Lifetime, wall_
     async def api_error(request: Request, error: ApiError) -> JSONResponse:
         return error_response(error.status, error.value)
 
-    def policy() -> None:
-        if lifetime.mode == 'explicit':
-            raise ApiError(409, wire.ErrorEnvelope(wire.LifetimePolicyIncompatibleError(
-                code='lifetime_policy_incompatible', message='Клиентские сессии не используются при явной остановке', details=None, diagnostic_id=None, command_id=None)))
-
-    def running() -> None:
-        if runtime.stopped:
-            raise ApiError(409, wire.ErrorEnvelope(wire.RuntimeStoppedError(
-                code='runtime_stopped', message='Око остановлено', details=None, diagnostic_id=None, command_id=None)))
-
-    def validate_identity(value: str) -> wire.ClientSessionId:
-        try:
-            return wire.ClientSessionId(value)
-        except ValueError:
-            raise ApiError(422, invalid('path', 'identity')) from None
-
-    def session(value: str) -> wire.ClientSession:
-        return wire.ClientSession(id=wire.ClientSessionId(value),
-            expires_at=timestamp(wall_clock() + lifetime.remaining(value)),
-            renew_after_seconds=lifetime.renew_after_seconds)
+    def policy() -> NoReturn:
+        # Keep the former endpoints' typed response for older clients.
+        raise ApiError(409, wire.ErrorEnvelope(wire.LifetimePolicyIncompatibleError(
+            code='lifetime_policy_incompatible', message='Клиентские сессии не используются при явной остановке', details=None, diagnostic_id=None, command_id=None)))
 
     status_storage = ''
     final_status: wire.RuntimeStatus | None = None
@@ -166,15 +148,10 @@ def register(app: FastAPI, runtime: ReaderApplication, lifetime: Lifetime, wall_
         bindings = {identity: wire.TelegramAccess.model_validate(binding) for identity, binding in snapshot.bindings.items()}
         identities = {obj.id for p in [*old.problems.current, *old.problems.recent] for obj in p.objects if obj.kind == 'material'} if isinstance(old.problems, facts.ProblemSnapshot) else set()
         material_feeds = current.material_feeds(identities) if current else {}
-        policy: wire.ExplicitLifetimePolicy | wire.ClientPresenceLifetimePolicy
-        if lifetime.mode == 'explicit':
-            policy = wire.ExplicitLifetimePolicy(kind='explicit')
-        else:
-            policy = wire.ClientPresenceLifetimePolicy(kind='client_presence', lease_seconds=lifetime.lease_seconds,
-                grace_seconds=lifetime.grace_seconds, renew_after_seconds=lifetime.renew_after_seconds)
+        policy = wire.ExplicitLifetimePolicy(kind='explicit')
         return wire.RuntimeStatus(api_version='3.0.0', runtime_state='stopped' if runtime.stopped else 'unavailable' if old.error else 'disabled' if not runtime.enabled else 'running',
-            lifetime=wire.LifetimePolicy(policy), work_allowed=runtime._live(), active_client_sessions=lifetime.active_clients,
-            work=[wire.WorkEntry(wire.WorkWaiting(phase='waiting',reason=wire.WaitingReason('storage_unavailable'),retry_at=None))] if old.error else [wire.WorkEntry(wire.WorkWaiting(phase='waiting',reason=wire.WaitingReason('client_presence_required'),retry_at=None))] if not lifetime.admitted() and not runtime.stopped else project.work(current.work_summary() if current else []),
+            lifetime=wire.LifetimePolicy(policy), work_allowed=runtime._live(), active_client_sessions=0,
+            work=[wire.WorkEntry(wire.WorkWaiting(phase='waiting',reason=wire.WaitingReason('storage_unavailable'),retry_at=None))] if old.error else project.work(current.work_summary() if current else []),
             sources=[wire.SourceState(feed_id=wire.FeedId(value.feed_id), title=value.title,
                 state='unavailable' if isinstance(value.error, str) and value.error else 'ready',
                 reason=wire.WaitingReason('source_unavailable') if isinstance(value.error, str) and value.error else None,
@@ -192,12 +169,9 @@ def register(app: FastAPI, runtime: ReaderApplication, lifetime: Lifetime, wall_
     def metadata() -> dict[str, object]:
         return dict(
         enabled=runtime.enabled,stopped=runtime.stopped,work_allowed=runtime._live(),
-        clients=lifetime.active_clients,sources=sorted(runtime._sources),
+        clients=0,sources=sorted(runtime._sources),
         diagnostics=[(r['id'],r['count'],r['last_time']) for r in journal.records],diagnostic_error=journal.persistence_error,
-        error=runtime._error,lifetime=lifetime.mode,
-        lease=lifetime.lease_seconds if lifetime.mode!='explicit' else None,
-        grace=lifetime.grace_seconds if lifetime.mode!='explicit' else None,
-        renew=lifetime.renew_after_seconds if lifetime.mode!='explicit' else None)
+        error=runtime._error,lifetime='explicit', lease=None, grace=None, renew=None)
     runtime.reader_advance=lambda: runtime.queries.versions.advance()
 
     async def finish_status() -> None:
@@ -214,31 +188,14 @@ def register(app: FastAPI, runtime: ReaderApplication, lifetime: Lifetime, wall_
     @app.post('/api/v3/client-sessions', status_code=201, response_model=wire.ClientSession)
     async def create_client_session() -> wire.ClientSession:
         policy()
-        running()
-        value = secrets.token_urlsafe(24)
-        lifetime.register(value)
-        await runtime.admission_changed()
-        return session(value)
 
     @app.put('/api/v3/client-sessions/{identity}', response_model=wire.ClientSession)
     async def renew_client_session(identity: str) -> wire.ClientSession:
         policy()
-        running()
-        validated = validate_identity(identity)
-        if not lifetime.renew(validated.root):
-            raise ApiError(410, wire.ErrorEnvelope(wire.ClientSessionExpiredError(
-                code='client_session_expired', message='Клиентская сессия истекла',
-                details=wire.ClientSessionExpiredErrorDetails(id=validated), diagnostic_id=None, command_id=None)))
-        await runtime.admission_changed()
-        return session(validated.root)
 
     @app.delete('/api/v3/client-sessions/{identity}', response_model=wire.ClientSessionClosed)
     async def close_client_session(identity: str) -> wire.ClientSessionClosed:
         policy()
-        validated = validate_identity(identity)
-        lifetime.close(validated.root)
-        await runtime.admission_changed()
-        return wire.ClientSessionClosed(id=validated, closed=True)
 
     @app.put('/api/v3/power', response_model=wire.CommandAcknowledgement)
     async def power(request: Request, body: wire.PowerRequest) -> wire.CommandAcknowledgement:
