@@ -2,7 +2,7 @@ import asyncio,threading
 from fastapi.testclient import TestClient
 import httpx
 from oko.collection.adapters import ExternalKey,ExternalReference,Platform
-from oko.collection.demo import DemoSource
+from tests.support.demo_source import DemoSource
 from oko.storage.transaction import transaction
 from tests.support.app import create_app
 from tests.support.models import model_transport

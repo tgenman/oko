@@ -40,19 +40,12 @@ npm ci
 npm run api:generate
 npm run build
 
-# Configure a private DSN selecting a separate demo PostgreSQL database/schema.
-# See docs/development/postgresql.md for database setup and credentials.
-uv run --locked python -m oko.storage.postgres_migrations --database-url-file /path/to/private-demo-dsn
-uv run --locked python -m oko --database-url-file /path/to/private-demo-dsn --demo --data /tmp/oko-demo
-```
-
-The browser opens automatically. The demo uses a synthetic source; no personal subscriptions or Telegram account are needed. Use a separate database/schema and data directory for a fresh demo.
-
-To start a new library:
-
-```sh
+# Configure a private PostgreSQL DSN. See docs/development/postgresql.md.
+uv run --locked python -m oko.storage.postgres_migrations --database-url-file /path/to/private-reader-dsn
 uv run --locked python -m oko --database-url-file /path/to/private-reader-dsn --data ./data
 ```
+
+The browser opens automatically.
 
 PostgreSQL is the only supported Oko storage. The current release does not import old SQLite libraries; the [PostgreSQL guide](docs/development/postgresql.md) describes schema setup and the limits of legacy tools.
 

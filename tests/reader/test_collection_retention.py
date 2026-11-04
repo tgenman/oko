@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 import httpx
 
 from oko.collection.contracts import SourceError
-from oko.collection.demo import DemoSource
+from tests.support.demo_source import DemoSource
 from tests.support.app import create_app
 from tests.support.reader import Clock, wait_for
 

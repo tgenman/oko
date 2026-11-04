@@ -10,7 +10,7 @@ from tests.support.worker_library import worker_library, workers, pass_worker, s
 
 def test_codex_choice_changes_only_future_work_on_postgres(postgres_url, tmp_path):
     from fastapi.testclient import TestClient
-    from oko.collection.demo import DemoSource
+    from tests.support.demo_source import DemoSource
     from tests.support.app import create_app
     from tests.support.codex import CodexService
     from tests.support.reader import HEADERS, wait_for

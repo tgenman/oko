@@ -65,7 +65,7 @@ def load_materials(client):
 
 def test_delayed_theses_finish_with_old_choice_after_settings_save(tmp_path):
     import asyncio, json, threading
-    from oko.collection.demo import DemoSource
+    from tests.support.demo_source import DemoSource
     from tests.support.reader import wait_for
     entered, released = threading.Event(), threading.Event()
     entered_items=[]

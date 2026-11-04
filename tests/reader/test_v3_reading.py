@@ -1,6 +1,6 @@
 from tests.support.cards import read_all_cards, read_publications_for_cards
 from tests.support.v3 import TestClient
-from oko.collection.demo import DemoSource
+from tests.support.demo_source import DemoSource
 from oko.reader.generated import models as wire
 from tests.support.app import create_app
 from tests.support.reader import HEADERS, setup_reader

@@ -11,7 +11,7 @@ import httpx
 from fastapi.testclient import TestClient
 
 from tests.support.app import create_app
-from oko.collection.demo import DemoSource
+from tests.support.demo_source import DemoSource
 
 
 def test_local_theses_follow_inherited_prompt_and_delete_with_original(tmp_path: Path):

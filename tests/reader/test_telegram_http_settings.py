@@ -3,7 +3,7 @@ import time
 
 import httpx
 
-from oko.collection.demo import DemoSource
+from tests.support.demo_source import DemoSource
 from tests.support.app import create_app
 from tests.support.telegram_web import page
 from tests.support.v3 import TestClient

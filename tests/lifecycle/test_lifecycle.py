@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from tests.support.app import create_app
 from tests.support.reader import Clock, wait_for
 from tests.support.cards import read_all_cards
-from oko.collection.demo import DemoSource
+from tests.support.demo_source import DemoSource
 
 HEADERS = {'Authorization': 'Bearer test-token'}
 

@@ -33,7 +33,7 @@ def test_folder_refresh_only_collects_its_feeds_and_records_the_target(tmp_path)
 def test_refresh_retries_incomplete_and_unavailable_once_preserving_saved_copy(tmp_path):
     import time
     from collections import Counter
-    from oko.collection.demo import DemoSource
+    from tests.support.demo_source import DemoSource
     from oko.collection.contracts import DiscoveryResult, Publication, FetchResult, SourceDeleted, SourceError
     from tests.support.synthetic_material import material as Material
     class Source(DemoSource):
@@ -70,7 +70,7 @@ def test_refresh_retries_incomplete_and_unavailable_once_preserving_saved_copy(t
 
 def test_refresh_retries_failed_theses_but_keeps_ready_results(tmp_path):
     import json
-    from oko.collection.demo import DemoSource
+    from tests.support.demo_source import DemoSource
     from oko.processing.contracts import ProcessingError
     from tests.support.codex import CodexService, configure_codex
     class Model(CodexService):
@@ -99,7 +99,7 @@ def test_refresh_retries_failed_theses_but_keeps_ready_results(tmp_path):
 
 
 def test_refresh_keeps_forced_source_wait_but_advances_ordinary_retries(tmp_path):
-    from oko.collection.demo import DemoSource
+    from tests.support.demo_source import DemoSource
     from oko.collection.contracts import DiscoveryResult, Publication, SourceError
     from tests.support.reader import Clock
     from collections import Counter

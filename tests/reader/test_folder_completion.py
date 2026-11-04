@@ -3,7 +3,7 @@ from tests.support.presence import presence
 from pathlib import Path
 from fastapi.testclient import TestClient
 from tests.support.app import create_app
-from oko.collection.demo import DemoSource
+from tests.support.demo_source import DemoSource
 from tests.support.processes import wait_cards
 
 HEADERS = {'Authorization': 'Bearer test-token'}

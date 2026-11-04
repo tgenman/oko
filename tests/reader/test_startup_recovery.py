@@ -43,7 +43,7 @@ def library(root, dsn, count=32):
 def start(root, credential, *, demo=False):
     log = root.parent/'startup.log'
     with log.open('ab') as output:
-        process = ServerProcess([sys.executable,'-m','tests.process_server','--persistent','--no-browser', *(['--demo'] if demo else []),
+        process = ServerProcess([sys.executable,'-m','tests.process_server','--persistent','--no-browser', *(['--synthetic-source'] if demo else []),
             '--host','127.0.0.1','--port','0','--data',str(root),'--database-url-file',str(credential)],
             cwd=ROOT, env={**os.environ,'PYTHONPATH':str(ROOT)}, stdout=output, stderr=subprocess.STDOUT)
     process.log_path = log

@@ -4,7 +4,7 @@
 
 ```sh
 npm run build
-uv run --locked python -m oko --demo --database-url-file "$OKO_DATABASE_URL_FILE"
+uv run --locked python -m oko --database-url-file "$OKO_DATABASE_URL_FILE"
 ```
 
 Для обновления чистого checkout и подготовки интерфейса используйте
@@ -25,7 +25,7 @@ npm run api:docs
 ## Самостоятельный API v3
 
 ```sh
-uv run --locked python -m oko --api-only --demo --database-url-file "$OKO_DATABASE_URL_FILE"
+uv run --locked python -m oko --api-only --database-url-file "$OKO_DATABASE_URL_FILE"
 ```
 
 Explicit-профиль работает до `POST /api/v3/stop`, без веб-сборки, Node и heartbeat. Обычный и persistent-запуск также используют explicit lifetime. Client-session endpoints возвращают прежний типизированный 409 lifetime_policy_incompatible; браузер их не вызывает. Remote auth и мобильное приложение не поставляются. Проверка копии кода без assets/PATH находится в `tests/lifecycle/test_independent_lifetime.py`; она не означает наличие wheel/install workflow, который сейчас удалён.

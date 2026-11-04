@@ -50,7 +50,7 @@ def test_http_inherited_settings_use_one_consistent_database_snapshot(tmp_path, 
     import threading
     from concurrent.futures import ThreadPoolExecutor
     import psycopg
-    from oko.collection.demo import DemoSource
+    from tests.support.demo_source import DemoSource
 
     app = create_app(tmp_path, token='test', api_only=True, source=DemoSource(), database_url=settings_database)
     with TestClient(app, headers=HEADERS) as client, psycopg.connect(settings_database) as writer:
