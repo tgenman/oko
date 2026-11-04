@@ -1,75 +1,26 @@
 """Experimental group projection; not wired into runtime."""
 import json
 from typing import Any
-from oko.storage.incomplete_index import content_class
-from oko.collection.contracts import SourceManifest
-from oko.collection.external_media import expected_incomplete
 
 
 class UnknownIncompleteGroup(ValueError):
     pass
 
 
-def group_key(item: str, owner: str | None, content: str) -> str | None:
-    classification=content_class(content)
+def group_key(item: str, owner: str | None, classification: int | None) -> str | None:
     if classification==1 or owner is None:return None
     if classification!=0:raise UnknownIncompleteGroup('Unrecognized publication completeness')
-    try:
-        data=json.loads(content)
-        header=data['extra']['_reader']
-        if header.get('full',True):return None
-        manifest=SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if header.get('source_manifest') else None
-        if expected_incomplete(manifest):return None
-        youtube=data['extra'].get('youtube')
-        if isinstance(youtube,dict):
-            from oko.storage.publication_document import caption_state
-            cause=caption_state(youtube,header)
-        else:
-            cause=header.get('captions')
-    except (ValueError,TypeError,KeyError,AttributeError) as exc:
-        raise UnknownIncompleteGroup('Unrecognized publication header') from exc
-    return 'incomplete:'+owner+':'+(cause if cause in ('missing','error') else item)
+    return 'incomplete:'+owner+':'+item
 
 
 def save_keys(db: Any, items: list[str]) -> None:
-    from oko.storage.publication_owners import owner_expr
-    for start in range(0,len(items),100):
-        rows=db.execute(f'SELECT p.id,p.content,{owner_expr("p")} AS owner FROM publications p WHERE p.id=ANY(%s) ORDER BY p.id FOR UPDATE',(items[start:start+100],)).fetchall()
-        if not rows:continue
-        keys=[];unknown=[]
-        for row in rows:
-            try:
-                keys.append(group_key(row['id'],row['owner'],row['content']));unknown.append(False)
-            except UnknownIncompleteGroup:
-                keys.append(None);unknown.append(True)
-        db.execute('UPDATE publications p SET incomplete_group_key=s.key,incomplete_group_owner=s.owner,incomplete_group_unknown=s.unknown,incomplete_group_conflict=false,incomplete_group_ready=true FROM unnest(%s::text[],%s::text[],%s::text[],%s::boolean[]) s(id,key,owner,unknown) WHERE p.id=s.id',([row['id'] for row in rows],keys,[row['owner'] for row in rows],unknown))
+    # The connection-local view derives group keys directly from current facts.
+    return None
 
 
 def recover_group_keys(store: Any) -> None:
-    from oko.storage.publication_owners import owner_expr
-    from oko.storage.transaction import begin_write
-    while True:
-        with store.db:
-            begin_write(store.db)
-            store.db.execute("SELECT pg_advisory_xact_lock(hashtextextended(current_schema(),%s))",(746582092,))
-            if store.db.execute("SELECT 1 FROM state WHERE key='experimental-incomplete-groups-v1'").fetchone():return
-            rows=store.db.execute(f"""SELECT p.id,p.content,{owner_expr('p')} AS owner FROM publications p
-                WHERE p.viewed=0 AND p.complete=1 AND NOT p.source_deleted AND p.incomplete_class IS DISTINCT FROM 1
-                    AND NOT p.incomplete_group_ready ORDER BY p.id LIMIT 100 FOR UPDATE""").fetchall()
-            if not rows:
-                store.db.execute("INSERT INTO state(key,value) VALUES ('experimental-incomplete-groups-v1','true') ON CONFLICT DO NOTHING")
-                return
-            keys=[];unknown=[]
-            for row in rows:
-                try:
-                    keys.append(group_key(row['id'],row['owner'],row['content']))
-                    unknown.append(False)
-                except UnknownIncompleteGroup:
-                    keys.append(None);unknown.append(True)
-            store.db.execute('''UPDATE publications p SET incomplete_group_key=s.key,incomplete_group_owner=s.owner,incomplete_group_unknown=s.unknown,incomplete_group_ready=true
-                FROM unnest(%s::text[],%s::text[],%s::text[],%s::boolean[]) s(id,key,owner,unknown) WHERE p.id=s.id''',([row['id'] for row in rows],keys,[row['owner'] for row in rows],unknown))
-            refresh_youtube_flags(store,[row['id'] for row in rows])
-        store.fault('experimental_incomplete_group_batch')
+    with store.db:
+        store.db.execute("INSERT INTO state(key,value) VALUES ('experimental-incomplete-groups-v1','true') ON CONFLICT DO NOTHING")
 
 
 def generic_job_targets(db: Any, roots: list[str]) -> list[str]:
@@ -105,13 +56,13 @@ def known_incomplete_materials(store: Any, roots: list[str]) -> set[str]:
     return known
 
 def group_candidates(store: Any, keys: list[str], now: float, sticky: set[str] | None = None) -> dict[str,dict[str,Any]]:
-    rows=store.db.execute('''SELECT p.id,p.content,p.incomplete_group_key,m.feed_id,f.kind AS feed_kind,j.status AS fetch_status,j.problem_code AS fetch_code,
+    rows=store.db.execute('''SELECT p.id,p.content,p.incomplete_group_key,m.feed_id,f.kind AS feed_kind,j.status AS fetch_status,j.reason_code AS fetch_code,
           EXISTS (SELECT 1 FROM media_files file JOIN jobs mj ON mj.kind='download_media' AND mj.item=file.id
-                  WHERE file.publication_id=p.id AND mj.status IN ('pending','running') AND mj.error IS NULL AND mj.problem_code IS NULL) AS media_waiting,
+                  WHERE file.publication_id=p.id AND mj.status IN ('pending','running') AND mj.reason_message IS NULL AND mj.reason_code IS NULL) AS media_waiting,
           CASE WHEN p.platform='youtube' THEN EXISTS(SELECT 1 FROM media_files file JOIN jobs mj ON mj.kind='download_media' AND mj.item=file.id
-                  WHERE file.publication_id=p.id AND file.resource_key='youtube:subtitles' AND mj.status='pending' AND mj.problem_code IS NULL) ELSE FALSE END AS caption_waiting
-        FROM publications p JOIN feed_publications m ON m.publication_id=p.id AND m.is_primary JOIN feeds f ON f.id=m.feed_id
-        LEFT JOIN jobs j ON j.kind='fetch' AND j.item=p.id WHERE p.incomplete_group_key COLLATE "C"=ANY(%s) AND p.viewed=0 AND p.complete=1 AND NOT p.source_deleted
+                  WHERE file.publication_id=p.id AND file.resource_key='youtube:subtitles' AND mj.status='pending' AND mj.reason_code IS NULL) ELSE FALSE END AS caption_waiting
+        FROM pg_temp.oko_incomplete_facts p JOIN (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m ON m.id=p.id JOIN feeds f ON f.id=m.feed_id
+        LEFT JOIN jobs j ON j.kind='fetch' AND j.item=p.id WHERE p.incomplete_group_key COLLATE "C"=ANY(%s) AND p.viewed=0 AND p.content <> '{}'::jsonb AND NOT p.source_deleted
         ORDER BY p.incomplete_group_key,p.id''',(keys,)).fetchall()
     if not rows:return {}
     roots=[row['id'] for row in rows]
@@ -123,8 +74,7 @@ def group_candidates(store: Any, keys: list[str], now: float, sticky: set[str] |
     for row in rows:
         key=row['incomplete_group_key']
         if row['id'] in suppressed:continue
-        header=store.problems.header(json.dumps(json.loads(row['content'])['extra']['_reader']))
-        if header.get('full',True) or (youtube['paused'] and row['feed_kind']=='youtube') or header.get('expected_incomplete'):continue
+        if youtube['paused'] and row['feed_kind']=='youtube':continue
         if row['caption_waiting'] and youtube['next_at']>now:continue
         active=row['fetch_status'] in ('pending','running')
         waiting=active and row['fetch_code'] is None
@@ -133,7 +83,6 @@ def group_candidates(store: Any, keys: list[str], now: float, sticky: set[str] |
             result[key]=dict(id=key,code='material-incomplete',section='object',title='Материал сохранён не полностью',
                 consequence='Доступная часть остаётся пригодной для чтения.',next_step='Повторите загрузку или откройте доступную часть.',
                 objects=[],action=None,created_at=now,state='current',finished_at=None,outcome=None,next_at=None)
-            if header.get('reason'):result[key]['reason']=header['reason']
         result[key]['objects'].append(dict(kind='material',id=row['id']))
         if active:result[key]['state']='retrying'
     return result
@@ -166,7 +115,7 @@ def sync_group(store: Any, key: str, now: float, *, previous_items: set[str] | N
     import uuid
     candidate=group_candidate(store,key,now)
     canonical=store.db.execute('SELECT id,identity,body,created FROM reader_problems WHERE identity=%s AND finished IS NULL',(key,)).fetchone()
-    indexed={r['id'] for r in store.db.execute('SELECT id FROM publications WHERE incomplete_group_key COLLATE "C"=%s',(key,))}
+    indexed={r['id'] for r in store.db.execute('SELECT id FROM pg_temp.oko_incomplete_facts WHERE incomplete_group_key COLLATE "C"=%s',(key,))}
     allowed=indexed | (previous_items or set())
     def valid(row: Any) -> bool:
         return valid_group_record(row,key,allowed)
@@ -244,7 +193,7 @@ class TransactionGroupDraft:
 
     def update_group_weights(self) -> None:
         self.store.db.execute('''UPDATE pg_temp.oko_incomplete_groups g SET weight=
-            (SELECT count(*) FROM publications p WHERE p.incomplete_group_key COLLATE "C"=g.key)
+            (SELECT count(*) FROM pg_temp.oko_incomplete_facts p WHERE p.incomplete_group_key COLLATE "C"=g.key)
             + (SELECT count(*) FROM pg_temp.oko_incomplete_work w WHERE w.old_key=g.key)''')
 
     def mark_materials(self, items: list[str], *, capture_admission: bool = True) -> bool:
@@ -273,17 +222,17 @@ class TransactionGroupDraft:
             db.ensure_youtube_admission_workset()
             db.execute('INSERT INTO pg_temp.oko_youtube_admission_control VALUES (true) ON CONFLICT DO NOTHING')
         if pause:
-            for rows in db.incomplete_row_pages("SELECT p.id FROM feeds f JOIN publications p ON p.incomplete_group_owner=f.id WHERE f.kind='youtube' AND p.incomplete_group_key IS NOT NULL"):
+            for rows in db.incomplete_row_pages("SELECT p.id FROM feeds f JOIN pg_temp.oko_incomplete_facts p ON p.incomplete_group_owner=f.id WHERE f.kind='youtube' AND p.incomplete_group_key IS NOT NULL"):
                 self.mark_materials([r['id'] for r in rows],capture_admission=False)
         # Caption waits also occur for a YouTube publication owned by another feed.
         for rows in db.incomplete_row_pages("""SELECT p.id FROM jobs j JOIN media_files m ON m.id=j.item
-            JOIN publications p ON p.id=m.publication_id WHERE j.kind='download_media' AND j.status='pending'
-            AND j.problem_code IS NULL AND m.resource_key='youtube:subtitles' AND p.incomplete_group_key IS NOT NULL"""):
+            JOIN pg_temp.oko_incomplete_facts p ON p.id=m.publication_id WHERE j.kind='download_media' AND j.status='pending'
+            AND j.reason_code IS NULL AND m.resource_key='youtube:subtitles' AND p.incomplete_group_key IS NOT NULL"""):
             self.mark_materials([r['id'] for r in rows],capture_admission=False)
-        for rows in db.incomplete_row_pages("""SELECT kind,item FROM jobs WHERE kind='fetch' AND incomplete_youtube_sensitive AND problem_code IS NULL AND error IS NOT NULL
+        for rows in db.incomplete_row_pages("""SELECT kind,item FROM jobs WHERE kind='fetch' AND incomplete_youtube_sensitive AND reason_code IS NULL AND reason_message IS NOT NULL
                 AND status IN ('pending','running','failed','unavailable','blocked')
             UNION ALL SELECT j.kind,j.item FROM jobs j JOIN media_files m ON m.id=j.item
-                WHERE j.kind='download_media' AND j.problem_code IS NULL AND j.error IS NOT NULL
+                WHERE j.kind='download_media' AND j.reason_code IS NULL AND j.reason_message IS NOT NULL
                 AND j.status IN ('pending','running','failed','unavailable','blocked') AND m.resource_key='youtube:subtitles'"""):
             self.mark_jobs([(row['kind'],row['item']) for row in rows],capture_admission=False)
 
@@ -291,9 +240,9 @@ class TransactionGroupDraft:
         ordered=sorted(feeds)
         for start in range(0,len(ordered),100):
             batch=ordered[start:start+100]
-            for rows in self.store.db.incomplete_row_pages("SELECT id FROM publications WHERE incomplete_group_owner=ANY(%s) AND incomplete_group_key IS NOT NULL",(batch,)):
+            for rows in self.store.db.incomplete_row_pages("SELECT id FROM pg_temp.oko_incomplete_facts WHERE incomplete_group_owner=ANY(%s) AND incomplete_group_key IS NOT NULL",(batch,)):
                 self.mark_materials([row['id'] for row in rows])
-            for rows in self.store.db.incomplete_row_pages("SELECT kind,item FROM jobs WHERE feed_id=ANY(%s) AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')",(batch,)):
+            for rows in self.store.db.incomplete_row_pages("SELECT kind,item FROM jobs WHERE feed_id=ANY(%s) AND reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')",(batch,)):
                 self.mark_jobs([(row['kind'],row['item']) for row in rows])
 
     def mark_jobs(self, jobs: list[tuple[str,Any]], *, capture_admission: bool = True) -> bool:
@@ -325,9 +274,11 @@ class TransactionGroupDraft:
         relevant=db.ensure_incomplete_workset()
         for start in range(0,len(ordered),100):
             db.execute("""INSERT INTO pg_temp.oko_incomplete_work(item,old_key)
-                SELECT id,incomplete_group_key FROM publications WHERE id=ANY(%s)
-                AND (viewed=0 OR incomplete_group_key IS NOT NULL)
-                AND (incomplete_class IS DISTINCT FROM 1 OR incomplete_group_key IS NOT NULL OR NOT incomplete_group_ready)
+                SELECT p.id,COALESCE((SELECT COALESCE(r.body::jsonb->>'incomplete_group_identity',r.identity)
+                    FROM reader_problems r WHERE r.finished IS NULL AND r.body::jsonb->>'code'='material-incomplete'
+                    AND r.body::jsonb->'objects' @> jsonb_build_array(jsonb_build_object('kind','material','id',p.id))
+                    ORDER BY r.created,r.id LIMIT 1),p.incomplete_group_key)
+                FROM pg_temp.oko_incomplete_facts p WHERE p.id=ANY(%s) AND p.viewed=0
                 ON CONFLICT(item) DO NOTHING""",(ordered[start:start+100],))
         return bool(relevant)
 
@@ -379,7 +330,7 @@ class TransactionGroupDraft:
                 save_keys(db,items)
                 refresh_youtube_flags(self.store,items)
                 db.execute("""UPDATE pg_temp.oko_incomplete_work w SET new_key=p.incomplete_group_key,unknown=p.incomplete_group_unknown,forgotten=p.viewed<>0
-                    FROM publications p WHERE w.item=p.id AND w.item=ANY(%s)""",(items,))
+                    FROM pg_temp.oko_incomplete_facts p WHERE w.item=p.id AND w.item=ANY(%s)""",(items,))
                 db.execute('UPDATE pg_temp.oko_incomplete_work w SET forgotten=true WHERE item=ANY(%s) AND NOT EXISTS (SELECT 1 FROM publications p WHERE p.id=w.item)',(items,))
             db.execute('INSERT INTO pg_temp.oko_incomplete_groups(key) SELECT DISTINCT new_key FROM pg_temp.oko_incomplete_work WHERE new_key IS NOT NULL ON CONFLICT(key) DO NOTHING')
             self.update_group_weights()
@@ -491,7 +442,7 @@ def sync_groups_batch(store: Any, keys: list[str], now: float, previous_items: d
     for r in store.db.execute("SELECT r.*,k.group_key FROM unnest(%s::text[]) AS k(group_key) CROSS JOIN LATERAL (SELECT id,identity,body,created FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:incomplete' AND body::jsonb->>'incomplete_group_identity'=k.group_key LIMIT 2) AS r",(keys,)):
         isolated.setdefault(r['group_key'],[]).append(r)
     members: dict[str,set[str]]={}
-    for row in store.db.execute('SELECT id,incomplete_group_key FROM publications WHERE incomplete_group_key COLLATE "C"=ANY(%s)',(keys,)):
+    for row in store.db.execute('SELECT id,incomplete_group_key FROM pg_temp.oko_incomplete_facts WHERE incomplete_group_key COLLATE "C"=ANY(%s)',(keys,)):
         members.setdefault(row['incomplete_group_key'],set()).add(row['id'])
     selected: dict[str,Any]={}
     candidate_keys: dict[str,str]={}
@@ -570,10 +521,7 @@ def sync_groups_batch(store: Any, keys: list[str], now: float, previous_items: d
 
 def flag_reservation_conflicts(store: Any, keys: list[str]) -> None:
     if not keys:return
-    rows=store.db.execute('UPDATE publications SET incomplete_group_conflict=true WHERE incomplete_group_key COLLATE "C"=ANY(%s) AND NOT incomplete_group_conflict RETURNING id',(keys,)).fetchall()
-    if rows:
-        from oko.storage.reader_status import changed as status_changed
-        status_changed(store.db)
+    raise ValueError('Conflicting incomplete diagnostic reservations: '+', '.join(keys))
 
 def create_reservations_batch(store: Any, future: dict[str,dict[str,Any]], now: float, deadline: float) -> set[str]:
     """Reserve first occurrences for independent, unoccupied groups."""
@@ -810,7 +758,7 @@ def recover_group_problems(store: Any) -> None:
     if store.db.execute("SELECT 1 FROM state WHERE key='experimental-incomplete-problems-v1'").fetchone():return
     cursor: str | None=None
     while True:
-        query='SELECT incomplete_group_key COLLATE "C" AS incomplete_group_key FROM publications WHERE incomplete_group_key IS NOT NULL'
+        query='SELECT incomplete_group_key COLLATE "C" AS incomplete_group_key FROM pg_temp.oko_incomplete_facts WHERE incomplete_group_key IS NOT NULL'
         if cursor is not None:query+=' AND incomplete_group_key COLLATE "C">%s'
         query+=' GROUP BY incomplete_group_key COLLATE "C" ORDER BY incomplete_group_key COLLATE "C" LIMIT 100'
         rows=store.db.execute(query,(cursor,) if cursor is not None else ()).fetchall()
@@ -844,7 +792,7 @@ def recover_group_problems(store: Any) -> None:
             possible[identity]={item}
         if possible:
             item_ids=sorted({item for values in possible.values() for item in values})
-            saved={row['id']:row for row in store.db.execute('SELECT id,incomplete_group_unknown,incomplete_group_conflict FROM publications WHERE id=ANY(%s)',(item_ids,))}
+            saved={row['id']:row for row in store.db.execute('SELECT id,incomplete_group_unknown,incomplete_group_conflict FROM pg_temp.oko_incomplete_facts WHERE id=ANY(%s)',(item_ids,))}
             possible={identity:items for identity,items in possible.items() if all(item in saved and not saved[item]['incomplete_group_unknown'] and not saved[item]['incomplete_group_conflict'] for item in items)}
         if possible:
             with store.db:
@@ -906,7 +854,7 @@ def virtual_due_groups(store: Any, now: float) -> list[dict[str,Any]]:
         projected={key:dict(singles[key]['future']) for key in batch}
         existing={r['identity']:r for r in store.db.execute('SELECT id,identity,body,created FROM reader_problems WHERE identity=ANY(%s) AND finished IS NULL',(batch,))}
         indexed: dict[str,set[str]]={}
-        for row in store.db.execute('SELECT id,incomplete_group_key FROM publications WHERE incomplete_group_key COLLATE "C"=ANY(%s)',(batch,)):
+        for row in store.db.execute('SELECT id,incomplete_group_key FROM pg_temp.oko_incomplete_facts WHERE incomplete_group_key COLLATE "C"=ANY(%s)',(batch,)):
             indexed.setdefault(row['incomplete_group_key'],set()).add(row['id'])
         for key in batch:
             candidate=projected.get(key)
@@ -1013,7 +961,7 @@ def schedule_current_groups(store: Any, keys: list[str], now: float, deadline: f
     for row in store.db.execute("SELECT r.*,k.group_key FROM unnest(%s::text[]) AS k(group_key) CROSS JOIN LATERAL (SELECT id,identity,body,created,finished,incomplete_due,incomplete_future,incomplete_closes FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:incomplete' AND body::jsonb->>'incomplete_group_identity'=k.group_key LIMIT 2) AS r",(list(present),)):
         isolated.setdefault(row['group_key'],[]).append(row)
     members: dict[str,set[str]]={}
-    for row in store.db.execute('SELECT id,incomplete_group_key FROM publications WHERE incomplete_group_key COLLATE "C"=ANY(%s)',(list(present),)):
+    for row in store.db.execute('SELECT id,incomplete_group_key FROM pg_temp.oko_incomplete_facts WHERE incomplete_group_key COLLATE "C"=ANY(%s)',(list(present),)):
         members.setdefault(row['incomplete_group_key'],set()).add(row['id'])
     updates: list[tuple[str,float | None,str | None,bool]]=[]
     for key in present:
@@ -1108,13 +1056,13 @@ def refresh_youtube_flags(store: Any, roots: list[str]) -> None:
     from oko.storage.publication_owners import owner_expr
     targets=generic_job_targets(store.db,roots)
     for start in range(0,len(targets),400):
-        rows=store.db.execute(f"""SELECT j.id,coalesce(bool_or(j.problem_code IS NULL AND j.error IS NOT NULL
+        rows=store.db.execute(f"""SELECT j.id,coalesce(bool_or(j.reason_code IS NULL AND j.reason_message IS NOT NULL
                 AND j.status IN ('pending','running','failed','unavailable','blocked') AND f.kind='youtube'
                 AND CASE WHEN root.id IS NOT NULL THEN root.incomplete_group_key IS NOT NULL ELSE p.incomplete_group_key IS NOT NULL END),false) AS sensitive
             FROM (SELECT * FROM jobs WHERE kind='fetch' AND item=ANY(%s) OFFSET 0) j
-            LEFT JOIN publications p ON p.id=j.item
+            LEFT JOIN pg_temp.oko_incomplete_facts p ON p.id=j.item
             LEFT JOIN publication_links link ON link.target_publication_id=p.id
-            LEFT JOIN publications root ON root.id=link.source_publication_id AND root.viewed=0
+            LEFT JOIN pg_temp.oko_incomplete_facts root ON root.id=link.source_publication_id AND root.viewed=0
             LEFT JOIN feeds f ON f.id=coalesce({owner_expr('p')},{owner_expr('root')},j.feed_id)
             GROUP BY j.id""",(targets[start:start+400],)).fetchall()
         if rows:

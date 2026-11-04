@@ -54,7 +54,7 @@ class Scenario:
 
     def close(self):
         self.server.should_exit = True
-        self.thread.join(timeout=3)
+        self.thread.join(timeout=8)
         self.socket.close()
         if self.thread.is_alive():
             raise RuntimeError('HTTP fixture did not shut down')

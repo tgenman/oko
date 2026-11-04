@@ -1316,7 +1316,9 @@ class YouTubeState(WireModel):
 
 class YoutubeSourceReference(WireModel):
     model_config = ConfigDict(extra="forbid")
-    captions: Literal["available", "not_requested", "unavailable", "error"]
+    captions: Literal[
+        "available", "not_requested", "pending", "running", "unavailable", "error"
+    ]
     feed_id: FeedId
     kind: Literal["youtube"]
     source_url: SourceUrl

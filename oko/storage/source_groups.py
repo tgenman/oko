@@ -28,46 +28,46 @@ def possible_pairs(identity: str, kind: str) -> list[tuple[str,str]]:
 
 
 def job_keys(store: 'Store', job_id: int, code: str | None = None) -> set[str]:
-    rows=store.db.execute(f"""SELECT j.kind,j.item,coalesce(%s,j.problem_code) AS problem_code,j.feed_id,
+    rows=store.db.execute(f"""SELECT j.kind,j.item,coalesce(%s,j.reason_code) AS reason_code,j.feed_id,
         coalesce({owner_expr('items')},{owner_expr('media_owner')},{owner_expr('root')},j.feed_id) AS owner
         FROM jobs j LEFT JOIN publications items ON items.id=j.item
         LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
         LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
         LEFT JOIN publication_links l ON l.target_publication_id=coalesce(items.id,media_owner.id)
         LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id AND viewed=0 OFFSET 0) root ON true
-        WHERE j.id=%s AND coalesce(%s,j.problem_code) LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete')""",(code,job_id,code)).fetchall()
-    return {'job:'+r['problem_code']+':'+(r['owner'] or r['feed_id'] or r['item'] or '')+':'+r['kind'] for r in rows}
+        WHERE j.id=%s AND coalesce(%s,j.reason_code) LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete')""",(code,job_id,code)).fetchall()
+    return {'job:'+r['reason_code']+':'+(r['owner'] or r['feed_id'] or r['item'] or '')+':'+r['kind'] for r in rows}
 
 
 
 
 def job_keys_with_previous_feed(store: 'Store', job_id: int, feed: str | None) -> tuple[str,set[str]] | None:
-    rows=store.db.execute(f"""SELECT j.kind,j.item,j.problem_code,
+    rows=store.db.execute(f"""SELECT j.kind,j.item,j.reason_code,
         coalesce({owner_expr('items')},{owner_expr('media_owner')},{owner_expr('root')},%s::text) AS owner
         FROM jobs j LEFT JOIN publications items ON items.id=j.item
         LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
         LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
         LEFT JOIN publication_links l ON l.target_publication_id=coalesce(items.id,media_owner.id)
         LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id AND viewed=0 OFFSET 0) root ON true
-        WHERE j.id=%s AND j.problem_code LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete')""",(feed,job_id)).fetchall()
+        WHERE j.id=%s AND j.reason_code LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete')""",(feed,job_id)).fetchall()
     if not rows:return None
     kind=rows[0]['kind']
-    return kind,{'job:'+row['problem_code']+':'+(row['owner'] or feed or row['item'] or '')+':'+kind for row in rows}
+    return kind,{'job:'+row['reason_code']+':'+(row['owner'] or feed or row['item'] or '')+':'+kind for row in rows}
 
 def job_keys_many(store: 'Store', job_ids: list[int]) -> dict[int,tuple[str,set[str]]]:
     if not job_ids:return {}
-    rows=store.db.execute(f"""SELECT j.id,j.kind,j.item,j.problem_code,j.feed_id,
+    rows=store.db.execute(f"""SELECT j.id,j.kind,j.item,j.reason_code,j.feed_id,
         coalesce({owner_expr('items')},{owner_expr('media_owner')},{owner_expr('root')},j.feed_id) AS owner
         FROM jobs j LEFT JOIN publications items ON items.id=j.item
         LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
         LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
         LEFT JOIN publication_links l ON l.target_publication_id=coalesce(items.id,media_owner.id)
         LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id AND viewed=0 OFFSET 0) root ON true
-        WHERE j.id=ANY(%s) AND j.problem_code LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete')""",(job_ids,)).fetchall()
+        WHERE j.id=ANY(%s) AND j.reason_code LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete')""",(job_ids,)).fetchall()
     groups: dict[int,tuple[str,set[str]]]={}
     for row in rows:
         if row['id'] not in groups:groups[row['id']]=(row['kind'],set())
-        groups[row['id']][1].add('job:'+row['problem_code']+':'+(row['owner'] or row['feed_id'] or row['item'] or '')+':'+row['kind'])
+        groups[row['id']][1].add('job:'+row['reason_code']+':'+(row['owner'] or row['feed_id'] or row['item'] or '')+':'+row['kind'])
     return groups
 
 def group_snapshot(store: 'Store', identity: str, kind: str, now: float, *, exclude: set[int] | None = None, pause_override: bool | None = None) -> tuple[dict[str,Any] | None,bool,set[int]]:
@@ -75,7 +75,7 @@ def group_snapshot(store: 'Store', identity: str, kind: str, now: float, *, excl
     if not pairs:return None,False,set()
     codes=[p[0] for p in pairs];owners=[p[1] for p in pairs]
     rows=store.db.execute(f"""WITH source_groups AS MATERIALIZED (SELECT code,owner FROM unnest(%s::text[],%s::text[]) AS g(code,owner)),
-        source_members AS MATERIALIZED (SELECT feed_id,publication_id FROM feed_publications WHERE is_primary AND feed_id=ANY(%s::text[])),
+        source_members AS MATERIALIZED (SELECT feed_id,id AS publication_id FROM publications WHERE feed_id=ANY(%s::text[])),
         items AS MATERIALIZED (
             SELECT g.code,g.owner,g.owner AS item FROM source_groups g
             UNION SELECT g.code,g.owner,m.publication_id FROM source_groups g JOIN source_members m ON m.feed_id=g.owner
@@ -85,11 +85,11 @@ def group_snapshot(store: 'Store', identity: str, kind: str, now: float, *, excl
             UNION SELECT g.code,g.owner,c.item FROM source_groups g CROSS JOIN LATERAL (SELECT item FROM jobs WHERE kind='delete' AND payload::jsonb->>'cleanup_feed'=g.owner OFFSET 0) c
                 JOIN publications p ON p.id=c.item AND p.viewed=1
         ), targets AS MATERIALIZED (
-            SELECT j.id FROM items i CROSS JOIN LATERAL (SELECT id FROM jobs WHERE kind=%s AND item=i.item AND problem_code=i.code AND problem_code LIKE 'source-%%' AND octet_length(problem_code)<=1000 OFFSET 0) j
+            SELECT j.id FROM items i CROSS JOIN LATERAL (SELECT id FROM jobs WHERE kind=%s AND item=i.item AND reason_code=i.code AND reason_code LIKE 'source-%%' AND octet_length(reason_code)<=1000 OFFSET 0) j
             UNION SELECT j.id FROM items i CROSS JOIN LATERAL (SELECT id FROM media_files WHERE publication_id=i.item OFFSET 0) m
-                CROSS JOIN LATERAL (SELECT id FROM jobs WHERE kind=%s AND kind='download_media' AND item=m.id AND problem_code=i.code AND problem_code LIKE 'source-%%' AND octet_length(problem_code)<=1000 OFFSET 0) j
-            UNION SELECT j.id FROM source_groups g CROSS JOIN LATERAL (SELECT id FROM jobs WHERE kind=%s AND feed_id=g.owner AND problem_code=g.code AND problem_code LIKE 'source-%%' AND octet_length(problem_code)<=1000 AND coalesce(octet_length(feed_id),0)<=1000 OFFSET 0) j
-        ) SELECT j.id,j.kind,j.item,j.status,j.error,j.problem_code,j.feed_id,m.resource_key,
+                CROSS JOIN LATERAL (SELECT id FROM jobs WHERE kind=%s AND kind='download_media' AND item=m.id AND reason_code=i.code AND reason_code LIKE 'source-%%' AND octet_length(reason_code)<=1000 OFFSET 0) j
+            UNION SELECT j.id FROM source_groups g CROSS JOIN LATERAL (SELECT id FROM jobs WHERE kind=%s AND feed_id=g.owner AND reason_code=g.code AND reason_code LIKE 'source-%%' AND octet_length(reason_code)<=1000 AND coalesce(octet_length(feed_id),0)<=1000 OFFSET 0) j
+        ) SELECT j.id,j.kind,j.item,j.status,j.reason_message,j.reason_code,j.feed_id,m.resource_key,
             coalesce({owner_expr('items')},{owner_expr('media_owner')},{owner_expr('root')},j.feed_id) AS owner,
             coalesce(items.viewed,media_owner.viewed) AS viewed,coalesce(root.id,m.publication_id,j.item) AS affected
         FROM targets t CROSS JOIN LATERAL (SELECT * FROM jobs WHERE id=t.id OFFSET 0) j
@@ -97,7 +97,7 @@ def group_snapshot(store: 'Store', identity: str, kind: str, now: float, *, excl
         LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
         LEFT JOIN publication_links l ON l.target_publication_id=coalesce(items.id,media_owner.id)
         LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id AND viewed=0 OFFSET 0) root ON true
-        WHERE (j.status IN ('pending','running','failed','unavailable','blocked') OR (j.status='done' AND j.kind='fetch' AND j.error IS NOT NULL AND j.problem_code IS NOT NULL))
+        WHERE (j.status IN ('pending','running','failed','unavailable','blocked') OR (j.status='done' AND j.kind='fetch' AND j.reason_message IS NOT NULL AND j.reason_code IS NOT NULL))
         {'AND NOT (j.id=ANY(%s))' if exclude else ''}
         ORDER BY j.kind,j.item,j.id,root.id""",(codes,owners,owners,kind,kind,kind,*([sorted(exclude)] if exclude else []))).fetchall()
     selected=[]
@@ -106,7 +106,7 @@ def group_snapshot(store: 'Store', identity: str, kind: str, now: float, *, excl
     paused=pause_override if pause_override is not None else bool(kind=='download_media' and any(row['resource_key']=='youtube:subtitles' for row in rows) and store.youtube.status(now)['paused'])
     for row in rows:
         owner=row['owner'] or row['feed_id'] or row['item'] or ''
-        if 'job:'+row['problem_code']+':'+owner+':'+kind!=identity:continue
+        if 'job:'+row['reason_code']+':'+owner+':'+kind!=identity:continue
         members.add(row['id'])
         if row['viewed'] and kind not in ('delete','feed-delete'):continue
         if kind=='download_media' and row['resource_key']=='youtube:subtitles':
@@ -114,16 +114,16 @@ def group_snapshot(store: 'Store', identity: str, kind: str, now: float, *, excl
             if paused:continue
         selected.append((row,owner))
     if not selected:return None,timed,members
-    first,first_owner=selected[0];code=first['problem_code']
+    first,first_owner=selected[0];code=first['reason_code']
     title={'feed-delete':'Удаление фида не завершено','fetch':'Не удалось загрузить материал','download_media':'Не удалось загрузить вложение','delete':'Удаление не завершено'}.get(kind,'Не удалось обработать материал')
     result: dict[str,Any]=dict(id=identity,code=code,section='object',title=title,
         consequence='Око продолжает попытки удаления.' if kind in ('delete','feed-delete') else 'Сохранённое содержимое остаётся доступным.',
         next_step='Включите обработку, чтобы повторить попытку.' if first['status']=='blocked' else 'Повторите загрузку вручную.' if first['status'] in ('done','failed') else 'Проверьте доступность источника.' if first['status']=='unavailable' else 'Око повторит попытку автоматически.',
-        objects=[],action=None,operation='producer:'+kind,created_at=now,state='retrying' if first['status']=='running' or not first['error'] else 'current',finished_at=None,outcome=None,next_at=None)
-    if first['error'] and kind!='delete':result['reason']=first['error']
+        objects=[],action=None,operation='producer:'+kind,created_at=now,state='retrying' if first['status']=='running' or not first['reason_message'] else 'current',finished_at=None,outcome=None,next_at=None)
+    if first['reason_message'] and kind!='delete':result['reason']=first['reason_message']
     if code=='source-reconnect':result.update(section='action',next_step='Проверьте привязку источника; доступ не изменяется автоматически.')
     seen_objects: set[tuple[str,str | None]]=set()
-    result['_source_codes']={row['problem_code'] for row,_ in selected}
+    result['_source_codes']={row['reason_code'] for row,_ in selected}
     for row,owner in selected:
         obj=dict(kind='feed' if kind=='feed-delete' else 'material',id=owner if kind=='feed-delete' else row['affected'])
         key=(obj['kind'],obj['id'])
@@ -310,7 +310,7 @@ def recover(store: 'Store') -> None:
     while True:
         with store.db:
             memberships.lock_graph(store.db)
-            query="""SELECT id FROM jobs WHERE kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code LIKE 'source-%%' AND source_event_owned=false"""
+            query="""SELECT id FROM jobs WHERE kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND reason_code LIKE 'source-%%' AND source_event_owned=false"""
             if cursor is not None:query+=' AND id>%s'
             jobs=store.db.execute(query+' ORDER BY id LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
             if not jobs:break
@@ -339,7 +339,7 @@ def recover(store: 'Store') -> None:
                 if updates:
                     store.db.execute('UPDATE state s SET value=batch.value FROM unnest(%s::text[],%s::text[]) AS batch(key,value) WHERE s.key=batch.key',([r[0] for r in updates],[r[1] for r in updates]))
             eligible=[job_id for job_id,(kind,keys) in groups.items() if all(status.get((kind,key))=='done' for key in keys)]
-            if eligible:store.db.execute("UPDATE jobs SET source_event_owned=(status IN ('pending','running','failed','unavailable','blocked') OR (kind='fetch' AND status='done' AND error IS NOT NULL)) WHERE id=ANY(%s) AND problem_code LIKE 'source-%%'",(eligible,))
+            if eligible:store.db.execute("UPDATE jobs SET source_event_owned=(status IN ('pending','running','failed','unavailable','blocked') OR (kind='fetch' AND status='done' AND reason_message IS NOT NULL)) WHERE id=ANY(%s) AND reason_code LIKE 'source-%%'",(eligible,))
             notify_admission(store,eligible)
             cursor=ids[-1]
         store.fault('source_problem_recovery_batch')
@@ -388,7 +388,7 @@ def sync_jobs(store: 'Store', job_ids: list[int], now: float) -> None:
     eligible_set=set(eligible)
     ineligible=[job_id for job_id in all_groups if job_id not in eligible_set]
     for start in range(0,len(eligible),400):
-        store.db.execute("UPDATE jobs SET source_event_owned=(status IN ('pending','running','failed','unavailable','blocked') OR (kind='fetch' AND status='done' AND error IS NOT NULL)) WHERE id=ANY(%s) AND problem_code LIKE 'source-%%'",(eligible[start:start+400],))
+        store.db.execute("UPDATE jobs SET source_event_owned=(status IN ('pending','running','failed','unavailable','blocked') OR (kind='fetch' AND status='done' AND reason_message IS NOT NULL)) WHERE id=ANY(%s) AND reason_code LIKE 'source-%%'",(eligible[start:start+400],))
     for start in range(0,len(ineligible),400):
         store.db.execute("UPDATE jobs SET source_event_owned=false WHERE id=ANY(%s) AND source_event_owned",(ineligible[start:start+400],))
     notify_admission(store,eligible+ineligible)
@@ -399,7 +399,7 @@ def previous_keys_many(store: 'Store', rows: list[tuple[int,str]]) -> dict[int,t
     result: dict[int,tuple[str,set[str]]]={}
     for start in range(0,len(rows),400):
         batch=rows[start:start+400]
-        found=store.db.execute(f"""SELECT j.id,j.kind,j.item,v.code AS problem_code,j.feed_id,
+        found=store.db.execute(f"""SELECT j.id,j.kind,j.item,v.code AS reason_code,j.feed_id,
             coalesce({owner_expr('items')},{owner_expr('media_owner')},{owner_expr('root')},j.feed_id) AS owner
             FROM unnest(%s::bigint[],%s::text[]) AS v(id,code) JOIN jobs j ON j.id=v.id
             LEFT JOIN publications items ON items.id=j.item LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
@@ -408,7 +408,7 @@ def previous_keys_many(store: 'Store', rows: list[tuple[int,str]]) -> dict[int,t
             LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id AND viewed=0 OFFSET 0) root ON true""",([r[0] for r in batch],[r[1] for r in batch])).fetchall()
         for row in found:
             if row['id'] not in result:result[row['id']]=(row['kind'],set())
-            result[row['id']][1].add('job:'+row['problem_code']+':'+(row['owner'] or row['feed_id'] or row['item'] or '')+':'+row['kind'])
+            result[row['id']][1].add('job:'+row['reason_code']+':'+(row['owner'] or row['feed_id'] or row['item'] or '')+':'+row['kind'])
     return result
 
 
@@ -428,7 +428,7 @@ def sync_changed_rows(store: 'Store', rows: list[Any], now: float) -> None:
     eligible_set=set(eligible)
     ineligible=[job_id for job_id in ids if job_id not in eligible_set]
     for start in range(0,len(eligible),400):
-        store.db.execute("UPDATE jobs SET source_event_owned=(status IN ('pending','running','failed','unavailable','blocked') OR (kind='fetch' AND status='done' AND error IS NOT NULL)) WHERE id=ANY(%s) AND problem_code LIKE 'source-%%'",(eligible[start:start+400],))
+        store.db.execute("UPDATE jobs SET source_event_owned=(status IN ('pending','running','failed','unavailable','blocked') OR (kind='fetch' AND status='done' AND reason_message IS NOT NULL)) WHERE id=ANY(%s) AND reason_code LIKE 'source-%%'",(eligible[start:start+400],))
     for start in range(0,len(ineligible),400):
         store.db.execute("UPDATE jobs SET source_event_owned=false WHERE id=ANY(%s) AND source_event_owned",(ineligible[start:start+400],))
     notify_admission(store,eligible+ineligible)
@@ -439,7 +439,7 @@ def job_evidence_many(store: 'Store', rows: Sequence[tuple[int,str | None]]) -> 
     evidence: dict[str,set[tuple[str,str]]]={}
     for start in range(0,len(rows),400):
         batch=rows[start:start+400]
-        found=store.db.execute(f"""SELECT j.id,j.kind,j.item,coalesce(v.code,j.problem_code) AS code,j.feed_id,
+        found=store.db.execute(f"""SELECT j.id,j.kind,j.item,coalesce(v.code,j.reason_code) AS code,j.feed_id,
             coalesce({owner_expr('items')},{owner_expr('media_owner')},{owner_expr('root')},j.feed_id) AS owner,
             coalesce(root.id,m.publication_id,j.item) AS affected
             FROM unnest(%s::bigint[],%s::text[]) AS v(id,code) JOIN jobs j ON j.id=v.id
@@ -447,7 +447,7 @@ def job_evidence_many(store: 'Store', rows: Sequence[tuple[int,str | None]]) -> 
             LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
             LEFT JOIN publication_links l ON l.target_publication_id=coalesce(items.id,media_owner.id)
             LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id AND viewed=0 OFFSET 0) root ON true
-            WHERE j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND coalesce(v.code,j.problem_code) LIKE 'source-%%'""",([r[0] for r in batch],[r[1] for r in batch])).fetchall()
+            WHERE j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND coalesce(v.code,j.reason_code) LIKE 'source-%%'""",([r[0] for r in batch],[r[1] for r in batch])).fetchall()
         for row in found:
             owner=row['owner'] or row['feed_id'] or row['item'] or ''
             key='job:'+row['code']+':'+owner+':'+row['kind']
@@ -459,7 +459,7 @@ def job_evidence_many(store: 'Store', rows: Sequence[tuple[int,str | None]]) -> 
 
 
 def job_evidence_with_previous_feed(store: 'Store', job_id: int, feed: str | None) -> dict[str,set[tuple[str,str]]]:
-    rows=store.db.execute(f"""SELECT j.kind,j.item,j.problem_code,
+    rows=store.db.execute(f"""SELECT j.kind,j.item,j.reason_code,
         coalesce({owner_expr('items')},{owner_expr('media_owner')},{owner_expr('root')},%s::text) AS owner,
         coalesce(root.id,m.publication_id,j.item) AS affected
         FROM jobs j LEFT JOIN publications items ON items.id=j.item
@@ -467,13 +467,13 @@ def job_evidence_with_previous_feed(store: 'Store', job_id: int, feed: str | Non
         LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
         LEFT JOIN publication_links l ON l.target_publication_id=coalesce(items.id,media_owner.id)
         LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id AND viewed=0 OFFSET 0) root ON true
-        WHERE j.id=%s AND j.problem_code LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete')""",(feed,job_id)).fetchall()
+        WHERE j.id=%s AND j.reason_code LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete')""",(feed,job_id)).fetchall()
     evidence: dict[str,set[tuple[str,str]]]={}
     for row in rows:
         owner=row['owner'] or feed or row['item'] or ''
-        key='job:'+row['problem_code']+':'+owner+':'+row['kind']
+        key='job:'+row['reason_code']+':'+owner+':'+row['kind']
         objects=evidence.setdefault(key,set())
-        objects.add(('code',row['problem_code']))
+        objects.add(('code',row['reason_code']))
         value=owner if row['kind']=='feed-delete' else row['affected']
         if row['kind']!='delete' and isinstance(value,str):objects.add(('feed' if row['kind']=='feed-delete' else 'material',value))
     return evidence

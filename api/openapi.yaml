@@ -15452,6 +15452,8 @@ components:
           enum:
           - available
           - not_requested
+          - pending
+          - running
           - unavailable
           - error
       required:

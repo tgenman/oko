@@ -12,10 +12,10 @@ def test_processor_failure_suppresses_then_restores_incomplete_atomically(tmp_pa
         with transaction(store.db):
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             content=json.dumps({'extra':{'_reader':{'full':False,'reason':'partial'}}})
-            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','rss','p',0,1,%s,0)",(content,))
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,content) VALUES ('p','rss','p',0,%s)",(content,))
+            store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','p','done',1) RETURNING id").fetchone()[0]
-            store.db.execute("INSERT INTO jobs(kind,item,status,generation,error,problem_code) SELECT 'fetch','foreign-'||n,'failed',1,'foreign','processor-config' FROM generate_series(1,10000)n")
+            store.db.execute("INSERT INTO jobs(kind,item,status,generation,reason_message,reason_code) SELECT 'fetch','foreign-'||n,'failed',1,'foreign','processor-config' FROM generate_series(1,10000)n")
             save_keys(store.db,['p']);store.incomplete_draft.mark(['p'])
         store.db._db.execute('ANALYZE jobs')
         old=store.db.execute("SELECT id FROM reader_problems WHERE identity='incomplete:f:p' AND finished IS NULL").fetchone()[0]

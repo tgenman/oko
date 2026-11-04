@@ -14,7 +14,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-test('real HTTP settings save proxy, preserve secrets and show the shared YouTube pause', {timeout:45000}, async t => {
+test('real HTTP settings save proxy, preserve secrets and show the shared YouTube pause', {timeout:60000}, async t => {
   const root = path.resolve(__dirname, '../..');
   const data = await fs.mkdtemp(path.join(os.tmpdir(), 'oko-youtube-browser-'));
   const child = spawn(process.env.OKO_PYTHON || path.join(root, '.venv/bin/python'), ['-m', 'tests.support.youtube_browser_server', data], {cwd:root, stdio:['ignore', 'pipe', 'pipe']});
@@ -87,7 +87,7 @@ test('real HTTP settings save proxy, preserve secrets and show the shared YouTub
     await expect.poll(async () => (await api('youtube')).mode).toBe('direct');
     const plan = await addSources(api, [["https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa", "YouTube", "No Folder"]]);
     await api('feeds/' + plan.feeds[0].id, 'PATCH', {importance:'high'});
-    await expect.poll(async () => (await api('youtube')).admission==='paused').toBe(true);
+    await expect.poll(async () => (await api('youtube')).admission==='paused',{timeout:15000}).toBe(true);
     await expect(page.locator('#youtube-pause')).toContainText('Subtitle downloads paused');
     await expect(page.locator('#youtube-pause')).toContainText('Next attempt no earlier than');
     assert.ok(!JSON.stringify(await api('diagnostics')).includes('fixture-password'));

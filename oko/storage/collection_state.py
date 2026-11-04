@@ -18,6 +18,16 @@ class CollectionState:
     def __init__(self,store: Store) -> None:
         self.store=store
 
+    def _require_transaction(self) -> None:
+        if not self.store.db.in_transaction:
+            raise RuntimeError('Collection source changes require an owning transaction')
+
+    def feed_status(self, feed: str, **state: Any) -> None:
+        self.store.feed_status(feed, **state)
+
+    def telegram_http_delay(self) -> float:
+        return float(self.store.subscriptions.telegram_http_settings()['value'])
+
     def revision(self) -> int:
         return self.store.subscriptions.source_revision()
 
@@ -44,16 +54,14 @@ class CollectionState:
 
 
     def refresh_identity(self, feed: str, info: dict[str,Any]) -> None:
+        self._require_transaction()
         self.store.subscriptions.telegram.refresh(feed,info)
 
     def cursor(self, feed: str) -> str | None:
         return self.store.cursor(feed)
 
-    def notify_parents(self, item: str) -> None:
-        from oko.storage.publication_links import notify_parents
-        notify_parents(self.store,item)
-
     def discovery_wait(self, feed: str, label: str, retry_at: float | None) -> None:
+        self._require_transaction()
         self.store.subscriptions.history.discovery_state(feed,dict(history_waiting=True,history_error=label,history_retry_at=retry_at))
 
     def caption_ready(self) -> float:
@@ -63,12 +71,15 @@ class CollectionState:
         return self.store.youtube.config()
 
     def caption_started(self, wall: float) -> None:
+        self._require_transaction()
         self.store.youtube.start(wall)
 
     def caption_blocked(self, wall: float, delay: float) -> None:
+        self._require_transaction()
         self.store.youtube.blocked(wall,delay)
 
     def caption_completed(self) -> None:
+        self._require_transaction()
         self.store.youtube.completed()
 
     def startup(self, injected: bool, source_feed: str) -> float:

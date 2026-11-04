@@ -10,8 +10,8 @@ def test_http_implicit_error_reads_without_write(tmp_path,postgres_url,kind):
     with psycopg.connect(postgres_url,autocommit=True) as db:
         db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
         db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','other_web','article')")
-        db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('feed','article',true)")
-        db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES (%s,'article','failed','failure',NULL)",(kind,))
+        db.execute("UPDATE publications SET feed_id='feed' WHERE id='article'")
+        db.execute("INSERT INTO jobs(kind,item,status,reason_message,reason_code) VALUES (%s,'article','failed','failure',NULL)",(kind,))
     with TestClient(create_app(tmp_path,token='test',database_url=postgres_url,api_only=True),headers=HEADERS) as client:
         with psycopg.connect(postgres_url,autocommit=True) as db:
             before=db.execute("SELECT id,xmin::text,body FROM reader_problems WHERE identity=%s AND finished IS NULL",('job:work-'+kind+':feed:'+kind+':article',)).fetchone()

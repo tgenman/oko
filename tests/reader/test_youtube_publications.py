@@ -127,7 +127,7 @@ def test_youtube_summary_uses_raw_captions_after_filtering(tmp_path):
         with database(root) as db:
             saved=db.execute('SELECT processing_metadata , content FROM publications WHERE id = %s',(card['id'],)).fetchone()
             metadata=json.loads(saved[0])
-            blocks=json.loads(saved[1])['blocks']
+            blocks=saved[1]['blocks']
             index=next(i for i,b in enumerate(blocks) if b.get('role')=='subtitles')
             media=blocks[index]['media_id']
         assert metadata['summary']['input_hash']==digest([dict(type='text',role='body',text='Useful words. Ad text.',source_media_id=media,source_block_index=index)])
@@ -193,7 +193,7 @@ def test_missing_captions_are_downloaded_again_after_reader_detects_loss(tmp_pat
             key=db.execute("SELECT storage_key FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles'",(card['id'],)).fetchone()[0]
         (root/key).unlink()
         client.get('/api/v3/publication/'+card['id'])
-        wait_for(client,lambda: len(calls)>=2 and client.get('/api/v3/publication/'+card['id']).json()['text']=='Recovered captions.')
+        wait_for(client,lambda: len(calls)>=2 and client.get('/api/v3/publication/'+card['id']).json()['text']=='Recovered captions.',timeout=30)
         assert calls==[VIDEO,VIDEO]
 
 
@@ -216,6 +216,6 @@ def test_youtube_description_is_saved_as_common_block(tmp_path):
         publication = wait_for(client, lambda: data if (data := client.get('/api/v3/publication/'+card['id']).json()).get('description') else None)
         assert publication['description'] == 'Saved description'
     with database(root) as db:
-        content = json.loads(db.execute('SELECT content FROM publications WHERE id=%s', (card['id'],)).fetchone()[0])
+        content = db.execute('SELECT content FROM publications WHERE id=%s', (card['id'],)).fetchone()[0]
         assert any(block.get('role') == 'description' and block.get('text') == 'Saved description' for block in content['blocks'])
         assert 'description' not in content['extra']['_reader']

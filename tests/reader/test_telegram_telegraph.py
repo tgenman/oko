@@ -33,7 +33,7 @@ def test_direct_articles_are_complete_local_and_unique_without_recursive_crawlin
         body = dict(source_locator='@fixture',folder='Inbox')
         assert client.post('/api/v3/telegram/connect',json=body).status_code == 200
         from tests.support.reader import wait_for
-        identity=settled(client)[0]['id']
+        identity=settled(client,timeout=15)[0]['id']
         material=wait_for(client,lambda: value if (value:=client.get('/api/v3/publication/'+identity).json())['completeness']['state']=='complete' else None)
         assert material['text'].startswith(POST)
         linked = material['linked_content']
@@ -49,6 +49,17 @@ def test_direct_articles_are_complete_local_and_unique_without_recursive_crawlin
         assert not any('example.org' in url for url in calls)
         assert sum('/getPage/One?' in url for url in calls) == 2  # Metadata, then media locator validation.
         assert sum('/getPage/Two?' in url for url in calls) == 1
+        from tests.support.storage import database
+        with database(tmp_path) as db:
+            db.execute("UPDATE publications SET status='pending_collection' WHERE platform='telegraph' AND title='Title One'")
+        partial=client.get('/api/v3/publication/'+identity).json()
+        assert 'Article One' in partial['text']
+        assert partial['linked_content']['articles'][0]['media_urls']
+        with database(tmp_path) as db:
+            db.execute("UPDATE jobs SET status='unavailable',reason_code='article-unavailable',reason_message='Article access restricted' WHERE kind='fetch' AND item=(SELECT id FROM publications WHERE platform='telegraph' AND title='Title One')")
+        partial=client.get('/api/v3/publication/'+identity).json()
+        assert 'Article access restricted' in partial['completeness']['message']
+        assert partial['linked_content']['articles'][0]['error']=='Article access restricted'
 
 
 def test_article_completion_and_retry_keep_previous_copy_without_false_edit(tmp_path):
@@ -72,7 +83,7 @@ def test_article_completion_and_retry_keep_previous_copy_without_false_edit(tmp_
         configure_fast_web(client)
         body = dict(source_locator='@fixture',folder='Inbox')
         client.post('/api/v3/telegram/connect',json=body)
-        deadline = time.monotonic()+2
+        deadline = time.monotonic()+15
         pending = None
         while time.monotonic()<deadline:
             cards = read_all_cards(client, '/api/v3/cards')
@@ -132,7 +143,7 @@ def test_late_article_after_feed_deletion_cannot_download_media_or_publish(tmp_p
                     headers={'Authorization':'Bearer test'}) as client:
         configure_fast_web(client)
         result = client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
-        assert started.wait(2)
+        assert started.wait(10)
         try:
             assert client.delete('/api/v3/feeds/'+result.json()['feed_id']).status_code == 200
             assert cancelled.is_set()

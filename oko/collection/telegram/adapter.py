@@ -110,7 +110,7 @@ def content(post: TelegramPublication, *, linked_descriptions: bool = False) -> 
         dict(blocks=blocks, extra=dict(telegram=dict(members=list(publication.members),
             description=teaser.description, manifest=teaser.source_manifest.model_dump(mode='json')))),
         tuple(media), linked_publications=tuple(_article_reference(url) for url in direct_articles(post.text)) if linked_descriptions and teaser.source_manifest.preview_fragment is None else (),
-        needs_fetch=bool(issues or teaser.source_manifest.post_web_unavailable and post.text.strip()), issues=tuple(issues))
+        needs_fetch=bool(issues or teaser.source_manifest.post_web_unavailable), issues=tuple(issues))
 
 
 def _article_reference(url: str) -> ExternalReference:
@@ -225,7 +225,7 @@ class TelegramWebAdapter:
         if post is None:
             raise failure(SourceDeleted(), publication)
         value = content(post,linked_descriptions=self.linked_descriptions)
-        if value.needs_fetch and post.publication.teaser and post.publication.teaser.source_manifest and post.publication.teaser.source_manifest.post_web_unavailable:
+        if value.needs_fetch and post.text.strip() and post.publication.teaser and post.publication.teaser.source_manifest and post.publication.teaser.source_manifest.post_web_unavailable:
             from oko.collection.telegram.preview import fragment
             try:
                 preview, preview_error = await fragment(name, post.publication.id, self.transport)

@@ -9,7 +9,7 @@ from copy import deepcopy
 import json
 from typing import Any
 
-from oko.collection.adapters import AdapterException,AdapterErrorKind,PublicationContent
+from oko.collection.adapters import AdapterException,AdapterErrorKind,AdapterIssue,PublicationContent
 from oko.collection.adapter_errors import source_error
 from oko.collection.contracts import SourceError, SourceManifest, Material, Publication, FetchResult, DiscoveryResult
 from oko.collection.telegram.adapter import TelegramWebAdapter,reference,publication_reference,finish_window
@@ -144,5 +144,7 @@ class TelegramWebSource(TelegramSource):
         issues = [issue for issue in value.issues if issue.kind!=AdapterErrorKind.notice]
         priority = {AdapterErrorKind.source_wait:3,AdapterErrorKind.temporary:2}
         issue = max(issues,key=lambda issue:(priority.get(issue.kind,1),issue.retry_at.timestamp() if issue.retry_at else 0),default=None)
+        if issue is None and teaser.source_manifest and teaser.source_manifest.post_web_unavailable:
+            issue=AdapterIssue('post-web-unavailable','Публикация недоступна для веб-просмотра',AdapterErrorKind.unavailable,value.metadata.reference)
         partial_error = source_error(AdapterException(issue)) if issue else None
         return FetchResult(replace(teaser, full=not value.media and not teaser.reason,collection_error=partial_error), self.observation())

@@ -40,9 +40,9 @@ class CollectionStatus:
         from oko.storage import memberships
         memberships.lock_graph(self.db)
         changed = self.db.execute("""UPDATE jobs SET feed_id=%s,collection_attempt=%s::jsonb WHERE id=%s
-            AND CASE WHEN kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code LIKE 'source-%%' AND feed_id IS DISTINCT FROM %s
+            AND CASE WHEN kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND reason_code LIKE 'source-%%' AND feed_id IS DISTINCT FROM %s
                 THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END
-            RETURNING OLD.feed_id AS previous_feed,OLD.problem_code AS previous_code,kind,item""",(feed,json.dumps(data),job,feed)).fetchone()
+            RETURNING OLD.feed_id AS previous_feed,OLD.reason_code AS previous_code,kind,item""",(feed,json.dumps(data),job,feed)).fetchone()
         if changed is None:raise LookupError('Collection job no longer exists')
         if changed['kind'] in ('fetch','download_media','filter','theses','delete','feed-delete') and (changed['previous_code'] or '').startswith('source-') and changed['previous_feed']!=feed:
             from oko.storage import source_groups
@@ -61,11 +61,11 @@ class CollectionStatus:
         if row is None or row['generation'] != job.generation:
             return
         data.update(finished_at=self.wall(), elapsed_seconds=elapsed)
-        completed = row['status'] == 'done' and not row['error']
+        completed = row['status'] == 'done' and (not row['reason_message'] or (row['kind'] == 'download_media' and row['reason_code'] == 'subtitles_absent'))
         failure = bool(observation.get('error')) or bool(observation['requests'])
         if failure:
             details = observation.get('error') or {}
-            message = details.get('message') or row['error'] or ''
+            message = details.get('message') or row['reason_message'] or ''
             trace = details.get('traceback', '')
             kind = details.get('error_type', '')
             message, message_cut = clipped(message, 16384)
@@ -94,7 +94,7 @@ class CollectionStatus:
                     result['last_error']['resolved'] = True
             self.db.execute('UPDATE feeds SET last_collection_result=%s::jsonb WHERE id=%s', (json.dumps(result), feed))
             # Completed operations need only the single latest per-feed result.
-            self.db.execute("UPDATE jobs SET feed_id=NULL, collection_attempt=NULL WHERE status='done' AND error IS NULL AND feed_id=%s AND collection_attempt IS NOT NULL", (feed,))
+            self.db.execute("UPDATE jobs SET feed_id=NULL, collection_attempt=NULL WHERE status='done' AND (reason_message IS NULL OR (kind='download_media' AND reason_code='subtitles_absent')) AND feed_id=%s AND collection_attempt IS NOT NULL", (feed,))
             self._bound(feed)
 
     def _bound(self, feed: str) -> None:
@@ -128,16 +128,16 @@ class CollectionStatus:
         results: dict[str, dict[str, Any]] = {}
         attempt_fields = "j.collection_attempt AS attempt_data" if details else "j.collection_attempt->>'attempt_id' AS saved_attempt, j.collection_attempt->>'started_at' AS started_at, j.collection_attempt->>'finished_at' AS finished_at, j.collection_attempt->>'elapsed_seconds' AS elapsed_seconds, j.collection_attempt #>> '{last_error,resolved}' AS error_resolved"
         result_fields = "f.last_collection_result AS result_data" if details else "f.last_collection_result->>'success_at' AS success_at, f.last_collection_result->>'duration' AS duration, f.last_collection_result #>> '{last_error,resolved}' AS error_resolved"
-        fields = 'j.id,j.kind,j.item,j.status,j.generation,j.next,j.error,j.queued_wall,j.problem_code,j.collection_attempt'
-        outer_fields = 'j.id,j.kind,j.item,j.status,j.generation,j.next,j.error,j.queued_wall,j.problem_code,j.feed'
+        fields = 'j.id,j.kind,j.item,j.status,j.generation,j.next,j.reason_message,j.queued_wall,j.reason_code,j.collection_attempt'
+        outer_fields = 'j.id,j.kind,j.item,j.status,j.generation,j.next,j.reason_message,j.queued_wall,j.reason_code,j.feed'
         for start in range(0, len(feeds), 400):
             batch = feeds[start:start + 400]
             marks = ','.join('%s' for _ in batch)
             discoveries = batch
             discovery_marks = ','.join('%s' for _ in discoveries)
             # Job kinds are disjoint, so these branches cannot duplicate an operation.
-            selected = f"SELECT {fields} , j . item AS feed FROM jobs j WHERE j . kind = 'discover' AND j . item IN ( {discovery_marks} ) UNION ALL SELECT {fields} , owner.feed_id AS feed FROM jobs j JOIN publications i ON i . id = j . item JOIN feed_publications owner ON owner.publication_id=i.id AND owner.is_primary AND owner.is_unviewed WHERE j . kind = 'fetch' AND i . viewed = 0 AND owner.feed_id IN ( {marks} ) UNION ALL SELECT {fields} , owner.feed_id AS feed FROM jobs j JOIN media_files m ON m . id = j . item JOIN publications i ON i . id = m . publication_id JOIN feed_publications owner ON owner.publication_id=i.id AND owner.is_primary AND owner.is_unviewed WHERE j . kind = 'download_media' AND i . viewed = 0 AND owner.feed_id IN ( {marks} )"
-            jobs.extend(self.db.execute(f"SELECT {outer_fields}, {attempt_fields} FROM ( {selected} ) j WHERE ( j . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' ) OR j . status = 'done' AND j . error IS NOT NULL ) AND coalesce ( j . problem_code , '' ) != 'source-deleted'", (discoveries + batch + batch)).fetchall())
+            selected = f"SELECT {fields} , j . item AS feed FROM jobs j WHERE j . kind = 'discover' AND j . item IN ( {discovery_marks} ) UNION ALL SELECT {fields} , i.feed_id AS feed FROM jobs j JOIN publications i ON i . id = j . item WHERE j . kind = 'fetch' AND i . viewed = 0 AND i.feed_id IN ( {marks} ) UNION ALL SELECT {fields} , i.feed_id AS feed FROM jobs j JOIN media_files m ON m . id = j . item JOIN publications i ON i . id = m . publication_id WHERE j . kind = 'download_media' AND i . viewed = 0 AND i.feed_id IN ( {marks} )"
+            jobs.extend(self.db.execute(f"SELECT {outer_fields}, {attempt_fields} FROM ( {selected} ) j WHERE ( j . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' ) OR j . status = 'done' AND j . reason_message IS NOT NULL AND NOT (j.kind='download_media' AND j.reason_code IS NOT DISTINCT FROM 'subtitles_absent') ) AND coalesce ( j . reason_code , '' ) != 'source-deleted'", (discoveries + batch + batch)).fetchall())
             for row in self.db.execute(f'SELECT f.id, f.last_discovery_at AS updated, {result_fields} FROM feeds f WHERE f.id IN ( {marks} )', batch):
                 if details:
                     result = dict(row['result_data']) if row['result_data'] else {}
@@ -167,17 +167,17 @@ class CollectionStatus:
                     elapsed_seconds=float(job['elapsed_seconds']) if job['elapsed_seconds'] is not None else None,
                     last_error=dict(resolved=job['error_resolved'] == 'true') if job['error_resolved'] is not None else None)
             running = active.get(job['id'])
-            if job['status'] == 'done' and not job['error']:
+            if job['status'] == 'done' and not job['reason_message']:
                 continue
             collecting = bool(running and running['generation'] == job['generation'] and allowed)
-            wait = job['status'] == 'pending' and (job['next'] > now or bool(job['error']))
-            state = 'collecting' if collecting else 'waiting' if wait else 'error' if job['status'] in ('done','failed','unavailable') and job['error'] else 'queued'
+            wait = job['status'] == 'pending' and (job['next'] > now or bool(job['reason_message']))
+            state = 'collecting' if collecting else 'waiting' if wait else 'error' if job['status'] in ('done','failed','unavailable') and job['reason_message'] else 'queued'
             if not allowed and state != 'error':
                 state = 'paused'
             stage = (running['stage'] if running else '') or ('Finding publications' if job['kind']=='discover' else 'Downloading attachment' if job['kind']=='download_media' else 'Downloading content')
             elapsed = running['elapsed_seconds'] if collecting and running else data.get('elapsed_seconds') if state in ('paused','error') else max(0.,wall-data['finished_at']) if state=='waiting' and data.get('finished_at') else max(0.,wall-job['queued_wall']) if state=='queued' and job['queued_wall'] is not None else None
             groups.setdefault(job['feed'], []).append(dict(operation_id=f"{job['kind']}:{job['item']}", attempt_id=data.get('attempt_id'), kind='fetch' if job['kind']=='download_media' else job['kind'],
-                state=state, stage=stage, reason=redact(reason if state=='paused' else job['error'] or ''),
+                state=state, stage=stage, reason=redact(reason if state=='paused' else job['reason_message'] or ''),
                 elapsed_seconds=elapsed, time_kind='attempt' if state in ('collecting','paused','error') else 'waiting' if state=='waiting' else 'queue',
                 queued_at=timestamp(job['queued_wall']), started_at=timestamp(data.get('started_at')), finished_at=timestamp(data.get('finished_at')),
                 retry_at=timestamp(wall+max(0.,job['next']-now)) if wait else None,

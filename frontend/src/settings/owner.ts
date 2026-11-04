@@ -86,7 +86,39 @@ export class MenusOwner {
     }catch(error){action.commit(()=>{this.settingsMessage=message(error);this.changed();});}
     finally{this.saving.delete(key);this.changed();}
   }
-  async history(feed:{id:string},method:'start'|'stop',value?:string|HistoryCountSelection){const key='history/'+feed.id;if(this.historyBusy(feed.id))return;const action=this.operations.begin('history');this.historyPending.set(key,action);this.changed();try{const options={client:this.api.client,path:{identity:feed.id}};const {data}=await this.api.command({operation:method==='stop'?'history_cancel':'history_start',feed_id:feed.id},headers=>method==='stop'?settings.historyCancel({...options,headers}):settings.historyStart({...options,headers,body:typeof value==='string'?{mode:'count',count:value}:value!}));if(method==='start'&&typeof value==='string'&&this.draft('feed/'+feed.id).youtubeHistoryCount===String(value))delete this.draft('feed/'+feed.id).youtubeHistoryCount;this.onChanged();await action.commit(async()=>{await this.refresh();await this.loadSettings();});action.commit(()=>{this.setHistory(feed.id,data.history);this.settingsMessage=method==='start'?'History download started':method==='stop'?'History download stopped':'';this.changed();});}catch(error){action.commit(()=>{this.settingsMessage=message(error);this.changed();});}finally{if(this.historyPending.get(key)===action)this.historyPending.delete(key);this.changed();}}
+  async history(feed:{id:string},method:'start'|'stop',value?:string|HistoryCountSelection){
+    const path='feed/'+feed.id,key='history/'+feed.id;if(this.historyBusy(feed.id))return;
+    const action=this.operations.begin('history');this.historyPending.set(key,action);this.invalidateStatus();const statusAtStart=this.historySequence(feed.id);this.changed();
+    try{
+      const options={client:this.api.client,path:{identity:feed.id}};
+      const {data}=await this.api.command({operation:method==='stop'?'history_cancel':'history_start',feed_id:feed.id},headers=>method==='stop'?settings.historyCancel({...options,headers}):settings.historyStart({...options,headers,body:typeof value==='string'?{mode:'count',count:value}:value!}));
+      if(method==='start'&&typeof value==='string'&&this.draft(path).youtubeHistoryCount===String(value))delete this.draft(path).youtubeHistoryCount;
+      this.onChanged();
+      let statusBefore=this.historySequence(feed.id);
+      await action.commit(async()=>{
+        await this.refresh();
+        for(let attempt=0;action.current&&attempt<3;attempt++){
+          this.invalidateStatus();statusBefore=this.historySequence(feed.id);
+          await this.loadSettings();
+          if(this.settingsFailures.has(path)||this.historySequence(feed.id)===statusBefore)break;
+        }
+      });
+      action.commit(()=>{
+        if(!this.settingsFailures.has(path)&&this.historySequence(feed.id)!==statusBefore){
+          this.settingsMessage=method==='start'?'History download started':'History download stopped';this.changed();return;
+        }
+        const saved=this.values.get(path);
+        const fetched=!this.settingsFailures.has(path)&&saved?.scope==='feed'?saved.feed.history:data.history;
+        const current=this.histories.find(entry=>entry.feed_id===feed.id)?.history;
+        const sameRun=current&&current.state!=='absent'&&data.history.state!=='absent'&&'run' in current&&'run' in data.history&&current.run===data.history.run;
+        const statusAdvanced=this.settingsFailures.has(path)&&(this.historySequence(feed.id)!==statusBefore||method==='start'&&this.historySequence(feed.id)!==statusAtStart&&sameRun);
+        const selected=statusAdvanced&&current?current:fetched;
+        this.setHistory(feed.id,selected);
+        this.settingsMessage=method==='start'?'History download started':'History download stopped';this.changed();
+      });
+    }catch(error){action.commit(()=>{this.settingsMessage=message(error);this.changed();});}
+    finally{if(this.historyPending.get(key)===action)this.historyPending.delete(key);this.changed();}
+  }
   private finishRemoval(id:string){
     this.removedFeeds.add(id);this.deletions.delete(id);
     this.subscriptions={...this.subscriptions,feeds:this.subscriptions.feeds.filter(feed=>feed.id!==id)};
@@ -116,6 +148,9 @@ export class MenusOwner {
   }
   status(state:RuntimeStatus,revision=this.statusGeneration){
     if(revision!==this.statusGeneration||this.stopped)return;
+    const before=new Map(this.histories.map(entry=>[entry.feed_id,JSON.stringify(entry.history)]));
+    const after=new Map(state.initial_histories.map(entry=>[entry.feed_id,JSON.stringify(entry.history)]));
+    for(const id of new Set([...before.keys(),...after.keys()]))if(before.get(id)!==after.get(id))this.historyStatusSequence.set(id,this.historySequence(id)+1);
     this.histories=state.initial_histories;this.youtube=state.youtube;this.changed();
     const path=this.currentPath;if(this.active==='feeds'&&this.page==='home'&&path?.startsWith('feed/')&&!this.settingsLoads.has(path)&&!this.settingsFailures.has(path)&&!this.saving.has(path+'/feed'))void this.loadSettings();
     if(this.deletions.size&&!this.deletionRefresh)this.deletionRefresh=this.refresh().then(applied=>{
@@ -123,6 +158,8 @@ export class MenusOwner {
     }).catch(()=>{}).finally(()=>{this.deletionRefresh=null;});
   }
   private statusGeneration=0;
+  private historyStatusSequence=new Map<string,number>();
+  private historySequence(id:string){return this.historyStatusSequence.get(id)||0;}
   get statusRevision(){return this.statusGeneration;}
   invalidateStatus(){this.statusGeneration++;}
   stop(){this.stopped=true;this.leave();this.active=null;this.subscriptionOperations.invalidate();this.changed();for(const name of ['add','feeds','settings']){(document.getElementById(name+'-dialog')as HTMLDialogElement).close();(document.getElementById(name+'-open')as HTMLButtonElement).disabled=true;}}

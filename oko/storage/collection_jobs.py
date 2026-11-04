@@ -29,17 +29,17 @@ def interrupt(store: 'Store', feeds: set[str] | None = None, *, backoff: bool = 
         until = (max(row['retry_at'] or 0, store.wall_clock()+max(initial,row['retry_delay'])) if backoff
             else row['retry_at'] if row['wait_scope'] else None)
         from oko.storage.fetch_job_problems import previous_candidates as managed_candidates
-        previous_fetch=managed_candidates(store,row['id'],store.wall_clock()) if row['kind']=='fetch' and (row['error'] is not None or row['problem_code'] is not None) else []
+        previous_fetch=managed_candidates(store,row['id'],store.wall_clock()) if row['kind']=='fetch' and (row['reason_message'] is not None or row['reason_code'] is not None) else []
         from oko.storage.media_job_problems import previous_candidates as media_candidates
-        previous_media=media_candidates(store,row['id'],store.wall_clock()) if row['kind']=='download_media' and (row['error'] is not None or row['problem_code'] is not None) else []
+        previous_media=media_candidates(store,row['id'],store.wall_clock()) if row['kind']=='download_media' and (row['reason_message'] is not None or row['reason_code'] is not None) else []
         from oko.storage.processing_job_problems import managed_candidates as processing_candidates
-        previous_processing=processing_candidates(store,row['id'],store.wall_clock()) if row['kind'] in ('filter','theses') and (row['error'] is not None or row['problem_code'] is not None) else []
+        previous_processing=processing_candidates(store,row['id'],store.wall_clock()) if row['kind'] in ('filter','theses') and (row['reason_message'] is not None or row['reason_code'] is not None) else []
         job_write(store.db, "UPDATE jobs SET queued_wall=CASE WHEN kind IN ('discover','fetch','download_media') AND status!='pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END, status='pending', generation=generation+1, retry_at=%s, next=%s WHERE id=%s",
             (until,store.clock()+max(0,until-store.wall_clock()) if until else 0,row['id']))
-        if row['kind'] in ('fetch','download_media','filter','theses') and (row['problem_code'] or '').startswith('source-'):source_changed.append(row['id'])
+        if row['kind'] in ('fetch','download_media','filter','theses') and (row['reason_code'] or '').startswith('source-'):source_changed.append(row['id'])
         manager=getattr(store,'incomplete_draft',None)
         if manager is not None:manager.mark_job(row['kind'],row['item'],row['id'])
-        if row['kind']=='discover' and (row['error'] is not None or row['problem_code'] is not None):
+        if row['kind']=='discover' and (row['reason_message'] is not None or row['reason_code'] is not None):
             store.problems.sync_discover(row['id'],store.wall_clock())
         if previous_fetch:
             store.problems.sync_fetch(row['id'],previous_fetch,store.wall_clock())
@@ -77,5 +77,5 @@ def fail(store: 'Store', job: 'Job', issue: AdapterIssue, *, cancelled: bool = F
         delay = min(settings['max_seconds'],max(settings['initial_seconds'],row['retry_delay']*2))
         status = 'cancelled' if cancelled else failure_status(issue)
         until = max(store.wall_clock()+delay,issue.retry_at.timestamp() if issue.retry_at else 0) if status=='pending' else None
-        result.changed=job_write(store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' AND %s = 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = %s , next = %s , retry_at = %s , retry_delay = %s , wait_scope = %s , error = %s , problem_code = %s WHERE id = %s AND generation = %s AND CASE WHEN kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND (problem_code LIKE 'source-%%' OR %s LIKE 'source-%%') THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING OLD.problem_code AS previous_code",(status,status,store.clock()+max(0,until-store.wall_clock()) if until else 0,
+        result.changed=job_write(store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' AND %s = 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = %s , next = %s , retry_at = %s , retry_delay = %s , wait_scope = %s , reason_message = %s , reason_code = %s WHERE id = %s AND generation = %s AND CASE WHEN kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND (reason_code LIKE 'source-%%' OR %s LIKE 'source-%%') THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING OLD.reason_code AS previous_code",(status,status,store.clock()+max(0,until-store.wall_clock()) if until else 0,
             until,delay,issue.scope if issue.kind==AdapterErrorKind.source_wait else None,None if cancelled else issue.message,None if cancelled else issue.code,job.id,job.generation,None if cancelled else issue.code)).fetchone()

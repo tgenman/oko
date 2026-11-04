@@ -25,7 +25,7 @@ def _preview_source(store: 'Store', identity: str) -> tuple[dict[str, Any], str]
     header = dict(own, title=own.get('title', row['title']), attachments=list(own.get('attachments', [])),
                   _media_urls=dict(own.get('_media_urls', {})))
     for child in publication_links.children(store, identity):
-        if child['complete']:
+        if child['content']:
             json.loads(child['media_ids'])
             linked = saved_content(child['content']).get('extra', {}).get('_reader', {})
             header['changed'] = bool(header.get('changed') or linked.get('changed'))
@@ -54,7 +54,7 @@ def card(store: 'Store', identity: str) -> dict[str, Any] | None:
         source_url=row['url'],loading=True,changed=False,preview_url=None,hidden=hidden,
         post_web_unavailable=False,external_attachment_kinds=[])
 
-    if not row['complete']:
+    if not row['content']:
         return result
     try:
         media_ids=json.loads(row['media_ids'])

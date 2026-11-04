@@ -38,7 +38,7 @@ def _sync_source(store: 'Store', kind: str, job_id: int, old_code: str | None, b
     from oko.storage import source_groups
     complete = source_groups.sync(store, kind, before | source_groups.job_keys(store, job_id),
         store.wall_clock(), evidence=source_groups.job_evidence_many(store, [(job_id, old_code)]))
-    job_write(store.db, "UPDATE jobs SET source_event_owned=(%s=1) AND (problem_code LIKE 'source-%%') IS TRUE WHERE id=%s", (complete, job_id))
+    job_write(store.db, "UPDATE jobs SET source_event_owned=(%s=1) AND (reason_code LIKE 'source-%%') IS TRUE WHERE id=%s", (complete, job_id))
 
 
 @dataclass
@@ -72,13 +72,13 @@ def failure(store: 'Store', job: 'Job', issue: Any, *, cancelled: bool) -> Itera
 def claim(store: 'Store', row: Any) -> Iterator[None]:
     kind, job_id = row['kind'], row['id']
     source_before: set[str] = set()
-    if kind in _SOURCE_KINDS and (row['problem_code'] or '').startswith('source-'):
+    if kind in _SOURCE_KINDS and (row['reason_code'] or '').startswith('source-'):
         from oko.storage import source_groups
         source_before = source_groups.job_keys(store, job_id)
-    previous = _previous(store, kind, job_id) if row['error'] is not None or row['problem_code'] is not None else []
+    previous = _previous(store, kind, job_id) if row['reason_message'] is not None or row['reason_code'] is not None else []
     yield
     if source_before:
-        _sync_source(store, kind, job_id, row['problem_code'], source_before)
+        _sync_source(store, kind, job_id, row['reason_code'], source_before)
     if kind == 'filter':
         store.processing.filter_changed(row['item'])
     if kind == 'fetch' and previous:

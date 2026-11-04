@@ -85,11 +85,11 @@ def test_http_inherited_settings_use_one_consistent_database_snapshot(tmp_path, 
 def test_codex_configuration_problem_rolls_back_with_settings(tmp_path, settings_database):
     from oko.storage.transaction import transaction
     from oko.subscriptions.subscriptions import Overrides
-    from oko.services.subscriptions import SubscriptionService
+    from oko.application.subscription_service import subscription_service
     from tests.support.storage import Store
     store=Store(tmp_path,lambda _:None,database_url=settings_database)
     try:
-        service=SubscriptionService(lambda:store)
+        service=subscription_service(lambda:store)
         with pytest.raises(ValueError,match='rollback'):
             with transaction(store.db):
                 service.update_settings('oko','global',Overrides(processor='codex',theses=True))
@@ -103,7 +103,7 @@ def test_codex_configuration_problem_rolls_back_with_settings(tmp_path, settings
         store=Store(tmp_path,lambda _:None,database_url=settings_database)
         assert store.db.execute("SELECT id FROM reader_problems WHERE identity='processor:codex-choice' AND finished IS NULL").fetchone()[0]==identity
         with transaction(store.db):
-            service=SubscriptionService(lambda:store)
+            service=subscription_service(lambda:store)
             service.update_settings('oko','global',Overrides(theses=False))
         assert store.db.execute("SELECT outcome FROM reader_problems WHERE id=%s",(identity,)).fetchone()[0]=='irrelevant'
     finally:

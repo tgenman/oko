@@ -37,11 +37,12 @@ def test_local_video_copy_wins_over_later_web_restriction(tmp_path):
         first=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json();video=next(a for a in [media for media in first['media'] if media['role']=='attachment'] if a['kind']=='video')
         assert client.get(video['url']).content==b'local-video'
         restricted[0]=True
-        client.post(url+'/retry');settled(client)
+        client.post(url+'/retry');settled(client,timeout=15)
         second=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()
         assert second['external_attachments']==[]
         assert client.get(next(a['url'] for a in [media for media in second['media'] if media['role']=='attachment'] if a['kind']=='video')).content==b'local-video'
-        assert client.get('/api/v3/status/details').json()['problems']['count']==0
+        problems=client.get('/api/v3/status/details').json()['problems']
+        assert problems['count']==0,problems
 
 
 import pytest
@@ -68,6 +69,9 @@ def test_lost_local_file_does_not_turn_into_a_normal_external_notice(tmp_path):
         restricted[0]=True
         client.post(url+'/retry');settled(client)
         assert client.get('/api/v3/status/details').json()['problems']['count']>0
+        with database(tmp_path) as db:
+            row=db.execute("SELECT status,reason_message FROM jobs WHERE kind='download_media' AND item=%s",(media_id,)).fetchone()
+            assert row and tuple(row)==('unavailable','Локальный файл вложения недоступен')
 
 
 def test_external_document_metadata_text_and_restart(tmp_path):

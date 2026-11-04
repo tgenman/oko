@@ -23,6 +23,13 @@ def test_forbidden_processing_waits_for_settings_without_errors_or_timed_retry(t
         # The counter below covers every Demo publication, not just the first.
         blocked = wait_for(client, blocked_materials)
         assert all(m['theses']['state'] == 'error' for m in blocked)
+        from tests.support.storage import database
+        with database(tmp_path) as db:
+            before_reason=db.execute("SELECT reason_message FROM jobs WHERE kind='theses' AND item=%s",(item,)).fetchone()[0]
+            db.execute("UPDATE jobs SET reason_message='Current processing reason' WHERE kind='theses' AND item=%s",(item,))
+        assert client.get('/api/v3/publication/'+item).json()['theses']['error']=='Current processing reason'
+        with database(tmp_path) as db:
+            db.execute("UPDATE jobs SET reason_message=%s WHERE kind='theses' AND item=%s",(before_reason,item))
         assert client.get('/api/v3/status/details').json()['diagnostic_count'] == 0
         waiting = [w for w in client.get('/api/v3/status/details').json()['work'] if w.get('reason') == 'public_ai_not_allowed']
         assert waiting and all(w.get('retry_at') is None for w in waiting)

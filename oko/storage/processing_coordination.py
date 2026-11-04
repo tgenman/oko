@@ -1,5 +1,6 @@
 """Current processing work and reconciliation of dependent reader results."""
 from oko.storage import material_read
+from oko.storage.publication_document import stored_content
 from oko.storage.reading import retry_time
 from oko.storage.transaction import begin_write
 from oko.storage.media_paths import existing_file
@@ -32,12 +33,12 @@ class ProcessingState:
         self.theses = SummaryResults(store)
     def waiting(self, item: str, kind: Literal['filter', 'theses'], now: float, wall_now: float) -> ProcessingWait | None:
         row = material_read.jobs(self.store.db,item).get(kind)
-        if not row or row['status'] != 'pending' or not row['error']:
+        if not row or row['status'] != 'pending' or not (row['reason_code'] or row['reason_message']):
             return None
         reason: Literal['processor_not_configured', 'public_ai_not_allowed', 'processor_unavailable', 'retry_scheduled']
-        if row['problem_code'] == 'processor-config':
+        if row['reason_code'] == 'processor-config':
             reason = 'processor_not_configured'
-        elif row['problem_code'] == 'ai-permission':
+        elif row['reason_code'] == 'ai-permission':
             reason = 'public_ai_not_allowed'
         else:
             reason = 'retry_scheduled'
@@ -69,7 +70,7 @@ class ProcessingState:
             yield
 
     def invalidate(self, scope: str = 'oko', owner: str = 'global') -> None:
-        query = 'SELECT DISTINCT i . id FROM publications i JOIN feed_publications m ON m . publication_id = i . id JOIN feeds f ON f . id = m . feed_id WHERE i . viewed = 0'
+        query = 'SELECT DISTINCT i . id FROM publications i JOIN (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m ON m.id = i . id JOIN feeds f ON f . id = m . feed_id WHERE i . viewed = 0'
         params: tuple[str, ...] = ()
         if scope in ('feed', 'folder'):
             condition = 'f.id=%s' if scope=='feed' else 'f.folder_id=%s'
@@ -77,7 +78,7 @@ class ProcessingState:
             # A linked source's privacy participates in its parent's AI input.
             query += """ UNION SELECT DISTINCT parent.id FROM publications parent
                 JOIN publication_links l ON l.source_publication_id=parent.id
-                JOIN feed_publications m ON m.publication_id=l.target_publication_id
+                JOIN (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m ON m.id=l.target_publication_id
                 JOIN feeds f ON f.id=m.feed_id WHERE parent.viewed=0 AND """ + condition
             params = (owner,owner)
         items = [row[0] for row in self.store.db.execute(query, params).fetchall()]
@@ -91,17 +92,17 @@ class ProcessingState:
         ordered = sorted(set(identities))
         for start in range(0,len(ordered),400):
             batch = ordered[start:start+400]
-            rows = self.store.db.execute("""SELECT i.id,EXISTS(SELECT 1 FROM feed_publications m
-                WHERE m.publication_id=i.id) AS has_owner FROM publications i WHERE i.id=ANY(%s)""", (batch,)).fetchall()
+            rows = self.store.db.execute("""SELECT i.id,EXISTS(SELECT 1 FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m
+                WHERE m.id=i.id) AS has_owner FROM publications i WHERE i.id=ANY(%s)""", (batch,)).fetchall()
             feedless = [row['id'] for row in rows if not row['has_owner']]
             if feedless:
-                processor_affected=[row['id'] for row in self.store.db.execute("SELECT id FROM jobs WHERE kind IN ('filter','theses') AND item=ANY(%s) AND (processor_visible OR problem_code='processor-config')",(feedless,))]
+                processor_affected=[row['id'] for row in self.store.db.execute("SELECT id FROM jobs WHERE kind IN ('filter','theses') AND item=ANY(%s) AND (processor_visible OR reason_code='processor-config')",(feedless,))]
                 processor_previous=self.store.problems.prepare_processor_change(processor_affected,self.store.wall_clock())
-                stage_affected=[row['id'] for row in self.store.db.execute("SELECT id FROM jobs WHERE kind IN ('filter','theses') AND item=ANY(%s) AND problem_code IS NOT NULL AND problem_code<>'' AND problem_code NOT LIKE 'source-%%'",(feedless,))]
+                stage_affected=[row['id'] for row in self.store.db.execute("SELECT id FROM jobs WHERE kind IN ('filter','theses') AND item=ANY(%s) AND reason_code IS NOT NULL AND reason_code<>'' AND reason_code NOT LIKE 'source-%%'",(feedless,))]
                 stage_previous=self.store.problems.saved_processing_candidates(stage_affected)
                 job_write(self.store.db, """UPDATE jobs SET status='cancelled',generation=generation+1,
-                    input_snapshot=NULL,error=NULL,problem_code=NULL WHERE item=ANY(%s) AND kind IN ('filter','theses')
-                    AND (status IS DISTINCT FROM 'cancelled' OR input_snapshot IS NOT NULL OR error IS NOT NULL OR problem_code IS NOT NULL)""", (feedless,))
+                    input_snapshot=NULL,reason_code=NULL,reason_message=NULL WHERE item=ANY(%s) AND kind IN ('filter','theses')
+                    AND (status IS DISTINCT FROM 'cancelled' OR input_snapshot IS NOT NULL OR reason_code IS NOT NULL OR reason_message IS NOT NULL)""", (feedless,))
                 if processor_affected:
                     self.store.problems.finish_processor_change(processor_affected,processor_previous,self.store.wall_clock())
                 self.store.db.execute("""UPDATE publications SET filtered_content='{}',summarized_content='{}',
@@ -149,21 +150,22 @@ class ProcessingState:
         self._repairing.add(item)
         try:
             from oko.storage import memberships, publication_links, youtube_media
+            from oko.storage.reading import saved_content
             with self.store.db:
                 begin_write(self.store.db)
                 self.store.db.after_rollback(lambda: self._repairs.add(item))
                 memberships.lock_graph(self.store.db)
                 row = self.store.db.execute("SELECT content FROM publications WHERE id=%s AND viewed=0", (item,)).fetchone()
-                content = json.loads(row[0]) if row else {}
+                content = saved_content(row[0],mutable=True) if row else {}
                 identity = youtube_media.subtitle_id(content)
                 media = self.store.db.execute("SELECT storage_key FROM media_files WHERE id=%s AND publication_id=%s AND status='ready'", (identity,item)).fetchone() if identity else None
                 if media and (not media[0] or existing_file(self.store.root,media[0]) is None):
                     affected=self.store.problems.processor_jobs_for_materials([item])
                     previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
-                    self.store.db.execute("UPDATE media_files SET status='pending_download',storage_key=NULL,reason='' WHERE id=%s", (identity,))
+                    self.store.db.execute("UPDATE media_files SET status='pending_download',storage_key=NULL WHERE id=%s", (identity,))
                     content['extra']['youtube']['captions'] = 'pending'
                     content['extra']['_reader'].pop('captions', None)
-                    self.store.db.execute('UPDATE publications SET content=%s WHERE id=%s', (json.dumps(content,ensure_ascii=False),item))
+                    self.store.db.execute('UPDATE publications SET content=%s WHERE id=%s', (json.dumps(stored_content(content),ensure_ascii=False),item))
                     from oko.storage.incomplete_index import save_class
                     save_class(self.store.db,item,content)
                     job_write(self.store.db, "UPDATE jobs SET status='cancelled' WHERE kind='download_media' AND item=%s AND status IN ('failed','unavailable')", (identity,))

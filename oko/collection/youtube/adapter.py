@@ -204,9 +204,6 @@ class YouTubeAdapter:
             issues+=(AdapterIssue('history-shortfall','Доступно меньше видео, чем запрошено',AdapterErrorKind.notice),)
         return DiscoveryPage(values,_encode(state),not state['done'],issues)
 
-    def window_order(self, feed: ExternalReference, cursor: str) -> tuple[ExternalKey,...]:
-        return tuple(ExternalKey(Platform.youtube,key) for key in self._state(feed,cursor)['keys'])
-
     async def fetch(self, publication: ExternalReference) -> PublicationContent:
         expected=video_reference(publication.key.external_id)
         if publication!=expected:

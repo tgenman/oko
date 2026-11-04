@@ -1,6 +1,7 @@
 """PostgreSQL repository contracts and owned transaction mechanics."""
 import psycopg
 from oko.storage.postgres_migrations import SchemaMismatch
+from oko.storage.transaction_context import TransactionContext
 
 from _thread import RLock
 from collections.abc import Callable, Iterator, Sequence
@@ -41,6 +42,7 @@ class Connection(Database, Protocol):
     @property
     def access_lock(self) -> RLock: ...
     transaction_depth: int
+    transaction_context: TransactionContext | None
     transaction_failed: bool
     before_commit: Callable[[], None] | None
     membership_feeds: set[str]

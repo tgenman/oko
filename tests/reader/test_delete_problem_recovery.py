@@ -31,7 +31,7 @@ def test_delete_problem_event_get_is_read_only_and_finish_rollback(tmp_path,post
 def test_restarted_running_deletion_updates_retry_state(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     with store.db:
-        job=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('feed-delete','feed','running','error','delete') RETURNING id").fetchone()[0]
+        job=store.db.execute("INSERT INTO jobs(kind,item,status,reason_message,reason_code) VALUES ('feed-delete','feed','running','error','delete') RETURNING id").fetchone()[0]
         store.problems.sync_deletion(job,[],1)
         assert json.loads(store.db.execute("SELECT body FROM reader_problems WHERE identity='job:delete:feed:feed-delete:feed'").fetchone()[0])['state']=='retrying'
     store.db.close()

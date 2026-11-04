@@ -7,17 +7,17 @@ if TYPE_CHECKING:
 
 
 def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_suppressed: bool = False, include_youtube: bool = True) -> dict[int,list[dict[str, Any]]]:
-    rows=store.db.execute(f"""SELECT j.id,j.kind,j.item,j.status,j.error,j.problem_code,j.feed_id,
+    rows=store.db.execute(f"""SELECT j.id,j.kind,j.item,j.status,j.reason_message AS reason_message,j.reason_code AS reason_code,j.feed_id,
         coalesce({owner_expr('p')},{owner_expr('root')},j.feed_id) AS owner,
         p.viewed,coalesce(root.id,j.item) AS affected, f.kind AS feed_kind
         FROM jobs j LEFT JOIN publications p ON p.id=j.item
         LEFT JOIN publication_links link ON link.target_publication_id=p.id
         LEFT JOIN publications root ON root.id=link.source_publication_id AND root.viewed=0
         LEFT JOIN feeds f ON f.id=coalesce({owner_expr('p')},{owner_expr('root')},j.feed_id)
-        WHERE j.id=ANY(%s) AND j.kind='fetch' AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL) ORDER BY j.id,root.id""",(job_ids,)).fetchall()
+        WHERE j.id=ANY(%s) AND j.kind='fetch' AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL OR j.status IN ('failed','unavailable')) ORDER BY j.id,root.id""",(job_ids,)).fetchall()
     youtube_jobs={row['id'] for row in rows if row['feed_kind']=='youtube'}
     profile_codes=('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')
-    feeds=sorted({row['owner'] or row['item'] or '' for row in rows if row['problem_code'] in profile_codes and isinstance(row['owner'] or row['item'] or '',str)})
+    feeds=sorted({row['owner'] or row['item'] or '' for row in rows if row['reason_code'] in profile_codes and isinstance(row['owner'] or row['item'] or '',str)})
     suppressed: set[str]=set()
     if feeds and not include_suppressed:
         for start in range(0,len(feeds),100):
@@ -29,8 +29,8 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
     for row in rows:
         if not isinstance(row['item'],str) or not row['item']:
             continue  # Preserve an unaddressable legacy Job rather than inventing a material ID.
-        code=row['problem_code']
-        if row['status'] not in ('pending','running','failed','unavailable','blocked') and not (row['status']=='done' and code and row['error']):continue
+        code=row['reason_code']
+        if row['status'] not in ('pending','running','failed','unavailable','blocked') and not (row['status']=='done' and code and row['reason_message']):continue
         if code in ('codex-choice','ai-permission','youtube-admission','processor-config') or row['viewed']:continue
         if not include_youtube and code is None and row['feed_kind']=='youtube' and store.youtube.ready_at()>now:continue
         code=code or 'work-fetch'
@@ -43,10 +43,10 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
         if group not in results:
             body: dict[str,Any]=dict(id=identity,code=code,section='object',title='Не удалось загрузить материал',
                 consequence='Сохранённое содержимое остаётся доступным.',next_step='Включите обработку, чтобы повторить попытку.' if row['status']=='blocked' else 'Повторите загрузку вручную.' if row['status'] in ('done','failed') else 'Проверьте доступность источника.' if row['status']=='unavailable' else 'Око повторит попытку автоматически.',
-                objects=[],action=None,operation='producer:fetch',fetch_owner=feed,_code_present=row['problem_code'] is not None or (row['error'] is not None and (include_youtube or row['id'] not in youtube_jobs)),created_at=now,state='retrying' if row['status']=='running' or not row['error'] else 'current',finished_at=None,outcome=None,next_at=None)
-            if code=='work-fetch':body['fetch_implicit_code']=row['problem_code'] in (None,'')
-            if row['problem_code'] is None and row['feed_kind']=='youtube':body['fetch_youtube_event']=True
-            if row['error']:body['reason']=row['error']
+                objects=[],action=None,operation='producer:fetch',fetch_owner=feed,_code_present=row['status'] in ('failed','unavailable') or row['reason_code'] is not None or (row['reason_message'] is not None and (include_youtube or row['id'] not in youtube_jobs)),created_at=now,state='retrying' if row['status']=='running' or (row['status'] not in ('failed','unavailable') and not row['reason_message']) else 'current',finished_at=None,outcome=None,next_at=None)
+            if code=='work-fetch':body['fetch_implicit_code']=row['reason_code'] in (None,'')
+            if row['reason_code'] is None and row['feed_kind']=='youtube':body['fetch_youtube_event']=True
+            if row['reason_message']:body['reason']=row['reason_message']
             if code=='source-reconnect':body.update(section='action',next_step='Проверьте привязку источника; доступ не изменяется автоматически.')
             results[group]=body
         legacy_feed=row['feed_id'] or row['item'] or ''

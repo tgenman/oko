@@ -15,6 +15,7 @@ import psycopg
 from psycopg.pq import TransactionStatus
 
 from oko.storage.rows import Record
+from oko.storage.transaction_context import TransactionContext
 from oko.storage.postgres_migrations import verify, verify_reader_permissions, schema_lock_key
 from oko.storage.postgres_schema import MIGRATIONS
 
@@ -48,12 +49,26 @@ class PostgresConnection:
         try:
             verify(self._db, MIGRATIONS)
             verify_reader_permissions(self._db)
+            self._db.execute("""CREATE TEMPORARY VIEW oko_incomplete_facts AS
+                SELECT facts.*,
+                  CASE WHEN facts.incomplete_class=0 AND facts.feed_id IS NOT NULL AND facts.viewed=0
+                    AND NOT facts.source_deleted AND facts.content<>'{}'::jsonb
+                    THEN 'incomplete:'||facts.feed_id||':'||facts.id ELSE NULL END AS incomplete_group_key,
+                  facts.feed_id AS incomplete_group_owner,true AS incomplete_group_ready,
+                  false AS incomplete_group_unknown,false AS incomplete_group_conflict
+                FROM (SELECT p.*,CASE WHEN p.status='pending_collection' OR EXISTS (
+                    SELECT 1 FROM media_files m LEFT JOIN jobs j ON j.kind='download_media' AND j.item=m.id
+                    WHERE m.publication_id=p.id AND m.status<>'ready'
+                      AND (m.status<>'pending_download' OR j.id IS NOT NULL)
+                      AND (m.status<>'unavailable' OR j.status IS DISTINCT FROM 'done' OR j.reason_code IS DISTINCT FROM 'subtitles_absent')
+                  ) THEN 0 ELSE 1 END AS incomplete_class FROM publications p) facts""")
         except BaseException:
             self._db.close()
             raise
         self.access_lock = RLock()
         self._trace: Callable[[str], None] | None = None
         self.transaction_depth = 0
+        self.transaction_context: TransactionContext | None = None
         self._read_only = False
         self.transaction_failed = False
         self.commit_callbacks: list[Callable[[], None]] = []
@@ -279,7 +294,15 @@ class PostgresConnection:
 
     def close(self) -> None:
         try:
-            self._db.close()
+            try:
+                if self._db.info.transaction_status != TransactionStatus.UNKNOWN:
+                    if self._db.info.transaction_status != TransactionStatus.IDLE:
+                        self._db.rollback()
+                    # Finish removing dependencies before another connection
+                    # drops the owning schema; socket close alone is asynchronous.
+                    self._db.execute('DROP VIEW IF EXISTS pg_temp.oko_incomplete_facts')
+            finally:
+                self._db.close()
         finally:
             callbacks, self.rollback_callbacks = self.rollback_callbacks, []
             self.commit_callbacks.clear()

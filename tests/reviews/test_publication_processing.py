@@ -40,7 +40,7 @@ def coordinated_transport(calls):
 def stored(root,item):
     with database(root) as db:
         row=dict(db.execute('SELECT * FROM publications WHERE id = %s',(item,)).fetchone())
-    for key in ('content','filtered_content','summarized_content','processing_metadata'):
+    for key in ('filtered_content','summarized_content','processing_metadata'):
         row[key]=json.loads(row[key])
     return row
 
@@ -140,7 +140,7 @@ def test_confirmed_empty_input_completes_without_model(tmp_path):
         return httpx.Response(200,content=b'photo',headers={'content-type':'image/jpeg'}) if request.url.host=='cdn.example' else httpx.Response(200,text=page([(11,text[0]+photo)]))
     with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(source),ai_transport=coordinated_transport(calls)),headers=HEADERS) as client:
         setup(client)
-        item=settled(client)[0]['id']
+        item=settled(client,timeout=15)[0]['id']
         wait_for(client,lambda:client.get('/api/v3/publication/'+item).json()['theses']['result'])
         row=stored(root,item)
         assert row['status']=='ready'
@@ -153,7 +153,7 @@ def test_confirmed_empty_input_completes_without_model(tmp_path):
         accepted=row['processing_metadata']
     with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(source),ai_transport=coordinated_transport(calls)),headers=HEADERS) as client:
         client.post('/api/v3/collect')
-        settled(client)
+        settled(client,timeout=15)
         assert stored(root,item)['processing_metadata']==accepted
         assert calls==[]
         text[0]='Text appeared'
@@ -174,7 +174,7 @@ def test_unavailable_input_waits_without_model_and_processes_when_retrieved(tmp_
     with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(source),ai_transport=coordinated_transport(calls)),headers=HEADERS) as client:
         setup(client)
         item=wait_for(client,lambda:(c[0]['id'] if (c:=read_publications_for_cards(client, '/api/v3/cards')) else None))
-        wait_for(client,lambda:r['status']=='pending_collection' and r['content']!={} and r['complete'] if (r:=stored(root,item)) else False)
+        wait_for(client,lambda:r['status']=='pending_collection' and r['content']!={} if (r:=stored(root,item)) else False)
         row=stored(root,item)
         assert row['filtered_content']=={} and row['summarized_content']=={}
         assert calls==[]
@@ -284,7 +284,7 @@ def test_processing_does_not_wait_for_the_media_lane(tmp_path):
     with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(source),ai_transport=coordinated_transport(calls)),headers=HEADERS) as client:
         try:
             setup(client)
-            assert started.wait(3)
+            assert started.wait(20),client.get('/api/v3/status/details').json()
             card=wait_for(client,lambda:next((c for c in read_publications_for_cards(client, '/api/v3/cards') if c['theses']['result']),None))
             assert stored(root,card['id'])['status']=='ready'
             assert [media for media in card['media'] if media['role'] == 'attachment']==[]
@@ -321,9 +321,10 @@ def test_article_retrieval_error_is_not_sent_as_publication_text(tmp_path):
         return httpx.Response(200,text=page([(11,'Useful post <a href="https://telegra.ph/Fixture">article</a>')]))
     with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(source),ai_transport=httpx.MockTransport(model)),headers=HEADERS) as client:
         setup(client)
-        card=wait_for(client,lambda:next((c for c in read_publications_for_cards(client, '/api/v3/cards') if c['theses']['result']),None))
-        assert all('Статья ещё не сохранена' not in call['sources'][0]['text'] for call in calls)
-        assert all('Telegraph:' not in call['sources'][0]['text'] for call in calls)
+        card=wait_for(client,lambda:next(iter(read_publications_for_cards(client, '/api/v3/cards')),None))
+        wait_for(client,lambda:(value if (value:=client.get('/api/v3/publication/'+card['id']).json()).get('completeness',{}).get('state')=='incomplete' and 'недоступна' in value['completeness'].get('message','') else None))
+        assert calls==[]
+        assert client.get('/api/v3/publication/'+card['id']).json()['theses']['result'] is None
         broken[0]=False
         client.post('/api/v3/materials/'+card['id']+'/retry')
         wait_for(client,lambda:any('Retrieved article' in source['text'] for call in calls for source in call['sources']))

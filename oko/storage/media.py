@@ -1,4 +1,6 @@
 """Individual local files: job ownership, durable acceptance and reader projection."""
+from oko.storage.publication_document import stored_content
+from oko.storage.reading import saved_content
 import asyncio
 from io import BufferedWriter
 from collections.abc import Callable
@@ -49,7 +51,48 @@ class MediaFiles:
     def __init__(self, store: 'Store') -> None:
         self.store = store
         self.active_paths: set[Path] = set()
-    def project_header(self, content: dict[str, Any], media: list[dict[str, Any]]) -> None:
+    def publication_rows(self, item: str) -> list[dict[str, Any]]:
+        snapshot=material_read.current(self.store.db)
+        rows = snapshot.media[item] if snapshot is not None and item in snapshot.media else self.store.db.execute("""SELECT m.*,j.id AS reader_job_id,j.status AS reader_job_status,j.reason_message AS reader_reason,j.reason_code AS reader_code
+            FROM media_files m LEFT JOIN jobs j ON j.kind='download_media' AND j.item=m.id
+            WHERE m.publication_id=%s""",(item,))
+        values=[]
+        for row in rows:
+            value=dict(row)
+            value['reason']=value['reader_reason'] or ('Субтитры недоступны' if value['reader_code']=='subtitles_absent' else '')
+            values.append(value)
+        return values
+
+    def project_completeness(self, content: dict[str, Any], media: list[dict[str, Any]], *, collection_reason: str = '') -> bool:
+        header=content['extra']['_reader']
+        base=collection_reason
+        subtitles={block.get('media_id') for block in content.get('blocks',[]) if block.get('type')=='media' and block.get('role')=='subtitles'}
+        not_requested=content['extra'].get('youtube',{}).get('captions')=='not_requested'
+        def waiting_reason(row: dict[str,Any]) -> str:
+            if row['reason']:
+                return str(row['reason'])
+            if not_requested and row['id'] in subtitles:
+                return 'Субтитры не запрошены'
+            if row['status']=='unavailable':
+                return 'Вложение недоступно'
+            if 'reader_job_id' not in row:
+                return 'Вложение ожидает загрузки'
+            if row['reader_job_id'] is None:
+                return 'Вложение не запрошено'
+            if row.get('reader_job_status')=='running':
+                return 'Вложение загружается'
+            return 'Вложение ожидает загрузки'
+        waiting=[waiting_reason(row) for row in media
+                 if row['status']!='ready' or not row.get('storage_key') or existing_file(self.store.root,row['storage_key']) is None]
+        resources=header.get('source_manifest',{}).get('resources',[])
+        resource_reasons=[r['reason'] for r in resources if r.get('reason') and (r.get('status')=='unsupported' or r['reason'].startswith('Внешнее встраивание'))]
+        embed_reasons=['External embed not saved locally' for block in content.get('blocks',[]) if block.get('type')=='external_media' and block.get('kind')=='web']
+        header['reason']='; '.join(dict.fromkeys(([base] if base else [])+waiting+resource_reasons+embed_reasons))
+        full=not header['reason'] and not any(r.get('external') for r in resources) and not header.get('source_manifest',{}).get('post_web_unavailable')
+        header['full']=full
+        return full
+
+    def project_header(self, content: dict[str, Any], media: list[dict[str, Any]], *, collection_reason: str = '') -> bool:
         header = content['extra']['_reader']
         resources = header.get('source_manifest', {}).get('resources', [])
         by_key = {row['resource_key']: row for row in media}
@@ -81,10 +124,7 @@ class MediaFiles:
                 name = self.projection_name(row)
                 header['attachments'].append(dict(name=name,media_id=row['id'],kind=kind,mime=row['mime_type'] or 'application/octet-stream'))
                 header['_media_urls'][name] = self.url(row['publication_id'],row['id'])
-        base = content['extra'].get('_collection_reason', header.get('reason', ''))
-        waiting = [row['reason'] or 'Вложение загружается' for row in media if row['status']!='ready']
-        header['reason'] = '; '.join(dict.fromkeys(([base] if base else [])+waiting))
-        header['full'] = not header['reason'] and not any(r.get('external') for r in resources) and not header.get('source_manifest', {}).get('post_web_unavailable')
+        return self.project_completeness(content,media,collection_reason=collection_reason)
 
     @staticmethod
     def url(item: str, media: str) -> str:
@@ -130,7 +170,7 @@ class MediaFiles:
             MediaReference(row['resource_key'], row['source_locator'], row['name'], row['mime_type'], row['size_bytes'], row['resource_identity']), temporary, final)
 
     def current(self, identity: str, download: MediaDownload, problem_jobs: list[int] | None = None) -> bool:
-        problem_column="" if problem_jobs is None else ", (SELECT j.id FROM jobs j WHERE j.kind='download_media' AND j.item=m.id AND j.status='running' AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)) AS problem_job"
+        problem_column="" if problem_jobs is None else ", (SELECT j.id FROM jobs j WHERE j.kind='download_media' AND j.item=m.id AND j.status='running' AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL)) AS problem_job"
         row=self.store.db.execute('SELECT m . * , i . platform , i . external_id'+problem_column+' FROM media_files m JOIN publications i ON i . id = m . publication_id WHERE m . id = %s AND i . viewed = 0',(identity,)).fetchone()
         valid=bool(row and row['publication_id']==download.publication_id
             and row['platform']==download.publication.key.platform.value and row['external_id']==download.publication.key.external_id
@@ -174,11 +214,11 @@ class MediaFiles:
         previous=store.db.execute('SELECT * FROM media_files WHERE id = %s',(media_id,)).fetchone()
         if not self.current(media_id,download):
             raise ValueError('Media owner changed')
-        row = store.db.execute('SELECT content FROM publications WHERE id = %s AND viewed = 0', (download.publication_id,)).fetchone()
+        row = store.db.execute('SELECT content,status FROM publications WHERE id = %s AND viewed = 0', (download.publication_id,)).fetchone()
         if row is None:
             raise ValueError('Media owner changed')
-        content = deepcopy(json.loads(row['content']))
-        media = [dict(r) for r in store.db.execute('SELECT * FROM media_files WHERE publication_id = %s', (download.publication_id,))]
+        content = saved_content(row['content'],mutable=True)
+        media = self.publication_rows(download.publication_id)
         for value in media:
             if value['id']==media_id:
                 value.update(id=identity,status='ready',reason='',name=actual.name,storage_key=str(saved.relative_to(store.root)),size_bytes=size,
@@ -194,7 +234,7 @@ class MediaFiles:
             content['extra']['youtube']['captions']='available'
             content['extra']['_reader'].pop('captions', None)
             content['extra']['youtube']['captions_digest']=files.file_digest(saved)
-        self.project_header(content, media)
+        media_complete=self.project_header(content, media)
         with store.db:
             memberships.lock_graph(store.db)
             problem_jobs: list[int]=[]
@@ -214,12 +254,12 @@ class MediaFiles:
                 job=store.db.execute("SELECT id FROM jobs WHERE kind='download_media' AND item=%s AND processor_visible",(media_id,)).fetchone()
                 if job:
                     store.problems.capture_processor_history(job['id'],store.wall_clock())
-            store.db.execute("UPDATE media_files SET id = %s , status = 'ready' , reason = '' , storage_key = %s , size_bytes = %s , source_locator = %s , mime_type = %s , name = %s WHERE id = %s",
+            store.db.execute("UPDATE media_files SET id = %s , status = 'ready' , storage_key = %s , size_bytes = %s , source_locator = %s , mime_type = %s , name = %s WHERE id = %s",
                 (identity,str(saved.relative_to(store.root)),size,actual.locator,actual.mime_type,actual.name,media_id))
-            store.db.execute('UPDATE publications SET content = %s , media_ids = %s WHERE id = %s', (json.dumps(content,ensure_ascii=False),json.dumps([value['id'] for value in media]),download.publication_id))
+            store.db.execute('UPDATE publications SET content = %s , media_ids = %s WHERE id = %s', (json.dumps(stored_content(content),ensure_ascii=False),json.dumps([value['id'] for value in media]),download.publication_id))
             from oko.storage.incomplete_index import save_class
             save_class(store.db,download.publication_id,content)
-            store.subscriptions.history.saved(download.publication_id, bool(content['extra']['_reader']['full']))
+            store.subscriptions.history.saved(download.publication_id, media_complete and row['status']!='pending_collection')
             if subtitles:
                 store.processing.reconcile_accepted_item(download.publication_id)
             publication_links.notify_parents(store,download.publication_id)
@@ -233,6 +273,12 @@ class MediaFiles:
     def release(self, download: MediaDownload) -> None:
         self.active_paths.difference_update((download.temporary, download.final))
         download.temporary.unlink(missing_ok=True)
+
+    def retired_file_cleaned(self, key: str | None) -> bool:
+        if key is None:
+            return True
+        path=resolve_key(self.store.root,key)
+        return bool(path is not None and path not in self.active_paths and not path.exists() and not path.is_symlink())
 
     def cleanup(self) -> None:
         """Runs under Runtime's file admission, outside a database transaction."""
@@ -254,16 +300,16 @@ class MediaFiles:
                 if path.is_file() and path not in self.active_paths:
                     path.unlink()
 
-    def _subtitles_absent(self, media_id: str, owner: str, issue: AdapterIssue) -> None:
+    def _subtitles_absent(self, media_id: str, owner: str, issue: AdapterIssue) -> str | None:
         store=self.store
         row=store.db.execute('SELECT content FROM publications WHERE id = %s AND viewed = 0',(owner,)).fetchone()
         if row is None:
-            return
-        content=json.loads(row['content'])
+            return None
+        content=saved_content(row['content'],mutable=True)
         content['extra']['youtube']['captions']='unavailable'
         content['extra']['_reader'].pop('captions', None)
         content['extra']['youtube'].pop('captions_digest',None)
-        media=[dict(row) for row in store.db.execute('SELECT * FROM media_files WHERE publication_id = %s',(owner,))]
+        media=self.publication_rows(owner)
         previous=next(value for value in media if value['id']==media_id)
         identity=str(uuid4()) if previous['storage_key'] else media_id
         for value in media:
@@ -278,33 +324,34 @@ class MediaFiles:
         self.project_header(content,media)
         with store.db:
             memberships.lock_graph(store.db)
-            job=store.db.execute("SELECT id,processor_visible,problem_code FROM jobs WHERE kind='download_media' AND item=%s",(media_id,)).fetchone()
+            job=store.db.execute("SELECT id,processor_visible,reason_code FROM jobs WHERE kind='download_media' AND item=%s",(media_id,)).fetchone()
             source_before: set[str]=set()
             source_evidence: dict[str,set[tuple[str,str]]]={}
             if job and job['processor_visible']:
                 store.problems.capture_processor_history(job['id'],store.wall_clock())
-            if job and identity!=media_id and (job['problem_code'] or '').startswith('source-'):
+            if job and identity!=media_id and (job['reason_code'] or '').startswith('source-'):
                 from oko.storage import source_groups
                 source_before=source_groups.job_keys(store,job['id'])
                 if source_before:source_evidence=source_groups.job_evidence_many(store,[(job['id'],None)])
-            store.db.execute("UPDATE media_files SET id = %s , status = 'unavailable' , reason = %s , storage_key = NULL , size_bytes = NULL WHERE id = %s",(identity,issue.message,media_id))
-            store.db.execute('UPDATE publications SET content = %s , media_ids = %s WHERE id = %s',(json.dumps(content,ensure_ascii=False),json.dumps([value['id'] for value in media]),owner))
+            store.db.execute("UPDATE media_files SET id = %s , status = 'unavailable' , storage_key = NULL , size_bytes = NULL WHERE id = %s",(identity,media_id))
+            store.db.execute('UPDATE publications SET content = %s , media_ids = %s WHERE id = %s',(json.dumps(stored_content(content),ensure_ascii=False),json.dumps([value['id'] for value in media]),owner))
             from oko.storage.incomplete_index import save_class
             save_class(store.db,owner,content)
             store.processing.reconcile_accepted_item(owner)
             publication_links.notify_parents(store,owner)
             if job and source_before:source_groups.sync(store,'download_media',source_before,store.wall_clock(),exclude={job['id']},evidence=source_evidence)
         store.processing.sync()
+        return identity
 
-    def failed(self, media_id: str, issue: AdapterIssue) -> None:
+    def failed(self, media_id: str, issue: AdapterIssue) -> tuple[str,str] | None:
         store = self.store
         owner = self.owner(media_id)
         if owner and issue.kind==AdapterErrorKind.notice and issue.code=='youtube-upcoming':
             store.viewed(owner)
-            return
+            return None
         if owner and issue.kind==AdapterErrorKind.notice and issue.code=='subtitles-unavailable':
-            self._subtitles_absent(media_id,owner,issue)
-            return
+            identity=self._subtitles_absent(media_id,owner,issue)
+            return (owner,identity) if identity else None
         changed = issue.kind==AdapterErrorKind.media_changed
         status = 'cancelled' if changed else collection_jobs.failure_status(issue)
         content = None
@@ -313,9 +360,9 @@ class MediaFiles:
         if owner:
             publication = store.db.execute('SELECT content FROM publications WHERE id = %s AND viewed = 0', (owner,)).fetchone()
             if publication:
-                content = json.loads(publication['content'])
+                content = saved_content(publication['content'],mutable=True)
                 subtitles=youtube_media.subtitle_id(content)==media_id
-                media = [dict(r) for r in store.db.execute('SELECT * FROM media_files WHERE publication_id = %s', (owner,))]
+                media = self.publication_rows(owner)
                 old=next((value for value in media if value['id']==media_id),None)
                 keep_file=bool(old and old['status']=='ready' and old['storage_key'] and existing_file(store.root,old['storage_key']) is not None)
                 if subtitles and not keep_file:
@@ -329,9 +376,9 @@ class MediaFiles:
             memberships.lock_graph(store.db)
             if content is not None:
                 assert owner is not None
-                store.db.execute('UPDATE media_files SET reason = %s , status = %s WHERE id = %s',
-                    (issue.message,'ready' if keep_file else 'unavailable' if status=='unavailable' or changed else 'pending_download',media_id))
-                store.db.execute('UPDATE publications SET content = %s WHERE id = %s', (json.dumps(content,ensure_ascii=False),owner))
+                store.db.execute('UPDATE media_files SET status = %s WHERE id = %s',
+                    ('ready' if keep_file else 'unavailable' if status=='unavailable' or changed else 'pending_download',media_id))
+                store.db.execute('UPDATE publications SET content = %s WHERE id = %s', (json.dumps(stored_content(content),ensure_ascii=False),owner))
                 from oko.storage.incomplete_index import save_class
                 save_class(store.db,owner,content)
                 store.subscriptions.history.saved(owner,False)
@@ -341,3 +388,4 @@ class MediaFiles:
         if content is not None:
             if subtitles:
                 store.processing.sync()
+        return None

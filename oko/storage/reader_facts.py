@@ -4,12 +4,43 @@ from contextlib import contextmanager
 from typing import Any
 from oko.storage.publication_owners import owned_ids, owner_expr
 from oko.storage.store import Store
+from oko.domain.reader import WorkSummary
+from oko.processing.llamacpp import ProcessorConfig
+from oko.storage.problems import CommandRecord
 from oko.storage import material_read, publication_links
 from oko.storage.reading import reader_now
 
 class ReaderFacts:
     def __init__(self, storage: Callable[[], Store]) -> None:
         self.storage = storage
+
+    def card(self, identity: str) -> dict[str, Any] | None:
+        from oko.storage.card_read import card
+        return card(self.storage(), identity)
+
+    def original(self, identity: str) -> tuple[dict[str, Any], str]:
+        return self.storage().original(identity)
+
+    def content_version(self, identity: str) -> str:
+        return self.storage().content_version(identity)
+
+    def processor_config(self) -> ProcessorConfig | None:
+        return self.storage().processor_config()
+
+    def work_summary(self) -> list[WorkSummary]:
+        return self.storage().work_summary()
+
+    def command_record(self, identity: str) -> CommandRecord | None:
+        return self.storage().problems.command_record(identity)
+
+    def command_succeeded(self, context: str) -> bool:
+        return bool(self.storage().db.execute("SELECT 1 FROM reader_action_results WHERE identity=%s AND result='succeeded' LIMIT 1",(context,)).fetchone())
+
+    def clock(self) -> float:
+        return self.storage().clock()
+
+    def wall_clock(self) -> float:
+        return self.storage().wall_clock()
 
     def item(self, identity: str) -> dict[str, Any] | None:
         row = material_read.item(self.storage().db, identity)
@@ -31,12 +62,11 @@ class ReaderFacts:
             return {}
         store = self.storage()
         now = reader_now(store.clock())
-        rows=store.db.execute("""SELECT i.id,i.xmin::text AS row_generation,owner.feed_id,f.kind,f.transport,
+        rows=store.db.execute("""SELECT i.id,i.xmin::text AS row_generation,i.feed_id,f.kind,f.transport,
             j.status AS fetch_status,CASE WHEN j.status='pending' AND j.next>%s THEN j.next END AS fetch_deadline,
             media.loading AS media_loading,media.deadline AS media_deadline,linked.children
             FROM publications i
-            LEFT JOIN LATERAL (SELECT m.feed_id FROM feed_publications m WHERE m.publication_id=i.id AND m.is_primary LIMIT 1) owner ON true
-            LEFT JOIN feeds f ON f.id=owner.feed_id
+            LEFT JOIN feeds f ON f.id=i.feed_id
             LEFT JOIN jobs j ON j.kind='fetch' AND j.item=i.id
             LEFT JOIN LATERAL (SELECT coalesce(bool_or(mj.status='running' OR (mj.status='pending' AND mj.next<=%s)),false) AS loading,
                 min(mj.next) FILTER (WHERE mj.status='pending' AND mj.next>%s) AS deadline
@@ -75,7 +105,7 @@ class ReaderFacts:
         return [row['id'] for row in self.storage().db.execute('SELECT id FROM publications WHERE viewed = 1')]
 
     def feed_members(self, identity: str) -> set[str]:
-        return {row[0] for row in self.storage().db.execute(f'''SELECT publication_id FROM feed_publications WHERE feed_id=%s
+        return {row[0] for row in self.storage().db.execute(f'''SELECT id FROM publications WHERE feed_id=%s
             UNION SELECT id FROM ({owned_ids('= %s')}) owner''', (identity,identity,identity))}
 
     def deletion_feeds(self) -> set[str]:

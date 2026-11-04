@@ -23,3 +23,17 @@ def header(material: Material) -> dict[str,Any]:
     if material.source_manifest:
         header['source_manifest']=material.source_manifest.model_dump(mode='json')
     return header
+
+
+def stored_content(content: dict[str,Any]) -> dict[str,Any]:
+    """Remove transient completeness projections before persisting content."""
+    from copy import deepcopy
+    result=deepcopy(content)
+    extra=result.get('extra')
+    if isinstance(extra,dict):
+        extra.pop('_collection_reason',None)
+        reader=extra.get('_reader')
+        if isinstance(reader,dict):
+            reader.pop('full',None)
+            reader.pop('reason',None)
+    return result

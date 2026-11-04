@@ -77,7 +77,7 @@ def test_http_viewed_succeeds_with_malformed_action_without_unsafe_recovery(tmp_
         with psycopg.connect(postgres_url,autocommit=True) as db:
             assert json.loads(db.execute("SELECT body FROM reader_problems WHERE id='bad-problem'").fetchone()[0])==body
             assert json.loads(db.execute("SELECT body FROM reader_action_results WHERE id='bad-receipt'").fetchone()[0])==body
-            assert db.execute('SELECT count(*) FROM feed_publications WHERE publication_id=%s',(item,)).fetchone()[0]==0
+            assert db.execute('SELECT count(*) FROM publications WHERE id=%s AND feed_id IS NOT NULL',(item,)).fetchone()[0]==0
         import time
         deadline=time.monotonic()+10
         while time.monotonic()<deadline:

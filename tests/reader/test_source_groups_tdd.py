@@ -11,7 +11,7 @@ def test_job_events_create_and_finish_source_occurrence_without_get(kind,tmp_pat
         with transaction(store.db):
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','other_web','p')")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
+            store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
             if kind=='download_media':store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','image','x','file','unavailable')")
             item='m' if kind=='download_media' else 'f' if kind=='feed-delete' else 'p'
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES (%s,%s,'running',1) RETURNING id",(kind,item)).fetchone()[0]
@@ -50,7 +50,7 @@ def test_source_failure_changes_group_after_retry_claim(tmp_path,postgres_url):
         with transaction(store.db):
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','other_web','p')")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
+            store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','p','running',1) RETURNING id").fetchone()[0]
         store.jobs.retry(Job(job_id,'fetch','p',1),1,'offline',code='source-network')
         old=store.db.execute("SELECT id FROM reader_problems WHERE body::jsonb->>'source_group_identity'='job:source-network:f:fetch' AND finished IS NULL").fetchone()[0]
@@ -71,7 +71,7 @@ def test_removing_one_of_two_source_roots_finishes_only_its_group(tmp_path,postg
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('a','a','A','default','rss','rss','connected',ARRAY[]::text[]),('b','b','B','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('ra','rss','ra'),('rb','rss','rb'),('p','rss','p')")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('a','ra',true),('b','rb',true)")
+            store.db.execute("UPDATE publications SET feed_id=CASE id WHEN 'ra' THEN 'a' WHEN 'rb' THEN 'b' END WHERE id IN ('ra','rb')")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('ra','p'),('rb','p')")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','p','running',1) RETURNING id").fetchone()[0]
         store.jobs.retry(Job(job,'fetch','p',1),1,'failure',code='source-network')
@@ -91,8 +91,8 @@ def test_http_source_group_is_visible_and_get_does_not_write(tmp_path,postgres_u
     with psycopg.connect(postgres_url,autocommit=True) as db:
         db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
         db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','other_web','p')")
-        db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
-        db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','p','failed','failure','source-network')")
+        db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
+        db.execute("INSERT INTO jobs(kind,item,status,reason_message,reason_code) VALUES ('fetch','p','failed','failure','source-network')")
     with TestClient(create_app(tmp_path,token='test',database_url=postgres_url,api_only=True),headers=HEADERS) as client:
         with psycopg.connect(postgres_url,autocommit=True) as db:
             before=db.execute("SELECT id,xmin::text,body FROM reader_problems WHERE body::jsonb->>'source_group_identity'='job:source-network:f:fetch' AND finished IS NULL").fetchone()
@@ -111,7 +111,7 @@ def test_claim_reloads_source_after_selected_row_becomes_stale(tmp_path,postgres
         with transaction(store.db):
             row=store.db.execute("INSERT INTO jobs(kind,item,feed_id,status,generation) VALUES ('fetch','p','f','pending',1) RETURNING *").fetchone()
         with transaction(store.db):
-            store.db.execute("UPDATE jobs SET error='offline',problem_code='source-network' WHERE id=%s",(row['id'],))
+            store.db.execute("UPDATE jobs SET reason_message='offline',reason_code='source-network' WHERE id=%s",(row['id'],))
             source_groups.sync_jobs(store,[row['id']],1)
         claimed=store.jobs._claim(row)
         assert claimed is not None
@@ -119,4 +119,27 @@ def test_claim_reloads_source_after_selected_row_becomes_stale(tmp_path,postgres
         assert tuple(current)==(True,'running')
         problem=store.db.execute("SELECT body::jsonb->>'state' FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'source_group_identity'='job:source-network:f:fetch'").fetchone()
         assert problem is not None and problem[0]=='retrying'
+    finally:store.db.close()
+
+
+def test_manual_feed_refresh_resolves_old_source_problem_and_keeps_wait(tmp_path,postgres_url):
+    from oko.storage.job_types import Job
+    from oko.collection.adapters import AdapterIssue, AdapterErrorKind
+    from datetime import datetime, timezone, timedelta
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
+            store.db.execute("INSERT INTO publications(id,platform,external_id,feed_id) VALUES ('p','other_web','p','f')")
+            job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','p','running',1) RETURNING id").fetchone()[0]
+        deadline=datetime.fromtimestamp(store.wall_clock(),timezone.utc)+timedelta(hours=1)
+        issue=AdapterIssue('source-network','Temporary limitation',AdapterErrorKind.source_wait,scope='feed:f',retry_at=deadline)
+        store.jobs.retry(Job(job,'fetch','p',1),1,issue.message,issue=issue)
+        old=store.db.execute("SELECT id FROM reader_problems WHERE body::jsonb->>'source_group_identity'='job:source-network:f:fetch' AND finished IS NULL").fetchone()
+        assert old
+        store.jobs.refresh_feed('f')
+        row=store.db.execute('SELECT status,reason_code,reason_message,wait_scope,retry_at FROM jobs WHERE id=%s',(job,)).fetchone()
+        assert row['status']=='pending' and row['reason_code'] is None and row['reason_message'] is None
+        assert row['wait_scope']=='feed:f' and row['retry_at']>=deadline.timestamp()
+        assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s',(old['id'],)).fetchone()[0] is not None
     finally:store.db.close()

@@ -3,6 +3,7 @@ from oko.storage.database import Database, Connection
 from collections.abc import Iterator, Callable
 from contextlib import contextmanager
 from oko.storage.postgres_connection import PostgresConnection
+from oko.storage.transaction_context import TransactionContext
 
 
 class TransactionAborted(RuntimeError):
@@ -21,8 +22,25 @@ def transaction(db: Connection, *, admitted: Callable[[], bool] = lambda: True) 
     with db.access_lock:
         if not admitted():
             raise InterruptedError('Storage admission closed')
-        with _transaction(db):
-            yield
+        if db.transaction_context is not None:
+            raise RuntimeError('Pass the existing transaction to nested services')
+        context = TransactionContext()
+        db.transaction_context = context
+        try:
+            with _transaction(db):
+                try:
+                    yield
+                    if not db.transaction_failed:
+                        context.validate()
+                finally:
+                    # Retire transaction-local state before commit/rollback
+                    # callbacks; callbacks may open a new transaction.
+                    db.transaction_context = None
+                    context.clear()
+        finally:
+            if db.transaction_context is context:
+                db.transaction_context = None
+                context.clear()
 
 
 @contextmanager

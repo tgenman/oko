@@ -8,50 +8,61 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any
-from oko.storage.store import Store, WorkSummary
+from oko.domain.reader import WorkSummary
 from oko.storage.problems import CommandRecord
 from oko.storage.reader_facts import ReaderFacts
 from oko.processing.llamacpp import ProcessorConfig
-from oko.storage.composition import Navigation
+from oko.storage.composition import Navigation, ReadingComposition
+from oko.storage.subscriptions import SubscriptionRepository
+from oko.storage.publications import Publications
+from oko.storage.filter_results import FilterResults
+from oko.storage.processing_coordination import ProcessingState
+from oko.storage.media import MediaFiles
+from oko.storage.reader_versions import ReaderVersions
 
-from oko.storage.access import repository_access
+from oko.services.access import repository_access
 
 
 class VersionQueries:
-    def __init__(self, storage: Callable[[], Store]) -> None:
-        self._storage = storage
+    def __init__(self, access: Callable[[], AbstractContextManager[Any]],
+                 versions: Callable[[], ReaderVersions], subscriptions: Callable[[], SubscriptionRepository]) -> None:
+        self._access, self._versions, self._subscriptions = access, versions, subscriptions
 
     @property
     @repository_access
     def identity(self) -> str:
-        return self._storage().read_versions.identity
+        return self._versions().identity
 
     @repository_access
     def version(self, kind: str, identity: str) -> dict[str, Any] | None:
-        row = self._storage().read_versions.version(kind, identity)
+        row = self._versions().version(kind, identity)
         return dict(row) if row else None
 
     @repository_access
     def source_revision(self) -> int:
-        return self._storage().subscriptions.source_revision()
+        return self._subscriptions().source_revision()
 
     @repository_access
     def history_versions(self) -> list[Any]:
-        return self._storage().read_versions.history_versions()
+        return self._versions().history_versions()
 
     @repository_access
     def time_boundaries(self) -> tuple[Any, ...]:
-        return self._storage().read_versions.time_boundaries()
+        return self._versions().time_boundaries()
 
     @repository_access
     def advance(self) -> None:
-        self._storage().read_versions.advance()
+        self._versions().advance()
 
 
 class ReadingQueries:
-    def __init__(self, storage: Callable[[], Store]) -> None:
-        self._storage = storage
-        self._facts = ReaderFacts(storage)
+    def __init__(self, *, access: Callable[[], AbstractContextManager[Any]], facts: ReaderFacts,
+                 subscriptions: Callable[[], SubscriptionRepository], reading: Callable[[], ReadingComposition],
+                 publications: Callable[[], Publications], filters: Callable[[], FilterResults],
+                 processing: Callable[[], ProcessingState], media: Callable[[], MediaFiles],
+                 versions: Callable[[], ReaderVersions]) -> None:
+        self._access, self._facts, self._subscriptions, self._reading = access, facts, subscriptions, reading
+        self._publications, self._filters, self._processing, self._media, self._versions = publications, filters, processing, media, versions
 
     @repository_access
     def item(self, identity: str) -> dict[str, Any] | None:
@@ -99,7 +110,7 @@ class ReadingQueries:
 
     @repository_access
     def feeds(self, identity: str | None = None, *, folder: str | None = None) -> list[dict[str, Any]]:
-        repository = self._storage().subscriptions
+        repository = self._subscriptions()
         if folder is not None:
             return repository.feeds(identity, folder=folder)
         return repository.feeds() if identity is None else repository.feeds(identity)
@@ -110,39 +121,39 @@ class ReadingQueries:
 
     @repository_access
     def folders(self) -> list[dict[str, Any]]:
-        return self._storage().subscriptions.folders()
+        return self._subscriptions().folders()
 
     @repository_access
     def bindings(self, feeds: list[str] | None = None) -> dict[str, dict[str, Any]]:
-        return self._storage().subscriptions.telegram.bindings(feeds)
+        return self._subscriptions().telegram.bindings(feeds)
 
     @repository_access
     def binding(self, feed: str) -> dict[str, Any] | None:
-        return self._storage().subscriptions.telegram.binding(feed)
+        return self._subscriptions().telegram.binding(feed)
 
     @repository_access
     def feed_details(self, feed: str) -> dict[str, Any]:
-        return self._storage().subscriptions.details.snapshot(feed)
+        return self._subscriptions().details.snapshot(feed)
 
     @repository_access
     def check_owner(self, scope: str, owner: str) -> None:
-        return self._storage().subscriptions.check_owner(scope, owner)
+        return self._subscriptions().check_owner(scope, owner)
 
     @repository_access
     def effective(self, scope: str, owner: str, *, details: bool = True) -> dict[str, Any]:
-        return self._storage().subscriptions.effective(scope, owner, details=details)
+        return self._subscriptions().effective(scope, owner, details=details)
 
     @repository_access
     def telegram_http_settings(self) -> dict[str, Any]:
-        return self._storage().subscriptions.telegram_http_settings()
+        return self._subscriptions().telegram_http_settings()
 
     @repository_access
     def navigation(self) -> Navigation:
-        return self._storage().reading.navigation()
+        return self._reading().navigation()
 
     @repository_access
     def page(self, options: dict[str, Any], cursor: str | None, limit: int) -> tuple[list[str], int] | None:
-        return self._storage().reading.page(options, cursor, limit)
+        return self._reading().page(options, cursor, limit)
 
     @repository_access
     def card_validators(self, identities: list[str]) -> dict[str, tuple[Any, ...]]:
@@ -150,79 +161,82 @@ class ReadingQueries:
 
     @repository_access
     def card(self, identity: str) -> dict[str, Any] | None:
-        from oko.storage.card_read import card
-        return card(self._storage(), identity)
+        return self._facts.card(identity)
 
     @repository_access
     def material(self, identity: str) -> dict[str, Any] | None:
-        return self._storage().reading.material(identity)
+        return self._reading().material(identity)
 
     @repository_access
     def provenance(self, identity: str, kind: str) -> dict[str, Any] | None:
-        return self._storage().publications.provenance(identity, kind)
+        return self._publications().provenance(identity, kind)
 
     @repository_access
     def original(self, identity: str) -> tuple[dict[str, Any], str]:
-        return self._storage().original(identity)
+        return self._facts.original(identity)
 
     @repository_access
     def source_deleted(self, identity: str) -> bool:
-        return self._storage().publications.source_deleted(identity)
+        return self._publications().source_deleted(identity)
 
     @repository_access
     def filter(self, identity: str) -> dict[str, Any]:
-        return self._storage().filters.read(identity)
+        return self._filters().read(identity)
 
     @repository_access
     def theses_signature(self, identity: str) -> str | None:
-        return self._storage().processing.theses.signature(identity)
+        return self._processing().theses.signature(identity)
 
     @repository_access
     def media_loading(self, identity: str) -> bool:
-        return self._storage().media.loading(identity)
+        return self._media().loading(identity)
 
     @repository_access
     def media_file(self, identity: str, name: str) -> tuple[Path, str] | None:
-        return self._storage().media.file(identity, name)
+        return self._media().file(identity, name)
 
     @repository_access
     def content_version(self, identity: str) -> str:
-        return self._storage().content_version(identity)
+        return self._facts.content_version(identity)
 
     @repository_access
     def processor_config(self) -> ProcessorConfig | None:
-        return self._storage().processor_config()
+        return self._facts.processor_config()
 
     @repository_access
     def command_record(self, identity: str) -> CommandRecord | None:
-        return self._storage().problems.command_record(identity)
+        return self._facts.command_record(identity)
+
+    @repository_access
+    def command_succeeded(self, context: str) -> bool:
+        return self._facts.command_succeeded(context)
 
     @repository_access
     def work_summary(self) -> list[WorkSummary]:
-        return self._storage().work_summary()
+        return self._facts.work_summary()
 
     @repository_access
     def clock(self) -> float:
-        return self._storage().clock()
+        return self._facts.clock()
 
     @repository_access
     def wall_clock(self) -> float:
-        return self._storage().wall_clock()
+        return self._facts.wall_clock()
 
     @repository_access
     def theses_parts(self, identity: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
-        theses = self._storage().processing.theses
+        theses = self._processing().theses
         return theses.read(identity), theses.provenance(identity), theses.status(identity)
 
     @property
     @repository_access
     def versions(self) -> VersionQueries:
-        return VersionQueries(self._storage)
+        return VersionQueries(self._access, self._versions, self._subscriptions)
 
     @repository_access
     def retry_settings(self) -> dict[str, int]:
-        return self._storage().subscriptions.retry_settings()
+        return self._subscriptions().retry_settings()
 
     @repository_access
     def validate_retry_settings(self, patch: dict[str, Any]) -> None:
-        self._storage().subscriptions.validate_retry_settings(patch)
+        self._subscriptions().validate_retry_settings(patch)

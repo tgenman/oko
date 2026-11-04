@@ -9,7 +9,8 @@ from oko.storage.store import Store
 from oko.storage.job_types import Job
 from oko.storage.job_repository import JobRepository, JobRejected
 from oko.domain.processing import Kind, ProcessingInput
-from oko.services.processing import ProcessingService, StaleInput
+from oko.services.processing import StaleInput
+from oko.workers.processing_service import processing_service
 from oko.processing.codex import Codex, CodexClient
 from oko.processing.llamacpp import LlamaCpp, GENERATION_PARAMETERS
 from oko.processing.execution import CodexChoice
@@ -21,7 +22,7 @@ class ProcessingWorker:
     def __init__(self, kind: Kind, execution: Execution, tasks: JobControl, clock: Callable[[], float], codex: CodexClient,
                  transport: httpx.AsyncBaseTransport | None) -> None:
         self.kind,self.execution,self.tasks,self.clock,self.codex,self.transport=kind,execution,tasks,clock,codex,transport
-        self.service=ProcessingService(execution.require_store)
+        self.service=processing_service(execution.require_store)
 
     async def run(self) -> None:
         while not self.execution.stopped:

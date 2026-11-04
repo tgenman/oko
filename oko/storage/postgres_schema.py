@@ -104,4 +104,13 @@ MIGRATIONS = (
     Migration(97, 'normalize-publication-titles', (Path(__file__).parent / 'postgres' / '097-normalize-publication-titles.sql').read_text()),
     Migration(98, 'publication-identity-date', (Path(__file__).parent / 'postgres' / '098-publication-identity-date.sql').read_text()),
     Migration(99, 'retire-demo-source', (Path(__file__).parent / 'postgres' / '099-retire-demo-source.sql').read_text()),
+    Migration(100, 'remove-publication-source-order', (Path(__file__).parent / 'postgres' / '100-remove-publication-source-order.sql').read_text()),
+    Migration(101, 'publication-feed', (Path(__file__).parent / 'postgres' / '101-publication-feed.sql').read_text()),
+    Migration(102, 'publication-content-jsonb', (Path(__file__).parent / 'postgres' / '102-publication-content-jsonb.sql').read_text()),
+    Migration(103, 'publication-reader-blocks', (Path(__file__).parent / 'postgres' / '103-publication-reader-blocks.sql').read_text(),
+              (Path(__file__).parent / 'postgres' / 'prelude-publication-reader-blocks.sql').read_text(), 96, 97),
+    Migration(104, 'publication-media-consistency', (Path(__file__).parent / 'postgres' / '104-publication-media-consistency.sql').read_text()),
+    Migration(105, 'job-reasons', (Path(__file__).parent / 'postgres' / '105-job-reasons.sql').read_text()),
+    Migration(106, 'remove-publication-complete', (Path(__file__).parent / 'postgres' / '106-remove-publication-complete.sql').read_text()),
+    Migration(107, 'remove-publication-incomplete-projection', (Path(__file__).parent / 'postgres' / '107-remove-publication-incomplete-projection.sql').read_text()),
 )

@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from oko.storage.store import WorkSummary
+    from oko.domain.reader import WorkSummary
 
 from oko.reader.generated import models as wire
 from oko.reader import snapshots as facts

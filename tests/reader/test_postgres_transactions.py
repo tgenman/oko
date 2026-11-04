@@ -234,3 +234,14 @@ def test_read_snapshot_is_consistent_and_rejects_writes(database):
         with pytest.raises(psycopg.errors.ReadOnlySqlTransaction), read_snapshot(reader):
             reader.execute("UPDATE state SET value='wrong' WHERE key='snapshot'")
         assert reader.execute("SELECT value FROM state WHERE key='snapshot'").fetchone()[0] == 'after'
+
+
+def test_commit_callback_can_open_a_fresh_transaction(database):
+    with database() as db:
+        def after_commit():
+            with transaction(db):
+                db.execute("INSERT INTO state VALUES ('nested-callback','saved')")
+        with transaction(db):
+            db.execute("INSERT INTO state VALUES ('outer','saved')")
+            db.after_commit(after_commit)
+        assert db.execute("SELECT value FROM state WHERE key='nested-callback'").fetchone()[0] == 'saved'

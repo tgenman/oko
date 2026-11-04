@@ -169,7 +169,7 @@ class History:
         if not row:
             return None
         counts = {r['outcome']: r['n'] for r in self.db.execute('SELECT outcome , count ( * ) n FROM history_members WHERE feed = %s GROUP BY outcome', (feed,))}
-        errors = [dict(item=r['item'],message=r['error']) for r in self.db.execute("SELECT h . item , ( SELECT j . error FROM jobs j WHERE j . item = h . item AND j . kind = 'fetch' ) AS error FROM history_members h WHERE h . feed = %s AND h . outcome IN ( 'retrying' , 'unavailable' )",(feed,)) if r['error'] is not None]
+        errors = [dict(item=r['item'],message=r['error']) for r in self.db.execute("SELECT h . item , ( SELECT j . reason_message FROM jobs j WHERE j . item = h . item AND j . kind = 'fetch' ) AS error FROM history_members h WHERE h . feed = %s AND h . outcome IN ( 'retrying' , 'unavailable' )",(feed,)) if r['error'] is not None]
         return self._status(row,counts,errors)
 
     def statuses(self, feeds: list[str]) -> dict[str,dict[str,Any]]:
@@ -182,8 +182,8 @@ class History:
         counts: dict[str,dict[str,int]]={}
         errors: dict[str,list[dict[str,Any]]]={}
         for row in self.db.execute("""SELECT h.feed, h.outcome, count(*) AS n,
-            jsonb_agg(jsonb_build_object('item',h.item,'message',j.error))
-              FILTER (WHERE h.outcome IN ('retrying','unavailable') AND j.error IS NOT NULL) AS errors
+            jsonb_agg(jsonb_build_object('item',h.item,'message',j.reason_message))
+              FILTER (WHERE h.outcome IN ('retrying','unavailable') AND j.reason_message IS NOT NULL) AS errors
             FROM history_members h LEFT JOIN jobs j ON j.item=h.item AND j.kind='fetch'
             WHERE h.feed = ANY(%s) GROUP BY h.feed,h.outcome""", (selected,)):
             counts.setdefault(row['feed'],{})[row['outcome']]=row['n']

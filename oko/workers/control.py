@@ -9,9 +9,9 @@ from oko.storage.store import Store
 from oko.storage.job_types import Job
 from oko.diagnostics import Journal, record_caught
 from oko.execution import Execution
-from oko.services.queries import ReadingQueries
+from oko.storage.reader_facts import ReaderFacts
 from oko.storage.job_repository import JobRepository
-from oko.services.processing import ProcessingService
+from oko.workers.processing_service import processing_service
 if TYPE_CHECKING:
     from oko.observability import Metrics
 
@@ -131,7 +131,7 @@ class JobControl:
 
 
     async def _drain_deletions(self, current: Store) -> None:
-        feeds = ReadingQueries(lambda: current).deletion_feeds()
+        feeds = ReaderFacts(lambda: current).deletion_feeds()
         if feeds:
             await self.cancel(feeds)
         job = current.jobs.next_job(self._clock(), deleting_only=True)
@@ -169,7 +169,7 @@ class JobControl:
 
     def _retry_processing(self, identity: str, kind: Literal['filter','theses']) -> bool:
         store=self.execution.require_store()
-        service=ProcessingService(self.execution.require_store)
+        service=processing_service(self.execution.require_store)
         repository=JobRepository(store)
         store.processing.reconcile_item(identity)
         repository.reconcile(kind,service.candidates(kind,item=identity))

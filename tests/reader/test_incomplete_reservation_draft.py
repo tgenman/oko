@@ -11,9 +11,9 @@ def test_pause_reservation_stable_through_deadline_tick_and_restart(tmp_path,pos
     try:
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
-            content=json.dumps({'extra':{'_reader':{'full':False,'reason':'partial'}}})
-            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(content,))
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
+            content=json.dumps({'blocks':[],'extra':{'_reader':{'full':False,'reason':'partial'},'youtube':{'captions':'pending'}}})
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,content) VALUES ('p','youtube','p',0,%s)",(content,))
+            store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
             store.db.execute("UPDATE youtube_access SET blocked_until=200 WHERE id=1")
             save_keys(store.db,['p'])
         with transaction(store.db):sync_group_with_time(store,'incomplete:f:p',100)
@@ -43,8 +43,8 @@ def test_feed_removal_after_deadline_does_not_restore_forgotten_material(tmp_pat
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'blocks':[],'extra':{'_reader':{'full':False}}})
-            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class,discovered_at) VALUES ('p','youtube','p',0,1,%s,0,1)",(raw,))
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,content,discovered_at) VALUES ('p','youtube','p',0,%s,1)",(raw,))
+            store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
             save_keys(store.db,['p'])
         store.youtube.blocked(100,900);clock[0]=1001
         seen=virtual_due_groups(store,clock[0]);assert len(seen)==1

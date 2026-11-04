@@ -1,4 +1,5 @@
 """Collection cron owns source/media attempts and their adapter calls."""
+from oko.domain.publication import PublicationIdentityConflict, PublicationOwnershipConflict
 from oko.collection.request_observation import Capture
 import asyncio
 from copy import deepcopy
@@ -29,7 +30,20 @@ from oko.diagnostics import Journal, diagnostic_source, diagnostic_materials, ca
 from oko.execution import Execution, ActionError
 from oko.workers.control import JobControl, _CollectionAttempt
 from oko.services.collection import CollectionService
+from oko.services.discovery import DiscoveryService
+from oko.storage.collection_state import CollectionState
+from oko.storage.collection_publications import CollectionPublications
 from oko.services.media import MediaService
+
+
+def collection_service(storage: Callable[[], Store]) -> CollectionService:
+    return CollectionService(access=lambda: storage().db.access_lock,
+        publications=lambda: CollectionPublications(storage()), sources=lambda: CollectionState(storage()),
+        collected=lambda: storage().collected_publication)
+
+
+def media_service(storage: Callable[[], Store]) -> MediaService:
+    return MediaService(access=lambda: storage().db.access_lock, repository=lambda: storage().media)
 
 
 class CollectionWorker:
@@ -42,8 +56,9 @@ class CollectionWorker:
                  youtube_captions: CaptionsClient | None, youtube_history: HistoryClient | None,
                  wall_clock: Callable[[],float]) -> None:
         self.execution = execution
-        self.service=CollectionService(execution.require_store)
-        self.media=MediaService(execution.retained_store)
+        self.service=collection_service(execution.require_store)
+        self.discovery=DiscoveryService(lambda: execution.require_store().discovery)
+        self.media=media_service(execution.retained_store)
         self._youtube_captions = youtube_captions or LocalCaptions()
         self._youtube_history = youtube_history
         self._wall_clock = wall_clock
@@ -205,14 +220,15 @@ class CollectionWorker:
                 outcome = await source.discover(cursor)
                 async with self.execution._actions:
                     if self.execution._store is current and self._live() and current.jobs.valid(job):
-                        if outcome.observation.identity:
-                            self.service.refresh_identity(feed, outcome.observation.identity.as_info())
                         collection_error = outcome.retry_error
                         with current.jobs.transaction(self._live):
                             if not self._live() or not current.jobs.valid(job):
                                 return
-                            effects=self.service.discovered(list(outcome.publications),outcome.cursor,feed,namespace,description=outcome.observation.description,successful=outcome.retry_error is None,source_order=outcome.source_order)
-                            current.jobs.apply_collection(effects)
+                            if outcome.observation.identity:
+                                self.service.refresh_identity(feed, outcome.observation.identity.as_info())
+                            current.jobs.begin_collection(job)
+                            effects=self.discovery.accept(list(outcome.publications),outcome.cursor,feed,namespace,description=outcome.observation.description,successful=outcome.retry_error is None)
+                            current.jobs.apply_collection(effects,job=job)
                             current.jobs.checkpoint('collection_after_result')
                             current.jobs.finish(job)
                             current.jobs.checkpoint('collection_after_finish')
@@ -221,7 +237,7 @@ class CollectionWorker:
                                 delay = outcome.continuation
                                 current.jobs.enqueue_discovery(feed, self._clock() + delay if delay else 0)
                                 current.jobs.checkpoint('collection_after_continuation')
-                        self.service.feed_status(feed, error=None, gap=outcome.observation.gap, changes=outcome.observation.changes)
+                            self.service.feed_status(feed, error=None, gap=outcome.observation.gap, changes=outcome.observation.changes)
             elif publication:
                 if linked:
                     fetched=await self._collection.article_source().fetch(publication)
@@ -232,15 +248,16 @@ class CollectionWorker:
                 collection_error = material.collection_error
                 async with self.execution._actions:
                     if self.execution._store is current and self._live() and current.jobs.valid(job):
-                        if fetched.observation.identity:
-                            self.service.refresh_identity(feed, fetched.observation.identity.as_info())
                         with current.jobs.transaction(self._live):
                             if not self._live() or not current.jobs.valid(job):return
                             if not self.service.current(job.item,revision):
                                 current.jobs.cancel(job)
                                 return
+                            if fetched.observation.identity:
+                                self.service.refresh_identity(feed, fetched.observation.identity.as_info())
+                            current.jobs.begin_collection(job)
                             collection_error,effects=self.service.collected(job.item,material,manual=current.jobs.manual(job))
-                            current.jobs.apply_collection(effects)
+                            current.jobs.apply_collection(effects,job=job)
                             current.jobs.checkpoint('collection_after_result')
                             if collection_error:
                                 current.jobs.retry(job,self._clock(),collection_error.label,issue=collection_error.adapter_issue or AdapterIssue(collection_error.code or 'fetch-failed',collection_error.label,AdapterErrorKind.temporary if collection_error.retryable else AdapterErrorKind.permanent))
@@ -248,7 +265,7 @@ class CollectionWorker:
                                 current.jobs.finish(job)
                             current.jobs.checkpoint('collection_after_finish')
                             self._finish_collection(job, current, collection_error)
-                        self.service.feed_status(feed, error=None, gap=fetched.observation.gap, changes=fetched.observation.changes)
+                            self.service.feed_status(feed, error=None, gap=fetched.observation.gap, changes=fetched.observation.changes)
         except CaptionsDeferred:
             async with self.execution._actions:
                 if current and self.execution._store is current and not self.stopped:
@@ -276,14 +293,18 @@ class CollectionWorker:
                             self.service.source_removed(job.item)
                             current.jobs.retry(job,self._clock(),error.label,terminal=True,
                                 issue=error.adapter_issue or AdapterIssue('source-unavailable',error.label,AdapterErrorKind.unavailable))
-                            self.service.notify_parents(job.item)
+                            current.jobs.notify_publication_parents(job.item)
                             self._finish_collection(job,current)
                         return
-                    label = error.label if isinstance(error, SourceError) else str(error) if isinstance(error, TelegramConflict) else 'Ошибка сбора'
+                    label = error.label if isinstance(error, SourceError) else str(error) if isinstance(error, (TelegramConflict, PublicationOwnershipConflict, PublicationIdentityConflict)) else 'Ошибка сбора'
                     if isinstance(error, SourceError):
                         code = error.code or 'source-unavailable'
                     elif isinstance(error, TelegramConflict):
                         code = error.code
+                    elif isinstance(error, PublicationOwnershipConflict):
+                        code = 'publication-ownership-conflict'
+                    elif isinstance(error, PublicationIdentityConflict):
+                        code = 'publication-identity-conflict'
                     elif job.kind == 'fetch' and isinstance(error, FileNotFoundError):
                         code = 'material-read-failed'
                     elif job.kind == 'fetch' and isinstance(error, OSError):
@@ -296,7 +317,7 @@ class CollectionWorker:
                             terminal=isinstance(error, SourceError) and not error.retryable or job.kind in ('discover','fetch') and (isinstance(error,ValueError) or Store.is_integrity_failure(error)),
                             issue=error.adapter_issue if isinstance(error,SourceError) else None)
                         if job.kind=='fetch':
-                            self.service.notify_parents(job.item)
+                            current.jobs.notify_publication_parents(job.item)
                         if job.kind=='discover':
                             self.service.discovery_wait(feed,label,current.jobs.retry_at(job))
                         if isinstance(error, SourceError):
@@ -320,12 +341,18 @@ class CollectionWorker:
         with current.jobs.transaction(self._live):
             if not self._live() or not current.jobs.valid(job):
                 return
-            self.media.failed(job.item,issue)
-            current.jobs.reconcile_cleanup()
+            replacement=self.media.failed(job.item,issue)
             if issue.kind==AdapterErrorKind.notice:
                 if current.jobs.valid(job):
-                    current.jobs.finish(job)
+                    if issue.code=='subtitles-unavailable':
+                        current.jobs.finish(job,reason_code='subtitles_absent',reason_message=issue.message)
+                        if replacement and replacement[1]!=job.item:
+                            current.jobs.retarget_completed_media(job,replacement[1],replacement[0])
+                    else:
+                        current.jobs.finish(job)
+                current.jobs.reconcile_cleanup()
             else:
+                current.jobs.reconcile_cleanup()
                 current.jobs.fail_media(job,issue)
                 if issue.kind==AdapterErrorKind.media_changed:
                     owner=self.media.owner(job.item)
@@ -338,7 +365,7 @@ class CollectionWorker:
             current = self.execution._store
             if not current or not self._live() or not current.jobs.valid(job):
                 return
-            media=MediaService(lambda:current)
+            media=media_service(lambda:current)
             owner=media.owner(job.item)
             if owner is None:
                 with current.jobs.transaction(self._live):current.jobs.finish(job)
@@ -374,6 +401,8 @@ class CollectionWorker:
                             return
                         media.accept(job.item,download,actual,staged)
                         current.jobs.finish(job)
+                        if staged[0]!=job.item:
+                            current.jobs.retarget_completed_media(job,staged[0],download.publication_id)
                         if caption_attempt and caption_attempt.attempted:
                             self.service.caption_completed()
                         self._finish_collection(job,current)
@@ -426,6 +455,9 @@ class CollectionWorker:
             now=self._clock()
             if now-self._last_media_cleanup>=3600:
                 self.media.cleanup()
+                for retired,key in self.execution._store.jobs.retired_media_jobs():
+                    if retired.id not in self.jobs._collection_active and self.media.retired_file_cleaned(key):
+                        self.execution._store.jobs.finish_retired_media_cleanup(retired,key)
                 self._last_media_cleanup=now
             self._sync_sources()
             if now-self._last_collection >= self._collection_interval:
@@ -501,7 +533,8 @@ class CaptionAttempt:
                 raise CaptionsDeferred
             config = worker.service.caption_config()
             client = LocalCaptions(proxy_url(config)) if isinstance(worker._youtube_captions, LocalCaptions) else worker._youtube_captions
-            worker.service.caption_started(worker._wall_clock())
+            with store.jobs.transaction(worker._live):
+                worker.service.caption_started(worker._wall_clock())
             self.attempted = True
             worker._captions_active = self
         try:
@@ -513,7 +546,8 @@ class CaptionAttempt:
             async with worker.execution._actions:
                 if not self.current():
                     raise asyncio.CancelledError
-                worker.service.caption_blocked(worker._wall_clock(), error.retry_after)
+                with store.jobs.transaction(worker._live):
+                    worker.service.caption_blocked(worker._wall_clock(), error.retry_after)
                 self.blocked = True
             raise
         async with worker.execution._actions:

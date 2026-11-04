@@ -397,7 +397,7 @@ class Material(WireModel):
     model_config = ConfigDict(extra='forbid')
     ai: AI | None | MISSING = MISSING
     attachments: list[Attachment] | MISSING = Field(default=MISSING, title='Attachments')
-    captions: Literal['available', 'not_requested', 'unavailable', 'error'] | None | MISSING = Field(default=MISSING, title='Captions')
+    captions: Literal['available', 'not_requested', 'pending', 'running', 'unavailable', 'error'] | None | MISSING = Field(default=MISSING, title='Captions')
     changed: StrictBool | MISSING = Field(default=MISSING, title='Changed')
     complete: StrictBool = Field(..., title='Complete')
     description: StrictStr | MISSING = Field(default=MISSING, title='Description')
@@ -417,7 +417,6 @@ class Material(WireModel):
     published_known: StrictBool | MISSING = Field(default=MISSING, title='Published Known')
     reason: StrictStr | MISSING = Field(default=MISSING, title='Reason')
     source_deleted: StrictBool | MISSING = Field(default=MISSING, title='Source Deleted')
-    source_order: StrictInt | None | MISSING = Field(default=MISSING, title='Source Order')
     text: StrictStr = Field(..., title='Text')
     theses: Summary | None | MISSING = MISSING
     title: StrictStr = Field(..., title='Title')

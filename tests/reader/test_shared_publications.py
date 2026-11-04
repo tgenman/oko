@@ -32,56 +32,49 @@ def shared(tmp_path):
             assert result.status_code==200,result.text
             feed=next(f for f in result.json()['feeds'] if url in f['original_urls']);feeds.append(feed)
             client.patch('/api/v3/feeds/'+feed['id'],json={'theses':False})
-        wait_for(client,lambda:all(read_all_cards(client, '/api/v3/cards', params={'feed':f['id']}) for f in feeds))
+        wait_for(client,lambda:'Publication ownership conflict' in client.get('/api/v3/status/details').text)
         yield client,feeds,root,models
 
 
-def test_same_video_is_readable_in_both_feeds_and_viewed_everywhere(shared):
+def test_same_video_conflict_is_reported_without_moving_the_publication(shared):
     client,feeds,_,_=shared
-    cards=read_all_cards(client, '/api/v3/cards'); assert len(cards)==1
-    for f in feeds:
-        assert [c['id'] for c in read_all_cards(client, '/api/v3/cards', params={'feed':f['id']})]==[cards[0]['id']]
-    composition=client.get('/api/v3/reading-composition').json()
-    assert composition['count']==1 and [f['count'] for f in composition['feeds']]==[1,1]
-    assert client.post('/api/v3/materials/'+cards[0]['id']+'/viewed').status_code==200
-    assert read_all_cards(client, '/api/v3/cards')==[]
-    assert client.get('/api/v3/publication/'+cards[0]['id']).status_code==404
+    cards=read_all_cards(client, '/api/v3/cards')
+    assert len(cards)==1
+    item=cards[0]['id']
+    original=client.get('/api/v3/publication/'+item).json()
+    owner=original['feed_id']
+    other=next(feed['id'] for feed in feeds if feed['id']!=owner)
+    assert [card['id'] for card in read_all_cards(client,'/api/v3/cards',params={'feed':owner})]==[item]
+    assert read_all_cards(client,'/api/v3/cards',params={'feed':other})==[]
+    details=client.get('/api/v3/status/details').text
+    assert all(value in details for value in ('Publication ownership conflict',item,owner,other))
+    assert sorted(feed['count'] for feed in client.get('/api/v3/reading-composition').json()['feeds'])==[0,1]
 
 
-def test_deleting_primary_feed_keeps_shared_publication_and_file(shared):
+def test_deleting_owner_does_not_transfer_publication_to_conflicting_feed(shared):
     client,feeds,_,_=shared
-    item=read_all_cards(client, '/api/v3/cards')[0]['id']
-    original=wait_for(client,lambda:(m if (m := client.get('/api/v3/publication/'+item).json()) and any(media['role'] == 'attachment' for media in m['media']) else None))
-    primary=next(f for f in feeds if f['id']==original['feed_id'])
-    remaining=next(f for f in feeds if f['id']!=primary['id'])
-    media=[media for media in original['media'] if media['role'] == 'attachment'][0]['url']
-    assert client.delete('/api/v3/feeds/'+primary['id']).status_code==200
-    wait_for(client,lambda:not any(f['id']==primary['id'] for f in client.get('/api/v3/subscriptions').json()['feeds']))
-    assert [c['id'] for c in read_all_cards(client, '/api/v3/cards', params={'feed':remaining['id']})]==[item]
-    assert client.get('/api/v3/publication/'+item).status_code==200
-    assert client.get(media).content==PNG
+    item=read_all_cards(client,'/api/v3/cards')[0]['id']
+    original=wait_for(client,lambda:(m if (m:=client.get('/api/v3/publication/'+item).json()) and any(media['role']=='attachment' for media in m['media']) else None))
+    owner=original['feed_id']
+    other=next(feed['id'] for feed in feeds if feed['id']!=owner)
+    assert client.delete('/api/v3/feeds/'+owner).status_code==200
+    wait_for(client,lambda:not any(feed['id']==owner for feed in client.get('/api/v3/subscriptions').json()['feeds']))
+    assert read_all_cards(client,'/api/v3/cards',params={'feed':other})==[]
+    assert client.get('/api/v3/publication/'+item).status_code==404
 
 
-def test_shared_publication_respects_all_source_permissions_and_uses_one_result(shared):
+def test_other_feed_permission_does_not_override_owning_feed(shared):
     client,feeds,_,models=shared
-    item=read_all_cards(client, '/api/v3/cards')[0]['id']
+    item=read_all_cards(client,'/api/v3/cards')[0]['id']
+    owner=client.get('/api/v3/publication/'+item).json()['feed_id']
+    other=next(feed['id'] for feed in feeds if feed['id']!=owner)
     client.put('/api/v3/processors/llamacpp',json={'endpoint':'https://public.example','model':'local:latest','local_execution':False})
     client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp'})
-    first=client.get('/api/v3/publication/'+item).json()['feed_id']
-    other=next(f['id'] for f in feeds if f['id']!=first)
     client.patch('/api/v3/feeds/'+other,json={'public_ai':False})
-    client.patch('/api/v3/feeds/'+first,json={'public_ai':True})
-    client.patch('/api/v3/settings/feed/'+first,json={'theses':True})
-    wait_for(client,lambda:any(w.get('reason')=='public_ai_not_allowed' for w in client.get('/api/v3/status/details').json()['work']))
-    wait_for(client,lambda:'Запрещена публичная' in (client.get('/api/v3/publication/'+item).json()['theses']['error'] or ''))
-    assert not [r for r in models if r.url.path=='/v1/chat/completions']
-    client.patch('/api/v3/feeds/'+other,json={'public_ai':True})
+    client.patch('/api/v3/feeds/'+owner,json={'public_ai':True})
+    client.patch('/api/v3/settings/feed/'+owner,json={'theses':True})
     wait_for(client,lambda:client.get('/api/v3/publication/'+item).json()['theses']['result'])
-    assert len([r for r in models if r.url.path=='/v1/chat/completions'])==1
-    client.patch('/api/v3/settings/feed/'+other,json={'prompt_theses':'Other unused rules'})
-    client.get('/api/v3/status/details')
-    assert client.get('/api/v3/publication/'+item).json()['theses']['result']
-    assert len([r for r in models if r.url.path=='/v1/chat/completions'])==1
+    assert len([request for request in models if request.url.path=='/v1/chat/completions'])==1
 
 
 def test_unreachable_link_cycle_does_not_retain_files_after_last_root_is_viewed(tmp_path):

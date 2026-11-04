@@ -16,8 +16,8 @@ def test_null_next_at_real_caption_attempt_defers_without_network(tmp_path,postg
         with transaction(store.db):
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             raw=json.dumps({'blocks':[],'extra':{'_reader':{'full':False}}})
-            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(raw,))
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,content) VALUES ('p','youtube','p',0,%s)",(raw,))
+            store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','youtube:subtitles','x','file','pending_download')")
             jid=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('download_media','m','running',1) RETURNING id").fetchone()[0]
             store.db.execute('UPDATE youtube_access SET next_at=%s WHERE id=1',(deadline,))
@@ -45,7 +45,7 @@ def test_http_status_after_null_next_deferral_has_no_infinite_timestamp(tmp_path
         def setup():
             store=app.state.host.require_store()
             with transaction(store.db):
-                store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,'{}',1)")
+                store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,content) VALUES ('p','youtube','p',0,'{}')")
                 store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','youtube:subtitles','x','file','pending_download')")
                 jid=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('download_media','m','running',1) RETURNING id").fetchone()[0]
                 store.db.execute('UPDATE youtube_access SET next_at=NULL WHERE id=1')

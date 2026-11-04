@@ -8,12 +8,12 @@ if TYPE_CHECKING:
 
 def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_subtitles: bool = False, include_completed: bool = False, include_suppressed: bool = False) -> dict[int,list[dict[str, Any]]]:
     subtitle_filter="" if include_subtitles else " AND m.resource_key IS DISTINCT FROM 'youtube:subtitles'"
-    error_filter="TRUE" if include_completed else "(j.error IS NOT NULL OR j.problem_code IS NOT NULL)"
-    rows=store.db.execute(f"""SELECT j.id,j.kind,j.item,j.status,j.error,j.problem_code,j.feed_id,m.publication_id,m.resource_key,
+    error_filter="TRUE" if include_completed else "(j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL OR j.status IN ('failed','unavailable'))"
+    rows=store.db.execute(f"""SELECT j.id,j.kind,j.item,j.status,j.reason_message AS reason_message,j.reason_code AS reason_code,j.feed_id,m.publication_id,m.resource_key,
         coalesce({owner_expr('legacy_item')},{owner_expr('p')},{owner_expr('root')},j.feed_id) AS owner,
         coalesce(legacy_item.viewed,p.viewed) AS viewed,coalesce(root.id,m.publication_id,j.item) AS affected, f.kind AS feed_kind
         FROM jobs j LEFT JOIN media_files m ON m.id=j.item LEFT JOIN publications p ON p.id=m.publication_id
-        LEFT JOIN publications legacy_item ON legacy_item.id=j.item AND (j.problem_code IS NULL OR j.problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) AND m.resource_key IS DISTINCT FROM 'youtube:subtitles'
+        LEFT JOIN publications legacy_item ON legacy_item.id=j.item AND (j.reason_code IS NULL OR j.reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) AND m.resource_key IS DISTINCT FROM 'youtube:subtitles'
         LEFT JOIN publication_links link ON link.target_publication_id=coalesce(legacy_item.id,p.id)
         LEFT JOIN publications root ON root.id=link.source_publication_id AND root.viewed=0
         LEFT JOIN feeds f ON f.id=coalesce({owner_expr('p')},{owner_expr('root')},j.feed_id)
@@ -23,8 +23,8 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
     for row in rows:
         if not isinstance(row['item'],str) or not row['item']:
             continue  # Preserve an unaddressable legacy Job rather than inventing a material ID.
-        code=row['problem_code']
-        if row['status'] not in ('pending','running','failed','unavailable','blocked') and not (include_completed and row['status']=='done' and row['error'] is None and row['problem_code'] is None):continue
+        code=row['reason_code']
+        if row['status'] not in ('pending','running','failed','unavailable','blocked') and not (include_completed and row['status']=='done' and row['reason_message'] is None and row['reason_code'] is None):continue
         if code in ('codex-choice','ai-permission','youtube-admission','processor-config') or row['viewed']:continue
         code=code or 'work-download_media'
         feed=row['owner'] or row['item'] or ''
@@ -38,12 +38,12 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
         if group not in results:
             body: dict[str,Any]=dict(id=identity,code=code,section='object',title='Не удалось загрузить вложение',
                 consequence='Сохранённое содержимое остаётся доступным.',next_step='Включите обработку, чтобы повторить попытку.' if row['status']=='blocked' else 'Повторите загрузку вручную.' if row['status'] in ('done','failed') else 'Проверьте доступность источника.' if row['status']=='unavailable' else 'Око повторит попытку автоматически.',
-                objects=[],action=None,operation='producer:download_media',media_owner=feed,_code_present=row['problem_code'] is not None or (row['error'] is not None and row['resource_key']!='youtube:subtitles'),_subtitle=row['resource_key']=='youtube:subtitles',media_file_id=item,media_orphan=row['publication_id'] is None,created_at=now,state='retrying' if row['status']=='running' or not row['error'] else 'current',finished_at=None,outcome=None,next_at=None)
-            if code=='work-download_media':body['media_implicit_code']=row['problem_code'] in (None,'')
-            if row['problem_code'] is None and row['resource_key']!='youtube:subtitles':body['media_null_event']=True
-            if row['problem_code'] in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'):body['media_profile_event']=True
-            if row['resource_key']=='youtube:subtitles':body.update(subtitle_event=True,subtitle_wait_on_next=row['problem_code'] is None)
-            if row['error']:body['reason']=row['error']
+                objects=[],action=None,operation='producer:download_media',media_owner=feed,_code_present=row['status'] in ('failed','unavailable') or row['reason_code'] is not None or (row['reason_message'] is not None and row['resource_key']!='youtube:subtitles'),_subtitle=row['resource_key']=='youtube:subtitles',media_file_id=item,media_orphan=row['publication_id'] is None,created_at=now,state='retrying' if row['status']=='running' or (row['status'] not in ('failed','unavailable') and not row['reason_message']) else 'current',finished_at=None,outcome=None,next_at=None)
+            if code=='work-download_media':body['media_implicit_code']=row['reason_code'] in (None,'')
+            if row['reason_code'] is None and row['resource_key']!='youtube:subtitles':body['media_null_event']=True
+            if row['reason_code'] in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'):body['media_profile_event']=True
+            if row['resource_key']=='youtube:subtitles':body.update(subtitle_event=True,subtitle_wait_on_next=row['reason_code'] is None)
+            if row['reason_message']:body['reason']=row['reason_message']
             if code=='source-reconnect':body.update(section='action',next_step='Проверьте привязку источника; доступ не изменяется автоматически.')
             results[group]=body
             seen_objects[group]=set()
