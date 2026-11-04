@@ -3,7 +3,7 @@ import threading
 import asyncio
 import pytest
 from fastapi.testclient import TestClient
-from tests.support.demo_source import DemoSource
+from tests.support.synthetic_source import SyntheticSource
 from tests.support.app import create_app
 from tests.support.presence import presence
 from tests.support.reader import wait_for, HEADERS
@@ -12,7 +12,7 @@ from tests.support.reader import wait_for, HEADERS
 def test_collection_attempt_is_shared_and_refresh_does_not_restart_it(tmp_path):
     started, release = threading.Event(), threading.Event()
 
-    class SlowSource(DemoSource):
+    class SlowSource(SyntheticSource):
         async def discover(self, cursor):
             started.set()
             while not release.is_set():
@@ -25,7 +25,7 @@ def test_collection_attempt_is_shared_and_refresh_does_not_restart_it(tmp_path):
         response = client.get('/api/v3/collection-status')
         assert response.status_code == 200, response.text
         state = response.json()
-        source = next(s for s in state['sources'] if s['feed_id'] == 'demo')
+        source = next(s for s in state['sources'] if s['feed_id'] == 'fixture')
         assert source['state'] == 'collecting'
         assert source['operation']['kind'] == 'discover'
         assert source['operation']['stage'] == 'Finding publications'
@@ -35,7 +35,7 @@ def test_collection_attempt_is_shared_and_refresh_does_not_restart_it(tmp_path):
         assert client.post('/api/v3/collect').status_code == 200
         again = client.get('/api/v3/collection-status').json()
         assert again['sources'][0]['operation']['attempt_id'] == attempt
-        details = client.get('/api/v3/collection-status/demo').json()
+        details = client.get('/api/v3/collection-status/fixture').json()
         assert details['operations'][0]['attempt_id'] == attempt
         assert details['instance_id'] == state['instance_id']
         assert details['revision'] >= state['revision']
@@ -50,7 +50,7 @@ def test_collection_wait_keeps_error_across_power_restart_and_resolves_on_succes
     clock = Clock()
     failed = threading.Event()
 
-    class RetryingSource(DemoSource):
+    class RetryingSource(SyntheticSource):
         async def discover(self, cursor):
             if not failed.is_set():
                 failed.set()
@@ -61,23 +61,23 @@ def test_collection_wait_keeps_error_across_power_restart_and_resolves_on_succes
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         source = wait_for(client, lambda: next((s for s in client.get('/api/v3/collection-status').json()['sources'] if s['state']=='waiting'), None))
         attempt = source['operation']['attempt_id']
-        details = client.get('/api/v3/collection-status/demo').json()
+        details = client.get('/api/v3/collection-status/fixture').json()
         assert details['operations'][0]['last_error']['message'] == 'temporary source failure'
         assert details['operations'][0]['last_error']['requests'] == []
         assert client.put('/api/v3/power', json={'enabled':False}).status_code == 200
         paused = client.get('/api/v3/collection-status').json()['sources'][0]
         assert paused['state'] == 'paused'
         assert paused['operation']['reason'] == 'Oko is stopped'
-        value=client.get('/api/v3/collection-status/demo').json()
+        value=client.get('/api/v3/collection-status/fixture').json()
         assert (value['last_error'] or value['operations'][0]['last_error'])['message'] == 'temporary source failure'
     clock.now += 100
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         assert client.get('/api/v3/collection-status').json()['sources'][0]['state'] == 'paused'
-        value=client.get('/api/v3/collection-status/demo').json()
+        value=client.get('/api/v3/collection-status/fixture').json()
         assert (value['last_error'] or value['operations'][0]['last_error'])['message'] == 'temporary source failure'
         assert client.put('/api/v3/power', json={'enabled':True}).status_code == 200
         wait_for(client, lambda: all(s['state']=='complete' for s in client.get('/api/v3/collection-status').json()['sources']))
-        details = client.get('/api/v3/collection-status/demo').json()
+        details = client.get('/api/v3/collection-status/fixture').json()
         assert details['last_error']['resolved'] is True
         assert details['last_error']['attempt_id'] == attempt
         assert details['source']['last_success_at']
@@ -87,13 +87,13 @@ def test_bare_session_secret_never_enters_collection_diagnostics(tmp_path):
     from oko.collection.contracts import SourceError
     secret = 'opaque-reader-session-value'
 
-    class FailedSource(DemoSource):
+    class FailedSource(SyntheticSource):
         async def discover(self, cursor):
             raise SourceError('transport failed ' + secret, delay=60)
 
     with TestClient(create_app(tmp_path, token=secret, source=FailedSource(),api_only=True), headers={'Authorization':'Bearer '+secret}) as client:
         wait_for(client, lambda: any(s['state']=='waiting' for s in client.get('/api/v3/collection-status').json()['sources']))
-        details = client.get('/api/v3/collection-status/demo')
+        details = client.get('/api/v3/collection-status/fixture')
         assert secret not in details.text
         assert '[session]' in details.text
     from tests.support.storage import database

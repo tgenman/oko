@@ -1,10 +1,10 @@
 from oko.collection.contracts import FetchResult
 from tests.support.synthetic_material import material as Material
 import asyncio
-from tests.support.demo_source import DemoSource
+from tests.support.synthetic_source import SyntheticSource
 
 
-class LateSource(DemoSource):
+class LateSource(SyntheticSource):
     async def fetch(self, publication):
         try:
             await asyncio.sleep(60)

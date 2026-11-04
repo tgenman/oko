@@ -10,7 +10,7 @@ import json
 from fastapi.testclient import TestClient
 from tests.support.reading_cost import library,traced_app,tracing
 from tests.support.reader import HEADERS
-from tests.support.storage import Store
+from tests.support.storage import Store, ensure_fixture
 from tests.support.postgres_work import scan_rows
 from oko.collection.contracts import Publication
 from tests.support.synthetic_material import material as Material
@@ -23,12 +23,12 @@ def archive_evidence():
      plan=db._db.execute('EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) '+sql,args or None).fetchone()[0][0]['Plan']
      return dict(rows=len(rows),rows_scanned=scan_rows(plan),buffers=plan.get('Shared Hit Blocks',0)+plan.get('Shared Read Blocks',0),plan=plan)
     with TemporaryDirectory() as d:
-     s=Store(Path(d),lambda _:None);s.subscriptions.ensure_demo()
+     s=Store(Path(d),lambda _:None);ensure_fixture(s.db)
      with s.db:
       s.db.executemany("INSERT INTO publications ( id , external_id, platform, published_at , viewed ) VALUES ( %s , %s , 'rss', %s , %s )",[(f'archive-{n}',f'archive-{n}',n,int(n>=100)) for n in range(20000)])
-      s.db.executemany("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) SELECT 'demo',id,true,viewed=0 FROM publications WHERE id=%s", [(f'archive-{n}',) for n in range(20000)])
+      s.db.executemany("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) SELECT 'fixture',id,true,viewed=0 FROM publications WHERE id=%s", [(f'archive-{n}',) for n in range(20000)])
       s.db.executemany("INSERT INTO jobs ( kind , item , status ) VALUES ( 'fetch' , %s , 'done' )",[(f'archive-{n}',) for n in range(20000)])
-      s.db.executemany("INSERT INTO history_members ( feed , item ) VALUES ( 'demo' , %s )",[(f'archive-{n}',) for n in range(20000)])
+      s.db.executemany("INSERT INTO history_members ( feed , item ) VALUES ( 'fixture' , %s )",[(f'archive-{n}',) for n in range(20000)])
       s.db.execute("INSERT INTO jobs(kind,item) VALUES ('filter','pending')")
       analyze(s.db)
      operations={

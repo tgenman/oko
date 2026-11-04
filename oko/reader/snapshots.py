@@ -336,7 +336,7 @@ class SubscriptionFeed(WireModel):
     importance: Literal['normal', 'elevated', 'high'] | MISSING = Field(default=MISSING, title='Importance')
     initial_days: StrictInt | MISSING = Field(default=MISSING, title='Initial Days')
     initial_history: History | None | MISSING = MISSING
-    kind: Literal['demo', 'rss', 'telegram', 'youtube', 'unresolved'] = Field(..., title='Kind')
+    kind: Literal['rss', 'telegram', 'youtube', 'unresolved'] = Field(..., title='Kind')
     original_urls: list[StrictStr] | MISSING = Field(default=MISSING, title='Original Urls')
     public_ai: StrictBool | None | MISSING = Field(default=MISSING, title='Public Ai')
     read_history: StrictBool | None | MISSING = Field(default=MISSING, title='Read History')
@@ -344,7 +344,7 @@ class SubscriptionFeed(WireModel):
     telegram_peer: StrictInt | None | MISSING = Field(default=MISSING, title='Telegram Peer')
     telegram_username: StrictStr | None | MISSING = Field(default=MISSING, title='Telegram Username')
     title: StrictStr = Field(..., title='Title')
-    transport: Literal['demo', 'rss', 'telegram', 'youtube'] | None | MISSING = Field(default=MISSING, title='Transport')
+    transport: Literal['rss', 'telegram', 'youtube'] | None | MISSING = Field(default=MISSING, title='Transport')
 
 class Summary(WireModel):
     model_config = ConfigDict(extra='forbid')
@@ -369,7 +369,7 @@ class Feed(WireModel):
     importance: Literal['normal', 'elevated', 'high'] | MISSING = Field(default=MISSING, title='Importance')
     initial_days: StrictInt | MISSING = Field(default=MISSING, title='Initial Days')
     initial_history: History | None | MISSING = MISSING
-    kind: Literal['demo', 'rss', 'telegram', 'youtube', 'unresolved'] = Field(..., title='Kind')
+    kind: Literal['rss', 'telegram', 'youtube', 'unresolved'] = Field(..., title='Kind')
     original_urls: list[StrictStr] | MISSING = Field(default=MISSING, title='Original Urls')
     public_ai: StrictBool | None | MISSING = Field(default=MISSING, title='Public Ai')
     read_history: StrictBool | None | MISSING = Field(default=MISSING, title='Read History')
@@ -378,7 +378,7 @@ class Feed(WireModel):
     telegram_topic: StrictInt | None | MISSING = Field(default=MISSING, title='Telegram Topic')
     telegram_username: StrictStr | None | MISSING = Field(default=MISSING, title='Telegram Username')
     title: StrictStr = Field(..., title='Title')
-    transport: Literal['demo', 'rss', 'telegram', 'youtube'] | None | MISSING = Field(default=MISSING, title='Transport')
+    transport: Literal['rss', 'telegram', 'youtube'] | None | MISSING = Field(default=MISSING, title='Transport')
 
 class FeedVerification(WireModel):
     model_config = ConfigDict(extra='forbid')

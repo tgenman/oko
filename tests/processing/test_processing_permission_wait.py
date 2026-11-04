@@ -4,13 +4,13 @@ from fastapi.testclient import TestClient
 from tests.support.app import create_app
 from tests.support.reader import HEADERS, Clock, setup_reader, wait_for
 from tests.support.codex import CodexService, configure_codex
-from tests.support.demo_source import DemoSource
+from tests.support.synthetic_source import SyntheticSource
 
 
 def test_forbidden_processing_waits_for_settings_without_errors_or_timed_retry(tmp_path):
     clock = Clock()
     model = CodexService()
-    with TestClient(create_app(tmp_path, source=DemoSource(), token='test', api_only=True, clock=clock, codex_client=model), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test', api_only=True, clock=clock, codex_client=model), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
         configure_codex(client)
         clock.now+=1
@@ -34,7 +34,7 @@ def test_forbidden_processing_waits_for_settings_without_errors_or_timed_retry(t
             time.sleep(.15)
             assert db.execute("SELECT sum(attempt) FROM jobs WHERE kind='theses'").fetchone()[0] == before
         assert not model.inputs
-        client.patch('/api/v3/feeds/demo', json={'public_ai': True})
+        client.patch('/api/v3/feeds/fixture', json={'public_ai': True})
         clock.now+=1
         wait_for(client, lambda: client.get('/api/v3/publication/'+item).json()['theses']['result'])
         assert model.inputs

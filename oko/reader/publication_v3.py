@@ -37,8 +37,8 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
                 source = wire.SourceReference(wire.TelegramSourceReference(kind='telegram', feed_id=fid, source_url=url, access=wire.TelegramAccess(owner.root.access), message_ids=[wire.TelegramMessageId(str(n)) for n in material.members] if isinstance(material.members, list) else []))
             elif owner.root.kind == 'youtube':
                 source = wire.SourceReference(wire.YoutubeSourceReference(kind='youtube', feed_id=fid, source_url=url, captions=material.captions if isinstance(material.captions, str) else 'not_requested'))
-            elif owner.root.kind == 'demo':
-                source = wire.SourceReference(wire.DemoSourceReference(kind='demo', feed_id=fid, source_url=url))
+            elif owner.root.kind == 'unresolved':
+                source = wire.SourceReference(wire.UnresolvedSourceReference(kind='unresolved', feed_id=fid, source_url=url))
             else:
                 source = wire.SourceReference(wire.RssSourceReference(kind='rss', feed_id=fid, source_url=url))
             filtered = material.filter if isinstance(material.filter, facts.Filter) else None

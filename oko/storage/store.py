@@ -179,8 +179,6 @@ class Store:
                     membership_graph.lock_graph(self.db)
                     self.incomplete_draft.mark_youtube_groups(pause=True)
             self.recover_files()
-            if self.db.execute(f"SELECT 1 FROM ({owned_ids('= %s')}) owner LIMIT 1", ('demo','demo')).fetchone():
-                self.ensure_demo()
             self.read_versions = ReaderVersions(self)
             self.processing.background = defer_recovery
             self.processing.recovering = True
@@ -246,12 +244,6 @@ class Store:
                     path.unlink()
 
 
-    def ensure_demo(self) -> None:
-        with self.db:
-            membership_graph.lock_graph(self.db)
-            self.subscriptions.ensure_demo()
-            self.problems.sync_codex_feed_added('demo', self.wall_clock())
-
     def pause_history(self, feed: str, paused: bool) -> dict[str, Any]:
         self.subscriptions.check_owner('feed', feed)
         with self.db:
@@ -270,11 +262,11 @@ class Store:
             return result
 
 
-    def cursor(self, feed: str = 'demo') -> str | None:
+    def cursor(self, feed: str) -> str | None:
         row=self.db.execute('SELECT cursor FROM feeds WHERE id = %s',(feed,)).fetchone()
         return str(row[0]) or None if row else None
 
-    def collect_discovery(self,publications: list[Publication],cursor: str,feed: str = 'demo',namespace: str = '',*,description: str | None = None,successful: bool = True,source_order: tuple[ExternalKey,...] = ()) -> CollectionEffects:
+    def collect_discovery(self,publications: list[Publication],cursor: str,feed: str,namespace: str = '',*,description: str | None = None,successful: bool = True,source_order: tuple[ExternalKey,...] = ()) -> CollectionEffects:
         effects=CollectionEffects()
         with self.db:
             membership_graph.lock_graph(self.db)
@@ -469,7 +461,7 @@ class Store:
             return 0
         return int(expect_row(self.db.execute(f"""SELECT count(*) FROM unnest(%s::text[]) f(id)
             WHERE NOT EXISTS (SELECT 1 FROM jobs j
-                WHERE j.item=CASE f.id WHEN 'demo' THEN '' ELSE f.id END
+                WHERE j.item=f.id
                     AND j.status IN ('pending','running') AND j.kind IN ('discover','feed-delete') OFFSET 0)
             AND NOT EXISTS (SELECT 1 FROM ({owned_ids('= f.id')}) owner WHERE EXISTS (
                 SELECT 1 FROM jobs j WHERE j.item=owner.id AND j.status IN ('pending','running')

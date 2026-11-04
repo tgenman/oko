@@ -875,30 +875,6 @@ export type DeletionInProgressErrorDetails = {
     feed_id: FeedId;
 };
 
-export type DemoSourceReference = {
-    feed_id: FeedId;
-    kind: 'demo';
-    source_url: SourceUrl;
-};
-
-export type DemoSubscriptionFeed = {
-    /**
-     * ready normalizes saved connected; unresolved identity or missing transport remain distinct domain states.
-     */
-    connection: 'ready' | 'unavailable' | 'deleting';
-    folder_id: FolderId;
-    history: HistoryState;
-    id: FeedId;
-    identity: string;
-    importance: Importance;
-    initial_days: number;
-    kind: 'demo';
-    original_urls: Array<SourceLocator>;
-    public_ai: boolean | null;
-    title: string;
-    transport: 'demo' | null;
-};
-
 export type DiagnosticAccepted = {
     entry: DiagnosticEntry;
     state: 'accepted';
@@ -1984,7 +1960,7 @@ export type ReadingFolder = {
     count: number;
     id: FolderId;
     /**
-     * Persisted ordering position; demo source legitimately uses -1.
+     * Persisted ordering position; legacy folders may have negative positions.
      */
     position: number;
     title: string;
@@ -2345,8 +2321,8 @@ export type SourceIdentityConflictErrorDetails = {
 export type SourceLocator = string;
 
 export type SourceReference = ({
-    kind: 'demo';
-} & DemoSourceReference) | ({
+    kind: 'unresolved';
+} & UnresolvedSourceReference) | ({
     kind: 'rss';
 } & RssSourceReference) | ({
     kind: 'youtube';
@@ -2444,12 +2420,12 @@ export type SubscriptionCatalog = {
     folders: Array<SubscriptionFolder>;
 };
 
-export type SubscriptionFeed = TelegramUnconfiguredSubscriptionFeed | DemoSubscriptionFeed | RssSubscriptionFeed | YoutubeSubscriptionFeed | UnresolvedSubscriptionFeed | TelegramWebSubscriptionFeed;
+export type SubscriptionFeed = TelegramUnconfiguredSubscriptionFeed | RssSubscriptionFeed | YoutubeSubscriptionFeed | UnresolvedSubscriptionFeed | TelegramWebSubscriptionFeed;
 
 export type SubscriptionFolder = {
     id: FolderId;
     /**
-     * Persisted ordering position; demo source legitimately uses -1.
+     * Persisted ordering position; legacy folders may have negative positions.
      */
     position: number;
     title: string;
@@ -2663,6 +2639,12 @@ export type UnknownLocalModel = {
 export type UnknownResultProvenance = {
     kind: 'unknown';
     reason: 'not_recorded';
+};
+
+export type UnresolvedSourceReference = {
+    feed_id: FeedId;
+    kind: 'unresolved';
+    source_url: SourceUrl;
 };
 
 export type UnresolvedSubscriptionFeed = {

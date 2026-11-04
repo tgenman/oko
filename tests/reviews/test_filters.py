@@ -131,6 +131,6 @@ def test_codex_filters_require_permission_and_use_filter_schema(tmp_path):
         item = read_publications_for_cards(client, '/api/v3/cards')[0]['id']
         wait_for(client, lambda: 'Запрещена публичная' in (client.get('/api/v3/publication/' + item).json()['filter']['error'] or ''))
         assert service.inputs == []
-        client.patch('/api/v3/feeds/demo', json={'public_ai': True})
+        client.patch('/api/v3/feeds/fixture', json={'public_ai': True})
         wait_for(client, lambda: len(read_publications_for_cards(client, '/api/v3/cards')) == 0)
         assert len(service.inputs) == 3

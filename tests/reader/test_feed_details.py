@@ -68,7 +68,7 @@ def test_unread_includes_hidden_and_viewed_dates_follow_actual_scope(tmp_path):
     clock = [1800000000.]
     with TestClient(create_app(tmp_path, token='test', source=FilterSource(), ai_transport=transport([]), wall_clock=lambda: clock[0]), headers=HEADERS) as client:
         setup_filters(client)
-        path = '/api/v3/settings/feed/demo'
+        path = '/api/v3/settings/feed/fixture'
         activity = lambda: client.get(path).json()['activity']
         assert activity()['unread'] == 3
         assert activity()['created'] == stamp(clock[0])
@@ -84,8 +84,8 @@ def test_unread_includes_hidden_and_viewed_dates_follow_actual_scope(tmp_path):
         clock[0] += 10
         assert client.post('/api/v3/materials/' + card['id'] + '/viewed').status_code == 200
         assert activity()['marked_read'] == marked
-        preview = client.post('/api/v3/folders/demo/completion/preview').json()
-        assert client.post('/api/v3/folders/demo/completion', json={'token':preview['token']}).status_code == 200
+        preview = client.post('/api/v3/folders/fixture/completion/preview').json()
+        assert client.post('/api/v3/folders/fixture/completion', json={'token':preview['token']}).status_code == 200
         assert activity()['unread'] == 0
         assert activity()['marked_read'] == stamp(clock[0])
     with TestClient(create_app(tmp_path, token='test', source=FilterSource(), api_only=True), headers=HEADERS) as client:

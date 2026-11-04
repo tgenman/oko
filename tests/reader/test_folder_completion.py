@@ -3,24 +3,24 @@ from tests.support.presence import presence
 from pathlib import Path
 from fastapi.testclient import TestClient
 from tests.support.app import create_app
-from tests.support.demo_source import DemoSource
+from tests.support.synthetic_source import SyntheticSource
 from tests.support.processes import wait_cards
 
 HEADERS = {'Authorization': 'Bearer test-token'}
 
 
 def test_folder_confirmation_deletes_all_originals_and_is_repeatable(tmp_path: Path):
-    with TestClient(create_app(tmp_path, source=DemoSource(), token='test-token'), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test-token'), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global', json={})
         presence(client, 'a')
         originals = wait_cards(client, 3)
-        response = client.post('/api/v3/folders/demo/completion/preview')
+        response = client.post('/api/v3/folders/fixture/completion/preview')
         assert response.status_code == 200
         preview = response.json()
         assert preview['cards_count'] == 3 and preview['publications_count'] == 3
         assert len(read_all_cards(client, '/api/v3/cards')) == 3
         for _ in range(2):
-            response = client.post('/api/v3/folders/demo/completion', json={'token': preview['token']})
+            response = client.post('/api/v3/folders/fixture/completion', json={'token': preview['token']})
             assert response.status_code == 200
         assert read_all_cards(client, '/api/v3/cards') == []
         for item in originals:
@@ -61,16 +61,16 @@ def test_other_folder_and_wrong_folder_confirmation_are_untouched(tmp_path):
     from tests.support.rss import rss, import_feed, wait_cards as rss_cards
     def response(request):
         return httpx.Response(200, text=rss() if request.url.path == '/feed' else '<article>Другой материал</article>')
-    with TestClient(create_app(tmp_path, source=DemoSource(), token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(response)), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(response)), headers=HEADERS) as client:
         import_feed(client)
-        other = next(f['folder_id'] for f in client.get('/api/v3/subscriptions').json()['feeds'] if f['id'] != 'demo')
+        other = next(f['folder_id'] for f in client.get('/api/v3/subscriptions').json()['feeds'] if f['id'] != 'fixture')
         presence(client, 'a')
         rss_cards(client, 4)
-        preview = client.post('/api/v3/folders/demo/completion/preview').json()
+        preview = client.post('/api/v3/folders/fixture/completion/preview').json()
         assert preview['cards_count'] == 3
         assert client.post(f'/api/v3/folders/{other}/completion', json={'token': preview['token']}).status_code == 409
         assert len(read_all_cards(client, '/api/v3/cards')) == 4
-        assert client.post('/api/v3/folders/demo/completion', json={'token': preview['token']}).status_code == 200
+        assert client.post('/api/v3/folders/fixture/completion', json={'token': preview['token']}).status_code == 200
         assert len(read_all_cards(client, '/api/v3/cards')) == 1
         assert len(read_all_cards(client, '/api/v3/cards?folder=' + other)) == 1
 
@@ -81,16 +81,16 @@ def test_delete_failure_is_reported_then_recovered_before_collection(tmp_path):
     def fault(point):
         if point == 'before_delete' and fail[0]:
             raise OSError('disk error')
-    options = dict(source=DemoSource(), token='test-token', fault=fault)
+    options = dict(source=SyntheticSource(), token='test-token', fault=fault)
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global', json={})
         presence(client, 'a')
         wait_cards(client, 3)
-        preview = client.post('/api/v3/folders/demo/completion/preview').json()
-        assert client.post('/api/v3/folders/demo/completion', json={'token': preview['token']}).status_code == 503
+        preview = client.post('/api/v3/folders/fixture/completion/preview').json()
+        assert client.post('/api/v3/folders/fixture/completion', json={'token': preview['token']}).status_code == 503
         assert read_all_cards(client, '/api/v3/cards') == []
         assert any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status/details').json()['problems']['current'])
-    class Counting(DemoSource):
+    class Counting(SyntheticSource):
         calls = 0
         async def discover(self, cursor):
             self.calls += 1

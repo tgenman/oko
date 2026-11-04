@@ -65,7 +65,7 @@ def load_materials(client):
 
 def test_delayed_theses_finish_with_old_choice_after_settings_save(tmp_path):
     import asyncio, json, threading
-    from tests.support.demo_source import DemoSource
+    from tests.support.synthetic_source import SyntheticSource
     from tests.support.reader import wait_for
     entered, released = threading.Event(), threading.Event()
     entered_items=[]
@@ -79,10 +79,10 @@ def test_delayed_theses_finish_with_old_choice_after_settings_save(tmp_path):
             source = json.loads(prompt.split('\n',1)[1])['sources'][0]
             return json.dumps({'points':[{'text':choice.model,'sources':[{'id':source['id'],'url':source['url']}]}]})
     service = Held()
-    with TestClient(create_app(tmp_path,token='test',source=DemoSource(),codex_client=service),headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path,token='test',source=SyntheticSource(),codex_client=service),headers=HEADERS) as client:
         item = load_materials(client)
         client.put('/api/v3/processors/codex',json=configuration())
-        client.patch('/api/v3/feeds/demo',json={'public_ai':True})
+        client.patch('/api/v3/feeds/fixture',json={'public_ai':True})
         client.patch('/api/v3/settings/oko/global',json={'theses':True})
         assert entered.wait(2)
         item=entered_items[0]  # Assert provenance for the request actually held by the fixture.

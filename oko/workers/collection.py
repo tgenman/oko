@@ -178,7 +178,7 @@ class CollectionWorker:
                     diagnostic_source.set('Удаление · ' + job.item)
                     self.jobs._delete(job, current)
                     return
-                feed = (job.item or 'demo') if job.kind in ('discover', 'read') else self.service.feed(job.item)
+                feed = job.item if job.kind in ('discover', 'read') else self.service.feed(job.item)
                 if job.kind in ('discover','fetch'):
                     self.jobs._collection_active[job.id] = _CollectionAttempt(job,feed,self._clock(),capture,current.jobs.collection_start(job,feed))
                     if self.jobs.metrics:

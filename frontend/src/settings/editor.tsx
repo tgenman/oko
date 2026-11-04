@@ -69,7 +69,7 @@ function FeedOptions({owner,feed}:{owner:MenusOwner;feed:SubscriptionFeed|undefi
  const values=owner.draft('feed/'+feed.id);const value=(name:string,fallback:string|boolean)=>values['feed-'+name]??fallback;const edit=(name:string,value:string|boolean)=>owner.edit('feed/'+feed.id,'feed-'+name,value);
  const storedHistory=owner.getHistory(feed);const history=storedHistory?.state==='absent'?undefined:storedHistory;const active=history&&!['complete','cancelled'].includes(history.state);
  const help=owner.sources.find(source=>source.feed_id===feed.id)?.changes;
- const connection=feed.kind==='demo'?'Test source connected':feed.kind==='telegram'?accessLabel(feed.access):transport==='rss'?'RSS connected: collects while the tab is open':transport==='youtube'?'YouTube connected: collects while the tab is open':feed.kind==='youtube'?'YouTube disabled':feed.connection==='ambiguous'?'Ambiguous address: select a connection explicitly':'Collector connection required';
+ const connection=feed.kind==='telegram'?accessLabel(feed.access):transport==='rss'?'RSS connected: collects while the tab is open':transport==='youtube'?'YouTube connected: collects while the tab is open':feed.kind==='youtube'?'YouTube disabled':feed.connection==='ambiguous'?'Ambiguous address: select a connection explicitly':'Collector connection required';
  const historyBusy=owner.historyBusy(feed.id);
  const count=String(values.youtubeHistoryCount??(history?.selection.mode==='count'?history.selection.count:60));
  return <><details hidden={!help}><summary>Update Detection Capabilities</summary><p id="source-help">{help&&help}</p></details><h2>Feed Connection</h2>

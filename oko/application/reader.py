@@ -126,7 +126,7 @@ class ReaderApplication:
         bindings=self.queries.bindings([feed['id'] for feed in feeds if feed['kind']=='telegram'])
         for feed in feeds:
             binding=bindings.get(feed['id'])
-            feed['collection_access'] = 'Web' if binding and binding['kind']=='web' else 'Personal account' if binding and binding.get('role')=='personal' else 'Collection account' if binding and binding.get('role')=='collection' else feed.get('transport', feed['kind'])
+            feed['collection_access'] = 'Web' if binding and binding['kind']=='web' else 'Personal account' if binding and binding.get('role')=='personal' else 'Collection account' if binding and binding.get('role')=='collection' else feed.get('transport') or feed['kind']
         sources = current.collection_status.snapshot(feeds, self._live(),
             'Oko is stopped' if not self.enabled else 'Waiting for reader presence' if not self._admitted() else 'Work is paused',
             {identity: dict(generation=attempt.job.generation, elapsed_seconds=max(0.,self._clock()-attempt.started),stage=attempt.capture.stage)

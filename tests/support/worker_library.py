@@ -1,6 +1,6 @@
 """Real temporary storage for worker transaction and recovery scenarios."""
 import json
-from tests.support.storage import Store
+from tests.support.storage import Store, ensure_fixture
 from oko.collection.contracts import Publication
 from tests.support.synthetic_material import material as Material
 from oko.subscriptions.subscriptions import Overrides
@@ -17,12 +17,12 @@ from tests.support.filters import transport
 def worker_library(root, *, text='Useful text', fault=lambda _:None, database_url=None):
     store=Store(root,fault,database_url=database_url)
     if database_url is not None:store.set_work_enabled(True)
-    store.subscriptions.ensure_demo()
+    ensure_fixture(store.db)
     store.configure_processor(ProcessorConfig(endpoint='http://localhost:9931',model='local:latest',local_execution=True))
     store.subscriptions.update_settings('oko','global',Overrides(processor='llamacpp',theses=True,prompt_filters='Keep useful text'))
     store.settings_changed()
-    store.jobs.enqueue_discovery()
-    job=store.jobs.next_job(store.clock())
+    store.jobs.enqueue_discovery('fixture')
+    job=store.jobs.next_job(store.clock(),feeds=['fixture'])
     assert job.kind=='discover'
     discovered(store,[publication_packet(Publication('one','https://example.org/one',100),Material('Title',text),needs_fetch=False)],'{}',job)
     item=store.db.execute('SELECT id FROM publications').fetchone()[0]
@@ -54,5 +54,5 @@ def collection_worker(root,store,source):
     worker=app.state.host.collection
     worker.execution._store=store
     worker.execution._admitted=lambda:True
-    worker._sources['demo']=source
+    worker._sources['fixture']=source
     return worker

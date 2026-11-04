@@ -426,3 +426,82 @@ def test_telegram_manifest_migration_distinguishes_state_from_identity(connectio
         assert 'manifest' not in rows['state']['extra']['telegram']
         assert rows['state']['extra']['_reader']['source_manifest']==ready
         assert rows['identity']['extra']['telegram']['manifest']==old
+
+
+def test_retired_demo_preserves_publications_and_normalizes_discovery_target(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:98])
+        db.execute("INSERT INTO folders(id,title,position) VALUES ('demo','Тестовый источник',-1)")
+        db.execute("INSERT INTO feeds(id,identity,title,kind,folder_id,connection,transport,original_urls) VALUES ('demo','demo','Тестовый источник','demo','demo','connected','demo',ARRAY[]::text[])")
+        db.execute("INSERT INTO publications(id,platform,external_id,title,discovered_at,content) VALUES ('p','other_web','external-p','Saved',1,%s)", (json.dumps({'blocks': [], 'extra': {}}),))
+        db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('demo','p',true,true)")
+        db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('discover','','failed','saved error','source-error')")
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT kind,transport,connection FROM feeds WHERE id='demo'").fetchone() == ('unresolved',None,'needs_connection')
+        assert db.execute("SELECT publication_id FROM feed_publications WHERE feed_id='demo'").fetchall() == [('p',)]
+        assert db.execute("SELECT title FROM publications WHERE id='p'").fetchone() == ('Saved',)
+        assert db.execute("SELECT item,status,error,problem_code FROM jobs WHERE kind='discover'").fetchone() == ('demo','failed','saved error','source-error')
+
+
+def test_retired_demo_migration_rejects_ambiguous_discovery_without_changes(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:98])
+        db.execute("INSERT INTO folders(id,title,position) VALUES ('demo','Old feed',0)")
+        db.execute("INSERT INTO feeds(id,identity,title,kind,folder_id,connection,transport,original_urls) VALUES ('demo','demo','Old feed','demo','demo','connected','demo',ARRAY[]::text[])")
+        db.execute("INSERT INTO jobs(kind,item) VALUES ('discover',''),('discover','demo')")
+        with pytest.raises(psycopg.errors.RaiseException, match='ambiguous legacy discovery jobs'):
+            migrate(db, MIGRATIONS)
+        verify(db, MIGRATIONS[:98])
+        assert db.execute("SELECT kind,transport FROM feeds WHERE id='demo'").fetchone() == ('demo','demo')
+        assert db.execute("SELECT item FROM jobs WHERE kind='discover' ORDER BY item").fetchall() == [('',),('demo',)]
+
+
+def test_retired_demo_is_readable_through_http_after_migration(postgres_database_url, tmp_path):
+    from fastapi.testclient import TestClient
+    from tests.support.app import create_app
+    from oko.storage.postgres_schema import MIGRATIONS
+    with psycopg.connect(postgres_database_url, autocommit=True) as db:
+        migrate(db, MIGRATIONS[:98])
+        db.execute("INSERT INTO folders(id,title,position) VALUES ('demo','Old synthetic feed',-1)")
+        db.execute("INSERT INTO feeds(id,identity,title,kind,folder_id,connection,transport,original_urls) VALUES ('demo','demo','Old synthetic feed','demo','demo','connected','demo',ARRAY[]::text[])")
+        content = {'blocks': [{'type': 'text', 'role': 'body', 'text': 'Saved text'}], 'extra': {'_reader': {'title': 'Saved', 'full': True, 'reason': '', 'members': [], 'captions': None, 'attachments': []}}}
+        db.execute("INSERT INTO publications(id,platform,external_id,title,url,discovered_at,published_at,content,complete) VALUES ('p','other_web','https://example.org/p','Saved','https://example.org/p',1,1,%s,1)", (json.dumps(content),))
+        db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('demo','p',true,true)")
+        db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('discover','','failed','saved error','source-error')")
+        migrate(db, MIGRATIONS)
+    with TestClient(create_app(tmp_path, token='test', api_only=True, database_url=postgres_database_url), headers={'Authorization':'Bearer test'}) as client:
+        feeds = client.get('/api/v3/subscriptions')
+        assert feeds.status_code == 200, feeds.text
+        feed = next(feed for feed in feeds.json()['feeds'] if feed['id'] == 'demo')
+        assert (feed['kind'], feed['connection']) == ('unresolved', 'needs_connection')
+        source = client.get('/api/v3/collection-status')
+        assert source.status_code == 200, source.text
+        assert any(item['feed_id'] == 'demo' for item in source.json()['sources'])
+        material = client.get('/api/v3/publication/p')
+        assert material.status_code == 200, material.text
+        assert material.json()['title'] == 'Saved'
+        assert material.json()['source']['kind'] == 'unresolved'
+        assert 'Saved text' in material.text
+
+
+def test_retired_demo_keeps_orphaned_discovery_after_feed_deletion(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:98])
+        db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('discover','','failed','saved error','source-error')")
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT item,status,error,problem_code FROM jobs WHERE kind='discover'").fetchone() == ('demo','failed','saved error','source-error')
+        assert db.execute("SELECT id FROM feeds").fetchall() == []
+
+
+def test_retired_demo_rejects_conflicting_saved_attempt_owner(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:98])
+        db.execute("INSERT INTO jobs(kind,item,feed_id) VALUES ('discover','','other-feed')")
+        with pytest.raises(psycopg.errors.RaiseException, match='owner conflicts'):
+            migrate(db, MIGRATIONS)
+        verify(db, MIGRATIONS[:98])
+        assert db.execute("SELECT item,feed_id FROM jobs WHERE kind='discover'").fetchone() == ('','other-feed')

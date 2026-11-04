@@ -3,7 +3,7 @@ import time
 
 import httpx
 
-from tests.support.demo_source import DemoSource
+from tests.support.synthetic_source import SyntheticSource
 from tests.support.app import create_app
 from tests.support.telegram_web import page
 from tests.support.v3 import TestClient
@@ -14,7 +14,7 @@ WRITE = '/api/v3/settings/oko/global'
 
 
 def test_rate_setting_defaults_validates_scope_persists_and_resets(tmp_path):
-    options = dict(token='test', api_only=True, source=DemoSource())
+    options = dict(token='test', api_only=True, source=SyntheticSource())
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         assert client.get(READ).json() == {'value':2, 'origin':{'scope':'default'}}
         for invalid in [0, -.1, 10.1, .09, True, '2', [], {}]:

@@ -71,7 +71,7 @@ paths:
                   error: null
                 media: []
                 source:
-                  kind: demo
+                  kind: rss
                   feed_id: example
                   source_url: https://example.test/post/1
                 availability: available
@@ -296,7 +296,7 @@ paths:
                   deleting: 0
                   unavailable: 0
                 sources:
-                - feed_id: demo
+                - feed_id: example
                   title: Example
                   source_url: https://example.org/rss
                   source_kind: rss
@@ -469,7 +469,7 @@ paths:
                 observed_at: '2026-10-21T18:00:00Z'
                 work_allowed: true
                 source:
-                  feed_id: demo
+                  feed_id: example
                   title: Example
                   source_url: https://example.org/rss
                   source_kind: rss
@@ -5315,7 +5315,7 @@ paths:
                 public_ai: null
                 history:
                   state: absent
-                kind: demo
+                kind: rss
                 connection: ready
                 transport: null
           headers:
@@ -7353,7 +7353,7 @@ paths:
                 public_ai: null
                 history:
                   state: absent
-                kind: demo
+                kind: rss
                 connection: ready
                 transport: null
           headers:
@@ -12463,7 +12463,7 @@ components:
           error: null
         media: []
         source:
-          kind: demo
+          kind: rss
           feed_id: example
           source_url: https://example.test/post/1
         availability: available
@@ -13572,78 +13572,6 @@ components:
       examples:
       - state: unconfigured
         role: personal
-    DemoSubscriptionFeed:
-      type: object
-      properties:
-        id:
-          $ref: '#/components/schemas/FeedId'
-        title:
-          type: string
-        folder_id:
-          $ref: '#/components/schemas/FolderId'
-        identity:
-          type: string
-          minLength: 1
-        original_urls:
-          type: array
-          items:
-            $ref: '#/components/schemas/SourceLocator'
-        importance:
-          $ref: '#/components/schemas/Importance'
-        initial_days:
-          type: integer
-          minimum: 1
-          maximum: 3650
-        public_ai:
-          anyOf:
-          - type: boolean
-          - type: 'null'
-        history:
-          $ref: '#/components/schemas/HistoryState'
-        kind:
-          type: string
-          const: demo
-        connection:
-          type: string
-          enum:
-          - ready
-          - unavailable
-          - deleting
-          description: ready normalizes saved connected; unresolved identity or missing transport remain distinct domain states.
-        transport:
-          anyOf:
-          - type: string
-            enum:
-            - demo
-          - type: 'null'
-      required:
-      - id
-      - title
-      - folder_id
-      - identity
-      - original_urls
-      - importance
-      - initial_days
-      - public_ai
-      - history
-      - kind
-      - connection
-      - transport
-      additionalProperties: false
-      examples:
-      - id: example
-        title: example
-        folder_id: example
-        identity: example
-        original_urls: []
-        importance: normal
-        initial_days: 1
-        public_ai: null
-        history:
-          state: absent
-        kind: demo
-        connection: ready
-        transport: null
     RssSubscriptionFeed:
       type: object
       properties:
@@ -13939,7 +13867,6 @@ components:
     SubscriptionFeed:
       oneOf:
       - $ref: '#/components/schemas/TelegramUnconfiguredSubscriptionFeed'
-      - $ref: '#/components/schemas/DemoSubscriptionFeed'
       - $ref: '#/components/schemas/RssSubscriptionFeed'
       - $ref: '#/components/schemas/YoutubeSubscriptionFeed'
       - $ref: '#/components/schemas/UnresolvedSubscriptionFeed'
@@ -13955,7 +13882,7 @@ components:
         public_ai: null
         history:
           state: absent
-        kind: demo
+        kind: rss
         connection: ready
         transport: null
     NavigationFeed:
@@ -13988,7 +13915,7 @@ components:
           public_ai: null
           history:
             state: absent
-          kind: demo
+          kind: rss
           connection: ready
           transport: null
         count: 0
@@ -14004,7 +13931,7 @@ components:
           type: integer
           minimum: -9007199254740991
           maximum: 9007199254740991
-          description: Persisted ordering position; demo source legitimately uses -1.
+          description: Persisted ordering position; legacy folders may have negative positions.
       required:
       - id
       - title
@@ -14025,7 +13952,7 @@ components:
           type: integer
           minimum: -9007199254740991
           maximum: 9007199254740991
-          description: Persisted ordering position; demo source legitimately uses -1.
+          description: Persisted ordering position; legacy folders may have negative positions.
         count:
           type: integer
           minimum: 0
@@ -14238,7 +14165,7 @@ components:
           public_ai: null
           history:
             state: absent
-          kind: demo
+          kind: rss
           connection: ready
           transport: null
     FeedVerification:
@@ -14829,7 +14756,7 @@ components:
           public_ai: null
           history:
             state: absent
-          kind: demo
+          kind: rss
           connection: ready
           transport: null
     SettingsTarget:
@@ -15472,12 +15399,12 @@ components:
       - url: /api/v3/materials/example/images/image.png
         kind: image
         mime: example
-    DemoSourceReference:
+    UnresolvedSourceReference:
       type: object
       properties:
         kind:
           type: string
-          const: demo
+          const: unresolved
         feed_id:
           $ref: '#/components/schemas/FeedId'
         source_url:
@@ -15488,7 +15415,7 @@ components:
       - source_url
       additionalProperties: false
       examples:
-      - kind: demo
+      - kind: unresolved
         feed_id: example
         source_url: https://example.test/post/1
     RssSourceReference:
@@ -15572,19 +15499,19 @@ components:
         message_ids: []
     SourceReference:
       oneOf:
-      - $ref: '#/components/schemas/DemoSourceReference'
+      - $ref: '#/components/schemas/UnresolvedSourceReference'
       - $ref: '#/components/schemas/RssSourceReference'
       - $ref: '#/components/schemas/YoutubeSourceReference'
       - $ref: '#/components/schemas/TelegramSourceReference'
       discriminator:
         propertyName: kind
         mapping:
-          demo: '#/components/schemas/DemoSourceReference'
+          unresolved: '#/components/schemas/UnresolvedSourceReference'
           rss: '#/components/schemas/RssSourceReference'
           youtube: '#/components/schemas/YoutubeSourceReference'
           telegram: '#/components/schemas/TelegramSourceReference'
       examples:
-      - kind: demo
+      - kind: rss
         feed_id: example
         source_url: https://example.test/post/1
     UnknownResultProvenance:
@@ -20878,7 +20805,7 @@ components:
       - has_details
       - history
       examples:
-      - feed_id: demo
+      - feed_id: example
         title: Example
         source_url: https://example.org/rss
         source_kind: rss
@@ -20998,7 +20925,7 @@ components:
           deleting: 0
           unavailable: 0
         sources:
-        - feed_id: demo
+        - feed_id: example
           title: Example
           source_url: https://example.org/rss
           source_kind: rss
@@ -21062,7 +20989,7 @@ components:
         observed_at: '2026-10-21T18:00:00Z'
         work_allowed: true
         source:
-          feed_id: demo
+          feed_id: example
           title: Example
           source_url: https://example.org/rss
           source_kind: rss

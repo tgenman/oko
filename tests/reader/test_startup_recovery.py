@@ -40,10 +40,10 @@ def library(root, dsn, count=32):
     return cards
 
 
-def start(root, credential, *, demo=False):
+def start(root, credential, *, synthetic=False):
     log = root.parent/'startup.log'
     with log.open('ab') as output:
-        process = ServerProcess([sys.executable,'-m','tests.process_server','--persistent','--no-browser', *(['--synthetic-source'] if demo else []),
+        process = ServerProcess([sys.executable,'-m','tests.process_server','--persistent','--no-browser', *(['--synthetic-source'] if synthetic else []),
             '--host','127.0.0.1','--port','0','--data',str(root),'--database-url-file',str(credential)],
             cwd=ROOT, env={**os.environ,'PYTHONPATH':str(ROOT)}, stdout=output, stderr=subprocess.STDOUT)
     process.log_path = log
@@ -141,7 +141,7 @@ def test_background_reconciliation_failure_closes_work_admission_and_can_stop(po
         db.execute("""CREATE FUNCTION failed_recovery() RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN RAISE EXCEPTION 'synthetic private recovery failure'; END $$""")
         db.execute('CREATE TRIGGER failed_recovery BEFORE UPDATE OF processing_metadata ON publications FOR EACH ROW EXECUTE FUNCTION failed_recovery()')
-    process = start(root, credential, demo=True)
+    process = start(root, credential, synthetic=True)
     try:
         deadline = time.monotonic()+10
         while not (root/'runtime.json').exists() and time.monotonic()<deadline:

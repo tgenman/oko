@@ -829,7 +829,7 @@ class ReadingFolder(WireModel):
     id: FolderId
     position: StrictInt = Field(
         ...,
-        description="Persisted ordering position; demo source legitimately uses -1.",
+        description="Persisted ordering position; legacy folders may have negative positions.",
         ge=-9007199254740991,
         le=9007199254740991,
     )
@@ -1144,7 +1144,7 @@ class SubscriptionFolder(WireModel):
     id: FolderId
     position: StrictInt = Field(
         ...,
-        description="Persisted ordering position; demo source legitimately uses -1.",
+        description="Persisted ordering position; legacy folders may have negative positions.",
         ge=-9007199254740991,
         le=9007199254740991,
     )
@@ -1213,6 +1213,13 @@ class UnknownResultProvenance(WireModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["unknown"]
     reason: Literal["not_recorded"]
+
+
+class UnresolvedSourceReference(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    feed_id: FeedId
+    kind: Literal["unresolved"]
+    source_url: SourceUrl
 
 
 class VerificationExpiredError(WireModel):
@@ -1725,13 +1732,6 @@ class CredentialsChange(
 class DeletionInProgressErrorDetails(WireModel):
     model_config = ConfigDict(extra="forbid")
     feed_id: FeedId
-
-
-class DemoSourceReference(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    feed_id: FeedId
-    kind: Literal["demo"]
-    source_url: SourceUrl
 
 
 class DiagnosticClearResult(RootModel[DiagnosticClearSuccess | DiagnosticClearFailure]):
@@ -3058,7 +3058,7 @@ class RssSubscriptionFeed(WireModel):
 
 class SourceReference(
     RootModel[
-        DemoSourceReference
+        UnresolvedSourceReference
         | RssSourceReference
         | YoutubeSourceReference
         | TelegramSourceReference
@@ -3066,7 +3066,7 @@ class SourceReference(
 ):
     model_config = ConfigDict(allow_inf_nan=False)
     root: (
-        DemoSourceReference
+        UnresolvedSourceReference
         | RssSourceReference
         | YoutubeSourceReference
         | TelegramSourceReference
@@ -3076,7 +3076,7 @@ class SourceReference(
         examples=[
             {
                 "feed_id": "example",
-                "kind": "demo",
+                "kind": "rss",
                 "source_url": "https://example.test/post/1",
             }
         ],
@@ -3367,25 +3367,6 @@ class CommandReceiptSucceeded(WireModel):
     updated_at: Timestamp
 
 
-class DemoSubscriptionFeed(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    connection: Literal["ready", "unavailable", "deleting"] = Field(
-        ...,
-        description="ready normalizes saved connected; unresolved identity or missing transport remain distinct domain states.",
-    )
-    folder_id: FolderId
-    history: HistoryState
-    id: FeedId
-    identity: StrictStr = Field(..., min_length=1)
-    importance: Importance
-    initial_days: StrictInt = Field(..., ge=1, le=3650)
-    kind: Literal["demo"]
-    original_urls: list[SourceLocator]
-    public_ai: StrictBool | None
-    title: StrictStr
-    transport: Literal["demo"] | None
-
-
 class DuplicateSourceErrorDetails(WireModel):
     model_config = ConfigDict(extra="forbid")
     existing_feeds: list[ExistingTelegramFeed] = Field(..., min_length=1)
@@ -3510,7 +3491,6 @@ class RetryingProblem(WireModel):
 class SubscriptionFeed(
     RootModel[
         TelegramUnconfiguredSubscriptionFeed
-        | DemoSubscriptionFeed
         | RssSubscriptionFeed
         | YoutubeSubscriptionFeed
         | UnresolvedSubscriptionFeed
@@ -3520,7 +3500,6 @@ class SubscriptionFeed(
     model_config = ConfigDict(allow_inf_nan=False)
     root: (
         TelegramUnconfiguredSubscriptionFeed
-        | DemoSubscriptionFeed
         | RssSubscriptionFeed
         | YoutubeSubscriptionFeed
         | UnresolvedSubscriptionFeed
@@ -3536,7 +3515,7 @@ class SubscriptionFeed(
                 "identity": "example",
                 "importance": "normal",
                 "initial_days": 1,
-                "kind": "demo",
+                "kind": "rss",
                 "original_urls": [],
                 "public_ai": None,
                 "title": "example",

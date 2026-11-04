@@ -517,7 +517,7 @@ def test_folder_completion_includes_hidden_publications(tmp_path):
         presence(client, 'reader')
         wait_for(client, lambda: len(c := read_publications_for_cards(client, '/api/v3/cards?show_hidden=true')) == 3 and all(x['filter']['state'] == 'ready' for x in c))
         assert len(read_publications_for_cards(client, '/api/v3/cards')) == 2
-        preview = client.post('/api/v3/folders/demo/completion/preview').json()
+        preview = client.post('/api/v3/folders/fixture/completion/preview').json()
         assert preview['cards_count'] == preview['publications_count'] == 3
-        assert client.post('/api/v3/folders/demo/completion', json={'token': preview['token']}).status_code == 200
+        assert client.post('/api/v3/folders/fixture/completion', json={'token': preview['token']}).status_code == 200
         assert read_publications_for_cards(client, '/api/v3/cards?show_hidden=true') == []

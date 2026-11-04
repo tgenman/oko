@@ -35,14 +35,6 @@ class SubscriptionRepository:
         row = self.db.execute("SELECT value FROM state WHERE key = 'sources-version'").fetchone()
         return int(row[0]) if row else 0
 
-    def ensure_demo(self) -> None:
-        with self.db:
-            self.db.execute("INSERT INTO folders VALUES ( 'demo' , 'Тестовый источник' , - 1 ) ON CONFLICT DO NOTHING")
-            inserted = self.db.execute("INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport ) VALUES ( 'demo' , 'demo' , 'Тестовый источник' , 'demo' , 'demo' , ARRAY[]::text[] , 'connected' , 'demo' ) ON CONFLICT DO NOTHING")
-            if inserted.rowcount:
-                source_changed(self.db)
-                self.details.created('demo')
-
     @reading_value
     def folders(self) -> list[dict[str, Any]]:
         folders = [dict(row) for row in self.db.execute('SELECT * FROM folders ORDER BY position , id')]
@@ -297,7 +289,7 @@ class SubscriptionRepository:
             raise ValueError('Telegram-источник не распознан')
         if transport == 'youtube' and feed['kind'] != 'youtube':
             raise ValueError('YouTube-источник не распознан')
-        if transport == 'rss' and feed['kind'] in ('youtube', 'demo'):
+        if transport == 'rss' and feed['kind'] == 'youtube':
             raise ValueError('Для этого источника нет RSS-подключения')
         with self.db:
             if patch.model_fields_set & {'folder_id','new_folder','importance','public_ai','transport'}:

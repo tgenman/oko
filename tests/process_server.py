@@ -1,7 +1,7 @@
 import asyncio
 import os
 from pathlib import Path
-from tests.support.demo_source import DemoSource
+from tests.support.synthetic_source import SyntheticSource
 import oko.__main__ as entrypoint
 from tests.support.app import create_app, OwnedServerTransport
 
@@ -25,7 +25,7 @@ class HeldPresenceBody:
         await self.app(scope, receive, held if target else send)
 
 
-class ResistantSource(DemoSource):
+class ResistantSource(SyntheticSource):
     async def fetch(self, publication):
         import sys
         root = Path(sys.argv[sys.argv.index('--data') + 1])
@@ -72,4 +72,4 @@ if __name__ == '__main__':
             app.add_middleware(HeldPresenceBody)
         return app
     entrypoint.create_app = fixture_app
-    entrypoint.run(fault=fault, source=ResistantSource() if os.environ.get('OKO_TEST_FAULT') == 'resist_cancel' else DemoSource() if synthetic else None)
+    entrypoint.run(fault=fault, source=ResistantSource() if os.environ.get('OKO_TEST_FAULT') == 'resist_cancel' else SyntheticSource() if synthetic else None)

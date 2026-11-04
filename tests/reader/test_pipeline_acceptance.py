@@ -19,7 +19,7 @@ def test_postgres_runs_all_workers_http_media_and_restart(tmp_path):
     store,item,execution,tasks=worker_library(source)
     asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
     context=saved(store,item)['processing_metadata']['_pass']
-    with store.db:store.db.execute("UPDATE feeds SET cursor='{\"synthetic_cursor\":null}' WHERE id='demo'")
+    with store.db:store.db.execute("UPDATE feeds SET cursor='{\"synthetic_cursor\":null}' WHERE id='fixture'")
     store.db.close()
     target=source
     calls=[]

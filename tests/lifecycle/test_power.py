@@ -2,7 +2,7 @@
 from tests.support.cards import read_all_cards
 from fastapi.testclient import TestClient
 
-from tests.support.demo_source import DemoSource
+from tests.support.synthetic_source import SyntheticSource
 from tests.support.app import create_app
 from tests.support.reader import setup_reader
 
@@ -11,7 +11,7 @@ HEADERS = {'Authorization': 'Bearer test'}
 
 def test_disabled_oko_keeps_reading_and_local_actions_and_survives_restart(tmp_path):
     exits = []
-    options = dict(token='test', source=DemoSource(), shutdown=lambda: exits.append(True))
+    options = dict(token='test', source=SyntheticSource(), shutdown=lambda: exits.append(True))
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         item = setup_reader(client, theses=False)
         cards = read_all_cards(client, '/api/v3/cards')
@@ -35,13 +35,13 @@ def test_disabled_oko_keeps_reading_and_local_actions_and_survives_restart(tmp_p
 
 
 def test_disabled_oko_rejects_every_external_command_but_keeps_local_settings(tmp_path):
-    with TestClient(create_app(tmp_path, token='test', source=DemoSource()), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, token='test', source=SyntheticSource()), headers=HEADERS) as client:
         item = setup_reader(client, theses=False)
         config = {'filter': {'model': 'fixture', 'reasoning_effort': 'low'}, 'theses': {'model': 'fixture', 'reasoning_effort': 'low'}}
         assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
         commands = [
             ('POST', '/api/v3/collect', None),
-            ('POST', '/api/v3/collect', {'scope': 'feed', 'feed_id': 'demo'}),
+            ('POST', '/api/v3/collect', {'scope': 'feed', 'feed_id': 'fixture'}),
             ('POST', f'/api/v3/materials/{item}/retry', None),
             ('POST', f'/api/v3/materials/{item}/theses/retry', None),
             ('POST', f'/api/v3/materials/{item}/filter/retry', None),
@@ -53,8 +53,8 @@ def test_disabled_oko_rejects_every_external_command_but_keeps_local_settings(tm
             ('POST', '/api/v3/processors/codex/check', None),
             ('POST', '/api/v3/processors/llamacpp/check', None),
             ('POST', '/api/v3/telegram/connect', {'source_locator': '@fixture', 'access': {'kind': 'web'}, 'folder': 'News'}),
-            ('POST', '/api/v3/feeds/demo/history', {'mode': 'count', 'count': '10'}),
-            ('PATCH', '/api/v3/feeds/demo/history', {'paused': False}),
+            ('POST', '/api/v3/feeds/fixture/history', {'mode': 'count', 'count': '10'}),
+            ('PATCH', '/api/v3/feeds/fixture/history', {'paused': False}),
         ]
         for method, path, body in commands:
             response = client.request(method, path, **({'json': body} if body is not None else {}))

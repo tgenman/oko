@@ -18,7 +18,7 @@ export function FeedDetails({owner,feed,activity}:{owner:MenusOwner;feed:Subscri
  const copy=async(url:string)=>{const action=owner.operations.begin('copy-link');setCopyStatus('');try{await navigator.clipboard.writeText(url);action.commit(()=>{if(mounted.current)setCopyStatus('Copied');});}catch{action.commit(()=>{if(mounted.current)setCopyStatus('Could not copy. Select and copy the link manually.');});}};
  const cancel=()=>{reset();owner.close('feeds');(document.getElementById('feeds-dialog')as HTMLDialogElement).close();};
  const loading=owner.settingsLoads.has(path),failed=owner.settingsFailures.has(path);
- const kind=feed.kind==='telegram'?'Telegram':feed.kind==='youtube'?'YouTube':feed.kind==='demo'?'Test source':feed.kind==='rss'?'RSS':'Unresolved source';
+ const kind=feed.kind==='telegram'?'Telegram':feed.kind==='youtube'?'YouTube':feed.kind==='rss'?'RSS':'Unresolved source';
  const connection=feed.kind==='telegram'?accessLabel(feed.access):feed.transport==='rss'?'RSS':feed.transport==='youtube'?'YouTube':'No collector connection';
  return <div className="feed-details" aria-label="Feed details">
  <div className="feed-details-heading">{'avatar_url'in feed&&feed.avatar_url&&owner.fetchMedia?<FeedAvatar url={feed.avatar_url} fetchMedia={owner.fetchMedia} kind={feed.kind}/>:<SourceIcon kind={['telegram','youtube'].includes(feed.kind)?feed.kind:'rss'}/>}<div><h2 tabIndex={-1}>{feed.title}</h2><p>{kind===connection?kind:kind+' · '+connection}</p></div></div>

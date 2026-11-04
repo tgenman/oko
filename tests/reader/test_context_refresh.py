@@ -33,10 +33,10 @@ def test_folder_refresh_only_collects_its_feeds_and_records_the_target(tmp_path)
 def test_refresh_retries_incomplete_and_unavailable_once_preserving_saved_copy(tmp_path):
     import time
     from collections import Counter
-    from tests.support.demo_source import DemoSource
+    from tests.support.synthetic_source import SyntheticSource
     from oko.collection.contracts import DiscoveryResult, Publication, FetchResult, SourceDeleted, SourceError
     from tests.support.synthetic_material import material as Material
-    class Source(DemoSource):
+    class Source(SyntheticSource):
         def __init__(self):
             self.calls=Counter()
             self.cursors=[]
@@ -55,14 +55,14 @@ def test_refresh_retries_incomplete_and_unavailable_once_preserving_saved_copy(t
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
         cards=wait_for(client,lambda:(cards if len(cards:=read_all_cards(client, '/api/v3/cards'))==2 and all(not c['loading'] for c in cards) else None))
         copies={c['id']:client.get('/api/v3/publication/'+c['id']).json()['text'] for c in cards}
-        assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'demo'}).status_code==200
+        assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'fixture'}).status_code==200
         wait_for(client,lambda:source.calls['1']==2 and source.calls['2']==2)
         time.sleep(.12)
         assert source.calls=={'1':2,'2':2}
         assert source.cursors==[None,'2']
         for item,text in copies.items():
             assert client.get('/api/v3/publication/'+item).json()['text']==text
-        assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'demo'}).status_code==200
+        assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'fixture'}).status_code==200
         wait_for(client,lambda:source.calls['2']==3)
         time.sleep(.12)
         assert source.calls['2']==3
@@ -70,7 +70,7 @@ def test_refresh_retries_incomplete_and_unavailable_once_preserving_saved_copy(t
 
 def test_refresh_retries_failed_theses_but_keeps_ready_results(tmp_path):
     import json
-    from tests.support.demo_source import DemoSource
+    from tests.support.synthetic_source import SyntheticSource
     from oko.processing.contracts import ProcessingError
     from tests.support.codex import CodexService, configure_codex
     class Model(CodexService):
@@ -83,27 +83,27 @@ def test_refresh_retries_failed_theses_but_keeps_ready_results(tmp_path):
                 raise ProcessingError('Temporary model failure')
             return await super().complete(prompt,schema,directory,choice)
     model=Model()
-    with TestClient(create_app(tmp_path,token='test',api_only=True,source=DemoSource(),codex_client=model),headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path,token='test',api_only=True,source=SyntheticSource(),codex_client=model),headers=HEADERS) as client:
         configure_codex(client)
-        assert client.patch('/api/v3/feeds/demo',json={'public_ai':True}).status_code==200
+        assert client.patch('/api/v3/feeds/fixture',json={'public_ai':True}).status_code==200
         client.patch('/api/v3/settings/oko/global',json={'theses':True,'prompt_filters':''})
         cards=wait_for(client,lambda:(c if len(c:=read_all_cards(client, '/api/v3/cards'))==3 else None))
         wait_for(client,lambda:len(set(model.calls))==3)
         wait_for(client,lambda:sum(client.get('/api/v3/publication/'+c['id']).json()['theses']['state']=='ready' for c in cards)==2)
         old=list(model.calls)
         model.failed=False
-        assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'demo'}).status_code==200
+        assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'fixture'}).status_code==200
         wait_for(client,lambda:all(client.get('/api/v3/publication/'+c['id']).json()['theses']['state']=='ready' for c in cards))
         assert len(model.calls)==len(old)+1
         assert model.calls[-1]==old[0]
 
 
 def test_refresh_keeps_forced_source_wait_but_advances_ordinary_retries(tmp_path):
-    from tests.support.demo_source import DemoSource
+    from tests.support.synthetic_source import SyntheticSource
     from oko.collection.contracts import DiscoveryResult, Publication, SourceError
     from tests.support.reader import Clock
     from collections import Counter
-    class Source(DemoSource):
+    class Source(SyntheticSource):
         calls=Counter()
         async def discover(self,cursor):
             return DiscoveryResult(tuple(Publication(str(i),'https://fixture.test/'+str(i),1800000000) for i in (1,2)) if cursor is None else (), '2')
@@ -122,7 +122,7 @@ def test_refresh_keeps_forced_source_wait_but_advances_ordinary_retries(tmp_path
     with TestClient(create_app(tmp_path,token='test',api_only=True,source=source,clock=clock),headers=HEADERS) as client:
         wait_for(client,lambda:source.calls=={'1':1,'2':1})
         wait_for(client,lambda:any(p['message']=='Network error' for p in client.get('/api/v3/status/details').json()['problems']['current']))
-        assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'demo'}).status_code==200
+        assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'fixture'}).status_code==200
         wait_for(client,lambda:source.calls['2']==2)
         assert source.calls['1']==1
         status=client.get('/api/v3/status/details').json()

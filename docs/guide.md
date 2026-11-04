@@ -90,7 +90,7 @@ In the managed Docker installation, a separate host process runs Codex. See [Cod
 
 ## Data, diagnostics, and backup
 
-Your data directory contains media files and integration settings; publication content, results and durable state live in PostgreSQL. Keep it separate from disposable demo directories. Marking material viewed removes its local reading content; it does not erase historical copies in backups or upstream services.
+Your data directory contains media files and integration settings; publication content, results and durable state live in PostgreSQL. Marking material viewed removes its local reading content; it does not erase historical copies in backups or upstream services.
 
 The **Diagnostics** (`Диагностика`) panel shows browser, API, collection, and processing failures. Repeated errors are grouped. Recent diagnostic groups persist in `debug.json` under the data directory. Diagnostics can include source context and tracebacks; inspect them before sharing. Credentials and session files should remain private.
 

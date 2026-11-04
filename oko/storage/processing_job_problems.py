@@ -24,7 +24,7 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
         if row['status'] not in ('pending','running','failed','unavailable','blocked'):continue
         if code in ('codex-choice','ai-permission','youtube-admission','processor-config') or row['viewed']:continue
         code=code or 'work-'+row['kind']
-        feed=row['owner'] or row['item'] or 'demo'
+        feed=row['owner'] or row['item'] or ''
         if not include_suppressed and code in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'):
             needle=store.db.execute("SELECT 1 FROM reader_problems WHERE identity LIKE 'profile:%%' AND finished IS NULL AND (body::jsonb->'objects') @> jsonb_build_array(jsonb_build_object('kind','feed','id',%s::text)) LIMIT 1",(feed,)).fetchone()
             if needle:continue
@@ -40,7 +40,7 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
             if row['error']:body['reason']=row['error']
             if code=='source-reconnect':body.update(section='action',next_step='Проверьте привязку источника; доступ не изменяется автоматически.')
             results[group]=body
-        legacy_feed=row['feed_id'] or row['item'] or 'demo'
+        legacy_feed=row['feed_id'] or row['item'] or ''
         legacy_identity='job:'+code+':'+legacy_feed+':'+row['kind']+('' if shared else ':'+item)
         if legacy_identity!=identity:results[group]['_legacy_id']=legacy_identity
         obj=dict(kind='material',id=row['affected'])

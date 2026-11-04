@@ -5,6 +5,7 @@ from collections.abc import Iterator
 import atexit
 import os
 import threading
+import time
 from uuid import uuid4
 from typing import Any
 
@@ -47,6 +48,16 @@ def database_url(root: Path) -> str:
         path.write_text(dsn)
         path.chmod(0o600)
         return dsn
+
+
+def ensure_fixture(db: Any, wall_clock: Any = time.time) -> None:
+    """Create an ordinary RSS feed for a test-injected adapter."""
+    with db:
+        db.execute("INSERT INTO folders(id,title,position) VALUES ('fixture','Synthetic source',0) ON CONFLICT DO NOTHING")
+        inserted = db.execute("INSERT INTO feeds(id,identity,title,kind,folder_id,original_urls,connection,transport) VALUES ('fixture','https://fixture.invalid/feed','Synthetic source','rss','fixture',ARRAY['https://fixture.invalid/feed'],'connected','rss') ON CONFLICT DO NOTHING")
+        if inserted.rowcount:
+            from oko.subscriptions.details import FeedDetails
+            FeedDetails(db, wall_clock).created('fixture')
 
 
 class Store(ProductionStore):

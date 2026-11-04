@@ -36,7 +36,7 @@ def job_keys(store: 'Store', job_id: int, code: str | None = None) -> set[str]:
         LEFT JOIN publication_links l ON l.target_publication_id=coalesce(items.id,media_owner.id)
         LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id AND viewed=0 OFFSET 0) root ON true
         WHERE j.id=%s AND coalesce(%s,j.problem_code) LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete')""",(code,job_id,code)).fetchall()
-    return {'job:'+r['problem_code']+':'+(r['owner'] or r['feed_id'] or r['item'] or 'demo')+':'+r['kind'] for r in rows}
+    return {'job:'+r['problem_code']+':'+(r['owner'] or r['feed_id'] or r['item'] or '')+':'+r['kind'] for r in rows}
 
 
 
@@ -52,7 +52,7 @@ def job_keys_with_previous_feed(store: 'Store', job_id: int, feed: str | None) -
         WHERE j.id=%s AND j.problem_code LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete')""",(feed,job_id)).fetchall()
     if not rows:return None
     kind=rows[0]['kind']
-    return kind,{'job:'+row['problem_code']+':'+(row['owner'] or feed or row['item'] or 'demo')+':'+kind for row in rows}
+    return kind,{'job:'+row['problem_code']+':'+(row['owner'] or feed or row['item'] or '')+':'+kind for row in rows}
 
 def job_keys_many(store: 'Store', job_ids: list[int]) -> dict[int,tuple[str,set[str]]]:
     if not job_ids:return {}
@@ -67,7 +67,7 @@ def job_keys_many(store: 'Store', job_ids: list[int]) -> dict[int,tuple[str,set[
     groups: dict[int,tuple[str,set[str]]]={}
     for row in rows:
         if row['id'] not in groups:groups[row['id']]=(row['kind'],set())
-        groups[row['id']][1].add('job:'+row['problem_code']+':'+(row['owner'] or row['feed_id'] or row['item'] or 'demo')+':'+row['kind'])
+        groups[row['id']][1].add('job:'+row['problem_code']+':'+(row['owner'] or row['feed_id'] or row['item'] or '')+':'+row['kind'])
     return groups
 
 def group_snapshot(store: 'Store', identity: str, kind: str, now: float, *, exclude: set[int] | None = None, pause_override: bool | None = None) -> tuple[dict[str,Any] | None,bool,set[int]]:
@@ -85,7 +85,7 @@ def group_snapshot(store: 'Store', identity: str, kind: str, now: float, *, excl
             UNION SELECT g.code,g.owner,c.item FROM source_groups g CROSS JOIN LATERAL (SELECT item FROM jobs WHERE kind='delete' AND payload::jsonb->>'cleanup_feed'=g.owner OFFSET 0) c
                 JOIN publications p ON p.id=c.item AND p.viewed=1
         ), targets AS MATERIALIZED (
-            SELECT j.id FROM items i CROSS JOIN LATERAL (SELECT id FROM jobs WHERE kind=%s AND (item=i.item OR (i.owner='demo' AND (item='' OR (item IS NULL AND feed_id IS NULL)))) AND problem_code=i.code AND problem_code LIKE 'source-%%' AND octet_length(problem_code)<=1000 OFFSET 0) j
+            SELECT j.id FROM items i CROSS JOIN LATERAL (SELECT id FROM jobs WHERE kind=%s AND item=i.item AND problem_code=i.code AND problem_code LIKE 'source-%%' AND octet_length(problem_code)<=1000 OFFSET 0) j
             UNION SELECT j.id FROM items i CROSS JOIN LATERAL (SELECT id FROM media_files WHERE publication_id=i.item OFFSET 0) m
                 CROSS JOIN LATERAL (SELECT id FROM jobs WHERE kind=%s AND kind='download_media' AND item=m.id AND problem_code=i.code AND problem_code LIKE 'source-%%' AND octet_length(problem_code)<=1000 OFFSET 0) j
             UNION SELECT j.id FROM source_groups g CROSS JOIN LATERAL (SELECT id FROM jobs WHERE kind=%s AND feed_id=g.owner AND problem_code=g.code AND problem_code LIKE 'source-%%' AND octet_length(problem_code)<=1000 AND coalesce(octet_length(feed_id),0)<=1000 OFFSET 0) j
@@ -105,7 +105,7 @@ def group_snapshot(store: 'Store', identity: str, kind: str, now: float, *, excl
     timed=False
     paused=pause_override if pause_override is not None else bool(kind=='download_media' and any(row['resource_key']=='youtube:subtitles' for row in rows) and store.youtube.status(now)['paused'])
     for row in rows:
-        owner=row['owner'] or row['feed_id'] or row['item'] or 'demo'
+        owner=row['owner'] or row['feed_id'] or row['item'] or ''
         if 'job:'+row['problem_code']+':'+owner+':'+kind!=identity:continue
         members.add(row['id'])
         if row['viewed'] and kind not in ('delete','feed-delete'):continue
@@ -408,7 +408,7 @@ def previous_keys_many(store: 'Store', rows: list[tuple[int,str]]) -> dict[int,t
             LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id AND viewed=0 OFFSET 0) root ON true""",([r[0] for r in batch],[r[1] for r in batch])).fetchall()
         for row in found:
             if row['id'] not in result:result[row['id']]=(row['kind'],set())
-            result[row['id']][1].add('job:'+row['problem_code']+':'+(row['owner'] or row['feed_id'] or row['item'] or 'demo')+':'+row['kind'])
+            result[row['id']][1].add('job:'+row['problem_code']+':'+(row['owner'] or row['feed_id'] or row['item'] or '')+':'+row['kind'])
     return result
 
 
@@ -449,7 +449,7 @@ def job_evidence_many(store: 'Store', rows: Sequence[tuple[int,str | None]]) -> 
             LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id AND viewed=0 OFFSET 0) root ON true
             WHERE j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND coalesce(v.code,j.problem_code) LIKE 'source-%%'""",([r[0] for r in batch],[r[1] for r in batch])).fetchall()
         for row in found:
-            owner=row['owner'] or row['feed_id'] or row['item'] or 'demo'
+            owner=row['owner'] or row['feed_id'] or row['item'] or ''
             key='job:'+row['code']+':'+owner+':'+row['kind']
             objects=evidence.setdefault(key,set())
             objects.add(('code',row['code']))
@@ -470,7 +470,7 @@ def job_evidence_with_previous_feed(store: 'Store', job_id: int, feed: str | Non
         WHERE j.id=%s AND j.problem_code LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete')""",(feed,job_id)).fetchall()
     evidence: dict[str,set[tuple[str,str]]]={}
     for row in rows:
-        owner=row['owner'] or feed or row['item'] or 'demo'
+        owner=row['owner'] or feed or row['item'] or ''
         key='job:'+row['problem_code']+':'+owner+':'+row['kind']
         objects=evidence.setdefault(key,set())
         objects.add(('code',row['problem_code']))

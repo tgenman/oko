@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 import httpx
 
 from oko.collection.contracts import SourceError
-from tests.support.demo_source import DemoSource
+from tests.support.synthetic_source import SyntheticSource
 from tests.support.app import create_app
 from tests.support.reader import Clock, wait_for
 
@@ -15,7 +15,7 @@ TOKEN = 'reader-auth-fixture-value'
 HEADERS = {'Authorization':'Bearer '+TOKEN}
 
 
-def details(client, feed='demo'):
+def details(client, feed='fixture'):
     result = client.get('/api/v3/collection-status/' + feed)
     assert result.status_code == 200, result.text
     return result.json()
@@ -43,7 +43,7 @@ def test_multiple_operations_share_one_hundred_newest_failed_requests(tmp_path):
     clock = Clock()
     release_second = threading.Event()
 
-    class MultipleFailures(DemoSource):
+    class MultipleFailures(SyntheticSource):
         async def fetch(self, publication):
             if publication.id == '1':
                 raise remote_error('first operation', 'recent', 2000)

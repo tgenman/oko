@@ -130,9 +130,9 @@ def test_folder_completion_survives_death_during_atomic_set_or_physical_delete(t
             client.patch('/api/v3/settings/oko/global', json={})
             presence(client, 'a')
             originals = wait_cards(client, 3)
-            preview = client.post('/api/v3/folders/demo/completion/preview').json()
+            preview = client.post('/api/v3/folders/fixture/completion/preview').json()
             try:
-                client.post('/api/v3/folders/demo/completion', json={'token': preview['token']})
+                client.post('/api/v3/folders/fixture/completion', json={'token': preview['token']})
             except httpx.TransportError:
                 pass
         assert process.wait(timeout=5) == 79
