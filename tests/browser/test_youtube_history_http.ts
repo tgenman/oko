@@ -18,7 +18,12 @@ test('real HTTP settings load three YouTube materials and can rediscover a viewe
   await page.locator('#youtube-history-count').fill('3');
   await page.locator('#youtube-history-start').click();
   await expect.poll(async()=>{const value=await history();return value.state==='absent'?0:value.progress.loaded;},{timeout:20000}).toBe(3);
-  await expect(page.locator('#history-progress')).toContainText('Loaded 3 of 3');
+  try {await expect(page.locator('#history-progress')).toContainText('Loaded 3 of 3');}
+  catch(error){
+    const details=await api('v3/status/details');
+    console.error('HISTORY_DIAGNOSTIC',JSON.stringify({settings:await history(),status:details.initial_histories,ui:await page.locator('#history-progress').textContent(),message:await page.locator('#settings-message').textContent()}));
+    throw error;
+  }
   await expect(page.locator('#youtube-history-start')).toBeEnabled();
   await page.locator('#feeds-close').click();
   await page.locator(`button[data-feed="${feed.id}"]`).click();
