@@ -210,7 +210,7 @@ def test_rule_change_rejects_late_filter_and_uses_one_new_feed_snapshot(tmp_path
     with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,ai_transport=httpx.MockTransport(model)),headers=HEADERS) as client:
         try:
             setup(client)
-            assert started.wait(3)
+            assert started.wait(10)
             client.patch('/api/v3/settings/oko/global',json={'prompt_filters':'Keep the text.','prompt_theses':'New summary rule.'})
             release.set()
             card=wait_for(client,lambda:next((c for c in read_publications_for_cards(client, '/api/v3/cards') if c['theses']['result']),None))

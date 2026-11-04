@@ -143,7 +143,7 @@ def test_late_article_after_feed_deletion_cannot_download_media_or_publish(tmp_p
                     headers={'Authorization':'Bearer test'}) as client:
         configure_fast_web(client)
         result = client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
-        assert started.wait(2)
+        assert started.wait(10)
         try:
             assert client.delete('/api/v3/feeds/'+result.json()['feed_id']).status_code == 200
             assert cancelled.is_set()

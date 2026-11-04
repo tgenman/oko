@@ -294,7 +294,15 @@ class PostgresConnection:
 
     def close(self) -> None:
         try:
-            self._db.close()
+            try:
+                if self._db.info.transaction_status != TransactionStatus.UNKNOWN:
+                    if self._db.info.transaction_status != TransactionStatus.IDLE:
+                        self._db.rollback()
+                    # Finish removing dependencies before another connection
+                    # drops the owning schema; socket close alone is asynchronous.
+                    self._db.execute('DROP VIEW IF EXISTS pg_temp.oko_incomplete_facts')
+            finally:
+                self._db.close()
         finally:
             callbacks, self.rollback_callbacks = self.rollback_callbacks, []
             self.commit_callbacks.clear()

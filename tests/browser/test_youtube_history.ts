@@ -69,3 +69,128 @@ test('late history start preserves selection and input in another feed', async()
     await expect(r.page.locator('#youtube-history-start')).toBeEnabled();
   } finally {await r.close();}
 });
+
+test('late start response cannot replace completed history progress', async()=>{
+  const r=await reader();
+  try{
+    await r.start([]);
+    await r.page.evaluate(()=>{
+      const t=readerTransport, settings=t.replies.get('/api/v3/settings/oko/global')!.body;
+      const feed={id:'yt',title:'Video',kind:'youtube',transport:'youtube',folder_id:'f',original_urls:['https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa'],importance:'normal',initial_history:null};
+      t.replies.set('/api/v3/subscriptions',{body:{folders:[{id:'f',title:'Folder'}],feeds:[feed]}});
+      t.replies.set('/api/v3/settings/feed/yt',{body:{...settings,feed}});
+      t.held.set('/api/v3/feeds/yt/history',true);
+    });
+    await r.page.locator('#feeds-open').click();
+    await r.page.locator('[data-owner="feed/yt"]').click();
+    await feedOptions(r.page);
+    await r.page.locator('#youtube-history-count').fill('3');
+    await r.page.locator('#youtube-history-start').click();
+    await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/feeds/yt/history'));
+    await r.page.evaluate(()=>{
+      const t=readerTransport;
+      const done=window.readerFixtures.history({mode:'count',count:3,loaded:3,available:3,state:'done',scan_complete:true,frozen:true});
+      t.replies.get('/api/v3/subscriptions')!.body!.feeds[0].initial_history=done;
+      t.replies.get('/api/v3/settings/feed/yt')!.body!.feed!.initial_history=done;
+      t.replies.set('/api/v3/status',{body:{stage:'Готово',errors:[],sources:[],ready_sources:1,total_sources:1,initial_histories:[{...done,feed_id:'yt'}]}});
+    });
+    await expect(r.page.locator('#history-progress')).toContainText('Loaded 3 of 3');
+    await r.page.evaluate(()=>readerTransport.held.set('/api/v3/status/details',true));
+    await r.page.evaluate(()=>readerTransport.release('/api/v3/feeds/yt/history',window.readerFixtures.history({mode:'count',count:3,loaded:0,available:3,state:'pending'})));
+    await expect(r.page.locator('#youtube-history-start')).toBeEnabled();
+    await expect(r.page.locator('#history-progress')).toContainText('Loaded 3 of 3');
+  }finally{await r.close();}
+});
+
+test('late settings response cannot replace a newer waiting history', async()=>{
+  const r=await reader();
+  try{
+    await r.start([]);
+    await r.page.evaluate(()=>{
+      const t=readerTransport,settings=t.replies.get('/api/v3/settings/oko/global')!.body;
+      const feed={id:'yt',title:'Video',kind:'youtube',transport:'youtube',folder_id:'f',original_urls:['https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa'],importance:'normal',initial_history:null};
+      t.replies.set('/api/v3/subscriptions',{body:{folders:[{id:'f',title:'Folder'}],feeds:[feed]}});
+      t.replies.set('/api/v3/settings/feed/yt',{body:{...settings,feed}});
+      t.replies.set('POST /api/v3/feeds/yt/history',{body:window.readerFixtures.history({mode:'count',count:3,loaded:0,available:0,state:'selecting'})});
+    });
+    await r.page.locator('#feeds-open').click();await r.page.locator('[data-owner="feed/yt"]').click();await feedOptions(r.page);
+    await r.page.locator('#youtube-history-count').fill('3');
+    await r.page.evaluate(()=>readerTransport.held.set('/api/v3/settings/feed/yt',true));
+    await r.page.locator('#youtube-history-start').click();
+    await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/settings/feed/yt'));
+    await r.page.evaluate(()=>{
+      const t=readerTransport;
+      const waiting=window.readerFixtures.history({mode:'count',count:3,loaded:0,available:0,state:'waiting',discovery_error:'YouTube недоступен'});
+      t.replies.set('/api/v3/status',{body:{stage:'Готово',errors:[],sources:[],ready_sources:1,total_sources:1,initial_histories:[{...waiting,feed_id:'yt'}]}});
+    });
+    await expect(r.page.locator('#history-progress')).toContainText('YouTube недоступен');
+    await r.page.evaluate(()=>readerTransport.held.set('/api/v3/status/details',true));
+    await r.page.evaluate(()=>readerTransport.release('/api/v3/settings/feed/yt',readerTransport.replies.get('/api/v3/settings/feed/yt')!.body));
+    await expect(r.page.locator('#settings-message')).toHaveText('History download started');
+    await expect(r.page.locator('#history-progress')).toContainText('YouTube недоступен');
+  }finally{await r.close();}
+});
+
+test('failed settings refresh preserves already completed history', async()=>{
+  const r=await reader();
+  try{
+    await r.start([]);
+    await r.page.evaluate(()=>{
+      const t=readerTransport,settings=t.replies.get('/api/v3/settings/oko/global')!.body;
+      const feed={id:'yt',title:'Video',kind:'youtube',transport:'youtube',folder_id:'f',original_urls:['https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa'],importance:'normal',initial_history:null};
+      t.replies.set('/api/v3/subscriptions',{body:{folders:[{id:'f',title:'Folder'}],feeds:[feed]}});
+      t.replies.set('/api/v3/settings/feed/yt',{body:{...settings,feed}});
+      t.held.set('/api/v3/feeds/yt/history',true);
+    });
+    await r.page.locator('#feeds-open').click();await r.page.locator('[data-owner="feed/yt"]').click();await feedOptions(r.page);
+    await r.page.locator('#youtube-history-count').fill('3');await r.page.locator('#youtube-history-start').click();
+    await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/feeds/yt/history'));
+    await r.page.evaluate(()=>{
+      const t=readerTransport,done=window.readerFixtures.history({mode:'count',count:3,loaded:3,available:3,state:'done',scan_complete:true,frozen:true});
+      t.replies.set('/api/v3/status',{body:{stage:'Готово',errors:[],sources:[],ready_sources:1,total_sources:1,initial_histories:[{...done,feed_id:'yt'}]}});
+      t.held.set('/api/v3/settings/feed/yt',true);
+    });
+    await expect(r.page.locator('#history-progress')).toContainText('Loaded 3 of 3');
+    await r.page.evaluate(()=>{
+      readerTransport.held.set('/api/v3/status/details',true);
+      readerTransport.release('/api/v3/feeds/yt/history',window.readerFixtures.history({mode:'count',count:3,loaded:0,available:3,state:'selecting'}));
+    });
+    await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/settings/feed/yt'));
+    await r.page.evaluate(()=>readerTransport.release('/api/v3/settings/feed/yt',{},503));
+    await expect(r.page.locator('#settings-message')).toHaveText('History download started');
+    await expect(r.page.locator('#history-progress')).toContainText('Loaded 3 of 3');
+  }finally{await r.close();}
+});
+
+test('confirmed stop wins over status observed before cancellation', async()=>{
+  const r=await reader();
+  try{
+    await r.start([]);
+    await r.page.evaluate(()=>{
+      const t=readerTransport,settings=t.replies.get('/api/v3/settings/oko/global')!.body;
+      const running=window.readerFixtures.history({mode:'count',count:3,loaded:0,available:3,state:'loading'});
+      const feed={id:'yt',title:'Video',kind:'youtube',transport:'youtube',folder_id:'f',original_urls:['https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa'],importance:'normal',initial_history:running};
+      t.replies.set('/api/v3/subscriptions',{body:{folders:[{id:'f',title:'Folder'}],feeds:[feed]}});
+      t.replies.set('/api/v3/settings/feed/yt',{body:{...settings,feed}});
+      t.replies.set('/api/v3/status',{body:{stage:'Готово',errors:[],sources:[],ready_sources:1,total_sources:1,initial_histories:[{...running,feed_id:'yt'}]}});
+      t.held.set('/api/v3/feeds/yt/history',true);
+    });
+    await r.page.locator('#feeds-open').click();await r.page.locator('[data-owner="feed/yt"]').click();await feedOptions(r.page);
+    await r.page.locator('#youtube-history-stop').click();
+    await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/feeds/yt/history'));
+    await r.page.evaluate(()=>{
+      const t=readerTransport,running=window.readerFixtures.history({mode:'count',count:3,loaded:1,available:3,state:'loading'});
+      t.replies.set('/api/v3/status',{body:{stage:'Готово',errors:[],sources:[],ready_sources:1,total_sources:1,initial_histories:[{...running,feed_id:'yt'}]}});
+      t.held.set('/api/v3/settings/feed/yt',true);
+    });
+    await expect(r.page.locator('#history-progress')).toContainText('Loaded 1 of 3');
+    await r.page.evaluate(()=>{
+      readerTransport.held.set('/api/v3/status/details',true);
+      readerTransport.release('/api/v3/feeds/yt/history',window.readerFixtures.history({mode:'count',count:3,loaded:1,available:3,state:'cancelled',cancelled:true}));
+    });
+    await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/settings/feed/yt'));
+    await r.page.evaluate(()=>readerTransport.release('/api/v3/settings/feed/yt',{},503));
+    await expect(r.page.locator('#settings-message')).toHaveText('History download stopped');
+    await expect(r.page.locator('#youtube-history-start')).toBeEnabled();
+  }finally{await r.close();}
+});
