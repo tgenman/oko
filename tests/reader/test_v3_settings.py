@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 
 from tests.support.app import create_app
 from tests.support.reader import HEADERS
-from oko.collection.demo import DemoSource
+from tests.support.demo_source import DemoSource
 
 
 def test_settings_inheritance_reset_and_command_receipt(tmp_path):

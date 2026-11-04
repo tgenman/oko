@@ -75,7 +75,7 @@ def test_persistent_process_starts_disabled_and_reuses_external_address(tmp_path
     seed.set_work_enabled(False)
     seed.db.close()
     command = [sys.executable, '-m', 'tests.process_server', '--persistent', '--data', str(tmp_path),
-               '--demo', '--no-browser', '--public-url', 'http://oko']
+               '--synthetic-source', '--no-browser', '--public-url', 'http://oko']
     log_path = tmp_path / 'server.log'
     with log_path.open('w') as log:
         process = ServerProcess(command, stdout=log, stderr=subprocess.STDOUT)

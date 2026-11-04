@@ -7,10 +7,6 @@ For installation commands, start with the [README](../README.md#quick-start).
 ## Start with a separate library
 
 ```sh
-# Synthetic publications for exploration.
-uv run --locked python -m oko --database-url-file /path/to/private-demo-dsn --demo --data /tmp/oko-demo
-
-# Your own sources and persistent local data.
 uv run --locked python -m oko --database-url-file /path/to/private-reader-dsn --data ./data
 ```
 

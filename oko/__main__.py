@@ -14,7 +14,6 @@ import webbrowser
 
 import uvicorn
 from oko.reader.app import create_app
-from oko.collection.demo import DemoSource
 from oko.collection.contracts import Source
 
 
@@ -50,7 +49,6 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
     parser = argparse.ArgumentParser(description='Око — локальный читатель')
     parser.add_argument('--data', type=Path, default=Path('data'))
     parser.add_argument('--database-url-file', type=Path, required=True, help='Закрытый файл подключения PostgreSQL; схема устанавливается отдельной командой миграции')
-    parser.add_argument('--demo', action='store_true', help='Подключить синтетический тестовый источник')
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--api-only', action='store_true', help='API без веб-интерфейса, работа до явной остановки')
     parser.add_argument('--persistent', action='store_true', help='Постоянный веб-экземпляр с запоминаемым входом')
@@ -120,10 +118,10 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
                 if server:
                     server.should_exit = True
 
-            app = create_app(root, source=source or (DemoSource() if args.demo else None),
+            app = create_app(root, source=source,
                              token=token, fault=fault, shutdown=shutdown,
                              lease=args.lease, grace=args.grace, api_only=args.api_only, persistent=args.persistent,
-                             public_url=args.public_url, codex_client=codex_client, rss_enabled=not args.demo, database_url=database_url,
+                             public_url=args.public_url, codex_client=codex_client, rss_enabled=True, database_url=database_url,
                              metrics_token=metrics_token)
             config = uvicorn.Config(app, access_log=False, log_level='critical', timeout_graceful_shutdown=2, proxy_headers=False,
                                     ssl_certfile=str(args.tls_cert) if args.tls_cert else None,
@@ -141,7 +139,7 @@ def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None 
                     temporary.write_text(json.dumps(dict(url=url, control_url=control_url, token=token, pid=os.getpid(),
                                                          lifetime='explicit', profile='api-only' if args.api_only else 'persistent' if args.persistent else 'reader', api_version=version)))
                     os.replace(temporary, root / 'runtime.json')
-                    print(f'Око запущено: {url} (источник: {"тестовый" if args.demo else "RSS / Telegram"}).', flush=True)
+                    print(f'Око запущено: {url}.', flush=True)
                     if not (args.no_browser or args.api_only):
                         await asyncio.to_thread(webbrowser.open, url + ('/' if args.persistent else '/#token=' + token))
                 await task

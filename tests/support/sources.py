@@ -1,7 +1,7 @@
 from oko.collection.contracts import FetchResult
 from tests.support.synthetic_material import material as Material
 import asyncio
-from oko.collection.demo import DemoSource
+from tests.support.demo_source import DemoSource
 
 
 class LateSource(DemoSource):

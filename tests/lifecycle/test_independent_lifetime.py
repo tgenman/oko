@@ -6,7 +6,7 @@ import pytest
 
 from fastapi.testclient import TestClient
 
-from oko.collection.demo import DemoSource
+from tests.support.demo_source import DemoSource
 from tests.support.app import create_app
 from tests.support.reader import Clock, wait_for
 
@@ -47,7 +47,7 @@ def test_api_only_process_runs_without_frontend_or_node_and_reuses_own_profile(t
     root = tmp_path / 'data'
     output = tmp_path / 'server.log'
     environment = {**os.environ, 'PYTHONPATH': os.pathsep.join((str(installed), str(checkout))), 'PATH': ''}
-    command = [sys.executable, '-m', 'tests.process_server', '--data', str(root), '--api-only', '--demo']
+    command = [sys.executable, '-m', 'tests.process_server', '--data', str(root), '--api-only', '--synthetic-source']
     with output.open('w') as log:
         process = ServerProcess(command, cwd=tmp_path, env=environment, stdout=log, stderr=subprocess.STDOUT)
     process.log_path = output

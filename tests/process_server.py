@@ -1,7 +1,7 @@
 import asyncio
 import os
 from pathlib import Path
-from oko.collection.demo import DemoSource
+from tests.support.demo_source import DemoSource
 import oko.__main__ as entrypoint
 from tests.support.app import create_app, OwnedServerTransport
 
@@ -45,6 +45,9 @@ if __name__ == '__main__':
         credential = root / '.test-database-url'
         if credential.is_file():
             sys.argv.extend(['--database-url-file', str(credential)])
+    synthetic = '--synthetic-source' in sys.argv
+    if synthetic:
+        sys.argv.remove('--synthetic-source')
     origin = os.environ.get('OKO_TEST_MODEL_ORIGIN')
     def fixture_app(root, **options):
         if os.environ.get('OKO_TEST_WEB_MEDIA'):
@@ -62,9 +65,11 @@ if __name__ == '__main__':
             options.update(clock=tick, wall_clock=tick)
         if origin:
             options['ai_transport'] = OwnedServerTransport(origin)
+        if synthetic:
+            options['rss_enabled'] = False
         app = create_app(root, **options)
         if os.environ.get('OKO_TEST_HOLD_PRESENCE_BODY') == '1':
             app.add_middleware(HeldPresenceBody)
         return app
     entrypoint.create_app = fixture_app
-    entrypoint.run(fault=fault, source=ResistantSource() if os.environ.get('OKO_TEST_FAULT') == 'resist_cancel' else None)
+    entrypoint.run(fault=fault, source=ResistantSource() if os.environ.get('OKO_TEST_FAULT') == 'resist_cancel' else DemoSource() if synthetic else None)

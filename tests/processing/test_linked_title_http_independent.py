@@ -1,7 +1,7 @@
 import asyncio
 from fastapi.testclient import TestClient
 from tests.support.synthetic_material import material as Material
-from oko.collection.demo import DemoSource
+from tests.support.demo_source import DemoSource
 from oko.services.collection import CollectionService
 from oko.storage.transaction import transaction
 from tests.support.app import create_app

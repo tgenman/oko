@@ -39,7 +39,7 @@ def test_native_tls_login_control_and_certificate_validation(tmp_path):
     seed.db.close()
     log_path = tmp_path / 'server.log'
     with log_path.open('w') as log:
-        process = ServerProcess([sys.executable, '-m', 'tests.process_server', '--persistent', '--demo',
+        process = ServerProcess([sys.executable, '-m', 'tests.process_server', '--persistent', '--synthetic-source',
             '--data', str(data), '--no-browser', '--port', str(port),
             '--public-url', origin, '--tls-cert', str(cert), '--tls-key', str(key)], stdout=log, stderr=subprocess.STDOUT)
     try:

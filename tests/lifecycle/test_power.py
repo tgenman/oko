@@ -2,7 +2,7 @@
 from tests.support.cards import read_all_cards
 from fastapi.testclient import TestClient
 
-from oko.collection.demo import DemoSource
+from tests.support.demo_source import DemoSource
 from tests.support.app import create_app
 from tests.support.reader import setup_reader
 

@@ -15,7 +15,7 @@ uv --version
 
 ```sh
 uv sync --locked --python python3.11
-uv run --locked python -m oko --demo
+uv run --locked python -m oko --database-url-file "$OKO_DATABASE_URL_FILE"
 ./scripts/check all
 ```
 

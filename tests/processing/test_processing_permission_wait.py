@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from tests.support.app import create_app
 from tests.support.reader import HEADERS, Clock, setup_reader, wait_for
 from tests.support.codex import CodexService, configure_codex
-from oko.collection.demo import DemoSource
+from tests.support.demo_source import DemoSource
 
 
 def test_forbidden_processing_waits_for_settings_without_errors_or_timed_retry(tmp_path):
