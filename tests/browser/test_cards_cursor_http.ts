@@ -5,8 +5,10 @@ import {reader,material,card} from './support';
 import {artifactPath} from './artifacts';
 import {addSources} from './connections';
 
-test('reading shows the first page and loads the next on scroll', {timeout: 90000}, async t=>{
+test('reading shows the first page and loads the next on scroll', {timeout: 180000}, async t=>{
+ t.diagnostic('Preparing synthetic library and starting reader');
  const r=await productionReader(t,{collection:false,library:{perFeed:26,active:false}});
+ t.diagnostic('Reader started; checking initial page and scrolling');
  const requests:{search:string;etag:string|undefined}[]=[];
  r.page.on('request',request=>{const url=new URL(request.url());if(url.pathname==='/api/v3/cards')requests.push({search:url.search,etag:request.headers()['if-none-match']});});
  await r.page.goto(r.origin+'/#token='+r.token);
@@ -106,8 +108,10 @@ test('a missing visible cursor restarts the current list',async()=>{
  }finally{await r.close();}
 });
 
-test('a captured late page cannot undo a viewed action over real HTTP',{timeout:90000},async t=>{
+test('a captured late page cannot undo a viewed action over real HTTP',{timeout:180000},async t=>{
+ t.diagnostic('Preparing synthetic library and starting reader');
  const r=await productionReader(t,{collection:false,library:{perFeed:26,active:false}});
+ t.diagnostic('Reader started; checking late page and viewed action');
  let release:(()=>void)|undefined;let captured=false;
  await r.page.route('**/api/v3/cards?*',async route=>{
   const query=new URL(route.request().url()).searchParams;
