@@ -36,10 +36,10 @@ class SummaryResults:
             return None
         job=material_read.jobs(self.store.db,item).get('theses')
         if not publication_input.stage_enabled(self.store, item, 'theses') and (not job or job['status'] != 'running'):
-            if job and job['error']:
-                return dict(status='off', error=job['error'])
+            if job and job['reason_message']:
+                return dict(status='off', error=job['reason_message'])
             return dict(status='done', error=None) if self.read(item) is not None else None
-        return dict(status='pending' if job['status']=='blocked' else job['status'],error=job['error']) if job else dict(status='pending',error=None)
+        return dict(status='pending' if job['status']=='blocked' else job['status'],error=job['reason_message']) if job else dict(status='pending',error=None)
 
     @reading_value
     def read(self,item: str) -> dict[str,Any] | None:

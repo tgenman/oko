@@ -21,7 +21,7 @@ def reconcile_settings(store: 'Store', identities: list[str], *, preserve_cancel
     ordered = sorted(set(identities))
     affected: list[int]=[]
     for start in range(0,len(ordered),400):
-        affected.extend(row['id'] for row in store.db.execute("SELECT id FROM jobs WHERE kind IN ('filter','theses') AND item=ANY(%s) AND (processor_visible OR problem_code='processor-config')",(ordered[start:start+400],)))
+        affected.extend(row['id'] for row in store.db.execute("SELECT id FROM jobs WHERE kind IN ('filter','theses') AND item=ANY(%s) AND (processor_visible OR reason_code='processor-config')",(ordered[start:start+400],)))
     processor_previous=store.problems.prepare_processor_change(affected,store.wall_clock())
     for start in range(0,len(ordered),400):
         batch = ordered[start:start+400]
@@ -45,7 +45,7 @@ def _stage(store: 'Store', batch: list[str], kind: Kind, *, preserve_cancelled: 
     with material_read.material_inputs(store.db,set(batch)), reading_snapshot():
         for item in batch:
             row = material_read.item(store.db,item)
-            if not row or row['viewed'] or row['platform'] is None or row['feed_id'] is None or not row['complete']:
+            if not row or row['viewed'] or row['platform'] is None or row['feed_id'] is None or not row['content']:
                 continue
             operation = store.filters if kind=='filter' else store.processing.theses
             signature = operation.signature(item)
@@ -87,13 +87,13 @@ def _stage(store: 'Store', batch: list[str], kind: Kind, *, preserve_cancelled: 
     if changed:capture_source_groups(store,effects,changed,kinds=(kind,))
     if unblock:
         job_write(store.db, """UPDATE jobs SET status='pending',
-            error=CASE WHEN payload::jsonb->>'preclaim_blocked'='true' THEN NULL ELSE error END,
-            problem_code=CASE WHEN payload::jsonb->>'preclaim_blocked'='true' THEN NULL ELSE problem_code END,
+            reason_code=CASE WHEN payload::jsonb->>'preclaim_blocked'='true' THEN NULL ELSE reason_code END,
+            reason_message=CASE WHEN payload::jsonb->>'preclaim_blocked'='true' THEN NULL ELSE reason_message END,
             payload=(payload-'preclaim_blocked') WHERE kind=%s AND item=ANY(%s) AND status='blocked'""", (kind,unblock))
     if block:
         job_write(store.db,"UPDATE jobs SET status='blocked' WHERE kind=%s AND item=ANY(%s) AND status='pending'", (kind,block))
     if cancel:
-        job_write(store.db,"UPDATE jobs SET status='cancelled',generation=generation+1,error=NULL,problem_code=NULL,input_snapshot=NULL WHERE kind=%s AND item=ANY(%s)", (kind,cancel))
+        job_write(store.db,"UPDATE jobs SET status='cancelled',generation=generation+1,reason_code=NULL,reason_message=NULL,input_snapshot=NULL WHERE kind=%s AND item=ANY(%s)", (kind,cancel))
     if upsert:
         wall = store.wall_clock()
         job_write(store.db,"""INSERT INTO jobs(kind,item,status,payload,input_snapshot)
@@ -102,8 +102,8 @@ def _stage(store: 'Store', batch: list[str], kind: Kind, *, preserve_cancelled: 
             ON CONFLICT(kind,item) DO UPDATE SET status=excluded.status,payload=excluded.payload,input_snapshot=excluded.input_snapshot,
                 generation=jobs.generation+1,
                 next=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.next ELSE 0 END,
-                error=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.error ELSE NULL END,
-                problem_code=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.problem_code ELSE NULL END""",
+                reason_code=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.reason_code ELSE NULL END,
+                reason_message=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.reason_message ELSE NULL END""",
             (kind,*([row[index] for row in upsert] for index in range(4)),wall,wall,wall))
 
     if changed:store.incomplete_draft.mark_materials(sorted(changed))

@@ -23,7 +23,7 @@ def blocks(content: dict[str, Any]) -> list[dict[str, Any]]:
 def content(store: 'Store', item: str) -> dict[str, Any]:
     row=material_read.item(store.db,item)
     own=youtube_media.add_input(store,saved_content(row['content'],mutable=True)) if row else {}
-    linked=[row for row in publication_links.children(store,item) if row['complete']]
+    linked=[row for row in publication_links.children(store,item) if row['content'] and row['status']!='pending_collection']
     if not linked:
         return own
     for block in own.get('blocks',[]):
@@ -77,9 +77,7 @@ def awaiting_input(content: dict[str, Any]) -> bool:
 
 
 def awaiting_linked_input(store: 'Store', item: str, selected: dict[str,Any]) -> bool:
-    if any(block.get('text','').strip() for block in blocks(selected)):
-        return False
-    return any(not row['complete'] for row in publication_links.children(store,item))
+    return any(not row['content'] or row['status']=='pending_collection' for row in publication_links.children(store,item))
 
 
 @reading_value
@@ -134,7 +132,7 @@ def settings(store: 'Store', item: str) -> dict[str, Any]:
 
 def signature(store: 'Store', item: str, kind: str) -> str | None:
     row=material_read.item(store.db,item)
-    if not row or row['viewed'] or row['feed_id'] is None or not row['complete'] or not row['content']:
+    if not row or row['viewed'] or row['feed_id'] is None or not row['content']:
         return None
     feed=processing_feed(store,item,kind)
     current=store.subscriptions.effective('feed',feed,details=False)

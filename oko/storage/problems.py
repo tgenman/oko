@@ -349,9 +349,9 @@ class Problems:
         ordered=sorted(items)
         for start in range(0,len(ordered),400):
             result.update(row['root'] for row in self.db.execute("""SELECT target.root FROM unnest(%s::text[]) target(root)
-                WHERE EXISTS (SELECT 1 FROM jobs j WHERE j.kind='fetch' AND j.item=target.root AND ((j.status IN ('pending','running','failed','unavailable','blocked') AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)) OR (j.status='done' AND j.error IS NOT NULL AND j.problem_code IS NOT NULL)))
+                WHERE EXISTS (SELECT 1 FROM jobs j WHERE j.kind='fetch' AND j.item=target.root AND ((j.status IN ('pending','running','failed','unavailable','blocked') AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL)) OR (j.status='done' AND j.reason_message IS NOT NULL AND j.reason_code IS NOT NULL)))
                    OR EXISTS (SELECT 1 FROM publication_links link JOIN jobs j ON j.kind='fetch' AND j.item=link.target_publication_id
-                       WHERE link.source_publication_id=target.root AND ((j.status IN ('pending','running','failed','unavailable','blocked') AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)) OR (j.status='done' AND j.error IS NOT NULL AND j.problem_code IS NOT NULL)))""",(ordered[start:start+400],)))
+                       WHERE link.source_publication_id=target.root AND ((j.status IN ('pending','running','failed','unavailable','blocked') AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL)) OR (j.status='done' AND j.reason_message IS NOT NULL AND j.reason_code IS NOT NULL)))""",(ordered[start:start+400],)))
         return result
 
     def recover_fetch_batch(self, rows: list[Any], now: float, *, include_youtube: bool = True, new_ids_out: set[str] | None = None) -> list[Any]:
@@ -681,7 +681,7 @@ class Problems:
         if self.db.execute("SELECT 1 FROM state WHERE key='fetch-null-recovered-v1'").fetchone():return
         cursor: int | None=None
         while True:
-            query="SELECT id FROM jobs WHERE kind='fetch' AND item IS NOT NULL AND item<>'' AND problem_code IS NULL AND error IS NOT NULL"
+            query="SELECT id FROM jobs WHERE kind='fetch' AND item IS NOT NULL AND item<>'' AND reason_code IS NULL AND reason_message IS NOT NULL"
             if cursor is not None:query+=' AND id>%s'
             rows=self.db.execute(query+' ORDER BY id LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
             if not rows:break
@@ -708,7 +708,7 @@ class Problems:
                 eligible=managed_candidates_many(self.store,[row['id'] for row in rows],self.store.wall_clock(),include_youtube=False)
                 complex_ids={row['id'] for row in complex_rows} | overflow_ids
                 owned=[job for job,candidates in eligible.items() if candidates and job not in complex_ids]
-                if owned:self.db.execute('UPDATE jobs SET fetch_null_owned=true,fetch_null_ambiguous=false WHERE id=ANY(%s) AND problem_code IS NULL AND error IS NOT NULL',(owned,))
+                if owned:self.db.execute('UPDATE jobs SET fetch_null_owned=true,fetch_null_ambiguous=false WHERE id=ANY(%s) AND reason_code IS NULL AND reason_message IS NOT NULL',(owned,))
             cursor=rows[-1]['id']
             self.store.fault('fetch_null_recovery_batch')
         with self.db:self.db.execute("INSERT INTO state(key,value) VALUES ('fetch-null-recovered-v1','true') ON CONFLICT DO NOTHING")
@@ -720,25 +720,25 @@ class Problems:
         many_youtube_members=bool(self.db.execute('''SELECT 1 FROM feeds f JOIN (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m ON m.feed_id=f.id
             WHERE f.kind='youtube' OFFSET 100 LIMIT 1''').fetchone())
         many_jobs=bool(self.db.execute("""SELECT 1 FROM jobs WHERE kind='fetch' AND item IS NOT NULL AND item<>''
-            AND problem_code IS NULL AND error IS NOT NULL OFFSET 100 LIMIT 1""").fetchone()) if many_youtube_members else False
+            AND reason_code IS NULL AND reason_message IS NOT NULL OFFSET 100 LIMIT 1""").fetchone()) if many_youtube_members else False
         bounded_job_walk=many_youtube_members and many_jobs
         while True:
             sql="""WITH youtube_feeds AS MATERIALIZED (SELECT id FROM feeds WHERE kind='youtube'),
                 candidates AS (
                     SELECT j.id FROM youtube_feeds f JOIN (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m ON m.feed_id=f.id
                     JOIN jobs j ON md5(j.item)=md5(m.id) AND j.item=m.id
-                    WHERE j.kind='fetch' AND j.item IS NOT NULL AND j.item<>'' AND j.status IN ('pending','running','failed','unavailable','blocked') AND j.problem_code IS NULL AND j.error IS NOT NULL
+                    WHERE j.kind='fetch' AND j.item IS NOT NULL AND j.item<>'' AND j.status IN ('pending','running','failed','unavailable','blocked') AND j.reason_code IS NULL AND j.reason_message IS NOT NULL
                     UNION
                     SELECT j.id FROM youtube_feeds f JOIN (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m ON m.feed_id=f.id
                     JOIN publication_links l ON l.source_publication_id=m.id
                     JOIN jobs j ON md5(j.item)=md5(l.target_publication_id) AND j.item=l.target_publication_id
-                    WHERE j.kind='fetch' AND j.item IS NOT NULL AND j.item<>'' AND j.status IN ('pending','running','failed','unavailable','blocked') AND j.problem_code IS NULL AND j.error IS NOT NULL
+                    WHERE j.kind='fetch' AND j.item IS NOT NULL AND j.item<>'' AND j.status IN ('pending','running','failed','unavailable','blocked') AND j.reason_code IS NULL AND j.reason_message IS NOT NULL
                     UNION
                     SELECT j.id FROM youtube_feeds f JOIN jobs j ON md5(j.feed_id)=md5(f.id) AND j.feed_id=f.id
-                    WHERE j.kind='fetch' AND j.item IS NOT NULL AND j.item<>'' AND j.feed_id IS NOT NULL AND j.status IN ('pending','running','failed','unavailable','blocked') AND j.problem_code IS NULL AND j.error IS NOT NULL
+                    WHERE j.kind='fetch' AND j.item IS NOT NULL AND j.item<>'' AND j.feed_id IS NOT NULL AND j.status IN ('pending','running','failed','unavailable','blocked') AND j.reason_code IS NULL AND j.reason_message IS NOT NULL
                 ) SELECT id FROM candidates"""
             if bounded_job_walk:
-                sql="SELECT id FROM jobs WHERE kind='fetch' AND item IS NOT NULL AND item<>'' AND problem_code IS NULL AND error IS NOT NULL"
+                sql="SELECT id FROM jobs WHERE kind='fetch' AND item IS NOT NULL AND item<>'' AND reason_code IS NULL AND reason_message IS NOT NULL"
                 if cursor is not None:sql+=' AND id>%s'
             elif cursor is not None:sql+=' WHERE id>%s'
             rows=self.db.execute(sql+' ORDER BY id LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
@@ -785,7 +785,7 @@ class Problems:
                 if self.db.execute('SELECT 1 FROM state WHERE key=%s',(marker,)).fetchone():return
                 from oko.storage import memberships
                 memberships.lock_graph(self.db)
-                sql="SELECT id FROM jobs WHERE kind='fetch' AND item IS NOT NULL AND item<>'' AND problem_code=ANY(%s)"
+                sql="SELECT id FROM jobs WHERE kind='fetch' AND item IS NOT NULL AND item<>'' AND reason_code=ANY(%s)"
                 if cursor is not None:sql+=' AND id>%s'
                 jobs=self.db.execute(sql+' ORDER BY id LIMIT 100',(codes,cursor) if cursor is not None else (codes,)).fetchall()
                 if not jobs:
@@ -803,7 +803,7 @@ class Problems:
                     complex_rows=self.recover_fetch_batch(active,now)
                     complex_ids={row['id'] for row in complex_rows}
                     simple_ids=[row['id'] for row in active if row['id'] not in complex_ids]
-                    if simple_ids:self.db.execute("UPDATE jobs SET identity_event_owned=true WHERE id=ANY(%s) AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') AND NOT fetch_null_ambiguous",(simple_ids,))
+                    if simple_ids:self.db.execute("UPDATE jobs SET identity_event_owned=true WHERE id=ANY(%s) AND reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') AND NOT fetch_null_ambiguous",(simple_ids,))
                     for row in complex_rows:self.sync_fetch(row['id'],previous.get(row['id'],[]),now)
                 suppressed={job_id:previous.get(job_id,[]) for job_id in ids if not current.get(job_id)}
                 if suppressed:self.sync_identity_profile_transition(suppressed,now)
@@ -869,7 +869,24 @@ class Problems:
                 cursor=(rows[-1]['created'],rows[-1]['id'])
             self.store.fault('fetch_delete_finished_legacy_recovery_batch')
 
+    def recover_jobs_without_reason(self, kind: str) -> None:
+        """Recover unsuccessful Jobs whose optional reason fields are both empty."""
+        after=0
+        while True:
+            rows=self.db.execute("SELECT id FROM jobs WHERE kind=%s AND status IN ('failed','unavailable') AND reason_code IS NULL AND reason_message IS NULL AND id>%s ORDER BY id LIMIT 100",(kind,after)).fetchall()
+            if not rows:
+                return
+            with self.db:
+                from oko.storage import memberships
+                memberships.lock_graph(self.db)
+                for row in rows:
+                    if kind=='fetch':self.sync_fetch(row['id'],[],self.store.wall_clock())
+                    elif kind=='download_media':self.sync_media_problem(row['id'],[],self.store.wall_clock())
+                    else:self.sync_processing_problem(row['id'],[],self.store.wall_clock())
+            after=rows[-1]['id']
+
     def recover_fetch_problems(self) -> None:
+        self.recover_jobs_without_reason('fetch')
         if self.db.execute("SELECT 1 FROM state WHERE key='fetch-problems-recovered-v2'").fetchone():
             self.recover_fetch_isolated_work()
             return
@@ -898,7 +915,7 @@ class Problems:
                 parsed.append((record,body,feed,item))
             items=sorted({item for _,_,_,item in parsed});feeds=sorted({feed for _,_,feed,_ in parsed})
             with self.db:
-                jobs={row['item']:row for row in self.db.execute("SELECT id,item,problem_code FROM jobs WHERE kind='fetch' AND item=ANY(%s)",(items,))} if items else {}
+                jobs={row['item']:row for row in self.db.execute("SELECT id,item,reason_code FROM jobs WHERE kind='fetch' AND item=ANY(%s)",(items,))} if items else {}
                 from oko.storage.fetch_job_problems import managed_candidates_many
                 expected=managed_candidates_many(self.store,[row['id'] for row in jobs.values()],self.store.wall_clock()) if jobs else {}
                 affected={obj['id'] for _,body,_,_ in parsed for obj in body['objects']}
@@ -912,7 +929,7 @@ class Problems:
                 pending_jobs: dict[int,list[dict[str,Any]]]={}
                 for record,body,feed,item in parsed:
                     job=jobs.get(item)
-                    if body['code']=='work-fetch' and (not job or job['problem_code'] is None):continue
+                    if body['code']=='work-fetch' and (not job or job['reason_code'] is None):continue
                     if job:
                         marked=body.get('fetch_job_id')==str(job['id'])
                         mentioned={obj['id'] for obj in body['objects']}
@@ -954,8 +971,8 @@ class Problems:
             self.store.fault('fetch_problem_record_recovery_batch')
         cursor: int | None=None
         while True:
-            query="""SELECT id FROM jobs WHERE kind='fetch' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL
-                AND problem_code NOT LIKE 'source-%%' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')"""
+            query="""SELECT id FROM jobs WHERE kind='fetch' AND item IS NOT NULL AND item<>'' AND reason_code IS NOT NULL
+                AND reason_code NOT LIKE 'source-%%' AND reason_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')"""
             if cursor is not None:query+=' AND id>%s'
             rows=self.db.execute(query+' ORDER BY id LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
             if not rows:break
@@ -1021,12 +1038,12 @@ class Problems:
         desired_youtube=[dict(candidate) for candidate in candidates if candidate.get('fetch_youtube_event')]
         if previous_youtube or desired_youtube:
             self.db.execute("UPDATE jobs SET fetch_youtube_sensitive=(%s=1) WHERE id=%s AND kind='fetch' AND fetch_youtube_sensitive IS DISTINCT FROM (%s=1)",(bool(desired_youtube),job_id,bool(desired_youtube)))
-        self.db.execute('UPDATE jobs SET fetch_null_owned=(%s=1) WHERE id=%s AND problem_code IS NULL AND error IS NOT NULL AND fetch_null_owned IS DISTINCT FROM (%s=1)',(bool(candidates),job_id,bool(candidates)))
+        self.db.execute('UPDATE jobs SET fetch_null_owned=(%s=1) WHERE id=%s AND reason_code IS NULL AND reason_message IS NOT NULL AND fetch_null_owned IS DISTINCT FROM (%s=1)',(bool(candidates),job_id,bool(candidates)))
         legacy=self.db.execute("""SELECT r.id FROM jobs j CROSS JOIN LATERAL (
             SELECT id FROM reader_problems WHERE finished IS NULL AND identity LIKE 'job:%%' AND body::jsonb->>'code'='work-fetch'
             AND body::jsonb->>'operation' IN ('producer:fetch','producer:status')
             AND substring(coalesce(body::jsonb->>'status_job_identity',identity) FROM ':fetch:(.*)$')=j.item LIMIT 101) r
-            WHERE j.id=%s AND j.kind='fetch' AND (j.fetch_null_ambiguous OR (j.problem_code IS NULL AND j.error IS NOT NULL))""",(job_id,)).fetchall()
+            WHERE j.id=%s AND j.kind='fetch' AND (j.fetch_null_ambiguous OR (j.reason_code IS NULL AND j.reason_message IS NOT NULL))""",(job_id,)).fetchall()
         if len(legacy)>=101:
             self.protect_fetch_null_legacy([job_id])
             self.db.execute('UPDATE jobs SET fetch_null_owned=false,fetch_null_ambiguous=true,identity_event_owned=false,fetch_youtube_sensitive=false WHERE id=%s',(job_id,))
@@ -1153,7 +1170,7 @@ class Problems:
             self.db.execute("""INSERT INTO reader_problems(id,identity,origin,body,created,finished,outcome)
                 SELECT id,identity,origin,body,created,NULL,NULL FROM unnest(%s::text[],%s::text[],%s::text[],%s::text[],%s::double precision[]) AS p(id,identity,origin,body,created)""",tuple([row[i] for row in added] for i in range(5)))
         if updates or added:status_changed(self.db)
-        self.db.execute("UPDATE jobs SET identity_event_owned=(COALESCE(problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'),false) AND item IS NOT NULL AND item<>'' AND NOT fetch_null_ambiguous) WHERE id=%s AND identity_event_owned IS DISTINCT FROM (COALESCE(problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'),false) AND item IS NOT NULL AND item<>'' AND NOT fetch_null_ambiguous)",(job_id,))
+        self.db.execute("UPDATE jobs SET identity_event_owned=(COALESCE(reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'),false) AND item IS NOT NULL AND item<>'' AND NOT fetch_null_ambiguous) WHERE id=%s AND identity_event_owned IS DISTINCT FROM (COALESCE(reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'),false) AND item IS NOT NULL AND item<>'' AND NOT fetch_null_ambiguous)",(job_id,))
         if previous_youtube or desired_youtube:
             from oko.storage.youtube_fetch_problems import transfer_reservation,cancel_reservations,sync_timer
             transferred=transfer_reservation(self.store,job_id,previous_youtube,desired_youtube,{row[0] for row in added}) if previous_youtube and desired_youtube else set()
@@ -1167,9 +1184,9 @@ class Problems:
         ordered=sorted(items)
         for start in range(0,len(ordered),400):
             result.update(row['root'] for row in self.db.execute("""SELECT target.root FROM unnest(%s::text[]) target(root)
-                WHERE EXISTS (SELECT 1 FROM jobs j WHERE j.kind='download_media' AND j.item=target.root AND j.status IN ('pending','running','failed','unavailable','blocked') AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL))
-                   OR EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=target.root AND j.status IN ('pending','running','failed','unavailable','blocked') AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL))
-                   OR EXISTS (SELECT 1 FROM publication_links l JOIN media_files m ON m.publication_id=l.target_publication_id JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE l.source_publication_id=target.root AND j.status IN ('pending','running','failed','unavailable','blocked') AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL))""",(ordered[start:start+400],)))
+                WHERE EXISTS (SELECT 1 FROM jobs j WHERE j.kind='download_media' AND j.item=target.root AND j.status IN ('pending','running','failed','unavailable','blocked') AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL))
+                   OR EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=target.root AND j.status IN ('pending','running','failed','unavailable','blocked') AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL))
+                   OR EXISTS (SELECT 1 FROM publication_links l JOIN media_files m ON m.publication_id=l.target_publication_id JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE l.source_publication_id=target.root AND j.status IN ('pending','running','failed','unavailable','blocked') AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL))""",(ordered[start:start+400],)))
         return result
 
     def recover_media_batch(self, rows: list[Any], now: float, *, include_subtitles: bool = False, new_ids_out: set[str] | None = None) -> list[Any]:
@@ -1288,10 +1305,10 @@ class Problems:
             query="""SELECT m.id AS file_id,j.id,j.subtitle_event_owned FROM media_files m JOIN jobs j ON j.item=m.id AND j.kind='download_media'
                 WHERE m.resource_key='youtube:subtitles' AND j.status IN ('pending','running','failed','unavailable','blocked')"""
             if profile_only:
-                query+=" AND j.problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')"
+                query+=" AND j.reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')"
             else:
-                query+=""" AND ((j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%'
-                    AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')))"""
+                query+=""" AND ((j.reason_code IS NULL AND j.reason_message IS NOT NULL) OR (j.reason_code IS NOT NULL AND j.reason_code NOT LIKE 'source-%%'
+                    AND j.reason_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')))"""
             if cursor is not None:query+=' AND '+('j.id>%s' if profile_only else 'm.id COLLATE "C">%s')
             order='j.id' if profile_only else 'm.id COLLATE "C"'
             rows=self.db.execute(query+' ORDER BY '+order+' LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
@@ -1389,7 +1406,7 @@ class Problems:
                 if self.db.execute("SELECT 1 FROM state WHERE key='media-profile-problems-recovered-v1'").fetchone():return
                 query="""SELECT j.id FROM jobs j LEFT JOIN media_files m ON m.id=j.item
                     WHERE j.kind='download_media' AND j.item IS NOT NULL AND j.item<>''
-                    AND j.problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')
+                    AND j.reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')
                     AND m.resource_key IS DISTINCT FROM 'youtube:subtitles'"""
                 if cursor is not None:query+=' AND j.id>%s'
                 rows=self.db.execute(query+' ORDER BY j.id LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
@@ -1436,7 +1453,7 @@ class Problems:
                 if self.db.execute("SELECT 1 FROM state WHERE key='media-null-problems-recovered-v1'").fetchone():return
                 query="""SELECT j.id FROM jobs j LEFT JOIN media_files m ON m.id=j.item
                     WHERE j.kind='download_media' AND j.item IS NOT NULL AND j.item<>''
-                    AND j.problem_code IS NULL AND j.error IS NOT NULL AND m.resource_key IS DISTINCT FROM 'youtube:subtitles'"""
+                    AND j.reason_code IS NULL AND j.reason_message IS NOT NULL AND m.resource_key IS DISTINCT FROM 'youtube:subtitles'"""
                 if cursor is not None:query+=' AND j.id>%s'
                 rows=self.db.execute(query+' ORDER BY j.id LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
                 if not rows:break
@@ -1476,7 +1493,7 @@ class Problems:
                     item=tail.split(':download_media:',1)[1]
                     if item:parsed.append((record,item))
                 jobs={row['item']:row['id'] for row in self.db.execute("""SELECT j.id,j.item FROM jobs j JOIN media_files m ON m.id=j.item
-                    WHERE j.kind='download_media' AND j.item=ANY(%s) AND j.status='done' AND j.error IS NULL AND j.problem_code IS NULL
+                    WHERE j.kind='download_media' AND j.item=ANY(%s) AND j.status='done' AND j.reason_message IS NULL AND j.reason_code IS NULL
                     AND m.resource_key IS DISTINCT FROM 'youtube:subtitles'""",([item for _,item in parsed],))} if parsed else {}
                 projected=candidates_many(self.store,list(jobs.values()),self.store.wall_clock(),include_completed=True) if jobs else {}
                 proven=[]
@@ -1504,6 +1521,7 @@ class Problems:
             self.store.fault('media_null_terminal_recovery_batch')
 
     def recover_media_problems(self) -> None:
+        self.recover_jobs_without_reason('download_media')
         if self.db.execute("SELECT 1 FROM state WHERE key='media-problems-recovered-v2'").fetchone():return
         problem_cursor: tuple[float,str] | None=None
         while True:
@@ -1591,8 +1609,8 @@ class Problems:
             self.store.fault('media_problem_record_recovery_batch')
         cursor: int | None=None
         while True:
-            query="""SELECT id FROM jobs WHERE kind='download_media' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL
-                AND problem_code NOT LIKE 'source-%%' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')"""
+            query="""SELECT id FROM jobs WHERE kind='download_media' AND item IS NOT NULL AND item<>'' AND reason_code IS NOT NULL
+                AND reason_code NOT LIKE 'source-%%' AND reason_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')"""
             if cursor is not None:query+=' AND id>%s'
             rows=self.db.execute(query+' ORDER BY id LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
             if not rows:break
@@ -1664,7 +1682,7 @@ class Problems:
         profile_row=self.db.execute("""SELECT j.id FROM jobs j LEFT JOIN media_files m ON m.id=j.item
             WHERE j.id=%s AND j.kind='download_media' AND j.item IS NOT NULL AND j.item<>''
               AND j.status IN ('pending','running','failed','unavailable','blocked')
-              AND j.problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')
+              AND j.reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')
               AND m.resource_key IS DISTINCT FROM 'youtube:subtitles'""",(job_id,)).fetchone() if not successful else None
         profile_owned=bool(profile_row)
         self.db.execute("UPDATE jobs SET identity_event_owned=(%s=1) WHERE id=%s AND kind='download_media' AND identity_event_owned IS DISTINCT FROM (%s=1)",(profile_owned,job_id,profile_owned))
@@ -1681,7 +1699,7 @@ class Problems:
                 return
         current_subtitle_ids={candidate['id'] for candidate in candidates if candidate.get('subtitle_event')}
         desired_subtitle=[dict(candidate) for candidate in candidates if candidate.get('subtitle_event')]
-        profile_subtitle=self.db.execute("SELECT 1 FROM jobs j JOIN media_files m ON m.id=j.item WHERE j.id=%s AND j.kind='download_media' AND m.resource_key='youtube:subtitles' AND j.status IN ('pending','running','failed','unavailable','blocked') AND j.problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')",(job_id,)).fetchone() is not None
+        profile_subtitle=self.db.execute("SELECT 1 FROM jobs j JOIN media_files m ON m.id=j.item WHERE j.id=%s AND j.kind='download_media' AND m.resource_key='youtube:subtitles' AND j.status IN ('pending','running','failed','unavailable','blocked') AND j.reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')",(job_id,)).fetchone() is not None
         owned_subtitle=bool(candidates) or profile_subtitle
         ownership_changed=self.db.execute("UPDATE jobs SET subtitle_event_owned=(%s=1) WHERE id=%s AND kind='download_media' AND EXISTS (SELECT 1 FROM media_files WHERE id=jobs.item AND resource_key='youtube:subtitles') AND subtitle_event_owned IS DISTINCT FROM (%s=1)",(owned_subtitle,job_id,owned_subtitle)).rowcount
         if previous_subtitle and not desired_subtitle and not profile_subtitle:
@@ -1884,9 +1902,9 @@ class Problems:
         ordered=sorted(items)
         for start in range(0,len(ordered),400):
             result.update(row['root'] for row in self.db.execute("""SELECT target.root FROM unnest(%s::text[]) target(root)
-                WHERE EXISTS (SELECT 1 FROM jobs j WHERE j.kind IN ('filter','theses') AND j.item=target.root AND j.status IN ('pending','running','failed','unavailable','blocked') AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL))
+                WHERE EXISTS (SELECT 1 FROM jobs j WHERE j.kind IN ('filter','theses') AND j.item=target.root AND j.status IN ('pending','running','failed','unavailable','blocked') AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL))
                    OR EXISTS (SELECT 1 FROM publication_links link JOIN jobs j ON j.kind IN ('filter','theses') AND j.item=link.target_publication_id
-                       WHERE link.source_publication_id=target.root AND j.status IN ('pending','running','failed','unavailable','blocked') AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL))""",(ordered[start:start+400],)))
+                       WHERE link.source_publication_id=target.root AND j.status IN ('pending','running','failed','unavailable','blocked') AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL))""",(ordered[start:start+400],)))
         return result
 
     def recover_processing_batch(self, rows: list[Any], now: float) -> list[Any]:
@@ -1947,7 +1965,7 @@ class Problems:
                 memberships.lock_graph(self.db)
                 if self.db.execute("SELECT 1 FROM state WHERE key='filter-profile-problems-recovered-v1'").fetchone():return
                 query="""SELECT id FROM jobs WHERE kind='filter' AND item IS NOT NULL AND item<>''
-                    AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')"""
+                    AND reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')"""
                 if cursor is not None:query+=' AND id>%s'
                 rows=self.db.execute(query+' ORDER BY id LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
                 if not rows:break
@@ -1990,7 +2008,7 @@ class Problems:
                 memberships.lock_graph(self.db)
                 if self.db.execute("SELECT 1 FROM state WHERE key='theses-profile-problems-recovered-v1'").fetchone():return
                 query="""SELECT id FROM jobs WHERE kind='theses' AND item IS NOT NULL AND item<>''
-                    AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')"""
+                    AND reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')"""
                 if cursor is not None:query+=' AND id>%s'
                 rows=self.db.execute(query+' ORDER BY id LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
                 if not rows:break
@@ -2024,6 +2042,8 @@ class Problems:
             self.store.fault('theses_profile_legacy_protection_batch')
 
     def recover_processing_problems(self) -> None:
+        self.recover_jobs_without_reason('filter')
+        self.recover_jobs_without_reason('theses')
         if self.db.execute("SELECT 1 FROM state WHERE key='processing-problems-recovered-v2'").fetchone():return
         def saved_job_id(value: Any) -> int | None:
             if not isinstance(value,str) or len(value)>20 or not re.fullmatch(r'-?(?:0|[1-9][0-9]*)',value):return None
@@ -2057,7 +2077,7 @@ class Problems:
                 parsed.append((record,body,feed,item,kind))
             items=sorted({item for _,_,_,item,_ in parsed});feeds=sorted({feed for _,_,feed,_,_ in parsed})
             with self.db:
-                jobs={(row['kind'],row['item']):row for row in self.db.execute("SELECT id,kind,item,problem_code FROM jobs WHERE kind IN ('filter','theses') AND item=ANY(%s)",(items,))} if items else {}
+                jobs={(row['kind'],row['item']):row for row in self.db.execute("SELECT id,kind,item,reason_code FROM jobs WHERE kind IN ('filter','theses') AND item=ANY(%s)",(items,))} if items else {}
                 from oko.storage.processing_job_problems import managed_candidates_many
                 expected=managed_candidates_many(self.store,[row['id'] for row in jobs.values()],self.store.wall_clock()) if jobs else {}
                 marker_ids={marker for _,body,_,_,_ in parsed if (marker:=saved_job_id(body.get('processing_job_id'))) is not None}
@@ -2118,8 +2138,8 @@ class Problems:
             self.store.fault('processing_problem_record_recovery_batch')
         cursor: int | None=None
         while True:
-            query="""SELECT id FROM jobs WHERE kind IN ('filter','theses') AND item IS NOT NULL AND item<>'' AND (((problem_code='' OR (problem_code IS NULL AND error IS NOT NULL))) OR (problem_code IS NOT NULL AND problem_code<>''
-                AND problem_code NOT LIKE 'source-%%' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')))"""
+            query="""SELECT id FROM jobs WHERE kind IN ('filter','theses') AND item IS NOT NULL AND item<>'' AND (((reason_code='' OR (reason_code IS NULL AND reason_message IS NOT NULL))) OR (reason_code IS NOT NULL AND reason_code<>''
+                AND reason_code NOT LIKE 'source-%%' AND reason_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')))"""
             if cursor is not None:query+=' AND id>%s'
             rows=self.db.execute(query+' ORDER BY id LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
             if not rows:break
@@ -2195,7 +2215,7 @@ class Problems:
         for start in range(0,len(ids),400):
             batch=ids[start:start+400]
             current=managed_candidates_many(self.store,batch,now)
-            profile_ids={row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE id=ANY(%s) AND kind IN ('filter','theses') AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')",(batch,))}
+            profile_ids={row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE id=ANY(%s) AND kind IN ('filter','theses') AND reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')",(batch,))}
             profile_ids.update(job for job in batch if any((part.get('filter_profile_event') or part.get('theses_profile_event')) for part in previous_by_job[job]))
             for job in sorted(profile_ids):self.sync_processing_problem(job,previous_by_job[job],now)
             batch=[job for job in batch if job not in profile_ids]
@@ -2242,7 +2262,7 @@ class Problems:
     def sync_processing_problem(self, job_id: int, previous: list[dict[str,Any]], now: float, *, allow_rekey: bool = True) -> None:
         from oko.storage.processing_job_problems import managed_candidates
         candidates=managed_candidates(self.store,job_id,now)
-        profile=self.db.execute("SELECT 1 FROM jobs WHERE id=%s AND kind IN ('filter','theses') AND item IS NOT NULL AND item<>'' AND status IN ('pending','running','failed','unavailable','blocked') AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')",(job_id,)).fetchone()
+        profile=self.db.execute("SELECT 1 FROM jobs WHERE id=%s AND kind IN ('filter','theses') AND item IS NOT NULL AND item<>'' AND status IN ('pending','running','failed','unavailable','blocked') AND reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')",(job_id,)).fetchone()
         self.db.execute("UPDATE jobs SET identity_event_owned=(%s=1) WHERE id=%s AND kind IN ('filter','theses') AND identity_event_owned IS DISTINCT FROM (%s=1)",(bool(profile),job_id,bool(profile)))
         keys={candidate['id'] for candidate in previous+candidates}
         keys.update(candidate['_legacy_id'] for candidate in candidates if candidate.get('_legacy_id'))
@@ -2388,9 +2408,9 @@ class Problems:
 
     @staticmethod
     def deletion_identity(row: Any) -> str | None:
-        if row['item'] is None or (row['problem_code'] is None and row['error'] is None):
+        if row['item'] is None or (row['reason_code'] is None and row['reason_message'] is None):
             return None
-        code = row['problem_code'] or 'work-' + row['kind']
+        code = row['reason_code'] or 'work-' + row['kind']
         special={'codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'}
         if not isinstance(code,str) or code.startswith('source-') or code in special:
             return None
@@ -2399,12 +2419,12 @@ class Problems:
 
     def deletion_candidates(self, job_id: int, now: float) -> list[dict[str, Any]]:
         """Project one deletion Job for every affected root owner."""
-        rows = self.db.execute(f"""SELECT j.kind,j.item,j.status,j.error,j.problem_code,
+        rows = self.db.execute(f"""SELECT j.kind,j.item,j.status,j.reason_message,j.reason_code,
             coalesce({owner_expr('p')},{owner_expr('root')},j.feed_id) AS feed_id
             FROM jobs j LEFT JOIN publications p ON p.id=j.item
             LEFT JOIN publication_links l ON l.target_publication_id=p.id
             LEFT JOIN publications root ON root.id=l.source_publication_id AND root.viewed=0
-            WHERE j.id=%s AND j.kind IN ('delete','feed-delete') AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL) ORDER BY root.id""", (job_id,)).fetchall()
+            WHERE j.id=%s AND j.kind IN ('delete','feed-delete') AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL) ORDER BY root.id""", (job_id,)).fetchall()
         candidates: dict[str, dict[str, Any]] = {}
         for row in rows:
             candidate = self._deletion_candidate(row,now)
@@ -2415,19 +2435,19 @@ class Problems:
     def deletion_problem_ids(self, job_id: int, now: float) -> list[str]:
         """Capture current and pre-owner-fix identities before a graph mutation."""
         identities = {candidate['id'] for candidate in self.deletion_candidates(job_id,now)}
-        row = self.db.execute("SELECT kind,item,error,problem_code,feed_id FROM jobs WHERE id=%s AND kind IN ('delete','feed-delete')",(job_id,)).fetchone()
+        row = self.db.execute("SELECT kind,item,reason_message,reason_code,feed_id FROM jobs WHERE id=%s AND kind IN ('delete','feed-delete')",(job_id,)).fetchone()
         legacy = self.deletion_identity(row) if row else None
         if legacy:
             identities.add(legacy)
         return sorted(identities)
 
     def _deletion_candidate(self, row: Any, now: float) -> dict[str, Any] | None:
-        if row['status'] not in ('pending','running','failed','unavailable','blocked') or (row['problem_code'] is None and row['error'] is None):
+        if row['status'] not in ('pending','running','failed','unavailable','blocked') or (row['reason_code'] is None and row['reason_message'] is None):
             return None
         identity = self.deletion_identity(row)
         if identity is None:
             return None
-        code = row['problem_code'] or 'work-' + row['kind']
+        code = row['reason_code'] or 'work-' + row['kind']
         feed = row['feed_id'] or row['item'] or ''
         kind = row['kind']
         title = 'Удаление фида не завершено' if kind=='feed-delete' else 'Удаление не завершено'
@@ -2438,10 +2458,10 @@ class Problems:
         candidate = dict(id=identity,code=code,section='object',title=title,
             consequence='Око продолжает попытки удаления.',next_step=next_step,
             objects=[dict(kind='feed',id=feed)] if kind=='feed-delete' else [],action=None,
-            operation='producer:'+kind,created_at=now,state='retrying' if row['status']=='running' or not row['error'] else 'current',
+            operation='producer:'+kind,created_at=now,state='retrying' if row['status']=='running' or not row['reason_message'] else 'current',
             finished_at=None,outcome=None,next_at=None)
-        if kind!='delete' and row['error']:
-            candidate['reason']=row['error']
+        if kind!='delete' and row['reason_message']:
+            candidate['reason']=row['reason_message']
         return candidate
 
     @staticmethod
@@ -2578,7 +2598,7 @@ class Problems:
                     raise RuntimeError('Unable to allocate deletion problem identity')
         current = {candidate['id']:candidate for candidate in current_candidates}
         if current:
-            job_row = self.db.execute("SELECT kind,item,error,problem_code,feed_id FROM jobs WHERE id=%s",(job_id,)).fetchone()
+            job_row = self.db.execute("SELECT kind,item,reason_message,reason_code,feed_id FROM jobs WHERE id=%s",(job_id,)).fetchone()
             legacy = self.deletion_identity(job_row) if job_row else None
             if legacy and legacy not in current:
                 old = self.db.execute('SELECT id,identity,body FROM reader_problems WHERE identity=%s AND finished IS NULL',(legacy,)).fetchone()
@@ -2649,7 +2669,7 @@ class Problems:
             feed=row['item']
             if not isinstance(feed,str) or not feed:
                 continue
-            code=row['problem_code'] or 'work-discover'
+            code=row['reason_code'] or 'work-discover'
             identity='job:'+code+':'+feed+':discover'+('' if code.startswith('source-') else ':'+feed)
             counts[identity]=counts.get(identity,0)+1
             if row['feed_id'] not in (None,feed) or row['status'] not in ('pending','running','failed','unavailable','blocked') or code in unsupported:
@@ -2670,13 +2690,13 @@ class Problems:
         legacy_sources=[row for row in rows if row['item'] in publication_ids or row['feed_id'] not in (None,row['item'])]
         legacy_keys: set[str] = set()
         if legacy_sources:
-            legacy_rows=self.db.execute(f"""SELECT j.id,j.item,j.problem_code,coalesce({owner_expr('items')},{owner_expr('linked_root')},j.feed_id) AS legacy_owner
+            legacy_rows=self.db.execute(f"""SELECT j.id,j.item,j.reason_code,coalesce({owner_expr('items')},{owner_expr('linked_root')},j.feed_id) AS legacy_owner
                 FROM jobs j LEFT JOIN publications items ON items.id=j.item
                 LEFT JOIN publication_links link ON link.target_publication_id=items.id
                 LEFT JOIN publications linked_root ON linked_root.id=link.source_publication_id AND linked_root.viewed=0
                 WHERE j.id=ANY(%s)""",([row['id'] for row in legacy_sources],)).fetchall()
             for row in legacy_rows:
-                code=row['problem_code'] or 'work-discover'
+                code=row['reason_code'] or 'work-discover'
                 owner=row['legacy_owner'] or row['item'] or ''
                 legacy_keys.add('job:'+code+':'+owner+':discover'+('' if code.startswith('source-') else ':'+(row['item'] or '')))
         simple=[(row,identity) for row,identity in pairs if counts[identity]==1 and row['item'] not in publication_ids and row['item'] not in deleting_feeds and identity not in occupied and row['item'] not in prior_feeds and identity not in legacy_keys]
@@ -2684,9 +2704,9 @@ class Problems:
         simple_ids={row['id'] for row,_ in simple}
         added=[]
         for row,identity in simple:
-            code=row['problem_code'] or 'work-discover'
-            body=dict(code=code,section='object',title='Не удалось обновить источник',consequence='Сохранённое содержимое остаётся доступным.',next_step='Включите обработку, чтобы повторить попытку.' if row['status']=='blocked' else 'Повторите загрузку вручную.' if row['status']=='failed' else 'Проверьте доступность источника.' if row['status']=='unavailable' else 'Око повторит попытку автоматически.',objects=[dict(kind='feed',id=row['item'])],action=None,operation='producer:discover',state='retrying' if row['status']=='running' or not row['error'] else 'current',next_at=None)
-            if row['error']:body['reason']=row['error']
+            code=row['reason_code'] or 'work-discover'
+            body=dict(code=code,section='object',title='Не удалось обновить источник',consequence='Сохранённое содержимое остаётся доступным.',next_step='Включите обработку, чтобы повторить попытку.' if row['status']=='blocked' else 'Повторите загрузку вручную.' if row['status']=='failed' else 'Проверьте доступность источника.' if row['status']=='unavailable' else 'Око повторит попытку автоматически.',objects=[dict(kind='feed',id=row['item'])],action=None,operation='producer:discover',state='retrying' if row['status']=='running' or not row['reason_message'] else 'current',next_at=None)
+            if row['reason_message']:body['reason']=row['reason_message']
             if code=='source-reconnect':body.update(section='action',next_step='Проверьте привязку источника; доступ не изменяется автоматически.')
             added.append((uuid.uuid4().hex,identity,'background',json.dumps(body),now))
         self.db.execute("""INSERT INTO reader_problems(id,identity,origin,body,created,finished,outcome)
@@ -2699,7 +2719,7 @@ class Problems:
             return
         cursor = None
         while True:
-            rows = self.db.execute("SELECT * FROM jobs WHERE kind='discover' AND (error IS NOT NULL OR problem_code IS NOT NULL)" + (" AND id>%s" if cursor is not None else "") + " ORDER BY id LIMIT 100", (cursor,) if cursor is not None else ()).fetchall()
+            rows = self.db.execute("SELECT * FROM jobs WHERE kind='discover' AND (reason_message IS NOT NULL OR reason_code IS NOT NULL)" + (" AND id>%s" if cursor is not None else "") + " ORDER BY id LIMIT 100", (cursor,) if cursor is not None else ()).fetchall()
             if not rows:
                 break
             with self.db:
@@ -2728,18 +2748,18 @@ class Problems:
                 all_feeds.update(feeds)
             with self.db:
                 aliases=sorted(all_feeds)
-                active={(row['item'] or '',row['code']) for row in self.db.execute("SELECT item,coalesce(problem_code,'work-discover') AS code FROM jobs WHERE kind='discover' AND item=ANY(%s) AND status IN ('pending','running','failed','unavailable','blocked') AND (error IS NOT NULL OR problem_code IS NOT NULL)",(aliases,))} if aliases else set()
+                active={(row['item'] or '',row['code']) for row in self.db.execute("SELECT item,coalesce(reason_code,'work-discover') AS code FROM jobs WHERE kind='discover' AND item=ANY(%s) AND status IN ('pending','running','failed','unavailable','blocked') AND (reason_message IS NOT NULL OR reason_code IS NOT NULL)",(aliases,))} if aliases else set()
                 legacy_active: set[tuple[str,str]] = set()
                 if all_feeds:
-                    legacy_active.update((row['feed_id'],row['code']) for row in self.db.execute("""SELECT owner.feed_id,coalesce(j.problem_code,'work-discover') AS code FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) owner
+                    legacy_active.update((row['feed_id'],row['code']) for row in self.db.execute("""SELECT owner.feed_id,coalesce(j.reason_code,'work-discover') AS code FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) owner
                         JOIN jobs j ON j.item=owner.id AND j.kind='discover'
                         WHERE owner.feed_id=ANY(%s) AND j.status IN ('pending','running','failed','unavailable','blocked')
-                          AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)""",(sorted(all_feeds),)))
-                    legacy_active.update((row['feed_id'],row['code']) for row in self.db.execute("""SELECT owner.feed_id,coalesce(j.problem_code,'work-discover') AS code FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) owner
+                          AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL)""",(sorted(all_feeds),)))
+                    legacy_active.update((row['feed_id'],row['code']) for row in self.db.execute("""SELECT owner.feed_id,coalesce(j.reason_code,'work-discover') AS code FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) owner
                         JOIN publications root ON root.id=owner.id AND root.viewed=0 JOIN publication_links link ON link.source_publication_id=root.id
                         JOIN jobs j ON j.item=link.target_publication_id AND j.kind='discover'
                         WHERE owner.feed_id=ANY(%s) AND j.status IN ('pending','running','failed','unavailable','blocked')
-                          AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)
+                          AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL)
                           AND NOT EXISTS (SELECT 1 FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) target WHERE target.id=j.item)""",(sorted(all_feeds),)))
                 present={row['id'] for row in self.db.execute("SELECT id FROM feeds WHERE id=ANY(%s) AND connection!='deleting'",(sorted(all_feeds),))} if all_feeds else set()
                 profile_feeds={feed for record,code,feeds in parsed if code in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') for feed in feeds if (feed,code) in active}
@@ -2763,16 +2783,16 @@ class Problems:
 
     def discover_legacy_active(self, owner: str, code: str, excluded_job: int) -> bool:
         params=(owner,excluded_job,code)
-        query="""SELECT 1 FROM jobs j WHERE j.kind='discover' AND j.item=%s AND j.id!=%s AND j.status IN ('pending','running','failed','unavailable','blocked') AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL) AND coalesce(j.problem_code,'work-discover')=%s LIMIT 1"""
+        query="""SELECT 1 FROM jobs j WHERE j.kind='discover' AND j.item=%s AND j.id!=%s AND j.status IN ('pending','running','failed','unavailable','blocked') AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL) AND coalesce(j.reason_code,'work-discover')=%s LIMIT 1"""
         if self.db.execute(query,params).fetchone():return True
         query="""SELECT 1 FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) owner JOIN jobs j ON j.item=owner.id AND j.kind='discover'
             WHERE owner.feed_id=%s AND j.id!=%s AND j.status IN ('pending','running','failed','unavailable','blocked')
-              AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL) AND coalesce(j.problem_code,'work-discover')=%s LIMIT 1"""
+              AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL) AND coalesce(j.reason_code,'work-discover')=%s LIMIT 1"""
         if self.db.execute(query,params).fetchone():return True
         query="""SELECT 1 FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) owner JOIN publications root ON root.id=owner.id AND root.viewed=0
             JOIN publication_links link ON link.source_publication_id=root.id JOIN jobs j ON j.item=link.target_publication_id AND j.kind='discover'
             WHERE owner.feed_id=%s AND j.id!=%s AND j.status IN ('pending','running','failed','unavailable','blocked')
-              AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL) AND coalesce(j.problem_code,'work-discover')=%s
+              AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL) AND coalesce(j.reason_code,'work-discover')=%s
               AND NOT EXISTS (SELECT 1 FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) target WHERE target.id=j.item) LIMIT 1"""
         return self.db.execute(query,params).fetchone() is not None
 
@@ -2791,12 +2811,12 @@ class Problems:
         if not feed:
             return
         old = self.db.execute("SELECT identity,body FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:discover' AND (body::jsonb->'objects') @> %s::jsonb", (json.dumps([dict(kind='feed',id=feed)]),)).fetchall()
-        jobs=self.db.execute("SELECT * FROM jobs WHERE kind='discover' AND item=ANY(%s) AND status IN ('pending','running','failed','unavailable','blocked') AND (error IS NOT NULL OR problem_code IS NOT NULL) ORDER BY id",([feed],)).fetchall()
+        jobs=self.db.execute("SELECT * FROM jobs WHERE kind='discover' AND item=ANY(%s) AND status IN ('pending','running','failed','unavailable','blocked') AND (reason_message IS NOT NULL OR reason_code IS NOT NULL) ORDER BY id",([feed],)).fetchall()
         feed_row=self.db.execute('SELECT connection FROM feeds WHERE id=%s',(feed,)).fetchone()
         deleting=bool(feed_row and feed_row['connection']=='deleting')
         candidates: dict[str,dict[str,Any]]={}
         for row in (() if deleting else jobs):
-            code=row['problem_code'] or 'work-discover'
+            code=row['reason_code'] or 'work-discover'
             if code in ('codex-choice','ai-permission','youtube-admission','processor-config'):
                 continue
             if self.discover_profile_suppresses(feed,code):
@@ -2804,8 +2824,8 @@ class Problems:
             identity='job:'+code+':'+feed+':discover'+('' if code.startswith('source-') else ':'+(row['item'] or ''))
             if identity in candidates:
                 continue
-            body=dict(id=identity,code=code,section='object',title='Не удалось обновить источник',consequence='Сохранённое содержимое остаётся доступным.',next_step='Включите обработку, чтобы повторить попытку.' if row['status']=='blocked' else 'Повторите загрузку вручную.' if row['status']=='failed' else 'Проверьте доступность источника.' if row['status']=='unavailable' else 'Око повторит попытку автоматически.',objects=[dict(kind='feed',id=feed)],action=None,operation='producer:discover',state='retrying' if row['status']=='running' or not row['error'] else 'current',next_at=None)
-            if row['error']:body['reason']=row['error']
+            body=dict(id=identity,code=code,section='object',title='Не удалось обновить источник',consequence='Сохранённое содержимое остаётся доступным.',next_step='Включите обработку, чтобы повторить попытку.' if row['status']=='blocked' else 'Повторите загрузку вручную.' if row['status']=='failed' else 'Проверьте доступность источника.' if row['status']=='unavailable' else 'Око повторит попытку автоматически.',objects=[dict(kind='feed',id=feed)],action=None,operation='producer:discover',state='retrying' if row['status']=='running' or not row['reason_message'] else 'current',next_at=None)
+            if row['reason_message']:body['reason']=row['reason_message']
             if code=='source-reconnect':body.update(section='action',next_step='Проверьте привязку источника; доступ не изменяется автоматически.')
             candidates[identity]=body
         current={}
@@ -2813,7 +2833,7 @@ class Problems:
             identity=canonical
             if not self.db.execute('SELECT 1 FROM reader_problems WHERE identity=%s AND finished IS NULL',(canonical,)).fetchone():
                 for row in jobs:
-                    code=row['problem_code'] or 'work-discover'
+                    code=row['reason_code'] or 'work-discover'
                     expected='job:'+code+':'+feed+':discover'+('' if code.startswith('source-') else ':'+(row['item'] or ''))
                     if expected!=canonical:
                         continue
@@ -2903,8 +2923,8 @@ class Problems:
                 if self.db.execute("SELECT 1 FROM state WHERE key='deletion-extra-recovered-v1'").fetchone():return
                 query="""SELECT id FROM jobs WHERE kind IN ('delete','feed-delete') AND item IS NOT NULL
                     AND status IN ('pending','running','failed','unavailable','blocked')
-                    AND problem_code IS NOT NULL AND problem_code<>'' AND problem_code NOT LIKE 'source-%%'
-                    AND problem_code NOT IN ('delete','feed-delete','work-delete','work-feed-delete',
+                    AND reason_code IS NOT NULL AND reason_code<>'' AND reason_code NOT LIKE 'source-%%'
+                    AND reason_code NOT IN ('delete','feed-delete','work-delete','work-feed-delete',
                         'codex-choice','ai-permission','youtube-admission','processor-config',
                         'identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')"""
                 if cursor is not None:query+=' AND id>%s'
@@ -2948,8 +2968,8 @@ class Problems:
             boundary = '' if cursor is None else ' AND id>%s'
             params = () if cursor is None else (cursor,)
             rows=self.db.execute("""SELECT id FROM jobs WHERE kind IN ('delete','feed-delete')
-                AND (error IS NOT NULL OR problem_code IS NOT NULL)
-                AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')"""+boundary+' ORDER BY id LIMIT 100',params).fetchall()
+                AND (reason_message IS NOT NULL OR reason_code IS NOT NULL)
+                AND coalesce(nullif(reason_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')"""+boundary+' ORDER BY id LIMIT 100',params).fetchall()
             if not rows:
                 break
             with self.db:
@@ -2997,9 +3017,9 @@ class Problems:
                         candidate['id']=canonical
                     if not self.deletion_record_matches(record,candidate):
                         continue
-                    job=self.db.execute('SELECT id,status,error,problem_code FROM jobs WHERE kind=%s AND item=%s',(kind,item)).fetchone()
-                    job_code=(job['problem_code'] or 'work-'+kind) if job else None
-                    if job and job_code==code and (job['error'] is not None or job['problem_code'] is not None) and job['status'] in ('pending','running','failed','unavailable','blocked'):
+                    job=self.db.execute('SELECT id,status,reason_message,reason_code FROM jobs WHERE kind=%s AND item=%s',(kind,item)).fetchone()
+                    job_code=(job['reason_code'] or 'work-'+kind) if job else None
+                    if job and job_code==code and (job['reason_message'] is not None or job['reason_code'] is not None) and job['status'] in ('pending','running','failed','unavailable','blocked'):
                         self.sync_deletion(job['id'],[candidate],self.store.wall_clock())
                     else:
                         self.sync_candidate(record['identity'],None,self.store.wall_clock())
@@ -3035,13 +3055,13 @@ class Problems:
             if closed:
                 changed=self.db.execute("UPDATE reader_problems SET finished=%s,outcome='resolved' WHERE id=ANY(%s) AND finished IS NULL",(now,closed)).rowcount
                 if changed:status_changed(self.db)
-                self.db.execute("UPDATE jobs SET identity_event_owned=true WHERE id=ANY(%s) AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')",(sorted(processed),))
+                self.db.execute("UPDATE jobs SET identity_event_owned=true WHERE id=ANY(%s) AND reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')",(sorted(processed),))
             opening=[{'id':job_id} for job_id in ids if not before[job_id] and after.get(job_id)]
             if opening:
                 complex_rows=self.recover_fetch_batch(opening,now)
                 complex_ids={row['id'] for row in complex_rows}
                 simple_ids=[row['id'] for row in opening if row['id'] not in complex_ids]
-                if simple_ids:self.db.execute("UPDATE jobs SET identity_event_owned=true WHERE id=ANY(%s) AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')",(simple_ids,))
+                if simple_ids:self.db.execute("UPDATE jobs SET identity_event_owned=true WHERE id=ANY(%s) AND reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')",(simple_ids,))
                 processed.update(simple_ids)
             for job_id in ids:
                 if job_id not in processed:self.sync_fetch(job_id,before[job_id],now,allow_rekey=False)
@@ -3055,7 +3075,7 @@ class Problems:
     def processor_configuration_rows(self, job_ids: list[int] | None = None) -> list[Row]:
         restriction=' AND id=ANY(%s)' if job_ids is not None else ''
         params=(job_ids,) if job_ids is not None else ()
-        return list(self.db.execute(f"""SELECT jobs.id,jobs.kind,jobs.item,jobs.status,jobs.error,jobs.feed_id,
+        return list(self.db.execute(f"""SELECT jobs.id,jobs.kind,jobs.item,jobs.status,jobs.reason_message,jobs.feed_id,
             CASE WHEN jobs.kind='read' THEN jobs.item ELSE coalesce({owner_expr('items')},{owner_expr('media_owner')},{owner_expr('linked_root')}) END AS resolved_feed_id,
             coalesce(items.viewed,media_owner.viewed) AS viewed, m.resource_key,
             CASE WHEN jobs.kind='read' OR (jobs.kind='download_media' AND m.id IS NULL) THEN NULL ELSE coalesce(linked_root.id,m.publication_id,jobs.item) END AS affected_item
@@ -3066,7 +3086,7 @@ class Problems:
             LEFT JOIN publication_links link ON link.target_publication_id=coalesce(items.id,media_owner.id)
             LEFT JOIN publications linked_root ON linked_root.id=link.source_publication_id AND linked_root.viewed=0
             WHERE (jobs.status IN ('pending','running','failed','unavailable','blocked')
-                OR (jobs.status='done' AND jobs.kind='fetch' AND jobs.error IS NOT NULL)) ORDER BY jobs.kind,jobs.item,linked_root.id""",params).fetchall())
+                OR (jobs.status='done' AND jobs.kind='fetch' AND jobs.reason_message IS NOT NULL)) ORDER BY jobs.kind,jobs.item,linked_root.id""",params).fetchall())
     def processor_configuration_candidate(self, now: float, job_ids: list[int] | None = None, *, overrides: dict[int,dict[str,Any]] | None = None) -> dict[str, Any] | None:
         rows=self.processor_configuration_rows(job_ids)
         return self.processor_candidate_from_rows(rows,now,self.processor_youtube_paused(now),overrides=overrides)
@@ -3101,9 +3121,9 @@ class Problems:
                     consequence='Око продолжает попытки удаления.' if kind in ('delete','feed-delete') else 'Сохранённое содержимое остаётся доступным.',
                     next_step='Включите обработку, чтобы повторить попытку.' if row['status']=='blocked' else 'Повторите загрузку вручную.' if row['status'] in ('done','failed') else 'Проверьте доступность источника.' if row['status']=='unavailable' else 'Откройте настройки обработчика.',
                     objects=[],action=None,operation='producer:'+kind,created_at=now,
-                    state='retrying' if row['status']=='running' or not row['error'] else 'current',finished_at=None,outcome=None,next_at=None)
-                if kind!='delete' and row['error']:
-                    candidate['reason']=row['error']
+                    state='retrying' if row['status']=='running' or not row['reason_message'] else 'current',finished_at=None,outcome=None,next_at=None)
+                if kind!='delete' and row['reason_message']:
+                    candidate['reason']=row['reason_message']
             obj_kind='feed' if kind in ('discover','read','feed-delete') else 'material'
             obj_id=feed if obj_kind=='feed' else row['affected_item']
             if kind!='delete' and isinstance(obj_id,str) and obj_id and (obj_kind,obj_id) not in seen:
@@ -3116,13 +3136,13 @@ class Problems:
         changed=False
         for start in range(0,len(job_ids),400):
             rows=self.db.execute("""UPDATE jobs j SET processor_visible=requested.visible,processor_caption=requested.caption FROM (
-                SELECT j.id,coalesce(j.problem_code='processor-config' AND EXISTS (SELECT 1 FROM media_files m WHERE j.kind='download_media' AND m.id=j.item AND m.resource_key='youtube:subtitles'),false) AS caption,coalesce(j.problem_code='processor-config' AND
+                SELECT j.id,coalesce(j.reason_code='processor-config' AND EXISTS (SELECT 1 FROM media_files m WHERE j.kind='download_media' AND m.id=j.item AND m.resource_key='youtube:subtitles'),false) AS caption,coalesce(j.reason_code='processor-config' AND
                     (j.status IN ('pending','running','failed','unavailable','blocked')
-                        OR (j.kind='fetch' AND j.status='done' AND j.error IS NOT NULL))
+                        OR (j.kind='fetch' AND j.status='done' AND j.reason_message IS NOT NULL))
                     AND (j.kind IN ('delete','feed-delete','discover','read') OR CASE WHEN j.kind='download_media' THEN coalesce(
                         (SELECT p.viewed FROM media_files m JOIN publications p ON p.id=m.publication_id WHERE m.id=j.item),0)=0 ELSE coalesce(
                         (SELECT p.viewed FROM publications p WHERE p.id=j.item),0)=0 END),false) AS visible
-                FROM jobs j WHERE j.id=ANY(%s) AND (j.processor_visible OR j.processor_caption OR j.problem_code='processor-config') OFFSET 0) AS requested
+                FROM jobs j WHERE j.id=ANY(%s) AND (j.processor_visible OR j.processor_caption OR j.reason_code='processor-config') OFFSET 0) AS requested
                 WHERE j.id=requested.id AND (j.processor_visible IS DISTINCT FROM requested.visible OR j.processor_caption IS DISTINCT FROM requested.caption) RETURNING j.id""",(job_ids[start:start+400],)).fetchall()
             if rows:
                 changed=True
@@ -3135,9 +3155,9 @@ class Problems:
         for start in range(0,len(items),400):
             batch=items[start:start+400]
             rows=self.db.execute("""SELECT j.id FROM jobs j WHERE j.item=ANY(%s)
-                    AND (j.processor_visible OR j.problem_code='processor-config')
+                    AND (j.processor_visible OR j.reason_code='processor-config')
                 UNION SELECT j.id FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id
-                    WHERE m.publication_id=ANY(%s) AND (j.processor_visible OR j.problem_code='processor-config')""",(batch,batch)).fetchall()
+                    WHERE m.publication_id=ANY(%s) AND (j.processor_visible OR j.reason_code='processor-config')""",(batch,batch)).fetchall()
             ids.update(row['id'] for row in rows)
         return sorted(ids)
 
@@ -3390,21 +3410,21 @@ class Problems:
                              for obj in json.loads(row['body'])['objects'] if obj['kind'] == 'feed'}
         groups: dict[str | tuple[str,str] | tuple[str,str,str], dict[str, Any]] = {}
         youtube = self.store.youtube.status(now)
-        source_owned_filter="AND NOT ((kind IS NOT DISTINCT FROM 'filter' OR kind IS NOT DISTINCT FROM 'theses') AND identity_event_owned AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND identity_event_owned AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) AND NOT (kind IN ('delete','feed-delete') AND deletion_extra_owned) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND problem_code IS NULL AND error IS NOT NULL AND media_null_owned) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') AND identity_event_owned) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND subtitle_event_owned) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND problem_code IS NULL AND error IS NOT NULL AND fetch_null_owned) AND NOT (kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code IS NOT NULL AND problem_code LIKE 'source-%' AND source_event_owned)" if scope_items is None else ''
-        admission_filter="AND problem_code IS DISTINCT FROM 'youtube-admission'" if scope_items is None and getattr(self.store,'youtube_admission_ready',False) else ''
+        source_owned_filter="AND NOT ((kind IS NOT DISTINCT FROM 'filter' OR kind IS NOT DISTINCT FROM 'theses') AND identity_event_owned AND reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND identity_event_owned AND reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) AND NOT (kind IN ('delete','feed-delete') AND deletion_extra_owned) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND reason_code IS NULL AND reason_message IS NOT NULL AND media_null_owned) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') AND identity_event_owned) AND NOT (kind IS NOT DISTINCT FROM 'download_media' AND subtitle_event_owned) AND NOT (kind IS NOT DISTINCT FROM 'fetch' AND reason_code IS NULL AND reason_message IS NOT NULL AND fetch_null_owned) AND NOT (kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND reason_code IS NOT NULL AND reason_code LIKE 'source-%' AND source_event_owned)" if scope_items is None else ''
+        admission_filter="AND reason_code IS DISTINCT FROM 'youtube-admission'" if scope_items is None and getattr(self.store,'youtube_admission_ready',False) else ''
         subtitle_owned_filter='AND NOT j.subtitle_event_owned' if scope_items is None else ''
-        item_join_filter=("(jobs.kind IS DISTINCT FROM 'download_media' OR left(jobs.problem_code,7)='source-' "
-            "OR jobs.problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','youtube-admission') "
-            "OR (jobs.problem_code IS NULL AND NOT jobs.subtitle_event_owned) "
-            + ("OR (m.resource_key='youtube:subtitles' AND jobs.problem_code IS DISTINCT FROM 'processor-config')" if youtube['paused'] else '') + ")") if scope_items is not None else 'TRUE'
-        jobs = self.db.execute(f"SELECT jobs . * , coalesce ( {owner_expr('items')} , {owner_expr('media_owner')} , {owner_expr('linked_root')} ) AS resolved_feed_id , coalesce ( items . viewed , media_owner . viewed ) AS viewed , m . resource_key AS resource_key , m.publication_id AS scoped_media_publication_id , coalesce ( linked_root . id , m . publication_id , jobs . item ) AS affected_item FROM (SELECT * FROM (SELECT * FROM jobs WHERE {direct_scope}kind IS DISTINCT FROM 'read' AND kind IS DISTINCT FROM 'discover' AND ({'TRUE' if scope_items is not None else 'FALSE'} OR problem_code IS DISTINCT FROM 'processor-config') AND ({'TRUE' if scope_items is not None else 'FALSE'} OR NOT ((kind IS NOT DISTINCT FROM 'filter' OR kind IS NOT DISTINCT FROM 'theses') AND item IS NOT NULL AND item<>'' AND (((problem_code='' OR (problem_code IS NULL AND error IS NOT NULL))) OR (problem_code IS NOT NULL AND problem_code<>'' AND problem_code NOT LIKE '{source_like}' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'))))) AND ({'TRUE' if scope_items is not None else 'FALSE'} OR NOT (kind IS NOT DISTINCT FROM 'fetch' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL AND problem_code NOT LIKE '{source_like}' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') AND NOT fetch_null_ambiguous)) AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')) AND (problem_code IS NOT NULL OR error IS NOT NULL) {source_owned_filter} {admission_filter} AND ({'TRUE' if scope_items is not None else 'FALSE'} OR NOT (kind IS NOT DISTINCT FROM 'download_media' AND item IS NOT NULL AND item<>'' AND problem_code IS NOT NULL AND problem_code NOT LIKE '{source_like}' AND problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'))) UNION ALL SELECT j.* FROM media_files subtitle JOIN jobs j ON j.kind='download_media' AND j.item=subtitle.id WHERE {media_scope}{'FALSE' if scope_items is not None else 'TRUE'} AND subtitle.resource_key='youtube:subtitles' AND j.kind='download_media' {subtitle_owned_filter} AND j.item IS NOT NULL AND j.item<>'' AND j.problem_code IS NOT NULL AND j.problem_code NOT LIKE '{source_like}' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) status_jobs ORDER BY kind,item OFFSET 0) jobs LEFT JOIN media_files m ON jobs . kind = 'download_media' AND m . id = jobs . item LEFT JOIN publications items ON items . id = jobs . item AND ({item_join_filter}) LEFT JOIN publications media_owner ON media_owner . id = m . publication_id LEFT JOIN publication_links link ON link . target_publication_id = coalesce ( items . id , media_owner . id ) LEFT JOIN publications linked_root ON linked_root . id = link . source_publication_id AND linked_root . viewed = 0 WHERE ( jobs . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' , 'blocked' ) OR ( jobs . status = 'done' AND jobs . kind = 'fetch' AND jobs . problem_code IS NOT NULL AND jobs . error IS NOT NULL ) ) AND ( jobs . problem_code IS NOT NULL OR jobs . error IS NOT NULL ) AND jobs.kind IS DISTINCT FROM 'read' AND ({'TRUE' if scope_items is not None else 'FALSE'} OR jobs.problem_code IS DISTINCT FROM 'processor-config') AND NOT (jobs.kind IN ('delete','feed-delete') AND coalesce(nullif(jobs.problem_code,''),'work-'||jobs.kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))",parameters).fetchall()
+        item_join_filter=("(jobs.kind IS DISTINCT FROM 'download_media' OR left(jobs.reason_code,7)='source-' "
+            "OR jobs.reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','youtube-admission') "
+            "OR (jobs.reason_code IS NULL AND NOT jobs.subtitle_event_owned) "
+            + ("OR (m.resource_key='youtube:subtitles' AND jobs.reason_code IS DISTINCT FROM 'processor-config')" if youtube['paused'] else '') + ")") if scope_items is not None else 'TRUE'
+        jobs = self.db.execute(f"SELECT jobs . * , coalesce ( {owner_expr('items')} , {owner_expr('media_owner')} , {owner_expr('linked_root')} ) AS resolved_feed_id , coalesce ( items . viewed , media_owner . viewed ) AS viewed , m . resource_key AS resource_key , m.publication_id AS scoped_media_publication_id , coalesce ( linked_root . id , m . publication_id , jobs . item ) AS affected_item FROM (SELECT * FROM (SELECT * FROM jobs WHERE {direct_scope}kind IS DISTINCT FROM 'read' AND kind IS DISTINCT FROM 'discover' AND ({'TRUE' if scope_items is not None else 'FALSE'} OR reason_code IS DISTINCT FROM 'processor-config') AND ({'TRUE' if scope_items is not None else 'FALSE'} OR NOT ((kind IS NOT DISTINCT FROM 'filter' OR kind IS NOT DISTINCT FROM 'theses') AND item IS NOT NULL AND item<>'' AND (((reason_code='' OR (reason_code IS NULL AND reason_message IS NOT NULL))) OR (reason_code IS NOT NULL AND reason_code<>'' AND reason_code NOT LIKE '{source_like}' AND reason_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'))))) AND ({'TRUE' if scope_items is not None else 'FALSE'} OR NOT (kind IS NOT DISTINCT FROM 'fetch' AND item IS NOT NULL AND item<>'' AND reason_code IS NOT NULL AND reason_code NOT LIKE '{source_like}' AND reason_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') AND NOT fetch_null_ambiguous)) AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(reason_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')) AND (reason_code IS NOT NULL OR reason_message IS NOT NULL) {source_owned_filter} {admission_filter} AND ({'TRUE' if scope_items is not None else 'FALSE'} OR NOT (kind IS NOT DISTINCT FROM 'download_media' AND item IS NOT NULL AND item<>'' AND reason_code IS NOT NULL AND reason_code NOT LIKE '{source_like}' AND reason_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'))) UNION ALL SELECT j.* FROM media_files subtitle JOIN jobs j ON j.kind='download_media' AND j.item=subtitle.id WHERE {media_scope}{'FALSE' if scope_items is not None else 'TRUE'} AND subtitle.resource_key='youtube:subtitles' AND j.kind='download_media' {subtitle_owned_filter} AND j.item IS NOT NULL AND j.item<>'' AND j.reason_code IS NOT NULL AND j.reason_code NOT LIKE '{source_like}' AND j.reason_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) status_jobs ORDER BY kind,item OFFSET 0) jobs LEFT JOIN media_files m ON jobs . kind = 'download_media' AND m . id = jobs . item LEFT JOIN publications items ON items . id = jobs . item AND ({item_join_filter}) LEFT JOIN publications media_owner ON media_owner . id = m . publication_id LEFT JOIN publication_links link ON link . target_publication_id = coalesce ( items . id , media_owner . id ) LEFT JOIN publications linked_root ON linked_root . id = link . source_publication_id AND linked_root . viewed = 0 WHERE ( jobs . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' , 'blocked' ) OR ( jobs . status = 'done' AND jobs . kind = 'fetch' AND jobs . reason_code IS NOT NULL AND jobs . reason_message IS NOT NULL ) ) AND ( jobs . reason_code IS NOT NULL OR jobs . reason_message IS NOT NULL ) AND jobs.kind IS DISTINCT FROM 'read' AND ({'TRUE' if scope_items is not None else 'FALSE'} OR jobs.reason_code IS DISTINCT FROM 'processor-config') AND NOT (jobs.kind IN ('delete','feed-delete') AND coalesce(nullif(jobs.reason_code,''),'work-'||jobs.kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))",parameters).fetchall()
         if scope_items is not None:
             source_ids=sorted({job['resolved_feed_id'] or job['feed_id'] for job in jobs if job['resolved_feed_id'] or job['feed_id']})
             for start in range(0,len(source_ids),400):
                 batch=source_ids[start:start+400]
                 feeds.update({row['id']:dict(row) for row in self.db.execute('SELECT id,kind FROM feeds WHERE id=ANY(%s)',(batch,))})
             profile_codes=('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')
-            job_feeds={job['resolved_feed_id'] or job['feed_id'] or job['item'] or '' for job in jobs if job['problem_code'] in profile_codes}
+            job_feeds={job['resolved_feed_id'] or job['feed_id'] or job['item'] or '' for job in jobs if job['reason_code'] in profile_codes}
             if job_feeds:
                 needles=[json.dumps([dict(kind='feed',id=feed)]) for feed in sorted(job_feeds)]
                 for row in self.db.execute("SELECT body FROM reader_problems WHERE identity LIKE 'profile:%%' AND finished IS NULL AND (body::jsonb->'objects') @> ANY(%s::jsonb[])",(needles,)):
@@ -3412,8 +3432,8 @@ class Problems:
         source_owned: set[str]=set()
         if scope_items is None:
             source_keys={
-                'job:'+job['problem_code']+':'+(job['resolved_feed_id'] or job['feed_id'] or job['item'] or '')+':'+job['kind']
-                for job in jobs if isinstance(job['problem_code'],str) and job['problem_code'].startswith('source-')
+                'job:'+job['reason_code']+':'+(job['resolved_feed_id'] or job['feed_id'] or job['item'] or '')+':'+job['kind']
+                for job in jobs if isinstance(job['reason_code'],str) and job['reason_code'].startswith('source-')
                 and job['kind'] in ('fetch','download_media','filter','theses','delete','feed-delete')
             }
             ordered_source_keys=sorted(source_keys)
@@ -3436,7 +3456,7 @@ class Problems:
                     if (body['objects'] or kind=='delete') and all(isinstance(obj,dict) and set(obj)=={'kind','id'} and (obj.get('kind'),obj.get('id')) in allowed for obj in body['objects']) and len({(obj['kind'],obj['id']) for obj in body['objects']})==len(body['objects']):source_owned.add(canonical)
         for job in jobs:
             resolved_feed = job['item'] if job['kind']=='read' else job['resolved_feed_id'] or job['feed_id']
-            code = job['problem_code']
+            code = job['reason_code']
             if scope_items is not None and job['kind']=='download_media' and code=='processor-config' and job['scoped_media_publication_id'] is None:
                 continue
             if code=='processor-config' and (scope_items is None or not job['processor_visible']):
@@ -3480,11 +3500,11 @@ class Problems:
                 groups[group_key] = dict(id=identity,code=code,section='action' if settings_action else 'object',title=title,
                     consequence='Сохранённое содержимое остаётся доступным.' if kind not in ('delete','feed-delete') else 'Око продолжает попытки удаления.',
                     next_step='Включите обработку, чтобы повторить попытку.' if job['status']=='blocked' else 'Повторите загрузку вручную.' if job['status'] in ('done','failed') else 'Проверьте доступность источника.' if job['status']=='unavailable' else 'Око повторит попытку автоматически.' if not settings_action else 'Откройте настройки обработчика.',
-                    objects=[],action=action,operation='producer:'+kind,created_at=now,state='retrying' if job['status'] == 'running' or not job['error'] else 'current',finished_at=None,outcome=None,next_at=None)
+                    objects=[],action=action,operation='producer:'+kind,created_at=now,state='retrying' if job['status'] == 'running' or not job['reason_message'] else 'current',finished_at=None,outcome=None,next_at=None)
                 if not shared:
                     groups[group_key]['_status_job_target'] = job['item']
-                if kind != 'delete' and job['error']:
-                    groups[group_key]['reason'] = job['error']
+                if kind != 'delete' and job['reason_message']:
+                    groups[group_key]['reason'] = job['reason_message']
                 if code == 'source-reconnect':
                     groups[group_key].update(section='action', next_step='Проверьте привязку источника; доступ не изменяется автоматически.', action=None)
             legacy_feed = job['feed_id'] or job['item'] or ''
@@ -3502,11 +3522,11 @@ class Problems:
                 rows=self.db.execute(f"""WITH affected(id) AS (
                     SELECT id FROM publications WHERE feed_id=ANY(%s)
                     UNION SELECT l.target_publication_id FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m JOIN publication_links l ON l.source_publication_id=m.id WHERE m.feed_id=ANY(%s)
-                    UNION SELECT item FROM jobs WHERE kind='fetch' AND feed_id=ANY(%s) AND status IN ('pending','running') AND problem_code IN ('','work-fetch')
+                    UNION SELECT item FROM jobs WHERE kind='fetch' AND feed_id=ANY(%s) AND status IN ('pending','running') AND reason_code IN ('','work-fetch')
                 ) SELECT DISTINCT coalesce(root.id,j.item) AS affected FROM affected a JOIN jobs j ON j.kind='fetch' AND j.item=a.id
                 LEFT JOIN publications items ON items.id=j.item LEFT JOIN publication_links l ON l.target_publication_id=items.id
                 LEFT JOIN publications root ON root.id=l.source_publication_id AND root.viewed=0
-                WHERE j.status IN ('pending','running') AND j.problem_code IN ('','work-fetch')
+                WHERE j.status IN ('pending','running') AND j.reason_code IN ('','work-fetch')
                 AND coalesce({owner_expr('items')},{owner_expr('root')},j.feed_id)=ANY(%s)""",(youtube_feeds,youtube_feeds,youtube_feeds,youtube_feeds))
                 owners.update(row['affected'] for row in rows)
             objects=[dict(kind='material',id=owner) for owner in sorted(owners)]
@@ -3519,52 +3539,14 @@ class Problems:
         current: list[dict[str, Any]] = []
         groups,feeds,youtube=self.incomplete_generic_groups(now)
         if self.db.execute("SELECT 1 FROM state WHERE key='experimental-incomplete-problems-v1'").fetchone():
-            unknown=self.db.execute('SELECT 1 FROM publications WHERE incomplete_group_unknown AND incomplete_group_owner IS NOT NULL AND viewed=0 AND complete=1 AND NOT source_deleted LIMIT 1').fetchone()
-            if unknown:raise ValueError('Unrecognized publication completeness value')
-            conflict=self.db.execute('SELECT 1 FROM publications WHERE incomplete_group_conflict AND incomplete_group_owner IS NOT NULL AND viewed=0 AND complete=1 AND NOT source_deleted LIMIT 1').fetchone()
-            if conflict:raise ValueError('Unrecognized incomplete reservation pointer')
             current.extend(groups.values())
             return current
-        affected = {obj['id'] for group in groups.values() for obj in group['objects'] if obj['kind'] == 'material'}
-        known_partial = {obj['id'] for record in self.db.execute("SELECT body FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'code' = 'material-incomplete'") for obj in json.loads(record['body'])['objects']}
-        saved = self.db.execute("SELECT i . id , i . feed_id AS feed_id , i.content AS content_raw , f . status AS fetch_status , f . problem_code AS fetch_code , EXISTS ( SELECT 1 FROM media_files m WHERE m . publication_id = i . id AND EXISTS ( SELECT 1 FROM jobs j WHERE j . item = m . id AND j . kind = 'download_media' AND j . status IN ( 'pending' , 'running' ) AND j . error IS NULL AND j . problem_code IS NULL ) ) AS media_waiting , CASE WHEN i . platform = 'youtube' THEN EXISTS ( SELECT 1 FROM media_files m JOIN jobs j ON j . item = m . id AND j . kind = 'download_media' WHERE m . publication_id = i . id AND m . resource_key = 'youtube:subtitles' AND j . status = 'pending' AND j . problem_code IS NULL ) ELSE FALSE END AS caption_waiting FROM publications i LEFT JOIN jobs f ON f . item = i . id AND f . kind = 'fetch' WHERE i . viewed = 0 AND i . feed_id IS NOT NULL AND i . complete = 1 AND NOT i . source_deleted AND i.incomplete_class IS DISTINCT FROM 1".replace('i . feed_id', owner_expr('i'))).fetchall()
-        for row in saved:
-            from oko.storage.incomplete_index import content_class
-            raw_content=saved_content(row['content_raw'])
-            classification=content_class(row['content_raw'])
-            if classification==1:
-                continue
-            if classification==2:
-                raise ValueError('Unrecognized publication completeness value')
-            if row['id'] in affected:
-                continue
-            raw_header=raw_content.get('extra',{}).get('_reader')
-            header = self.header(json.dumps(raw_header) if raw_header is not None else None)
-            if isinstance(raw_content.get('extra', {}).get('youtube'), dict):
-                from oko.storage.publication_document import caption_state
-                header['captions']=caption_state(raw_content['extra']['youtube'], header)
-            if header.get('full', True) or (youtube['paused'] and feeds.get(row['feed_id'], {}).get('kind') == 'youtube'):
-                continue
-            if header.get('expected_incomplete'):
-                continue
-            if row['caption_waiting'] and self.store.youtube.ready_at()>now:
-                continue
-            cause = header.get('captions')
-            active=row['fetch_status'] in ('pending','running')
-            waiting=active and row['fetch_code'] is None
-            media_waiting=bool(row['media_waiting'])
-            if (waiting or media_waiting) and row['id'] not in known_partial:
-                continue
-            identity = 'incomplete:' + row['feed_id'] + ':' + (cause if cause in ('missing','error') else row['id'])
-            if identity not in groups:
-                groups[identity] = dict(id=identity,code='material-incomplete',section='object',title='Материал сохранён не полностью',
-                    consequence='Доступная часть остаётся пригодной для чтения.',next_step='Повторите загрузку или откройте доступную часть.',
-                    objects=[],action=None,created_at=now,state='current',finished_at=None,outcome=None,next_at=None)
-                if header.get('reason'):
-                    groups[identity]['reason'] = header['reason']
-            groups[identity]['objects'].append(dict(kind='material',id=row['id']))
-            if active:
-                groups[identity]['state'] = 'retrying'
+        # During recovery, reconstruct the same view from current status and
+        # Job facts; legacy reader completeness flags are not authoritative.
+        from oko.storage.incomplete_group_draft import group_candidates
+        keys=[row[0] for row in self.db.execute("SELECT DISTINCT incomplete_group_key FROM pg_temp.oko_incomplete_facts WHERE incomplete_group_key IS NOT NULL ORDER BY incomplete_group_key")]
+        for start in range(0,len(keys),100):
+            groups.update(group_candidates(self.store,keys[start:start+100],now))
         current.extend(groups.values())
         return current
 
@@ -3753,7 +3735,7 @@ class Problems:
         matches: dict[str,list[Any]] = {}
         for start in range(0,len(possible),400):
             batch=possible[start:start+400]
-            rows=self.db.execute('''SELECT j.kind,j.item,j.feed_id,j.status,j.error,j.problem_code,p.identity,p.feed
+            rows=self.db.execute('''SELECT j.kind,j.item,j.feed_id,j.status,j.reason_message,j.reason_code,p.identity,p.feed
                 FROM unnest(%s::text[],%s::text[],%s::text[],%s::text[]) AS p(identity,kind,item,feed)
                 JOIN jobs j ON j.kind=p.kind AND j.item=p.item''',tuple([row[i] for row in batch] for i in range(4))).fetchall()
             for row in rows:
@@ -3767,7 +3749,7 @@ class Problems:
             if (job['kind'] not in ('delete','feed-delete','read')
                 and job['feed'] == (job['feed_id'] or job['item'] or '')
                 and isinstance(objects,list) and any(isinstance(obj,dict) and obj.get('kind')=='material' and obj.get('id')==job['item'] for obj in objects)
-                and job['status']=='done' and job['error'] is None and job['problem_code'] is None):
+                and job['status']=='done' and job['reason_message'] is None and job['reason_code'] is None):
                 result.add(identity)
         return result
 
@@ -4213,13 +4195,13 @@ class Problems:
         # resource; show the Job without inventing a material or writing on GET.
         jobs=self.db.execute("""SELECT id,kind FROM jobs WHERE (item IS NULL OR item='')
             AND kind IN ('fetch','filter','theses','download_media','delete','feed-delete','read','discover')
-            AND (kind<>'read' OR problem_code IS NULL)
-            AND (kind<>'discover' OR problem_code='')
-            AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))
-            AND (status IN ('pending','running','failed','unavailable','blocked') OR (status='done' AND kind='fetch' AND problem_code IS NOT NULL AND error IS NOT NULL))
-            AND (problem_code IS NOT NULL OR error IS NOT NULL)
-            AND NOT (coalesce(problem_code,'') LIKE 'source-%%' AND source_event_owned)
-            AND coalesce(problem_code,'') NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config') ORDER BY id""").fetchall()
+            AND (kind<>'read' OR reason_code IS NULL)
+            AND (kind<>'discover' OR reason_code='')
+            AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(reason_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))
+            AND (status IN ('pending','running','failed','unavailable','blocked') OR (status='done' AND kind='fetch' AND reason_code IS NOT NULL AND reason_message IS NOT NULL))
+            AND (reason_code IS NOT NULL OR reason_message IS NOT NULL)
+            AND NOT (coalesce(reason_code,'') LIKE 'source-%%' AND source_event_owned)
+            AND coalesce(reason_code,'') NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config') ORDER BY id""").fetchall()
         visible_ids={entry['id'] for entry in current+recent}
         for job in jobs:
             seed=f"legacy-null-job:{job['id']}"

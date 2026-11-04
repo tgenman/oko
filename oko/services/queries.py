@@ -208,6 +208,10 @@ class ReadingQueries:
         return self._facts.command_record(identity)
 
     @repository_access
+    def command_succeeded(self, context: str) -> bool:
+        return self._facts.command_succeeded(context)
+
+    @repository_access
     def work_summary(self) -> list[WorkSummary]:
         return self._facts.work_summary()
 

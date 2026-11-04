@@ -58,7 +58,7 @@ def set_viewed(db: Database, items: list[str], viewed: bool) -> None:
     if not items:
         return
     lock_graph(db)
-    changed = db.execute('UPDATE publications SET viewed=%s,complete=0 WHERE id=ANY(%s) AND (viewed IS DISTINCT FROM %s OR complete IS DISTINCT FROM 0)', (int(viewed),items,int(viewed))).rowcount
+    changed = db.execute('UPDATE publications SET viewed=%s WHERE id=ANY(%s) AND viewed IS DISTINCT FROM %s', (int(viewed),items,int(viewed))).rowcount
     if changed:
         status_changed(db)
         mark=getattr(db,'incomplete_group_mark',None)

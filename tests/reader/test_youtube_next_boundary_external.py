@@ -14,10 +14,10 @@ def test_caption_next_at_boundary_invalidates_status_etag(tmp_path,postgres_url)
             with transaction(store.db):
                 store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
                 raw=json.dumps({'extra':{'_reader':{'full':False,'reason':'partial'}}})
-                store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,%s,0)",(raw,))
+                store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,content) VALUES ('p','youtube','p',0,%s)",(raw,))
                 store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
                 store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','youtube:subtitles','x','f','pending_download')")
-                store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('download_media','m','pending','failed',NULL)")
+                store.db.execute("INSERT INTO jobs(kind,item,status,reason_message,reason_code) VALUES ('download_media','m','pending','failed',NULL)")
                 store.db.execute("UPDATE youtube_access SET next_at=200,blocked_until=0 WHERE id=1")
             app.state.host.execution.reader_advance=None
         client.portal.call(setup)

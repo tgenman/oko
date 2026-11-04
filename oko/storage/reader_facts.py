@@ -33,6 +33,9 @@ class ReaderFacts:
     def command_record(self, identity: str) -> CommandRecord | None:
         return self.storage().problems.command_record(identity)
 
+    def command_succeeded(self, context: str) -> bool:
+        return bool(self.storage().db.execute("SELECT 1 FROM reader_action_results WHERE identity=%s AND result='succeeded' LIMIT 1",(context,)).fetchone())
+
     def clock(self) -> float:
         return self.storage().clock()
 

@@ -143,10 +143,10 @@ def test_discovery_reports_conflicting_publication_owner(tmp_path, prior_owner):
 
         def failed():
             with database(tmp_path) as db:
-                return db.execute("SELECT status,error,problem_code FROM jobs WHERE kind='discover' AND item=%s AND status='failed'", (original_feed,)).fetchone()
+                return db.execute("SELECT status,reason_message,reason_code FROM jobs WHERE kind='discover' AND item=%s AND status='failed'", (original_feed,)).fetchone()
         status = wait_for(client, failed)
-        assert status['problem_code'] == 'publication-ownership-conflict'
-        assert all(text in status['error'] for text in (publication, str(prior_owner), original_feed, 'https://example.org/oko/'))
+        assert status['reason_code'] == 'publication-ownership-conflict'
+        assert all(text in status['reason_message'] for text in (publication, str(prior_owner), original_feed, 'https://example.org/oko/'))
         details = client.get('/api/v3/status/details')
         assert details.status_code == 200
         assert publication in details.text and str(prior_owner) in details.text
@@ -188,3 +188,53 @@ def test_distinct_external_keys_are_not_merged_by_member_number(tmp_path):
     with TestClient(create_app(tmp_path, token='test', api_only=True, source=OverlappingMembers()), headers=HEADERS) as client:
         setup_reader(client, theses=False)
         assert len({card['id'] for card in read_all_cards(client, '/api/v3/cards')}) == 3
+
+
+def test_reader_ignores_legacy_completeness_flags_when_job_and_status_are_ready(tmp_path):
+    from tests.support.storage import database
+    from tests.support.reader import setup_reader, HEADERS
+    from tests.support.synthetic_source import SyntheticSource
+    from fastapi.testclient import TestClient
+    import json
+    with TestClient(create_app(tmp_path,source=SyntheticSource(),token='test',api_only=True),headers=HEADERS) as client:
+        item=setup_reader(client,theses=False)
+        with database(tmp_path) as db:
+            row=db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()
+            content=row[0] if not isinstance(row[0],str) else json.loads(row[0])
+            content['extra']['_reader']['full']=False
+            content['extra']['_reader']['reason']='Obsolete reason'
+            content['extra'].pop('_collection_reason',None)
+            db.execute("UPDATE publications SET content=%s,status='ready' WHERE id=%s",(json.dumps(content),item))
+        material=client.get('/api/v3/publication/'+item).json()
+        assert material['completeness']['state']=='complete'
+        assert 'Obsolete reason' not in str(material)
+
+
+def test_unavailable_collection_without_reason_is_not_shown_as_waiting(tmp_path):
+    from tests.support.storage import database
+    from tests.support.reader import setup_reader, HEADERS
+    from tests.support.synthetic_source import SyntheticSource
+    from fastapi.testclient import TestClient
+    with TestClient(create_app(tmp_path,source=SyntheticSource(),token='test',api_only=True),headers=HEADERS) as client:
+        item=setup_reader(client,theses=False)
+        with database(tmp_path) as db:
+            db.execute("UPDATE publications SET status='pending_collection' WHERE id=%s",(item,))
+            db.execute("INSERT INTO jobs(kind,item,status,reason_code,reason_message) VALUES ('fetch',%s,'unavailable',NULL,NULL) ON CONFLICT(kind,item) DO UPDATE SET status='unavailable',reason_code=NULL,reason_message=NULL",(item,))
+        material=client.get('/api/v3/publication/'+item).json()
+        assert 'недоступна' in material['completeness']['message'].lower()
+
+
+def test_saved_publication_does_not_duplicate_completeness_in_content(tmp_path):
+    from tests.support.storage import database
+    from tests.support.reader import setup_reader, HEADERS
+    from tests.support.synthetic_source import SyntheticSource
+    from fastapi.testclient import TestClient
+    import json
+    with TestClient(create_app(tmp_path,source=SyntheticSource(),token='test',api_only=True),headers=HEADERS) as client:
+        item=setup_reader(client,theses=False)
+        with database(tmp_path) as db:
+            raw=db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()[0]
+        content=raw if isinstance(raw,dict) else json.loads(raw)
+        extra=content.get('extra',{})
+        assert '_collection_reason' not in extra
+        assert 'full' not in extra.get('_reader',{}) and 'reason' not in extra.get('_reader',{})

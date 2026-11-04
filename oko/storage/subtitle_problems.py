@@ -44,7 +44,7 @@ def sync_timer(store: 'Store', now: float, job_ids: list[int] | None = None, *, 
     previous_by_id={candidate['id']:candidate for candidate in (previous or [])}
     cursor: int | None=None
     while True:
-        query="SELECT id,problem_code FROM jobs WHERE kind='download_media' AND subtitle_event_owned"
+        query="SELECT id,reason_code FROM jobs WHERE kind='download_media' AND subtitle_event_owned"
         params: list[Any]=[]
         if job_ids is not None:query+=' AND id=ANY(%s)';params.append(job_ids)
         if cursor is not None:query+=' AND id>%s';params.append(cursor)
@@ -78,7 +78,7 @@ def sync_timer(store: 'Store', now: float, job_ids: list[int] | None = None, *, 
         closes=[];rekeys=[];inserts=[];updates=[];removes=[];ambiguous_jobs:set[int]=set()
         for job in jobs:
             candidates=projected.get(job['id'],[])
-            deadline=max(blocked,next_at if job['problem_code'] is None else 0)
+            deadline=max(blocked,next_at if job['reason_code'] is None else 0)
             for candidate in candidates:
                 canonical=candidate['id']
                 saved_rows=reservations.get((str(job['id']),canonical),[])

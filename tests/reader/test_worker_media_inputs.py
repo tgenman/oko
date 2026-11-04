@@ -55,8 +55,8 @@ def test_old_download_success_or_error_cannot_replace_a_refreshed_locator(tmp_pa
         row=store.db.execute('SELECT * FROM media_files WHERE id = %s',(job.item,)).fetchone()
         assert row['source_locator']=='new-locator' and row['name']=='new-file.png'
         assert row['status']=='pending_download' and row['storage_key'] is None
-        replacement=store.db.execute('SELECT status , generation , error FROM jobs WHERE id = %s',(job.id,)).fetchone()
-        assert replacement['status']=='pending' and replacement['generation']>job.generation and replacement['error'] is None
+        replacement=store.db.execute('SELECT status , generation , reason_message FROM jobs WHERE id = %s',(job.id,)).fetchone()
+        assert replacement['status']=='pending' and replacement['generation']>job.generation and replacement['reason_message'] is None
         assert not list((tmp_path/'staging'/'_media').iterdir())
         store.db.close()
     asyncio.run(scenario())
@@ -133,12 +133,32 @@ def test_failed_media_attempt_and_diagnostic_roll_back_together(tmp_path, monkey
         monkeypatch.setattr(worker,'_finish_collection',fail_diagnostic)
         with pytest.raises(RuntimeError, match='diagnostic failure'):
             asyncio.run(worker._execute(job))
-        row=store.db.execute('SELECT status,error FROM jobs WHERE id=%s',(job.id,)).fetchone()
+        row=store.db.execute('SELECT status,reason_message FROM jobs WHERE id=%s',(job.id,)).fetchone()
         assert row[:] == ('running',None)
-        media=store.db.execute('SELECT status,reason FROM media_files WHERE id=%s',(job.item,)).fetchone()
-        assert media[:] == ('pending_download','')
+        media=store.db.execute('SELECT status FROM media_files WHERE id=%s',(job.item,)).fetchone()
+        assert media[:] == ('pending_download',)
     finally:
         store.db.close()
+
+
+def test_changed_media_waits_for_new_metadata_with_explanation(tmp_path):
+    class Changed(StructuredSource):
+        def publication_adapter(self):
+            class Provider:
+                async def download_media(self,publication,media,output):
+                    raise AdapterException(AdapterIssue('changed','Media locator changed',AdapterErrorKind.media_changed))
+            return Provider()
+    store,item,execution,tasks=worker_library(tmp_path)
+    try:
+        source=Changed(None)
+        worker=collection_worker(tmp_path,store,source)
+        accept_material(store,worker.service,item,image_material(source,store,item))
+        job=store.jobs.next_job(store.clock(),feeds=['fixture'],media_only=True)
+        asyncio.run(worker._execute(job))
+        row=store.db.execute("SELECT m.status,j.status,j.reason_code,j.reason_message FROM media_files m JOIN jobs j ON j.item=m.id AND j.kind='download_media' WHERE m.id=%s",(job.item,)).fetchone()
+        assert row[:]==('unavailable','unavailable','media-metadata-changed','Media locator changed')
+        assert store.db.execute("SELECT status FROM jobs WHERE kind='fetch' AND item=%s",(item,)).fetchone()[0]=='pending'
+    finally:store.db.close()
 
 
 def test_cancelled_caption_attempt_cannot_block_or_release_new_owner(tmp_path):

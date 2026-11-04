@@ -68,8 +68,9 @@ class DiscoveryRepository:
             self._publications.identify(item,publication.adapter_reference,effects=effects)
             if plan.content is not None:
                 assert plan.fingerprint is not None
+                previous=expect_row(self._db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone())
+                completed=not bool(previous['content'])
                 self._publications.publish(item,plan.content,plan.fingerprint,effects)
-                completed = bool(self._db.execute('UPDATE publications SET complete = 1 WHERE id = %s AND complete IS DISTINCT FROM 1',(item,)).rowcount)
                 item_status_changed |= completed
                 if completed:
                     completed_links.add(item)
@@ -101,10 +102,10 @@ class DiscoveryRepository:
             if envelope:
                 self._subscriptions.history.telegram_state(feed,envelope.selection)
             for item in history_items:
-                row=expect_row(self._db.execute('SELECT complete FROM publications WHERE id = %s',(item,)).fetchone())
+                row=expect_row(self._db.execute('SELECT content FROM publications WHERE id = %s',(item,)).fetchone())
                 if self._publications.source_deleted(item):
                     self._subscriptions.history.failed(item,unavailable=True)
-                elif row['complete']:
+                elif row['content']:
                     self._subscriptions.history.saved(item,bool(self._original(item)[0].get('full')))
         if selection:
             self._subscriptions.history.discovery_state(feed,selection)

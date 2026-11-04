@@ -2754,7 +2754,7 @@ export type YouTubeState = {
 };
 
 export type YoutubeSourceReference = {
-    captions: 'available' | 'not_requested' | 'unavailable' | 'error';
+    captions: 'available' | 'not_requested' | 'pending' | 'running' | 'unavailable' | 'error';
     feed_id: FeedId;
     kind: 'youtube';
     source_url: SourceUrl;

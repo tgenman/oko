@@ -33,8 +33,8 @@ class FilterResults:
         job=material_read.jobs(self.store.db,item).get('filter')
         enabled = publication_input.stage_enabled(self.store, item, 'filter')
         if not enabled and (not job or job['status'] != 'running'):
-            return dict(status='off', hidden=False, reason='', removed=[], error=job['error'] if job else None)
-        return dict(status=('off' if job and job['status']=='blocked' else job['status']) if job and job['status']!='done' else 'pending',error=job['error'] if job else None,
+            return dict(status='off', hidden=False, reason='', removed=[], error=job['reason_message'] if job else None)
+        return dict(status=('off' if job and job['status']=='blocked' else job['status']) if job and job['status']!='done' else 'pending',error=job['reason_message'] if job else None,
                     hidden=False,reason='',removed=[])
 
     def request(self,item: str) -> tuple[ProcessingRequest,str,bool] | None:

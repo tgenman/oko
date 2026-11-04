@@ -49,6 +49,17 @@ def test_direct_articles_are_complete_local_and_unique_without_recursive_crawlin
         assert not any('example.org' in url for url in calls)
         assert sum('/getPage/One?' in url for url in calls) == 2  # Metadata, then media locator validation.
         assert sum('/getPage/Two?' in url for url in calls) == 1
+        from tests.support.storage import database
+        with database(tmp_path) as db:
+            db.execute("UPDATE publications SET status='pending_collection' WHERE platform='telegraph' AND title='Title One'")
+        partial=client.get('/api/v3/publication/'+identity).json()
+        assert 'Article One' in partial['text']
+        assert partial['linked_content']['articles'][0]['media_urls']
+        with database(tmp_path) as db:
+            db.execute("UPDATE jobs SET status='unavailable',reason_code='article-unavailable',reason_message='Article access restricted' WHERE kind='fetch' AND item=(SELECT id FROM publications WHERE platform='telegraph' AND title='Title One')")
+        partial=client.get('/api/v3/publication/'+identity).json()
+        assert 'Article access restricted' in partial['completeness']['message']
+        assert partial['linked_content']['articles'][0]['error']=='Article access restricted'
 
 
 def test_article_completion_and_retry_keep_previous_copy_without_false_edit(tmp_path):

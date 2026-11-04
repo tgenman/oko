@@ -174,7 +174,7 @@ def test_unavailable_input_waits_without_model_and_processes_when_retrieved(tmp_
     with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(source),ai_transport=coordinated_transport(calls)),headers=HEADERS) as client:
         setup(client)
         item=wait_for(client,lambda:(c[0]['id'] if (c:=read_publications_for_cards(client, '/api/v3/cards')) else None))
-        wait_for(client,lambda:r['status']=='pending_collection' and r['content']!={} and r['complete'] if (r:=stored(root,item)) else False)
+        wait_for(client,lambda:r['status']=='pending_collection' and r['content']!={} if (r:=stored(root,item)) else False)
         row=stored(root,item)
         assert row['filtered_content']=={} and row['summarized_content']=={}
         assert calls==[]
@@ -321,9 +321,10 @@ def test_article_retrieval_error_is_not_sent_as_publication_text(tmp_path):
         return httpx.Response(200,text=page([(11,'Useful post <a href="https://telegra.ph/Fixture">article</a>')]))
     with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(source),ai_transport=httpx.MockTransport(model)),headers=HEADERS) as client:
         setup(client)
-        card=wait_for(client,lambda:next((c for c in read_publications_for_cards(client, '/api/v3/cards') if c['theses']['result']),None))
-        assert all('Статья ещё не сохранена' not in call['sources'][0]['text'] for call in calls)
-        assert all('Telegraph:' not in call['sources'][0]['text'] for call in calls)
+        card=wait_for(client,lambda:next(iter(read_publications_for_cards(client, '/api/v3/cards')),None))
+        wait_for(client,lambda:(value if (value:=client.get('/api/v3/publication/'+card['id']).json()).get('completeness',{}).get('state')=='incomplete' and 'недоступна' in value['completeness'].get('message','') else None))
+        assert calls==[]
+        assert client.get('/api/v3/publication/'+card['id']).json()['theses']['result'] is None
         broken[0]=False
         client.post('/api/v3/materials/'+card['id']+'/retry')
         wait_for(client,lambda:any('Retrieved article' in source['text'] for call in calls for source in call['sources']))

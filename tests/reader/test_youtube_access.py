@@ -98,7 +98,7 @@ def test_block_is_shared_persistent_and_retry_cannot_bypass_it(tmp_path):
             clock.advance(1)  # Common discovery commits its initial cursor before the next portion.
             return False
         eventually(paused)
-        item = eventually(lambda: next((m for m in materials(client) if m['source'].get('captions') == 'error'), None))
+        item = eventually(lambda: next((m for m in materials(client) if m['source'].get('captions') == 'pending'), None))
         retry_at = datetime.fromisoformat(client.get('/api/v3/youtube').json()['retry_at'].replace('Z','+00:00')).timestamp()
         assert retry_at == captions.calls[0][1] + 900
         client.post('/api/v3/materials/' + item['id'] + '/retry')
@@ -162,10 +162,10 @@ def test_closed_browser_allows_retry_but_viewed_material_does_not_resume(tmp_pat
         assert client.patch('/api/v3/settings/oko/global', json={'feed_refresh_minutes':1440}).status_code == 200
         add(client)
         heartbeat(client)
-        item = eventually(lambda: next((m for m in materials(client) if len(captions.calls)==1 and m['source'].get('captions') == 'error' and not m['loading']), None))
+        item = eventually(lambda: next((m for m in materials(client) if len(captions.calls)==1 and m['source'].get('captions') == 'pending' and not m['loading']), None))
         assert close_presence(client, 'reader').status_code == 409
         clock.advance(900)
-        eventually(lambda: len(captions.calls) == 2 and any(m['source'].get('captions') == 'error' and not m['loading'] for m in materials(client)))
+        eventually(lambda: len(captions.calls) == 2 and any(m['source'].get('captions') == 'pending' and not m['loading'] for m in materials(client)))
         assert client.get('/api/v3/status').json()['work_allowed'] is True
         client.put('/api/v3/power',json={'enabled':False})
         client.post('/api/v3/materials/' + item['id'] + '/viewed')

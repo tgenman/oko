@@ -59,11 +59,15 @@ def test_delete_failure_is_visible_and_retried_without_content_in_errors(tmp_pat
         from oko.storage.material_read import item as stored_item
         with database(tmp_path) as db:
             assert stored_item(db,item)['reader_feed_id'] == cards[0]['feed_id']
+            job = db.execute("SELECT reason_code,reason_message FROM jobs WHERE kind='delete' AND item=%s",(item,)).fetchone()
+            assert job is not None and tuple(job)==('delete','Ошибка удаления')
         fail = False
         clock.now += 1.1
         wait_for(client, lambda: not any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status/details').json()['problems']['current']))
         assert not any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status/details').json()['problems']['current'])
         assert not retained(tmp_path,item)
+        with database(tmp_path) as db:
+            assert db.execute('SELECT kind FROM jobs WHERE item=%s',(item,)).fetchall() == []
 
 
 def test_corrupt_database_is_reported_and_never_replaced(tmp_path: Path, postgres_url):
@@ -116,3 +120,27 @@ def test_restart_keeps_failed_deletion_retryable_and_blocks_collection(tmp_path:
         assert not retained(tmp_path,item)
         assert source.calls == 1
         assert not any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status/details').json()['problems']['current'])
+
+
+def test_restart_finishes_cleanup_after_files_were_removed(tmp_path: Path):
+    clock=Clock()
+    fail=[True]
+    def fault(point):
+        if point=='after_delete_files' and fail[0]:
+            raise OSError('interrupted after removing files')
+    kwargs=dict(source=SyntheticSource(),token='test-token',fault=fault,clock=clock)
+    with TestClient(create_app(tmp_path,**kwargs),headers=HEADERS) as client:
+        client.patch('/api/v3/settings/oko/global',json={'theses':False})
+        presence(client,'reader')
+        item=wait_for(client,lambda: next((card['id'] for card in read_all_cards(client,'/api/v3/cards') if client.get('/api/v3/publication/'+card['id']).json()['availability']=='available'),None))
+        assert client.post('/api/v3/materials/'+item+'/viewed').status_code==200
+        wait_for(client,lambda: any(problem['code']=='feed_delete_failed' for problem in client.get('/api/v3/status/details').json()['problems']['current']))
+        with database(tmp_path) as db:
+            assert db.execute("SELECT status FROM jobs WHERE kind='delete' AND item=%s",(item,)).fetchone() is not None
+    fail[0]=False
+    clock.now+=2
+    with TestClient(create_app(tmp_path,**kwargs),headers=HEADERS) as client:
+        presence(client,'reader')
+        wait_for(client,lambda: not retained(tmp_path,item))
+        with database(tmp_path) as db:
+            assert db.execute('SELECT id FROM jobs WHERE item=%s',(item,)).fetchall()==[]

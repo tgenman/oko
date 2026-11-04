@@ -22,6 +22,7 @@ class Inputs:
     items: dict[str, Row] = field(default_factory=dict)
     jobs: dict[str, dict[str, Row]] = field(default_factory=dict)
     media_jobs: dict[str,list[Row]] = field(default_factory=dict)
+    media: dict[str,list[Row]] = field(default_factory=dict)
     feeds: dict[str, Row] = field(default_factory=dict)
     settings: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
     state: dict[str, str] = field(default_factory=dict)
@@ -71,7 +72,7 @@ def item(db: Database, identity: str) -> Row | None:
 @reading_value
 def jobs(db: Database, identity: str) -> dict[str, Row]:
     value = current(db)
-    return value.jobs.get(identity, {}) if value and identity in value.items else {r['kind']: r for r in db.execute('SELECT * FROM jobs WHERE item = %s', (identity,))}
+    return value.jobs.get(identity, {}) if value and (identity in value.items or identity in value.related_items) else {r['kind']: r for r in db.execute('SELECT * FROM jobs WHERE item = %s', (identity,))}
 
 
 
@@ -107,8 +108,13 @@ def material_inputs(db: Database, identities: set[str], *, include_subtitles: bo
                 value.media_jobs.setdefault(r['reader_item'],[]).append(r)
             else:
                 value.jobs.setdefault(r['reader_item'],{})[r['kind']]=r
+        value.media.update({identity: [] for identity in batch})
+        for row in db.execute("""SELECT m.*,j.id AS reader_job_id,j.status AS reader_job_status,j.reason_message AS reader_reason,j.reason_code AS reader_code
+            FROM media_files m LEFT JOIN jobs j ON j.kind='download_media' AND j.item=m.id
+            WHERE m.publication_id=ANY(%s)""",(batch,)):
+            value.media[row['publication_id']].append(row)
         value.children.update({identity: [] for identity in batch})
-        for row in db.execute(f"SELECT l . source_publication_id AS reader_source , i . * , {owner_expr('i')} AS reader_feed_id , j . error AS fetch_error FROM publication_links l JOIN publications i ON i . id = l . target_publication_id LEFT JOIN jobs j ON j . kind = 'fetch' AND j . item = i . id WHERE l . source_publication_id = ANY ( %s ) AND i . viewed = 0 ORDER BY l . rowid", (batch,)):
+        for row in db.execute(f"SELECT l . source_publication_id AS reader_source , i . * , {owner_expr('i')} AS reader_feed_id , j . reason_message AS fetch_error FROM publication_links l JOIN publications i ON i . id = l . target_publication_id LEFT JOIN jobs j ON j . kind = 'fetch' AND j . item = i . id WHERE l . source_publication_id = ANY ( %s ) AND i . viewed = 0 ORDER BY l . rowid", (batch,)):
             value.children[row['reader_source']].append(row)
             value.related_items[row['id']] = row
         value.memberships.update({identity: [] for identity in batch})
@@ -117,6 +123,16 @@ def material_inputs(db: Database, identities: set[str], *, include_subtitles: bo
         value.owners.update({identity: set() for identity in batch})
         for row in db.execute('SELECT m.id AS reader_source , m . feed_id FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m WHERE m.id = ANY ( %s ) UNION SELECT l . source_publication_id AS reader_source , m . feed_id FROM publication_links l JOIN (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m ON m.id = l . target_publication_id WHERE l . source_publication_id = ANY ( %s )', (batch, batch)):
             value.owners[row['reader_source']].add(row['feed_id'])
+    # Linked publications participate in the same read snapshot. Prefetch their
+    # jobs and media in batches before projecting any of their saved content.
+    related=sorted(set(value.related_items)-set(value.items))
+    for start in range(0,len(related),400):
+        batch=related[start:start+400]
+        value.media.update({identity: [] for identity in batch})
+        for row in db.execute("SELECT m.*,j.id AS reader_job_id,j.status AS reader_job_status,j.reason_message AS reader_reason,j.reason_code AS reader_code FROM media_files m LEFT JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=ANY(%s)",(batch,)):
+            value.media[row['publication_id']].append(row)
+        for row in db.execute("SELECT j.* FROM jobs j WHERE j.item=ANY(%s) AND j.kind<>'download_media'",(batch,)):
+            value.jobs.setdefault(row['item'],{})[row['kind']]=row
     feeds = sorted({r['reader_feed_id'] for r in value.items.values() if r['reader_feed_id'] is not None}
                    | {feed for owners in value.owners.values() for feed in owners})
     for start in range(0, len(feeds), 400):

@@ -13,4 +13,5 @@ class CollectionEffects:
     fetch: dict[str,bool] = field(default_factory=dict)
     refresh_links: set[str] = field(default_factory=set)
     media: set[str] = field(default_factory=set)
+    unavailable_media: dict[str,tuple[str,str]] = field(default_factory=dict)
     revalidate: dict[str,bool] = field(default_factory=dict)

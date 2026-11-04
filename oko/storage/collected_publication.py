@@ -14,6 +14,7 @@ from oko.storage import memberships as membership_graph
 from oko.storage import processing_input as publication_input
 from oko.storage.media_paths import existing_file
 from oko.storage.reader_status import changed as status_changed
+from oko.storage.publication_document import stored_content
 from oko.storage.reading import saved_content
 from oko.storage.media import MediaFiles
 from oko.storage.publications import Publications
@@ -44,7 +45,7 @@ class CollectedPublicationRepository:
         if not self._unviewed(item):
             return None,self._capture.finish(effects,operation='fetch',target=item)
         if material.source_manifest and material.source_manifest.post_web_unavailable:
-            media=[dict(row) for row in self._db.execute('SELECT * FROM media_files WHERE publication_id = %s',(item,))]
+            media=self._media.publication_rows(item)
             missing=[row for row in media if row['storage_key'] and existing_file(self._root,row['storage_key']) is None or row['status']=='unavailable' and row['reason']=='Локальный файл вложения недоступен']
             if missing:
                 error=SourceError('Локальный файл вложения недоступен',code='media-unavailable',retryable=False)
@@ -55,15 +56,16 @@ class CollectedPublicationRepository:
                 self._media.project_header(content,media)
                 membership_graph.lock_graph(self._db)
                 for row in missing:
-                    self._db.execute("UPDATE media_files SET status = 'unavailable' , reason = %s , storage_key = NULL WHERE id = %s",(error.label,row['id']))
-                self._db.execute('UPDATE publications SET content = %s WHERE id = %s',(json.dumps(content,ensure_ascii=False),item))
+                    self._db.execute("UPDATE media_files SET status = 'unavailable' , storage_key = NULL WHERE id = %s",(row['id'],))
+                    effects.unavailable_media[row['id']]=('media-unavailable',error.label)
+                self._db.execute('UPDATE publications SET content = %s WHERE id = %s',(json.dumps(stored_content(content),ensure_ascii=False),item))
                 from oko.storage.incomplete_index import save_class
                 save_class(self._db,item,content)
                 self._collection_history(item,replace(material,collection_error=error))
                 return error,self._capture.finish(effects,operation='fetch',target=item)
         if material.source_manifest and material.source_manifest.post_web_unavailable:
-            saved=self._db.execute('SELECT complete FROM publications WHERE id=%s', (item,)).fetchone()
-            retained_header, retained_text = self._publications.original(item) if saved and saved['complete'] else ({}, '')
+            saved=self._db.execute('SELECT content FROM publications WHERE id=%s', (item,)).fetchone()
+            retained_header, retained_text = self._publications.original(item) if saved and saved['content'] else ({}, '')
             raw_manifest=retained_header.get('source_manifest')
             manifest=SourceManifest.model_validate_json(json.dumps(raw_manifest)) if raw_manifest else None
         else:
@@ -82,7 +84,7 @@ class CollectedPublicationRepository:
                     captions=retained_header.get('captions'), description=retained_header.get('description',''),
                     source_manifest=manifest.model_copy(update={'post_web_unavailable':True}),
                     collection_error=material.collection_error)
-        old_media={row['id']:dict(row) for row in self._db.execute('SELECT * FROM media_files WHERE publication_id = %s',(item,))} if manual else {}
+        old_media={row['id']:row for row in self._media.publication_rows(item)} if manual else {}
         prepared=self._publications.prepare(item,material)
         fingerprint=publication_input.digest(prepared[0])
         self._fault('after_file_move')
@@ -91,9 +93,10 @@ class CollectedPublicationRepository:
             return None,self._capture.finish(effects,operation='fetch',target=item)
         if material.adapter_content and material.adapter_content.metadata.reference.key.platform==Platform.telegram:
             self._publications.identify(item,material.adapter_content.metadata.reference,effects=effects)
+        previous=expect_row(self._db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone())
+        item_status_changed=not bool(previous['content'])
         self._publications.publish(item,prepared,fingerprint,effects)
         self._fault('collection_after_publication_write')
-        item_status_changed = bool(self._db.execute('UPDATE publications SET complete = 1 WHERE id = %s AND complete IS DISTINCT FROM 1',(item,)).rowcount)
         if material.members:
             item_status_changed |= bool(self._db.execute('UPDATE publications SET members = %s WHERE id = %s AND members IS DISTINCT FROM %s',(json.dumps(material.members),item,json.dumps(material.members))).rowcount)
         if item_status_changed:

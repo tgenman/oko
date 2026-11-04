@@ -19,7 +19,7 @@ class ProcessingRepository:
 
     def candidates(self, kind: Kind, *, item: str) -> list[tuple[str,str | None]]:
         # Reconciliation is publication-owned; there is no stage queue to scan.
-        query = "SELECT i.id FROM publications i WHERE i.id=%s AND i.viewed=0 AND i.platform IS NOT NULL AND i.feed_id IS NOT NULL AND i.complete=1"
+        query = "SELECT i.id FROM publications i WHERE i.id=%s AND i.viewed=0 AND i.platform IS NOT NULL AND i.feed_id IS NOT NULL AND i.content<>'{}'::jsonb"
         parameters: tuple[str | int, ...] = (item,)
         rows=self.store.db.execute(query,parameters).fetchall()
         operation=self.store.filters if kind=='filter' else self.store.processing.theses
@@ -31,7 +31,7 @@ class ProcessingRepository:
         enabled = publication_input.stage_enabled(self.store, item, kind)
         if not enabled:return ProcessingPreparation('disabled',reason='stage_disabled')
         selected=publication_input.content(self.store,item)
-        if not row['complete'] or not row['content'] or publication_input.awaiting_input(selected) or publication_input.awaiting_linked_input(self.store,item,selected):
+        if row['status']=='pending_collection' or not row['content'] or publication_input.awaiting_input(selected) or publication_input.awaiting_linked_input(self.store,item,selected):
             return ProcessingPreparation('waiting',reason='input_pending')
         if kind=='theses':
             filtered=self.store.filters.read(item)

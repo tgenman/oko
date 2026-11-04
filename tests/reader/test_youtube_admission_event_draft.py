@@ -28,9 +28,9 @@ def test_viewed_during_pause_never_restores_forgotten_object(tmp_path,postgres_u
     try:
         with transaction(store.db):
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('yt','yt','YT','default','youtube','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('p','youtube','p',0,1,'{}',1)")
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,content) VALUES ('p','youtube','p',0,'{}')")
             store.db.execute("UPDATE publications SET feed_id='yt' WHERE id='p'")
-            store.db.execute("INSERT INTO jobs(kind,item,status,problem_code) VALUES ('fetch','p','pending','')")
+            store.db.execute("INSERT INTO jobs(kind,item,status,reason_code) VALUES ('fetch','p','pending','')")
             store.incomplete_draft.mark_job('fetch','p')
         store.youtube.blocked(100,900)
         assert json.loads(current(store)['body'])['objects']==[dict(kind='material',id='p')]

@@ -104,8 +104,8 @@ class Store:
                 (root / name).mkdir(exist_ok=True)
             with self.db:
                 collection_jobs.interrupt(self)
-                running_delete = [row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE kind IN ('delete','feed-delete') AND status='running' AND (error IS NOT NULL OR problem_code IS NOT NULL) AND (deletion_extra_owned OR coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))")]
-                running_source=[row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE status='running' AND kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code LIKE 'source-%%'")]
+                running_delete = [row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE kind IN ('delete','feed-delete') AND status='running' AND (reason_message IS NOT NULL OR reason_code IS NOT NULL) AND (deletion_extra_owned OR coalesce(nullif(reason_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))")]
+                running_source=[row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE status='running' AND kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND reason_code LIKE 'source-%%'")]
                 job_write(self.db, "UPDATE jobs SET status='pending', generation=generation+1 WHERE status='running'")
                 if running_source:
                     from oko.storage import source_groups
@@ -347,11 +347,11 @@ class Store:
     def publication(self, item: str) -> Publication | None:
         row = self.db.execute('SELECT * FROM publications WHERE id = %s AND viewed = 0', (item,)).fetchone()
         if row:
-            header, text = self.publications.original(item) if row['complete'] else ({},'')
+            header, text = self.publications.original(item) if row['content'] else ({},'')
             reference=ExternalReference(ExternalKey(Platform(row['platform']),row['external_id']),row['url'])
             teaser = Material(header.get('title',''),header.get('full',False),header.get('reason',''),
                 members=tuple(json.loads(row['members'])),description=header.get('description',''),
-                source_manifest=SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if header.get('source_manifest') else None) if row['complete'] else None
+                source_manifest=SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if header.get('source_manifest') else None) if row['content'] else None
             return Publication(row['external_id'],row['url'],row['published_at'] or 0.,teaser,tuple(json.loads(row['members'])),row['published_at'] is not None,adapter_reference=reference)
         return None
 
@@ -439,7 +439,7 @@ class Store:
                 WHERE i.feed_id=%s AND i.processing_metadata::jsonb->'_pass'->>'feed_id'=%s""", (feed,feed))]
             if selected:
                 publication_links.capture_processing_problems(self,effects,set(selected))
-                affected=[row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE item=ANY(%s) AND kind IN ('filter','theses') AND status!='done' AND (processor_visible OR problem_code='processor-config')",(selected,))]
+                affected=[row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE item=ANY(%s) AND kind IN ('filter','theses') AND status!='done' AND (processor_visible OR reason_code='processor-config')",(selected,))]
                 previous=self.problems.prepare_processor_change(affected,self.wall_clock())
                 job_write(self.db, """UPDATE jobs SET status='cancelled',generation=generation+1,input_snapshot=NULL
                     WHERE item=ANY(%s) AND kind IN ('filter','theses') AND status!='done'""", (selected,))
@@ -447,7 +447,7 @@ class Store:
                 self.db.execute("UPDATE publications SET processing_metadata=(processing_metadata::jsonb-'_pass')::text WHERE id=ANY(%s)", (selected,))
             if self.db.execute("UPDATE feeds SET connection = 'deleting' WHERE id = %s AND connection IS DISTINCT FROM 'deleting'", (feed,)).rowcount:
                 source_changed(self.db)
-            for row in self.db.execute("SELECT id FROM jobs WHERE kind='discover' AND (item=%s OR feed_id=%s) AND (error IS NOT NULL OR problem_code IS NOT NULL)",(feed,feed)):
+            for row in self.db.execute("SELECT id FROM jobs WHERE kind='discover' AND (item=%s OR feed_id=%s) AND (reason_message IS NOT NULL OR reason_code IS NOT NULL)",(feed,feed)):
                 self.problems.sync_discover(row['id'],self.wall_clock())
             shared=[r[0] for r in self.db.execute(f'SELECT p.id FROM ({owned_ids("= %s")}) owner JOIN publications p ON p.id=owner.id WHERE p.platform IS NOT NULL',(feed,feed))]
             # NULL-platform legacy roots can also own a timed fetch projection.
@@ -532,7 +532,7 @@ class Store:
                 attachment['name'], attachment['kind'], attachment['mime']
             json.loads(row['media_ids'])
             for child in publication_links.children(self, item):
-                if child['complete']:
+                if child['content']:
                     json.loads(child['media_ids'])
             filtered = self.filters.read(item)
             theses = self.processing.theses.read(item)
@@ -548,12 +548,13 @@ class Store:
         """Saved publication facts without reader-specific text projections."""
         item = row['id']
         settings = self.subscriptions.effective('feed', row['feed_id'], details=False)
+        available=bool(row['content'])
         base = dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published_at'] or 0.,
                     published_known=row['published_at'] is not None,
-                    members=json.loads(row['members']), complete=bool(row['complete']),
+                    members=json.loads(row['members']), complete=available,
                     originals=settings['effective']['originals']['value'])
         fetch = material_read.jobs(self.db, item).get('fetch')
-        if not row['complete']:
+        if not available:
             base.update(title='Материал загружается', loading=bool(fetch and fetch['status'] in ('pending', 'running')))
             return dict(base, text='')
         try:
@@ -582,17 +583,17 @@ class Store:
         if include_problems:
             # Match each existing partial index separately; a combined OR scans
             # the completed archive even when it has no problems.
-            condition = """jobs.id IN (SELECT id FROM jobs WHERE status IN ('pending','running') OR error IS NOT NULL
-                UNION SELECT id FROM jobs WHERE problem_code IS NOT NULL OR error IS NOT NULL)"""
-        rows = self.db.execute(f"SELECT jobs . kind , jobs . status , jobs . problem_code , count ( * ) AS count , CASE WHEN jobs . kind IN ( 'discover' , 'feed-delete' ) THEN NULLIF ( jobs . item , '' ) WHEN jobs . kind = 'download_media' THEN ( SELECT {owner_expr('i')} FROM media_files m JOIN publications i ON i . id = m . publication_id WHERE m . id = jobs . item ) ELSE {owner_expr('items')} END AS feed , min ( jobs . next ) AS next , sum ( CASE WHEN jobs . error IS NOT NULL THEN 1 ELSE 0 END ) AS errors FROM jobs LEFT JOIN publications items ON items . id = jobs . item WHERE {condition} GROUP BY jobs . kind , jobs . status , jobs . problem_code , feed ORDER BY min ( jobs . id )").fetchall()
+            condition = """jobs.id IN (SELECT id FROM jobs WHERE status IN ('pending','running')
+                UNION SELECT id FROM jobs WHERE status IN ('failed','unavailable') OR (status<>'done' AND (reason_code IS NOT NULL OR reason_message IS NOT NULL)))"""
         now, wall = self.clock(), self.wall_clock()
+        rows = self.db.execute(f"SELECT jobs . kind , jobs . status , jobs . reason_code AS reason_code , (jobs.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at > %s) AS source_wait , count ( * ) AS count , CASE WHEN jobs . kind IN ( 'discover' , 'feed-delete' ) THEN NULLIF ( jobs . item , '' ) WHEN jobs . kind = 'download_media' THEN ( SELECT {owner_expr('i')} FROM media_files m JOIN publications i ON i . id = m . publication_id WHERE m . id = jobs . item ) ELSE {owner_expr('items')} END AS feed , min ( jobs . next ) AS next , sum ( CASE WHEN jobs . status IN ('failed','unavailable') OR jobs . reason_message IS NOT NULL OR jobs . reason_code IS NOT NULL THEN 1 ELSE 0 END ) AS errors FROM jobs LEFT JOIN publications items ON items . id = jobs . item WHERE {condition} GROUP BY jobs . kind , jobs . status , jobs . reason_code , source_wait , feed ORDER BY min ( jobs . id )",(wall,)).fetchall()
         return [WorkSummary(row['kind'],row['status'],row['feed'],row['count'],
-                    row['problem_code'] or (row['kind']+'-failed' if row['errors'] else None),
-                    retry_time(row['next'],now,wall) if row['status']=='pending' and row['errors'] and row['next'] else None)
+                    row['reason_code'] or ('source-wait' if row['source_wait'] else row['kind']+'-failed' if row['errors'] else None),
+                    retry_time(row['next'],now,wall) if row['status']=='pending' and (row['errors'] or row['source_wait']) and row['next'] else None)
                 for row in rows]
 
     def status(self) -> dict[str, Any]:
-        rows = self.db.execute("SELECT kind , status , error , count ( * ) AS count FROM jobs WHERE status IN ( 'pending' , 'running' ) OR error IS NOT NULL GROUP BY kind , status , error").fetchall()
+        rows = self.db.execute("SELECT kind , status , reason_message AS error , count ( * ) AS count FROM jobs WHERE status IN ( 'pending' , 'running' ) OR (status <> 'done' AND reason_message IS NOT NULL) GROUP BY kind , status , reason_message").fetchall()
         # The durable feed sweep is deletion work, not a new public job kind.
         jobs = [dict(r, kind='delete' if r['kind'] == 'feed-delete' else r['kind']) for r in rows]
         errors = sorted({r['error'] for r in rows if r['error']})
@@ -618,11 +619,11 @@ class Store:
         with boundary:
             membership_graph.lock_graph(self.db)
             self.subscriptions.settings.set_state('processor:codex', config.model_dump_json())
-            ids=[row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE status='pending' AND problem_code='processor-config' AND payload::jsonb->>'preclaim_blocked'='true'")]
+            ids=[row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE status='pending' AND reason_code='processor-config' AND payload::jsonb->>'preclaim_blocked'='true'")]
             processor_previous=self.problems.prepare_processor_change(ids,self.wall_clock())
-            job_write(self.db, """UPDATE jobs SET status='pending',next=0,error=NULL,problem_code=NULL,
+            job_write(self.db, """UPDATE jobs SET status='pending',next=0,reason_message=NULL,reason_code=NULL,
                 payload=(payload-'preclaim_blocked')
-                WHERE status='pending' AND problem_code='processor-config' AND payload::jsonb->>'preclaim_blocked'='true'""")
+                WHERE status='pending' AND reason_code='processor-config' AND payload::jsonb->>'preclaim_blocked'='true'""")
             self.problems.finish_processor_change(ids,processor_previous,self.wall_clock())
             self.problems.sync_codex_choice(self.wall_clock())
 
@@ -671,7 +672,7 @@ class Store:
             return [row['title'],publication_input.blocks(content),json.loads(row['media_ids']),youtube.get('captions_digest')]
         own=material_read.item(self.db,item)
         return publication_input.digest([input_value(own) if own else None,
-            [(row['id'],input_value(row)) for row in publication_links.children(self,item) if row['complete']]])
+            [(row['id'],input_value(row)) for row in publication_links.children(self,item) if row['content']]])
 
 
     def mark_source_removed(self, item: str) -> None:

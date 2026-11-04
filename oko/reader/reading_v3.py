@@ -29,7 +29,7 @@ def card_source_url(value: object) -> object:
 
 
 def completeness(full: bool, reason: str, external_only: bool = False, post_web_unavailable: bool = False) -> wire.ContentCompleteness:
-    return wire.ContentCompleteness(wire.CompleteContent(state='complete') if full else wire.IncompleteContent(state='incomplete', reason='post_web_unavailable' if post_web_unavailable and not reason else 'external_attachment' if external_only else 'source_incomplete', message=reason))
+    return wire.ContentCompleteness(wire.CompleteContent(state='complete') if full else wire.IncompleteContent(state='incomplete', reason='post_web_unavailable' if post_web_unavailable and (not reason or reason=='Публикация недоступна для веб-просмотра') else 'external_attachment' if external_only else 'source_incomplete', message=reason))
 
 
 def provenance(value: facts.UnknownProvenance | facts.CodexProvenance | facts.LocalProvenance | None) -> wire.Provenance:
@@ -284,7 +284,11 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
         async with track(runtime, request, context):
             value = context.root
             if isinstance(value, wire.CommandViewed):
-                await runtime.viewed(value.material_id.root)
+                try:
+                    await runtime.viewed(value.material_id.root)
+                except ActionError as error:
+                    if error.kind!='missing' or not runtime.queries.command_succeeded(context.model_dump_json()):
+                        raise
             elif isinstance(value, wire.CommandRegenerate):
                 await runtime.regenerate(value.material_id.root)
             elif isinstance(value, wire.CommandRetryMaterial):

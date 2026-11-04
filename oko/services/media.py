@@ -13,9 +13,10 @@ class MediaRepository(Protocol):
     def begin(self, identity: str, attempt: str, revalidate: bool) -> MediaDownload | None: ...
     def stage(self, identity: str, download: MediaDownload, actual: MediaReference) -> StagedMedia: ...
     def accept(self, identity: str, download: MediaDownload, actual: MediaReference, staged: StagedMedia, /) -> bool: ...
-    def failed(self, identity: str, issue: AdapterIssue, /) -> None: ...
+    def failed(self, identity: str, issue: AdapterIssue, /) -> tuple[str,str] | None: ...
     def release(self, download: MediaDownload) -> None: ...
     def cleanup(self) -> None: ...
+    def retired_file_cleaned(self, key: str | None) -> bool: ...
     def current(self, identity: str, download: MediaDownload) -> bool: ...
 
 
@@ -40,14 +41,17 @@ class MediaService:
         self._repository().accept(identity,download,actual,staged)
 
     @repository_access
-    def failed(self, identity: str, issue: AdapterIssue) -> None:
-        self._repository().failed(identity,issue)
+    def failed(self, identity: str, issue: AdapterIssue) -> tuple[str,str] | None:
+        return self._repository().failed(identity,issue)
 
     def release(self, download: MediaDownload) -> None:
         self._repository().release(download)
 
     def cleanup(self) -> None:
         self._repository().cleanup()
+
+    def retired_file_cleaned(self, key: str | None) -> bool:
+        return self._repository().retired_file_cleaned(key)
 
     @repository_access
     def current(self, identity: str, download: MediaDownload) -> bool:

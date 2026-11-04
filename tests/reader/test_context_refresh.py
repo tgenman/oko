@@ -30,7 +30,7 @@ def test_folder_refresh_only_collects_its_feeds_and_records_the_target(tmp_path)
         assert client.post('/api/v3/collect',json={'scope':'folder','folder_id':'missing'}).status_code==404
 
 
-def test_refresh_retries_incomplete_and_unavailable_once_preserving_saved_copy(tmp_path):
+def test_refresh_preserves_successfully_collected_copy_without_recollecting(tmp_path):
     import time
     from collections import Counter
     from tests.support.synthetic_source import SyntheticSource
@@ -56,16 +56,15 @@ def test_refresh_retries_incomplete_and_unavailable_once_preserving_saved_copy(t
         cards=wait_for(client,lambda:(cards if len(cards:=read_all_cards(client, '/api/v3/cards'))==2 and all(not c['loading'] for c in cards) else None))
         copies={c['id']:client.get('/api/v3/publication/'+c['id']).json()['text'] for c in cards}
         assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'fixture'}).status_code==200
-        wait_for(client,lambda:source.calls['1']==2 and source.calls['2']==2)
+        wait_for(client,lambda:source.cursors==[None,'2'])
         time.sleep(.12)
-        assert source.calls=={'1':2,'2':2}
+        assert source.calls=={'1':1,'2':1}
         assert source.cursors==[None,'2']
         for item,text in copies.items():
             assert client.get('/api/v3/publication/'+item).json()['text']==text
         assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'fixture'}).status_code==200
-        wait_for(client,lambda:source.calls['2']==3)
         time.sleep(.12)
-        assert source.calls['2']==3
+        assert source.calls=={'1':1,'2':1}
 
 
 def test_refresh_retries_failed_theses_but_keeps_ready_results(tmp_path):

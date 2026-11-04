@@ -89,7 +89,7 @@ def test_card_etag_changes_when_retry_becomes_due_without_background_write(tmp_p
                 store = app.state.host.require_store()
                 app.state.host.execution.reader_advance = None
                 with store.db:
-                    store.db.execute("UPDATE jobs SET next=10,error='Synthetic wait',problem_code='source-connection' WHERE kind='fetch' AND item=%s", (items[0],))
+                    store.db.execute("UPDATE jobs SET next=10,reason_message='Synthetic wait',reason_code='source-connection' WHERE kind='fetch' AND item=%s", (items[0],))
             client.portal.call(schedule)
             first = client.get('/api/v3/cards')
             assert first.status_code == 200 and first.json()['items'][0]['loading'] is False
@@ -112,8 +112,8 @@ def test_card_etag_tracks_linked_content_without_parent_version_write(tmp_path):
             def add_link():
                 store = app.state.host.require_store()
                 with store.db:
-                    store.db.execute("""INSERT INTO publications(id,url,platform,external_id,complete,content,title,discovered_at)
-                        SELECT 'linked','https://example.org/linked','other_web','linked',1,content,title,discovered_at FROM publications WHERE id=%s""", (items[0],))
+                    store.db.execute("""INSERT INTO publications(id,url,platform,external_id,status,content,title,discovered_at)
+                        SELECT 'linked','https://example.org/linked','other_web','linked','ready',content,title,discovered_at FROM publications WHERE id=%s""", (items[0],))
                     store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES (%s,'linked')", (items[0],))
             client.portal.call(add_link)
             first = client.get('/api/v3/cards')

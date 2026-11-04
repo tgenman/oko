@@ -72,3 +72,42 @@ def test_preview_rate_limit_keeps_runtime_wait_and_saved_fragment(tmp_path):
         assert source['state']=='waiting' and source['operation']['retry_at']
         assert 'Saved fragment' in client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json()['text']
         assert 'HTTP 429' not in client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json()['linked_content']['post_text']
+        from tests.support.storage import database
+        item=path.rsplit('/',1)[-1]
+        with database(tmp_path) as db:
+            job=db.execute("SELECT reason_message FROM jobs WHERE kind='fetch' AND item=%s",(item,)).fetchone()
+            assert db.execute('SELECT status FROM publications WHERE id=%s',(item,)).fetchone()[0]=='pending_collection'
+        assert job and job['reason_message']
+        assert job['reason_message'] in client.get('/api/v3/publication/'+item).json()['completeness']['message']
+        import json
+        old_reason=job['reason_message']
+        with database(tmp_path) as db:
+            raw=db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()[0]
+            if isinstance(raw,str):raw=json.loads(raw)
+            raw['extra']['_collection_reason']=old_reason
+            db.execute('UPDATE publications SET content=%s WHERE id=%s',(json.dumps(raw),item))
+        client.post(path+'/retry')
+        with database(tmp_path) as db:
+            job=db.execute("SELECT reason_message,wait_scope,retry_at FROM jobs WHERE kind='fetch' AND item=%s",(item,)).fetchone()
+        assert job and job['reason_message'] is None and job['wait_scope'] and job['retry_at']
+        assert old_reason not in client.get('/api/v3/publication/'+item).json()['completeness']['message']
+
+
+def test_saved_preview_is_readable_while_publication_collection_is_pending(tmp_path):
+    from tests.support.storage import database
+    def response(request):
+        if request.url.path=='/fixture/11':
+            return httpx.Response(200,text=preview_metadata_page('Saved partial text'))
+        return httpx.Response(200,text=forwarded_unavailable_page())
+    with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(response)),headers={'Authorization':'Bearer test'}) as client:
+        configure_fast_web(client)
+        client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'})
+        item=settled(client)[0]['id']
+        with database(tmp_path) as db:
+            db.execute("UPDATE publications SET status='pending_collection' WHERE id=%s",(item,))
+        result=client.get('/api/v3/publication/'+item)
+        assert result.status_code==200
+        assert 'Saved partial text' in result.json()['text']
+        from tests.support.cards import read_all_cards
+        card=next(card for card in read_all_cards(client,'/api/v3/cards') if card['id']==item)
+        assert card['title']!='Материал загружается'

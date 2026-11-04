@@ -4,7 +4,7 @@ import {productionReader} from './http-reader';
 import {addSources} from './connections';
 import {artifactPath} from './artifacts';
 
-for(const kind of ['rss','telegram'] as const) test(`${kind} root stays readable while a separate article fails and updates its theses`,{timeout:30000},async t=>{
+for(const kind of ['rss','telegram'] as const) test(`${kind} root stays readable and waits for its article before theses`,{timeout:30000},async t=>{
  const r=await productionReader(t,{publicationPipeline:true});
  await r.setArticleState('held');
  await r.setMediaState('held');
@@ -17,12 +17,13 @@ for(const kind of ['rss','telegram'] as const) test(`${kind} root stays readable
  await r.page.locator('[data-card]').click();
  const own=kind==='rss'?'Own announcement.':'Own Telegram post.';
  await expect(r.page.locator('#text')).toContainText(own);
- await expect.poll(async()=>{const cards=(await r.api('cards')).items;return !!cards[0]&&(await r.api(`publication/${cards[0].id}`)).theses.result!==null;}).toBe(true);
- await expect(r.page.locator('#theses')).toContainText(own);
- await expect(r.page.locator('#theses')).not.toContainText('Article text arrived.');
+ await expect.poll(async()=>{const cards=(await r.api('cards')).items;return !!cards[0]&&(await r.api(`publication/${cards[0].id}`)).theses.result===null;}).toBe(true);
+ await expect(r.page.locator('#theses')).not.toContainText(own);
  await r.setArticleState('error');
  await expect(r.page.locator('#completeness')).toContainText('недоступна');
  await expect(r.page.locator('#text')).toContainText(own);
+ const pendingCard=(await r.api('cards')).items[0]!;
+ expect((await r.api(`publication/${pendingCard.id}`)).theses.result).toBeNull();
  await r.page.screenshot({path:artifactPath(`linked-${kind}-error.png`)});
  // Make the source available at the real retry, before the backend receives it.
  // An automatic retry before the click would otherwise stage a new version.

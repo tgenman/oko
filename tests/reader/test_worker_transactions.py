@@ -81,7 +81,7 @@ def test_new_input_rejects_old_success_and_old_error_without_harming_replacement
         await tasks._ai
         assert saved(store,item)['filtered_content']=={}
         latest=dict(store.db.execute("SELECT * FROM jobs WHERE kind='filter'").fetchone())
-        assert latest['generation']==replacement['generation'] and latest['error'] is None and latest['status']=='pending'
+        assert latest['generation']==replacement['generation'] and latest['reason_message'] is None and latest['status']=='pending'
         store.db.close()
     asyncio.run(scenario())
 
@@ -191,8 +191,8 @@ def test_processing_waits_when_publication_feed_disallows_processor(tmp_path):
             store.processing.reconcile_accepted_item(item)
         worker = workers(execution,tasks)[0]
         asyncio.run(pass_worker(worker,tasks))
-        job = store.db.execute("SELECT status,problem_code FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()
-        assert job['problem_code'] == 'ai-permission'
+        job = store.db.execute("SELECT status,reason_code FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()
+        assert job['reason_code'] == 'ai-permission'
         assert saved(store,item)['filtered_content'] == {}
         with transaction(store.db):
             store.subscriptions.update_settings('feed','fixture',Overrides(processor='llamacpp'))
@@ -249,11 +249,11 @@ def test_new_revision_does_not_shorten_source_wait(tmp_path):
         worker.service.reconcile()
         deadline=store.wall_clock()+120
         next_at=store.clock()+120
-        store.db.execute("UPDATE jobs SET status = 'pending' , wait_scope = 'source:synthetic' , retry_at = %s , next = %s , error = 'source wait' WHERE kind = 'filter'",(deadline,next_at))
+        store.db.execute("UPDATE jobs SET status = 'pending' , wait_scope = 'source:synthetic' , retry_at = %s , next = %s , reason_message = 'source wait' WHERE kind = 'filter'",(deadline,next_at))
         store.subscriptions.update_feed('fixture',FeedPatch(importance='high'))
         store.settings_changed('feed','fixture')
         worker.service.reconcile()
-    row=store.db.execute("SELECT retry_at,next,wait_scope,error FROM jobs WHERE kind='filter'").fetchone()
+    row=store.db.execute("SELECT retry_at,next,wait_scope,reason_message FROM jobs WHERE kind='filter'").fetchone()
     assert tuple(row)==(deadline,next_at,'source:synthetic','source wait')
     assert store.jobs.claim_processing('filter',store.clock()) is None
     store.db.close()
@@ -269,8 +269,8 @@ def test_linked_source_privacy_change_reconciles_parent_job_atomically(tmp_path)
             store.subscriptions.update_feed('fixture',FeedPatch(public_ai=True))
             store.subscriptions.update_feed(other,FeedPatch(public_ai=True))
             memberships.lock_graph(store.db)
-            store.db.execute("""INSERT INTO publications(id,url,platform,external_id,complete,content,title,discovered_at)
-                SELECT 'linked','https://example.org/linked','rss','linked',1,content,title,discovered_at FROM publications WHERE id=%s""", (item,))
+            store.db.execute("""INSERT INTO publications(id,url,platform,external_id,status,content,title,discovered_at)
+                SELECT 'linked','https://example.org/linked','rss','linked','ready',content,title,discovered_at FROM publications WHERE id=%s""", (item,))
             memberships.add(store.db,other,'linked',newly_created=True)
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES (%s,'linked')", (item,))
             store.processing.reconcile_accepted_item(item)
@@ -439,8 +439,8 @@ def test_legacy_linked_quote_copy_does_not_invalidate_parent_after_restart(tmp_p
         row=store.db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()
         content=row[0]
         content['blocks'].append(dict(type='quote',text='Original linked quote',author=None,source_url=None))
-        store.db.execute("""INSERT INTO publications(id,url,platform,external_id,complete,content,title)
-            VALUES ('linked','https://example.org/linked','rss','linked',1,%s,'Linked')""",(json.dumps(content),))
+        store.db.execute("""INSERT INTO publications(id,url,platform,external_id,status,content,title)
+            VALUES ('linked','https://example.org/linked','rss','linked','ready',%s,'Linked')""",(json.dumps(content),))
         store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES (%s,'linked')",(item,))
         store.processing.reconcile_accepted_item(item)
     filter_worker,summary_worker=workers(execution,tasks)
@@ -501,8 +501,8 @@ def test_publication_linked_title_wins_after_content_migration(tmp_path):
         row=store.db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()
         content=row[0]
         content['extra']['_reader']['title']='Legacy displayed title'
-        store.db.execute("""INSERT INTO publications(id,url,platform,external_id,complete,content,title)
-            VALUES ('linked','https://example.org/linked','rss','linked',1,%s,'Old source title')""",(json.dumps(content),))
+        store.db.execute("""INSERT INTO publications(id,url,platform,external_id,status,content,title)
+            VALUES ('linked','https://example.org/linked','rss','linked','ready',%s,'Old source title')""",(json.dumps(content),))
         store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES (%s,'linked')",(item,))
         store.processing.reconcile_accepted_item(item)
     filter_worker,summary_worker=workers(execution,tasks)
@@ -893,7 +893,7 @@ def test_collection_result_and_retry_outcome_commit_together(tmp_path):
             store.jobs.retry(job,store.clock(),'temporary failure',code='source-temporary')
         assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/retry'").fetchone()
         assert store.db.execute("SELECT cursor FROM feeds WHERE id='fixture'").fetchone()[0]=='retry-cursor'
-        row=store.db.execute('SELECT status,generation,error FROM jobs WHERE id=%s',(job.id,)).fetchone()
+        row=store.db.execute('SELECT status,generation,reason_message FROM jobs WHERE id=%s',(job.id,)).fetchone()
         assert row[:] == ('pending',job.generation,'temporary failure')
     finally:
         store.db.close()

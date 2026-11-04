@@ -97,8 +97,8 @@ def test_article_arrival_reprocesses_root_and_keeps_actual_source_references(tmp
             client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True})
             import_feed(client)
             presence(client,'rss')
-            card=wait_for(client,lambda:next((c for c in read_publications_for_cards(client, '/api/v3/cards') if c['theses']['result']),None))
-            assert len(calls)==1 and calls[0]['sources'][0]['text']=='Own excerpt'
+            card=wait_for(client,lambda:next(iter(read_publications_for_cards(client, '/api/v3/cards')),None))
+            assert card['theses']['result'] is None and calls==[]
             release.set()
             updated=wait_for(client,lambda:(value if (value:=client.get('/api/v3/publication/'+card['id']).json())['theses']['result'] and len(value['theses']['result']['points'])==2 else None))
             assert updated['theses']['result']['points']==['Own excerpt','Article body']

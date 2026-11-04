@@ -42,7 +42,7 @@ def test_http_reports_recovered_source_failure_without_get_writes(tmp_path,postg
     import psycopg
     with psycopg.connect(postgres_url,autocommit=True) as db:
         db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
-        db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('discover','feed','failed','failure','source-connection')")
+        db.execute("INSERT INTO jobs(kind,item,status,reason_message,reason_code) VALUES ('discover','feed','failed','failure','source-connection')")
     with TestClient(create_app(tmp_path,token='test',database_url=postgres_url,api_only=True),headers=HEADERS) as client:
         with psycopg.connect(postgres_url,autocommit=True) as db:
             before=db.execute("SELECT id,xmin::text,body FROM reader_problems WHERE identity='job:source-connection:feed:discover' AND finished IS NULL").fetchone()

@@ -341,12 +341,18 @@ class CollectionWorker:
         with current.jobs.transaction(self._live):
             if not self._live() or not current.jobs.valid(job):
                 return
-            self.media.failed(job.item,issue)
-            current.jobs.reconcile_cleanup()
+            replacement=self.media.failed(job.item,issue)
             if issue.kind==AdapterErrorKind.notice:
                 if current.jobs.valid(job):
-                    current.jobs.finish(job)
+                    if issue.code=='subtitles-unavailable':
+                        current.jobs.finish(job,reason_code='subtitles_absent',reason_message=issue.message)
+                        if replacement and replacement[1]!=job.item:
+                            current.jobs.retarget_completed_media(job,replacement[1],replacement[0])
+                    else:
+                        current.jobs.finish(job)
+                current.jobs.reconcile_cleanup()
             else:
+                current.jobs.reconcile_cleanup()
                 current.jobs.fail_media(job,issue)
                 if issue.kind==AdapterErrorKind.media_changed:
                     owner=self.media.owner(job.item)
@@ -395,6 +401,8 @@ class CollectionWorker:
                             return
                         media.accept(job.item,download,actual,staged)
                         current.jobs.finish(job)
+                        if staged[0]!=job.item:
+                            current.jobs.retarget_completed_media(job,staged[0],download.publication_id)
                         if caption_attempt and caption_attempt.attempted:
                             self.service.caption_completed()
                         self._finish_collection(job,current)
@@ -447,6 +455,9 @@ class CollectionWorker:
             now=self._clock()
             if now-self._last_media_cleanup>=3600:
                 self.media.cleanup()
+                for retired,key in self.execution._store.jobs.retired_media_jobs():
+                    if retired.id not in self.jobs._collection_active and self.media.retired_file_cleaned(key):
+                        self.execution._store.jobs.finish_retired_media_cleanup(retired,key)
                 self._last_media_cleanup=now
             self._sync_sources()
             if now-self._last_collection >= self._collection_interval:

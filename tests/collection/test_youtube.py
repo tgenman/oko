@@ -145,17 +145,46 @@ def test_normal_feed_waits_for_mode_and_missing_captions_never_reach_ai(tmp_path
         presence(client, 'reader')
         material = wait(client, lambda m: m['source'].get('captions') == 'not_requested')
         assert not captions.calls and not ai
+        assert material['completeness']['message']=='Субтитры не запрошены'
+        from tests.support.storage import database_url
+        import psycopg
+        with psycopg.connect(database_url(tmp_path)) as db:
+            state=db.execute("SELECT m.status,j.id FROM media_files m LEFT JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=%s AND m.resource_key='youtube:subtitles'",(material['id'],)).fetchone()
+        assert state == ('pending_download',None)
         client.patch('/api/v3/settings/feed/' + feed, json={'theses': True, 'processor': 'llamacpp'})
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
         material = wait(client, lambda m: m['source'].get('captions') == 'unavailable' and m['theses']['state']=='ready')
         assert material['completeness'].get('message','') == 'Субтитры недоступны' and material['text'] == ''
         assert material['theses']['result']['points']==[] and not ai
+        with psycopg.connect(database_url(tmp_path)) as db:
+            reason = db.execute("SELECT j.reason_code, j.reason_message FROM jobs j JOIN media_files m ON m.id=j.item WHERE j.kind='download_media' AND m.publication_id=%s AND m.resource_key='youtube:subtitles'", (material['id'],)).fetchone()
+        assert reason == ('subtitles_absent', 'Субтитры недоступны')
+        source = next(s for s in client.get('/api/v3/collection-status').json()['sources'] if s['feed_id'] == feed)
+        assert source['error_count'] == 0
+        assert not any(op['state'] == 'error' for op in client.get('/api/v3/collection-status/' + feed).json()['operations'])
+        with psycopg.connect(database_url(tmp_path),autocommit=True) as db:
+            db.execute("UPDATE jobs SET reason_message='Confirmed no captions' WHERE kind='download_media' AND item=(SELECT id FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles')",(material['id'],))
+        assert client.get('/api/v3/publication/'+material['id']).json()['completeness']['message']=='Confirmed no captions'
+        with psycopg.connect(database_url(tmp_path),autocommit=True) as db:
+            db.execute("UPDATE jobs SET wait_scope='youtube:captions',retry_at=%s,next=%s WHERE kind='download_media' AND item=(SELECT id FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles')",(wall[0]+100,tick[0]+100,material['id']))
         captions.outcome = 'error'
         # Advance both admission clocks; never wait for real rate-limit time.
-        wall[0] += 10
-        tick[0] += 10
         client.post('/api/v3/materials/' + material['id'] + '/retry')
-        material = wait(client, lambda m: m['source'].get('captions') == 'error' and not m['loading'])
+        with psycopg.connect(database_url(tmp_path)) as db:
+            pending=db.execute("SELECT m.status,j.status,p.content #>> '{extra,youtube,captions}' FROM media_files m JOIN jobs j ON j.item=m.id AND j.kind='download_media' JOIN publications p ON p.id=m.publication_id WHERE m.publication_id=%s AND m.resource_key='youtube:subtitles'",(material['id'],)).fetchone()
+        assert pending==('pending_download','pending','pending')
+        assert client.get('/api/v3/publication/'+material['id']).json()['source'].get('captions') == 'pending'
+        with psycopg.connect(database_url(tmp_path),autocommit=True) as db:
+            db.execute("UPDATE jobs SET status='running' WHERE kind='download_media' AND item=(SELECT id FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles')",(material['id'],))
+        assert client.get('/api/v3/publication/'+material['id']).json()['source'].get('captions') == 'running'
+        with psycopg.connect(database_url(tmp_path),autocommit=True) as db:
+            db.execute("UPDATE jobs SET status='failed',reason_code='network',reason_message='Network error' WHERE kind='download_media' AND item=(SELECT id FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles')",(material['id'],))
+        assert client.get('/api/v3/publication/'+material['id']).json()['source'].get('captions') == 'error'
+        with psycopg.connect(database_url(tmp_path),autocommit=True) as db:
+            db.execute("UPDATE jobs SET status='pending',reason_code=NULL,reason_message=NULL WHERE kind='download_media' AND item=(SELECT id FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles')",(material['id'],))
+        wall[0] += 110
+        tick[0] += 110
+        material = wait(client, lambda m: m['source'].get('captions') == 'pending' and 'Ограничение' in m['completeness'].get('message',''))
         assert 'Ограничение' in material['completeness'].get('message','') and not ai
         captions.outcome = 'ok'
         # Advance both admission clocks; never wait for real rate-limit time.
@@ -270,6 +299,8 @@ def test_late_captions_cannot_publish_after_reader_action(tmp_path, action):
             assert PNG in before_files.values()
             with psycopg.connect(database_url(tmp_path), autocommit=True) as db:
                 assert db.execute("SELECT status,storage_key FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles'", (item,)).fetchone() == ('pending_download', None)
+                media_job_ids = [row[0] for row in db.execute("SELECT j.id FROM jobs j JOIN media_files m ON m.id=j.item WHERE j.kind='download_media' AND m.publication_id=%s",(item,))]
+                assert media_job_ids
             assert not captions.cancelled.is_set()
             if action == 'viewed':
                 assert client.post('/api/v3/materials/' + item + '/viewed').status_code == 200
@@ -297,6 +328,7 @@ def test_late_captions_cannot_publish_after_reader_action(tmp_path, action):
             if action == 'viewed':
                 assert publication is None
                 assert db.execute('SELECT id FROM media_files WHERE publication_id=%s', (item,)).fetchall() == []
+                assert db.execute('SELECT id FROM jobs WHERE id=ANY(%s)',(media_job_ids,)).fetchall() == []
             else:
                 assert publication == (0,)
                 assert len(subtitles) == 1
@@ -330,7 +362,7 @@ class YouTubeTranscriptApi:
         presence(client, 'reader')
         feed = subscribe(client)
         presence(client, 'reader')
-        wait(client, lambda m: m['source'].get('captions') == 'error' and not m['loading'], keep_alive=True)
+        wait(client, lambda m: m['source'].get('captions') == 'pending' and bool(m['completeness'].get('message')), keep_alive=True)
         groups = client.get('/api/v3/diagnostics').json()['groups']
         matching = [g for g in groups if 'SDK failed' in g['message']]
         assert len(matching) == 1 and matching[0]['count'] == 1
@@ -391,7 +423,7 @@ class YouTubeTranscriptApi:
         presence(client, 'reader')
         subscribe(client)
         if not skipped:
-            wait(client, lambda m: m['source'].get('captions') == 'error' and not m['loading'],keep_alive=True)
+            wait(client, lambda m: m['source'].get('captions') == 'pending' and bool(m['completeness'].get('message')),keep_alive=True)
             assert any(g['error_type'] == 'VideoUnplayable' for g in client.get('/api/v3/diagnostics').json()['groups'])
             return
         for _ in range(200):
@@ -426,3 +458,85 @@ def test_description_uses_common_content_block():
                                  {'blocks': [{'type': 'text', 'role': 'description', 'text': ''}],
                                   'extra': {'youtube': {'captions': 'pending'}}})
     assert source._material(cleared, material).description == ''
+
+
+def test_confirmed_absent_captions_survive_restart_without_retry(tmp_path):
+    import psycopg
+    from tests.support.storage import database_url
+
+    class Missing(Captions):
+        async def fetch(self, video):
+            self.calls.append(video)
+            return None
+
+    captions=Missing()
+    kwargs=dict(token='test',rss_enabled=True,rss_transport=transport([]),youtube_captions=captions,lease=600)
+    with TestClient(create_app(tmp_path, **kwargs),headers=HEADERS) as client:
+        presence(client,'reader')
+        subscribe(client)
+        material=wait(client,lambda value:value['source'].get('captions')=='unavailable')
+        item=material['id']
+        with psycopg.connect(database_url(tmp_path)) as db:
+            assert db.execute("SELECT j.status,j.reason_code FROM jobs j JOIN media_files m ON m.id=j.item WHERE j.kind='download_media' AND m.publication_id=%s AND m.resource_key='youtube:subtitles'",(item,)).fetchone()==('done','subtitles_absent')
+        with psycopg.connect(database_url(tmp_path),autocommit=True) as db:
+            db.execute("UPDATE jobs SET reason_message=NULL WHERE kind='download_media' AND item=(SELECT id FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles')",(item,))
+        assert client.get('/api/v3/publication/'+item).json()['completeness']['message']=='Субтитры недоступны'
+    with TestClient(create_app(tmp_path, **kwargs),headers=HEADERS) as client:
+        presence(client,'reader')
+        material=wait(client,lambda value:value['id']==item and value['source'].get('captions')=='unavailable')
+        assert material['completeness']['message']=='Субтитры недоступны'
+        assert captions.calls==[VIDEO]
+
+
+def test_replacing_captions_keeps_the_same_download_job(tmp_path):
+    import psycopg
+    from tests.support.storage import database_url
+
+    class Changing(Captions):
+        async def fetch(self, video):
+            self.calls.append(video)
+            return 'First captions' if len(self.calls)==1 else 'Replacement captions'
+
+    captions,downloads,shift=Changing(),[],[0.0]
+    kwargs=dict(token='test',rss_enabled=True,rss_transport=transport(downloads),youtube_captions=captions,
+                lease=600,clock=lambda:time.monotonic()+shift[0],wall_clock=lambda:time.time()+shift[0])
+    with TestClient(create_app(tmp_path,**kwargs),headers=HEADERS) as client:
+        presence(client,'reader')
+        subscribe(client)
+        material=wait(client,lambda m:m['source'].get('captions')=='available' and not m['loading'])
+        with psycopg.connect(database_url(tmp_path)) as db:
+            first=db.execute("SELECT j.id,m.id FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=%s AND m.resource_key='youtube:subtitles'",(material['id'],)).fetchone()
+        assert first is not None
+        assert client.post('/api/v3/materials/'+material['id']+'/retry').status_code==200
+        shift[0]+=60
+        wait(client,lambda m:m['text']=='Replacement captions' and not m['loading'])
+        with psycopg.connect(database_url(tmp_path)) as db:
+            second=db.execute("SELECT j.id,m.id,j.status FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=%s AND m.resource_key='youtube:subtitles'",(material['id'],)).fetchone()
+        assert second is not None and second[0]==first[0] and second[2]=='done'
+
+
+def test_subtitles_disappearing_on_retry_keep_completed_job_and_reason(tmp_path):
+    import psycopg
+    from tests.support.storage import database_url
+
+    class Disappearing(Captions):
+        async def fetch(self, video):
+            self.calls.append(video)
+            return 'Previously saved captions' if len(self.calls)==1 else None
+
+    captions,shift=Disappearing(),[0.0]
+    kwargs=dict(token='test',rss_enabled=True,rss_transport=transport([]),youtube_captions=captions,
+                lease=600,clock=lambda:time.monotonic()+shift[0],wall_clock=lambda:time.time()+shift[0])
+    with TestClient(create_app(tmp_path,**kwargs),headers=HEADERS) as client:
+        presence(client,'reader')
+        subscribe(client)
+        material=wait(client,lambda m:m['source'].get('captions')=='available' and not m['loading'])
+        with psycopg.connect(database_url(tmp_path)) as db:
+            first=db.execute("SELECT j.id FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=%s AND m.resource_key='youtube:subtitles'",(material['id'],)).fetchone()
+        assert first is not None
+        assert client.post('/api/v3/materials/'+material['id']+'/retry').status_code==200
+        shift[0]+=60
+        wait(client,lambda m:m['source'].get('captions')=='unavailable' and not m['loading'])
+        with psycopg.connect(database_url(tmp_path)) as db:
+            second=db.execute("SELECT j.id,j.status,j.reason_code FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=%s AND m.resource_key='youtube:subtitles'",(material['id'],)).fetchone()
+        assert second==(first[0],'done','subtitles_absent')

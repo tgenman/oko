@@ -19,6 +19,9 @@ HEADERS = {'Authorization':'Bearer test'}
 def test_edited_text_is_readable_while_new_photo_download_is_held(tmp_path):
     root = publication_root(tmp_path)
     phase = [0]
+    import time
+    from tests.support.storage import database
+    offset=[0.0]
     started, release = threading.Event(), threading.Event()
     async def response(request):
         if request.url.host == 'cdn.example':
@@ -29,19 +32,24 @@ def test_edited_text_is_readable_while_new_photo_download_is_held(tmp_path):
             return httpx.Response(200, content=b'old-photo' if phase[0]==0 else b'new-photo', headers={'content-type':'image/jpeg'})
         photo = '<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/image-'+str(phase[0])+'.jpg\')"></a>'
         return httpx.Response(200, text=page([(11, ('Initial text' if phase[0]==0 else 'Edited text')+photo)]))
-    with TestClient(create_app(root, token='test', api_only=True, rss_transport=httpx.MockTransport(response)), headers=HEADERS) as client:
+    with TestClient(create_app(root, token='test', api_only=True, rss_transport=httpx.MockTransport(response), clock=lambda:time.monotonic()+offset[0], wall_clock=lambda:time.time()+offset[0]), headers=HEADERS) as client:
         try:
             configure_fast_web(client)
             client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
             item = settled(client)[0]['id']
             old = client.get('/api/v3/publication/'+item).json()
             assert client.get([media for media in old['media'] if media['role'] == 'attachment'][0]['url']).content == b'old-photo'
+            with database(root) as db:
+                previous=db.execute("SELECT j.id,m.storage_key FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=%s AND m.status='ready'",(item,)).fetchone()
+                assert previous
+                previous_job,previous_key=previous['id'],previous['storage_key']
             phase[0] = 1
             client.post('/api/v3/materials/'+item+'/retry')
             assert started.wait(3)
             updated = wait_for(client, lambda: (m if (m := client.get('/api/v3/publication/'+item).json())['text']=='Edited text' else None))
             assert [media for media in updated['media'] if media['role'] == 'attachment'] == []
             assert updated['completeness']['state'] == 'incomplete'
+            assert 'Вложение загружается' in updated['completeness']['message']
             release.set()
             complete = wait_for(client, lambda: (m if (m := client.get('/api/v3/publication/'+item).json()) and any(media['role'] == 'attachment' for media in m['media']) else None))
             assert client.get([media for media in complete['media'] if media['role'] == 'attachment'][0]['url']).content == b'new-photo'
@@ -49,6 +57,15 @@ def test_edited_text_is_readable_while_new_photo_download_is_held(tmp_path):
             assert [media for media in complete['media'] if media['role'] == 'attachment'][0]['url'] != [media for media in old['media'] if media['role'] == 'attachment'][0]['url']
             assert client.get([media for media in old['media'] if media['role'] == 'attachment'][0]['url']).status_code == 404
             assert 'previous_versions' not in complete
+            with database(root) as db:
+                assert db.execute('SELECT id FROM jobs WHERE id=%s',(previous_job,)).fetchone() is not None
+            assert (root/previous_key).exists()
+            offset[0]+=3601
+            def cleaned():
+                with database(root) as db:
+                    return db.execute('SELECT id FROM jobs WHERE id=%s',(previous_job,)).fetchone() is None
+            wait_for(client,cleaned)
+            assert not (root/previous_key).exists()
         finally:
             release.set()
 
@@ -108,6 +125,19 @@ def test_one_file_failure_keeps_other_files_and_backoff_survives_restart(tmp_pat
         item = wait_for(client, lambda: (cards[0]['id'] if (cards := read_all_cards(client, '/api/v3/cards')) else None))
         failed = wait_for(client, lambda: (m if (m := client.get('/api/v3/publication/'+item).json()) and sum(media['role'] == 'attachment' for media in m['media'])==1 and 'Не удалось загрузить вложение' in m['completeness'].get('message','') else None))
         assert failed['text']=='Readable text'
+        from tests.support.storage import database
+        with database(root) as db:
+            result=db.execute("""SELECT j.reason_message FROM media_files m
+                JOIN jobs j ON j.kind='download_media' AND j.item=m.id
+                WHERE m.publication_id=%s AND m.source_locator LIKE '%%/bad.jpg'""",(item,)).fetchone()
+            assert result and result['reason_message']
+            raw=db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()[0]
+            assert '_collection_reason' not in raw['extra']
+            assert 'full' not in raw['extra']['_reader'] and 'reason' not in raw['extra']['_reader']
+            db.execute("UPDATE jobs SET reason_code=NULL,reason_message=NULL WHERE kind='download_media' AND item=(SELECT id FROM media_files WHERE publication_id=%s AND source_locator LIKE '%%/bad.jpg')",(item,))
+        assert 'Вложение ожидает загрузки' in client.get('/api/v3/publication/'+item).json()['completeness']['message']
+        with database(root) as db:
+            db.execute("UPDATE jobs SET reason_message=%s WHERE kind='download_media' AND item=(SELECT id FROM media_files WHERE publication_id=%s AND source_locator LIKE '%%/bad.jpg')",(result['reason_message'],item))
         assert calls == {'bad':1, 'good':1}
         problems = client.get('/api/v3/status/details').json()['problems']['current']
         assert all(affected['material_id']==item for problem in problems for affected in problem['affected'] if affected['kind']=='material')
