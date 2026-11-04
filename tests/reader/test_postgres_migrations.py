@@ -721,7 +721,10 @@ def test_media_ids_migration_preserves_order_and_media_after_restart(connections
     with connections() as db:
         verify(db, MIGRATIONS)
         ids, saved = db.execute("SELECT media_ids,content FROM publications WHERE id='p'").fetchone()
-        assert json.loads(ids)==['m2','m1'] and saved==content
+        assert json.loads(ids)==['m2','m1']
+        assert saved['blocks']==[dict(block,source_url=f'https://media.test/{index}',publication_url=None)
+                                 for index,block in enumerate(content['blocks'],1)]
+        assert saved['extra']==content['extra']
         assert db.execute("SELECT id FROM media_files WHERE publication_id='p' ORDER BY id").fetchall()==[('m1',),('m2',)]
 
 

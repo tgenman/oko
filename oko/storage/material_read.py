@@ -133,6 +133,8 @@ def material_inputs(db: Database, identities: set[str], *, include_subtitles: bo
             value.media[row['publication_id']].append(row)
         for row in db.execute("SELECT j.* FROM jobs j WHERE j.item=ANY(%s) AND j.kind<>'download_media'",(batch,)):
             value.jobs.setdefault(row['item'],{})[row['kind']]=row
+        for row in db.execute("SELECT j.*,m.publication_id AS reader_item FROM jobs j JOIN media_files m ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=ANY(%s)",(batch,)):
+            value.media_jobs.setdefault(row['reader_item'],[]).append(row)
     feeds = sorted({r['reader_feed_id'] for r in value.items.values() if r['reader_feed_id'] is not None}
                    | {feed for owners in value.owners.values() for feed in owners})
     for start in range(0, len(feeds), 400):

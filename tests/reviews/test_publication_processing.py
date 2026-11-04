@@ -287,11 +287,12 @@ def test_processing_does_not_wait_for_the_media_lane(tmp_path):
             assert started.wait(20),client.get('/api/v3/status/details').json()
             card=wait_for(client,lambda:next((c for c in read_publications_for_cards(client, '/api/v3/cards') if c['theses']['result']),None))
             assert stored(root,card['id'])['status']=='ready'
-            assert [media for media in card['media'] if media['role'] == 'attachment']==[]
+            assert any(media['status']=='pending_download' and media['url'] is None for media in card['media'])
+            assert [media for media in card['media'] if media['url'] is not None]==[]
             assert {c['operation'] for c in calls}=={'filter','theses'}
             metadata=stored(root,card['id'])['processing_metadata']
             release.set()
-            wait_for(client,lambda:[media for media in client.get('/api/v3/publication/'+card['id']).json()['media'] if media['role'] == 'attachment'])
+            wait_for(client,lambda:[media for media in client.get('/api/v3/publication/'+card['id']).json()['media'] if media['url'] is not None])
             assert stored(root,card['id'])['processing_metadata']==metadata
         finally:
             release.set()

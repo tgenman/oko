@@ -66,7 +66,7 @@ class _Content:
     def file(self, url: str, role: str, *, name: str = '', mime: str | None = None, caption: str = '') -> None:
         self.flush()
         key='web:'+str(len(self.media))+':'+role
-        self.media.append(MediaReference(key,url,name,mime))
+        self.media.append(MediaReference(key,url,name,mime,source_url=url))
         self.blocks.append(dict(type='media',ref={'$media':key},role=role,caption=caption))
 
     def walk(self, node: Any) -> None:

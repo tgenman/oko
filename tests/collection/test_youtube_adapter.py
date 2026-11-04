@@ -36,7 +36,7 @@ def test_youtube_discovery_describes_video_cover_and_subtitles_without_downloadi
     assert value.metadata.reference.url=='https://www.youtube.com/watch?v='+VIDEO
     assert not value.needs_fetch and not value.linked_publications
     blocks=value.content['blocks']
-    assert blocks[0]=={'type':'external_media','kind':'youtube','url':'https://www.youtube.com/watch?v='+VIDEO}
+    assert blocks[0]=={'type':'external_media','kind':'video','url':'https://www.youtube.com/watch?v='+VIDEO}
     assert [block['role'] for block in blocks if block['type']=='media']==['cover','subtitles']
     assert len(value.media)==2 and captions.calls==[]
     assert all('/feeds/videos.xml?' in url for url in calls)

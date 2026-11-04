@@ -29,7 +29,7 @@ def test_rss_article_images_are_local_and_viewing_removes_the_copy(tmp_path: Pat
         material = client.get('/api/v3/publication/' + card['id']).json()
         assert (material['completeness']['state']=='complete') is True
         assert 'Полный текст статьи.' in material['text'] and 'Шум' not in material['text']
-        image = [media['url'] for media in [media for media in material['media'] if media['role'] == 'attachment'] if media['kind']=='image'][0]
+        image = [media['url'] for media in [media for media in material['media'] if media['url'] is not None] if media['kind']=='image'][0]
         assert client.get(image).content == PNG
         assert client.post('/api/v3/materials/' + card['id'] + '/viewed').status_code == 200
         assert client.get(image).status_code == 404
@@ -125,14 +125,14 @@ def test_retry_missing_image_preserves_local_text_and_cleans_old_assets(tmp_path
         import_feed(client)
         presence(client, 'test')
         wait_cards(client)
-        card = wait_for(client,lambda:next((c for c in read_publications_for_cards(client, '/api/v3/cards') if len([m for m in [media for media in c['media'] if media['role'] == 'attachment'] if m['kind']=='image'])==1),None))
-        assert (card['completeness']['state']=='complete') is False and len([media for media in [media for media in card['media'] if media['role'] == 'attachment'] if media['kind']=='image']) == 1
+        card = wait_for(client,lambda:next((c for c in read_publications_for_cards(client, '/api/v3/cards') if len([m for m in [media for media in c['media'] if media['url'] is not None] if m['kind']=='image'])==1),None))
+        assert (card['completeness']['state']=='complete') is False and len([media for media in [media for media in card['media'] if media['url'] is not None] if media['kind']=='image']) == 1
         available = True
         client.post('/api/v3/materials/' + card['id'] + '/retry')
-        card = wait_for(client,lambda:next((c for c in read_publications_for_cards(client, '/api/v3/cards') if len([m for m in [media for media in c['media'] if media['role'] == 'attachment'] if m['kind']=='image'])==2),None))
-        assert (card['completeness']['state']=='complete') is True and len([media for media in [media for media in card['media'] if media['role'] == 'attachment'] if media['kind']=='image']) == 2
+        card = wait_for(client,lambda:next((c for c in read_publications_for_cards(client, '/api/v3/cards') if len([m for m in [media for media in c['media'] if media['url'] is not None] if m['kind']=='image'])==2),None))
+        assert (card['completeness']['state']=='complete') is True and len([media for media in [media for media in card['media'] if media['url'] is not None] if media['kind']=='image']) == 2
         client.post('/api/v3/materials/' + card['id'] + '/viewed')
-        assert all(client.get(url).status_code == 404 for url in [media['url'] for media in [media for media in card['media'] if media['role'] == 'attachment'] if media['kind']=='image'])
+        assert all(client.get(url).status_code == 404 for url in [media['url'] for media in [media for media in card['media'] if media['url'] is not None] if media['kind']=='image'])
 
 
 def test_source_disabled_switch_cannot_continue_collecting(tmp_path: Path):
@@ -177,7 +177,7 @@ def test_rss_saved_jobs_recover_after_failed_file_commit(tmp_path: Path):
         presence(client, 'test')
         cards=wait_for(client,lambda:(cards if len(cards:=read_publications_for_cards(client, '/api/v3/cards'))==1 and cards[0]['completeness']['state']=='complete' else None))
         assert len(cards)==1
-        assert client.get([media['url'] for media in [media for media in cards[0]['media'] if media['role'] == 'attachment'] if media['kind']=='image'][0]).content == PNG
+        assert client.get([media['url'] for media in [media for media in cards[0]['media'] if media['url'] is not None] if media['kind']=='image'][0]).content == PNG
         client.post('/api/v3/materials/' + cards[0]['id'] + '/viewed')
         assert not [path for path in (tmp_path/'staging').rglob('*') if path.is_file()]
 
@@ -240,7 +240,7 @@ def test_atom_xhtml_keeps_text_images_and_xml_base(tmp_path: Path):
         assert card['source_url'] == 'https://source.test/news/article'
         material=client.get('/api/v3/publication/'+card['id']).json()
         assert (material['completeness']['state']=='complete') is False
-        assert len([media for media in [media for media in material['media'] if media['role'] == 'attachment'] if media['kind']=='image']) == 1
+        assert len([media for media in [media for media in material['media'] if media['url'] is not None] if media['kind']=='image']) == 1
         assert client.get('/api/v3/publication/' + card['id']).json()['text'] == 'Полный анонс'
 
 

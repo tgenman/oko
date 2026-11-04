@@ -113,4 +113,5 @@ MIGRATIONS = (
     Migration(105, 'job-reasons', (Path(__file__).parent / 'postgres' / '105-job-reasons.sql').read_text()),
     Migration(106, 'remove-publication-complete', (Path(__file__).parent / 'postgres' / '106-remove-publication-complete.sql').read_text()),
     Migration(107, 'remove-publication-incomplete-projection', (Path(__file__).parent / 'postgres' / '107-remove-publication-incomplete-projection.sql').read_text()),
+    Migration(108, 'media-source-url', (Path(__file__).parent / 'postgres' / '108-media-source-url.sql').read_text()),
 )

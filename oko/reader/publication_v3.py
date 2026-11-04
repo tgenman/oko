@@ -81,15 +81,13 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
                     completeness=completeness(material.full, material.reason, material.external_only, material.post_web_unavailable).model_dump(mode='json'),
                     loading=material.loading is True, changed=material.changed is True,
                     source_deleted=material.source_deleted is True, revision_id=material.version)
+            unified=current.unified_publication(item)
         original=content.get('text','')
         filtered=value['filter']
         summarized=value['theses']
         f=filtered['result']
         summary=summarized['result']
-        attachments=content.get('attachments',[])
-        images=content.get('images',[])
-        media=[dict(kind='image',url=url,mime=None,role='image') for url in images]
-        media.extend(dict(kind=a['kind'],url=a['url'],mime=a['mime'],role='attachment') for a in attachments)
+        media=unified.pop('media')
         body=dict(id=value['id'],title=value['title'],feed_id=value['feed_id'],published_at=value['published_at'],
             source_url=value['source_url'],text=original,source=value['source'],availability=value['availability'],
             description=content.get('description',''),revision_id=content.get('revision_id'),
@@ -99,7 +97,7 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
             post_web_unavailable=content.get('post_web_unavailable',False),external_attachments=content.get('external_attachments',[]),
             filter=dict(state=filtered['state'],result=dict(**f,text=content.get('display_text',original)) if f else None,error=filtered['error']),
             theses=summarized,
-            media=media)
+            media=media,**unified)
         body=wire.PublicationResponse.model_validate(body).model_dump(mode='json')
         encoded=json.dumps(body,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()
         etag='"'+hashlib.sha256(storage.encode()+b'\0'+encoded).hexdigest()+'"'

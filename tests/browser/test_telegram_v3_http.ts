@@ -26,7 +26,7 @@ test('real HTTP Telegram web: connection, duplicate, local removal and fresh re-
  await page.locator('[data-card]').first().click();
  await expect(page.locator('#text')).toContainText('Веб-публикация без аккаунта');
  await expect(page.locator('#text')).toContainText('Полный текст статьи сохранён локально.');
- await expect(page.locator('.telegraph-article img')).toBeVisible();
+ await expect(page.locator('.linked-publication img')).toBeVisible();
  await expect(page.locator('#completeness')).toContainText('External embed not saved locally');
  await page.locator('#add-open').click();await page.locator('#add-telegram-tab').click();
  await page.locator('#telegram-peer').fill('https://t.me/s/fixture/11');

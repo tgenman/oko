@@ -48,7 +48,7 @@ test('Markdown publication links travel through the production HTTP reader uncha
 
 test('filtered publication keeps a collapsed full original, media and restorable Markdown text',async()=>{
  const r=await reader();try{
-  const item=material('A',{text:'[Статья](https://example.net/story)\n\nРеклама',media:[{kind:'image',role:'image',url:'/api/v3/materials/A/images/x.png',mime:null}],filter:{state:'ready',error:null,result:{hidden:false,reason:'Убрана реклама',removed:['Реклама'],text:'[Статья](https://example.net/story)\n\n',provenance:{kind:'unknown',reason:'not_recorded'}}}});
+  const item=material('A',{text:'[Статья](https://example.net/story)\n\nРеклама',media:[{id:'image',name:'image',size_bytes:null,source_url:null,status:'ready',reason_code:null,reason_message:null,kind:'image',role:'image',url:'/api/v3/materials/A/images/x.png',mime:null}],filter:{state:'ready',error:null,result:{hidden:false,reason:'Убрана реклама',removed:['Реклама'],text:'[Статья](https://example.net/story)\n\n',provenance:{kind:'unknown',reason:'not_recorded'}}}});
   await r.start([item]);
   await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/materials/A/images/x.png',{base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jL1sAAAAASUVORK5CYII=',mime:'image/png'}));
   await r.page.locator('[data-card="A"]').click();
@@ -59,7 +59,7 @@ test('filtered publication keeps a collapsed full original, media and restorable
   await r.page.locator('#original-panel summary').click();await expect(r.page.locator('#text').getByRole('link',{name:'Статья'})).toBeVisible();
   await expect(r.page.locator('#text')).toContainText('Реклама');await expect(r.page.locator('#material img')).toHaveCount(1);
   await expect(r.page.locator('#filter-restore')).toHaveCount(0);
-  const hidden={...item,filter:{...item.filter,result:{...item.filter.result!,hidden:true,reason:'Скрыто фильтром'}}};
+  const hidden={...item,filtered_content:{...item.filtered_content,hidden:true,reason:'Скрыто фильтром',blocks:[]},filter:{...item.filter,result:{...item.filter.result!,hidden:true,reason:'Скрыто фильтром'}}};
   await r.page.evaluate(hidden=>readerTransport.replies.set('/api/v3/publication/A',{body:hidden}),hidden);
   await expect(r.page.locator('#filter-status')).toContainText('Скрыто фильтром');await expect(r.page.locator('#text').getByRole('link',{name:'Статья'})).toBeVisible();
   await expect(r.page.locator('#original-panel')).toHaveCount(0);

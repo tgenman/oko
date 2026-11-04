@@ -1,9 +1,6 @@
-import {SourceIcon} from './tree';
 import type {Navigation} from './tree';
-import {LinkedPublication} from './linked-content';
-import {PostWebUnavailable} from './post-web-unavailable';
-import {ExternalAttachments} from './external-attachments';
 import './opened.css';
+import './linked-content.css';
 import {Markdown} from './markdown';
 import {readingPosition} from './position';
 import {newsTitle} from './title';
@@ -20,19 +17,18 @@ import {createStore,useStore,host,errorMessage} from './store';
 
 type MediaFetch=(path:string,signal?:AbortSignal,cache?:RequestCache)=>Promise<Response>;
 type Material = PublicationResponse;
-type DisplayContent = Omit<PublicationResponse, 'completeness' | 'revision_id'> & {completeness: NonNullable<PublicationResponse['completeness']>; revision_id: string; display_text: string; images: string[]; attachments: Attachment[]};
+type DisplayContent = PublicationResponse & {images: string[]; attachments: Attachment[]};
 type OpenCard=Pick<Card,'id'>&Partial<Card>;
 type Session={id:string;sourceTitle?:string;sourceFeed?:Navigation['feeds'][number];folder_id:string|undefined;etag:string|null;loading:boolean;detached:boolean;reset:boolean;assetsPaused:boolean;assetEpoch:number;assets:AbortController;controller:AbortController};
 type Resource={url:string;kind:Attachment['kind'];name:string;failed?:boolean};
-function Media({material,fetchMedia,session,id,className,imageAlt='Publication image',optional=false}:{material:Pick<DisplayContent,'images'|'attachments'> & Partial<Pick<DisplayContent,'external_attachments'>>;fetchMedia:MediaFetch;session:Session;id?:string;className?:string;imageAlt?:string;optional?:boolean}) {
+function Media({material,fetchMedia,session,id,className,imageAlt='Publication image',optional=false}:{material:Pick<DisplayContent,'images'|'attachments'>;fetchMedia:MediaFetch;session:Session;id?:string;className?:string;imageAlt?:string;optional?:boolean}) {
   const ref=useRef<HTMLDivElement>(null),[resources,setResources]=useState<Resource[]>([]);
   useLayoutEffect(()=>()=>{for(const media of ref.current?.querySelectorAll<HTMLMediaElement>('video,audio')||[]){media.pause();media.removeAttribute('src');media.load();}},[]);
-  const resourcesKey=JSON.stringify([material.images,material.attachments,material.external_attachments]);
+  const resourcesKey=JSON.stringify([material.images,material.attachments]);
   const loaded=useRef(new Map<string,Resource>());
   useEffect(()=>{
     let active=true;const controller=new AbortController(),signal=AbortSignal.any([controller.signal,session.controller.signal,session.assets.signal]),epoch=session.assetEpoch;
-    const posters=new Set((material.external_attachments||[]).map(media=>media.poster_url));
-    const inputs=[...(material.images||[]).map(url=>({url,kind:'image' as const})),...(material.attachments||[])].filter(media=>!posters.has(media.url));
+    const inputs=[...(material.images||[]).map(url=>({url,kind:'image' as const})),...(material.attachments||[])];
     const keys=new Set(inputs.map(input=>input.kind+'/'+input.url));
     for(const [key,value] of loaded.current)if(!keys.has(key)){URL.revokeObjectURL(value.url);loaded.current.delete(key);}
     const publish=()=>{if(active){setResources(inputs.flatMap(input=>{const resource=loaded.current.get(input.kind+'/'+input.url);return resource&&!resource.failed?[resource]:[];}));}};
@@ -50,35 +46,97 @@ function Media({material,fetchMedia,session,id,className,imageAlt='Publication i
     return()=>{active=false;controller.abort();};
   },[resourcesKey,session,fetchMedia,session.assetsPaused,session.assetEpoch,optional]);
   useEffect(()=>{const owned=loaded.current;return()=>{for(const resource of owned.values())URL.revokeObjectURL(resource.url);owned.clear();};},[]);
-  return <div ref={ref} {...(id?{id}:{})} {...(className?{className}:{})}>{resources.map(resource=>resource.kind==='image'?<img key={resource.url} src={resource.url} alt={imageAlt} onError={optional?()=>{resource.failed=true;setResources(current=>current.filter(item=>item!==resource));}:undefined}/>:resource.kind==='video'||resource.kind==='circle'?<video key={resource.url} src={resource.url} controls preload="metadata" className={resource.kind==='circle'?'circle':undefined} aria-label={resource.kind==='circle'?'Telegram video message':'Publication video'}/>:resource.kind==='audio'?<audio key={resource.url} src={resource.url} controls preload="metadata" aria-label="Publication audio"/>:<a key={resource.url} href={resource.url} download={resource.name}>Download Attachment</a>)}</div>;
+  return <div ref={ref} {...(id?{id}:{})} {...(className?{className}:{})}>{resources.map(resource=>resource.kind==='image'?<img key={resource.url} src={resource.url} alt={imageAlt} onError={optional?()=>{resource.failed=true;setResources(current=>current.filter(item=>item!==resource));}:undefined}/>:resource.kind==='video'||resource.kind==='circle'?<video key={resource.url} src={resource.url} controls preload="metadata" className={resource.kind==='circle'?'circle':undefined} aria-label={resource.kind==='circle'?'Video message':'Publication video'}/>:resource.kind==='audio'?<audio key={resource.url} src={resource.url} controls preload="metadata" aria-label="Publication audio"/>:<a key={resource.url} href={resource.url} download={resource.name}>Download Attachment</a>)}</div>;
 }
-type PublicationBody = Pick<DisplayContent,'text'|'images'|'attachments'|'linked_content'>;
-function postMedia<T extends Pick<DisplayContent,'images'|'attachments'|'linked_content'>>(material:T):T {
-  const articleUrls=new Set(material.linked_content?.articles.flatMap(article=>article.media_urls)||[]);
-  return {...material,attachments:material.attachments.filter(media=>!articleUrls.has(media.url))};
+type PublicationBody = Pick<DisplayContent,'content'|'linked_publications'|'media'|'jobs'>;
+function SubtitleText({url,session,fetchMedia}:{url:string|null;session:Session;fetchMedia:MediaFetch}) {
+  const [text,setText]=useState('');
+  useEffect(()=>{
+    if(!url||session.detached||session.assetsPaused)return;
+    const controller=new AbortController(),epoch=session.assetEpoch;
+    const signal=AbortSignal.any([controller.signal,session.controller.signal,session.assets.signal]);
+    void fetchMedia(url,signal).then(response=>response.ok?response.text():'').then(value=>{
+      if(!signal.aborted&&!session.detached&&epoch===session.assetEpoch)setText(value);
+    }).catch(error=>{if(!signal.aborted)reportError(error,'Opened item');});
+    return()=>controller.abort();
+  },[url,session,fetchMedia,session.assetsPaused,session.assetEpoch]);
+  return <Markdown text={text}/>;
 }
-function PublicationText({material,session,fetchMedia,sourceUrl,inlineMedia=true}:{material:PublicationBody;session:Session;fetchMedia:MediaFetch;sourceUrl:string;inlineMedia?:boolean}) {
-  return material.linked_content?<LinkedPublication content={material.linked_content} renderMedia={urls=>inlineMedia&&<Media material={{images:[],attachments:material.attachments.filter(media=>urls.includes(media.url))}} session={session} fetchMedia={fetchMedia}/>}/>:<Markdown text={material.text} sourceUrl={sourceUrl}/>;
+function postMedia<T extends Pick<DisplayContent,'images'|'attachments'|'linked_publications'|'media'>>(material:T):T {
+  const articleIds=new Set(material.linked_publications.flatMap(article=>(article.content.blocks||[]).filter(block=>block.type==='media').map(block=>block.media_id)));
+  const articleUrls=new Set(material.media.filter(media=>articleIds.has(media.id)&&media.url).map(media=>media.url!));
+  return {...material,images:material.images.filter(url=>!articleUrls.has(url)),attachments:material.attachments.filter(media=>!articleUrls.has(media.url))};
+}
+function PublicationText({material,session,fetchMedia,sourceUrl,revision,inlineMedia=true}:{material:PublicationBody;session:Session;fetchMedia:MediaFetch;sourceUrl:string;revision:number;inlineMedia?:boolean}) {
+  const blocks=material.content.blocks||[];
+  const hasMedia=blocks.some(block=>block.type==='media')||material.linked_publications.some(article=>(article.content.blocks||[]).some(block=>block.type==='media'));
+  if(blocks.some(block=>block.type==='text'||block.type==='quote'||block.type==='media'||block.type==='publication'||block.type==='external_media')){
+    const render=(values:typeof blocks,base:string,linked:boolean)=>values.map((block,index)=>{
+      if(block.type==='text'&&block.role==='body')return <Markdown key={index} text={block.text} sourceUrl={base}/>;
+      if(block.type==='text'&&block.role==='description')return <section key={index} id={!linked?'description-panel':undefined}><h3>Description</h3><div id={!linked?'description':undefined}><Markdown text={block.text} sourceUrl={base}/></div></section>;
+      if(block.type==='quote')return <ReplyPreview key={session.id+'/'+revision+'/'+index} id={!linked&&index===values.findIndex(value=>value.type==='quote')?'reply-preview':undefined} preview={block}/>;
+      if(block.type==='media'){
+        const file=material.media.find(value=>value.id===block.media_id);
+        const occurrence=values.slice(0,index).filter(previous=>previous.type==='media'&&previous.media_id===block.media_id).length;
+        return <div key={'media/'+block.media_id+'/'+occurrence}>{block.source_url&&<a href={block.source_url} target="_blank" rel="noopener noreferrer">Original file</a>}{block.source_url&&block.publication_url&&' · '}{block.publication_url&&<a href={block.publication_url} target="_blank" rel="noopener noreferrer">Original publication</a>}{block.role==='subtitles'?<SubtitleText key={session.id+'/'+block.media_id+'/'+(file?.url||'')} url={file?.url||null} session={session} fetchMedia={fetchMedia}/>:inlineMedia&&file?.url&&<Media material={{images:file.kind==='image'?[file.url]:[],attachments:file.kind==='image'?[]:[{url:file.url,kind:file.kind,mime:file.mime||'application/octet-stream'}]}} session={session} fetchMedia={fetchMedia}/>}</div>;
+      }
+      if(block.type==='external_media'){
+        const poster=material.media.find(value=>value.id===block.poster_media_id);
+        return <section key={index} className="external-attachment" aria-label="External media">{inlineMedia&&poster?.url&&<Media material={{images:[poster.url],attachments:[]}} session={session} fetchMedia={fetchMedia} className="external-attachment-art" optional/>}<div className="external-attachment-copy"><strong>{block.title||'External media'}</strong>{block.author&&<p>{block.author}</p>}{block.duration&&<p>{block.duration}</p>}{block.size_label&&<p>{block.size_label}</p>}{block.restriction==='size_limit'?<p>File exceeds the available size limit.</p>:block.reason==='public_preview_unavailable'&&<p>Available at the source; no local copy.</p>}<a href={block.url} target="_blank" rel="noopener noreferrer">Open original ↗</a></div></section>;
+      }
+      if(block.type!=='publication'||linked)return null;
+      const article=material.linked_publications.find(value=>value.id===block.publication_id);
+      if(!article)return <a key={index} href={block.source_url} target="_blank" rel="noopener noreferrer">Original publication</a>;
+      const problem=material.jobs.find(job=>job.operation==='fetch'&&job.object_id===article.id&&(job.status==='failed'||job.status==='unavailable'));
+      return <section key={article.id} className="linked-publication" aria-label="Linked publication"><header><a href={article.source_url} target="_blank" rel="noopener noreferrer">Original publication ↗</a></header><div className="linked-publication-body"><h2>{article.title}</h2>{problem&&<p role="status">{problem.reason_message||'Publication unavailable'}</p>}{render(article.content.blocks||[],article.source_url,true)}</div></section>;
+    });
+    return <div id={inlineMedia&&hasMedia?'images':undefined}>{render(blocks,sourceUrl,false)}</div>;
+  }
+  return null;
 }
 function ReplyPreview({preview,id}:{preview:ReplyContext;id?:string}) {
   const [expanded,setExpanded]=useState(false);
   let href:string|undefined;
   try {const url=new URL(preview.source_url||'');if(['http:','https:'].includes(url.protocol)&&!url.username&&!url.password)href=url.href;}catch{/* Missing/unsafe source remains readable. */}
-  const body=<><strong>{preview.author||'Ответ на сообщение'}</strong><span className="reply-preview-text" data-reading-paragraph>{preview.text}</span></>;
-  return <section id={id} className={'reply-preview'+(expanded?' expanded':'')} aria-label="Ответ на сообщение" data-reading-region>
+  const body=<><strong>{preview.author||'Цитата'}</strong><span className="reply-preview-text" data-reading-paragraph>{preview.text}</span></>;
+  return <section id={id} className={'reply-preview'+(expanded?' expanded':'')} aria-label="Цитата" data-reading-region>
     {href?<a className="reply-preview-link" href={href} target="_blank" rel="noopener noreferrer">{body}</a>:<div className="reply-preview-link">{body}</div>}
     {preview.text&&<button type="button" className="reply-preview-expand" aria-expanded={expanded} onClick={()=>setExpanded(value=>!value)}>{expanded?'Свернуть':'Весь фрагмент'}</button>}
   </section>;
 }
-function Points({points,references}:{points:string[];references:NonNullable<PublicationResponse['theses']['result']>['references']}) {return <>{points.map((point,index)=><li key={index}>{point}{(references[index]||[]).map((ref,i)=><a key={i} href={ref.source_url} target="_blank" rel="noopener noreferrer"> Source</a>)}</li>)}</>;}
+type SummaryReference={material_id:string;source_url:string|null};
+function Points({points,references}:{points:string[];references:SummaryReference[][]}) {return <>{points.map((point,index)=><li key={index}>{point}{(references[index]||[]).map((ref,i)=>ref.source_url?<a key={i} href={ref.source_url} target="_blank" rel="noopener noreferrer"> Source</a>:<span key={i}> Source unavailable ({ref.material_id})</span>)}</li>)}</>;}
+
+function summaryResult(material:Material):{points:string[];references:SummaryReference[][]}|null {
+  const raw=material.summarized_content.points;
+  if(!raw)return null;
+  const sources=new Map([[material.id,material.source_url],...material.linked_publications.map(article=>[article.id,article.source_url] as const)]);
+  const points:string[]=[],references:SummaryReference[][]=[];
+  for(const value of raw){
+    points.push(value.text);
+    references.push(value.source_publication_ids.map(id=>({material_id:id,source_url:sources.get(id)||null})));
+  }
+  return {points,references};
+}
+
+function summaryProvenance(material:Material):string {
+  const value=material.processing_metadata.summary;
+  if(!value||typeof value!=='object')return 'Unknown model';
+  const processor='processor'in value&&typeof value.processor==='string'?value.processor:null;
+  const model='model'in value&&typeof value.model==='string'?value.model:null;
+  if(!processor&&!model)return 'Unknown model';
+  const parameters='parameters'in value&&value.parameters&&typeof value.parameters==='object'?value.parameters:value;
+  const effort=parameters&&'reasoning_effort'in parameters&&typeof parameters.reasoning_effort==='string'?parameters.reasoning_effort:null;
+  const fast=parameters&&'fast'in parameters&&typeof parameters.fast==='boolean'?(parameters.fast?'Fast enabled':'Fast disabled'):null;
+  return [processor,model,effort,fast].filter(Boolean).join(' · ');
+}
 
 function availableContent(material:Material):DisplayContent|null {
-  if(material.availability !== 'available')return null;
-  if(!material.revision_id || !material.completeness)return null;
-  return {...material,revision_id:material.revision_id,completeness:material.completeness,
-    display_text:material.filter.result?.text??material.text,
-    images:material.media.filter(m=>m.role==='image').map(m=>m.url),
-    attachments:material.media.filter(m=>m.role==='attachment').map(m=>({kind:m.kind,url:m.url,mime:m.mime||'application/octet-stream'}))};
+  if(material.status==='pending_collection'&&!material.content.blocks?.length)return null;
+  const subtitleIds=new Set([...(material.content.blocks||[]),...material.linked_publications.flatMap(article=>article.content.blocks||[])].filter(block=>block.type==='media'&&block.role==='subtitles').map(block=>block.media_id));
+  return {...material,
+    images:material.media.filter(m=>m.role==='image'&&m.url!==null).map(m=>m.url!),
+    attachments:material.media.filter(m=>m.role==='attachment'&&m.url!==null&&!subtitleIds.has(m.id)).map(m=>({kind:m.kind,url:m.url!,mime:m.mime||'application/octet-stream'}))};
 }
 
 export function createOpenedMaterial({readerApi,fetchMedia,onViewed,onChanged,getFeed,getStorage}:{getStorage:()=>string|null;getFeed:(id:string)=>Navigation['feeds'][number]|undefined;readerApi:ReaderApi;fetchMedia:MediaFetch;onViewed:(id:string)=>void;onChanged:(changed:boolean)=>void}) {
@@ -95,10 +153,12 @@ export function createOpenedMaterial({readerApi,fetchMedia,onViewed,onChanged,ge
   }
   function showLatest(){const state=store.get();if(state.pending&&!state.retained){state.session!.reset=false;state.session!.assetsPaused=false;update({...state,material:state.pending,pending:null,message:'',generation:state.generation+1});}}
   function acceptPublication(value:PublicationResponse,session:Session) {
-    if(value.availability==='available'&&(!value.revision_id||!value.completeness))throw new Error('Publication revision unavailable');
     const next=value,state=store.get(),shown=state.material;
     const feed=getFeed(next.feed_id);if(feed){session.sourceFeed=feed;session.sourceTitle=feed.title;}
-    const changed=shown?.availability==='available'&&(session.reset||next.availability!=='available'||next.revision_id!==shown.revision_id||next.text!==shown.text||next.description!==shown.description||next.title!==shown.title);
+    const linked=(value:Material)=>value.linked_publications.map(article=>[article.id,article.title,article.source_url,article.content.blocks]);
+    const textMedia=(value:Material)=>{const ids=new Set((value.content.blocks||[]).filter(block=>block.type==='media'&&block.role==='subtitles').map(block=>block.media_id));return value.media.filter(file=>ids.has(file.id)&&file.status==='ready').map(file=>[file.id,file.url]);};
+    const changedTextMedia=!!shown&&!!shown.summarized_content.points&&JSON.stringify(textMedia(shown))!==JSON.stringify(textMedia(next));
+    const changed=!!shown&&!!availableContent(shown)&&(changedTextMedia||session.reset||!availableContent(next)||JSON.stringify(next.content.blocks)!==JSON.stringify(shown.content.blocks)||JSON.stringify(linked(next))!==JSON.stringify(linked(shown))||next.title!==shown.title);
     if(changed)update({...state,pending:next,message:'A new version is available. Updates for the displayed version may be unavailable.'});
     else update({...state,material:next,pending:null,message:''});
   }
@@ -136,17 +196,31 @@ export function createOpenedMaterial({readerApi,fetchMedia,onViewed,onChanged,ge
   async function markViewed() {const session=store.get().session;if(!session||session.detached||!store.get().material)return;try{await readerApi.command({operation:'viewed',material_id:session.id},headers=>viewed({client:readerApi.client,headers,path:{item:session.id}}));if(active(session))retain();onViewed(session.id);}catch(error){reportError(error,'Opened item');if(active(session))store.set({...store.get(),message:errorMessage(error)});}}
   function Surface() {
     const state=useStore(store),material=state.material,session=state.session;
-    const content=material?availableContent(material):null,filter=material?.filter.result,theses=material?.theses.result,hasResult=!!theses,origin=theses?.provenance;
-    const provenance=!origin||origin.kind==='unknown'?'Unknown model':origin.kind==='codex'?[origin.kind,origin.model,origin.reasoning_effort,origin.fast?'Fast enabled':'Fast disabled'].join(' · '):[origin.processor_id,origin.model.state==='known'?origin.model.name:'Unknown model'].join(' · ');
-    const shortened=!!filter&&!filter.hidden&&filter.removed.length>0;
-    const originalText=<div id="text" data-reading-region>{content&&session?<PublicationText material={content} sourceUrl={material?.source_url||''} session={session} fetchMedia={fetchMedia} inlineMedia={!shortened}/>:null}</div>;
+    const content=material?availableContent(material):null,filter=material?.filtered_content.hidden===undefined?null:material.filtered_content,theses=material?summaryResult(material):null,hasResult=!!theses;
+    const filterJob=material?.jobs.find(job=>job.operation==='filter'&&job.object_id===material.id);
+    const filterError=filterJob?.reason_message||((filterJob?.status==='failed'||filterJob?.status==='unavailable')?(filterJob.reason_code||'Filtering unavailable'):null);
+    const thesisJob=material?.jobs.find(job=>job.operation==='theses'&&job.object_id===material.id);
+    const thesisError=thesisJob?.reason_message||((thesisJob?.status==='failed'||thesisJob?.status==='unavailable')?(thesisJob.reason_code||'Summary unavailable'):null);
+    const provenance=material?summaryProvenance(material):'Unknown model';
+    const shortened=!!filter&&!filter.hidden&&(filter.removed?.length||0)>0;
+    const filteredText=(filter?.blocks||[]).filter(block=>block.type==='text'&&block.role==='body').map(block=>block.text).join('\n\n');
+    const commonMedia=!shortened&&!!content&&((content.content.blocks||[]).some(block=>block.type==='media')||content.linked_publications.some(article=>(article.content.blocks||[]).some(block=>block.type==='media')));
+    const originalText=<div id="text" data-reading-region>{content&&session?<PublicationText revision={state.generation} material={content} sourceUrl={material?.source_url||''} session={session} fetchMedia={fetchMedia} inlineMedia={!shortened}/>:null}</div>;
     const feed=material?getFeed(material.feed_id)||session?.sourceFeed:undefined;
     const avatar=feed?.avatar_url??undefined;
-    const sourceKind=material?.source.kind||'rss';
-    const captions=material?.source.kind==='youtube';
-    const completeness=!material?'':!content?'Loading item':content.loading?(captions?'Fetching subtitles and preview'+(content.completeness.state==='incomplete'?' · '+content.completeness.message:''):'Text saved · loading attachments'):content.completeness.state==='incomplete'?(content.completeness.reason==='post_web_unavailable'?'Пост недоступен для веб-просмотра':content.completeness.reason==='external_attachment'?'Текст сохранён · вложения доступны в Telegram':'Incomplete item · '+content.completeness.message):captions?'Subtitles and preview saved':'Fully saved';
-    const filterStatus=material?.filter.state==='processing'?'Filtering publication':material?.filter.error||(filter?(filter.hidden?'Hidden · ':filter.removed.length?'Promotional content removed · ':'Filtering complete')+filter.reason:'Waiting for filtering');
-    return <><div id="empty" hidden={!!material}>{state.empty}</div><div id="material" hidden={!material}><div id="material-update" hidden={!state.pending}><span>A new version is available </span><button id="material-update-button" onClick={showLatest}>Show new version</button></div><p id="material-retained" hidden={!state.retained}>Local content kept in this tab · missing parts are unavailable</p><p className="meta" id="completeness">{completeness}{content?.changed?' · Updated':''}{content?.source_deleted?' · Unavailable at source; local copy kept':''}</p><h1 id="title">{material?.source_url?<a href={material.source_url} target="_blank" rel="noopener noreferrer">{content?.post_web_unavailable&&!content.text?'Публикация в Telegram':newsTitle(material.title)}</a>:newsTitle(material?.title||'')}</h1><div id="material-byline">{material&&<><div className="material-feed-avatar"><SourceIcon kind={sourceKind}/>{avatar&&session&&<Media material={{images:[avatar],attachments:[],external_attachments:[]}} session={session} fetchMedia={fetchMedia} className="material-feed-image" imageAlt="" optional/>}</div><div className="material-source-details"><strong id="material-feed-title">{feed?.title||session?.sourceTitle||'Unknown source'}</strong><p id="date">{material.published_at===null?'Unknown date':new Date(material.published_at).toLocaleString('en')}</p></div></>}</div>{content?.reply_preview&&session&&<ReplyPreview id="reply-preview" key={'reply/'+session.id+'/'+content.revision_id+'/'+state.generation} preview={content.reply_preview}/>}<div id="theses-panel" hidden={!theses&&material?.theses.state==='disabled'}><h2>Publication Summary</h2><p id="ai-status" role="status">{!material?'':material.theses.state==='processing'?'Generating summary':material.theses.error|| (theses?'Summary ready':'Waiting for processor')}</p><ul id="theses"><Points points={theses?.points||[]} references={theses?.references||[]}/></ul><button id="theses-retry" disabled={!state.workAllowed||state.retained||!!state.pending} hidden={!material?.theses.error} onClick={()=>void action('retryTheses')}>Retry Summary</button></div><div id="filter-panel" hidden={material?.filter.state==='disabled'}><p id="filter-status" role="status">{filterStatus}</p><button id="filter-retry" disabled={!state.workAllowed||state.retained||!!state.pending} hidden={!material?.filter.error} onClick={()=>void action('retryFilter')}>Retry Filtering</button><div id="filtered-text" data-reading-region><Markdown sourceUrl={material?.source_url} text={filter&&!filter.hidden&&filter.removed.length?content?.display_text||'':''}/></div></div><div id="description-panel" hidden={!content?.description}><h3>Video Description</h3><div id="description" data-reading-region><Markdown sourceUrl={material?.source_url} text={content?.description||''}/></div></div>{content?.post_web_unavailable&&<PostWebUnavailable id="post-web-unavailable" sourceUrl={material?.source_url||''} sourceTitle={session?.sourceTitle} retained={!!content.text||!!content.attachments.length||!!content.images.length}/>}<div id="external-attachments">{content&&session&&<ExternalAttachments attachments={content.external_attachments} poster={url=><Media material={{images:[],attachments:[{url,kind:'image',mime:'image/jpeg'}]}} fetchMedia={fetchMedia} session={session}/>}/>}</div>{shortened?<details id="original-panel" key={content?.revision_id+'/'+state.generation}><summary>Original Publication</summary>{originalText}</details>:originalText}{content&&session?<Media key={session.id+'/'+content.revision_id+'/'+state.generation} id="images" material={shortened?content:postMedia(content)} session={session} fetchMedia={fetchMedia}/>:<div id="images"/>}<details id="processing-details" hidden={!hasResult} open={state.processingOpen} onToggle={event=>{if(event.currentTarget.open!==store.get().processingOpen)store.set({...store.get(),processingOpen:event.currentTarget.open});}}><summary>Processing Details</summary><p id="processing-provenance">{hasResult?provenance:''}</p></details><button id="regenerate" disabled={!state.workAllowed||state.retained||!!state.pending} hidden={!hasResult} onClick={()=>void action('regenerate')}>Regenerate</button><div className="actions"><button id="retry" disabled={!state.workAllowed||state.retained||!!state.pending} hidden={!content||content.completeness.state!=='incomplete'||['external_attachment','post_web_unavailable'].includes(content.completeness.reason)||content.loading&&!captions} onClick={()=>void action('retryMaterial')}>Retry Download</button><button id="copy" onClick={()=>material&&void copy(material.source_url)}>Copy Original Link</button><button id="viewed" disabled={state.retained} onClick={()=>void markViewed()}>Mark as Read</button></div><p id="message" role="status">{state.message}</p></div></>;
+    const captions=!!content&&(content.content.blocks||[]).some(block=>block.type==='media'&&block.role==='subtitles');
+    const fetchProblem=material?.jobs.find(job=>job.operation==='fetch'&&job.object_id===material.id&&(job.status==='unavailable'||job.status==='failed'));
+    const collectionJobs=material?.jobs.filter(job=>job.operation==='fetch'||job.operation==='download_media')||[];
+    const loading=collectionJobs.some(job=>job.status==='running'||job.status==='pending'&&!job.retry_at);
+    const problem=collectionJobs.find(job=>job.reason_message&&(job.status!=='done'||job.reason_code==='subtitles_absent'));
+    const externalBlocks=content?[...(content.content.blocks||[]),...content.linked_publications.flatMap(article=>article.content.blocks||[])].filter(block=>block.type==='external_media'):[];
+    const external=externalBlocks.some(block=>block.kind==='web'||block.reason==='public_preview_unavailable');
+    const externalReason=externalBlocks.some(block=>block.kind==='web')?'External embed not saved locally':'';
+    const incomplete=!!material&&(material.status==='pending_collection'||material.linked_publications.some(article=>article.status==='pending_collection')||material.media.some(file=>file.status!=='ready'||!file.url)||external);
+    const completeness=!material?'':!content?'Loading item':loading?('Loading publication'+(collectionJobs.some(job=>job.operation==='download_media'&&job.status==='running')?' · loading attachments':'')+(problem?.reason_message?' · '+problem.reason_message:'')):incomplete?('Incomplete item'+(problem?.reason_message?' · '+problem.reason_message:externalReason?' · '+externalReason:'')):'Fully saved';
+    const canRetry=collectionJobs.some(job=>job.status==='failed'||job.status==='unavailable'||job.status==='pending'&&!!job.reason_message||job.reason_code==='subtitles_absent');
+    const filterStatus=filterJob?.status==='running'?'Filtering publication':filterError||(filter?(filter.hidden?'Hidden · ':filter.removed?.length?'Promotional content removed · ':'Filtering complete')+(filter.reason||''):'Waiting for filtering');
+    return <><div id="empty" hidden={!!material}>{state.empty}</div><div id="material" hidden={!material}><div id="material-update" hidden={!state.pending}><span>A new version is available </span><button id="material-update-button" onClick={showLatest}>Show new version</button></div><p id="material-retained" hidden={!state.retained}>Local content kept in this tab · missing parts are unavailable</p><p className="meta" id="completeness">{completeness}</p><h1 id="title">{material?.source_url?<a href={material.source_url} target="_blank" rel="noopener noreferrer">{newsTitle(material.title)}</a>:newsTitle(material?.title||'')}</h1><div id="material-byline">{material&&<><div className="material-feed-avatar"><span className="source-icon" aria-hidden="true">◉</span>{avatar&&session&&<Media material={{images:[avatar],attachments:[]}} session={session} fetchMedia={fetchMedia} className="material-feed-image" imageAlt="" optional/>}</div><div className="material-source-details"><strong id="material-feed-title">{feed?.title||session?.sourceTitle||'Unknown source'}</strong><p id="date">{material.published_at===null?'Unknown date':new Date(material.published_at).toLocaleString('en')}</p></div></>}</div><div id="theses-panel" hidden={!theses&&!thesisJob}><h2>Publication Summary</h2><p id="ai-status" role="status">{!material?'':thesisJob?.status==='running'?'Generating summary':thesisError|| (theses?'Summary ready':'Waiting for processor')}</p><ul id="theses"><Points points={theses?.points||[]} references={theses?.references||[]}/></ul><button id="theses-retry" disabled={!state.workAllowed||state.retained||!!state.pending} hidden={!thesisError} onClick={()=>void action('retryTheses')}>Retry Summary</button></div><div id="filter-panel" hidden={!filter&&!filterJob}><p id="filter-status" role="status">{filterStatus}</p><button id="filter-retry" disabled={!state.workAllowed||state.retained||!!state.pending} hidden={!filterError} onClick={()=>void action('retryFilter')}>Retry Filtering</button><div id="filtered-text" data-reading-region><Markdown sourceUrl={material?.source_url} text={shortened?filteredText:''}/></div></div>{fetchProblem&&material&&<section id="source-unavailable" aria-label="Publication unavailable"><p>{fetchProblem.reason_message||'Publication unavailable'}</p><a href={material.source_url} target="_blank" rel="noopener noreferrer">Open original ↗</a></section>}{shortened?<details id="original-panel" key={state.generation}><summary>Original Publication</summary>{originalText}</details>:originalText}{!commonMedia&&(content&&session?<Media key={session.id+'/'+state.generation} id="images" material={shortened?content:postMedia(content)} session={session} fetchMedia={fetchMedia}/>:<div id="images"/>)}<details id="processing-details" hidden={!hasResult} open={state.processingOpen} onToggle={event=>{if(event.currentTarget.open!==store.get().processingOpen)store.set({...store.get(),processingOpen:event.currentTarget.open});}}><summary>Processing Details</summary><p id="processing-provenance">{hasResult?provenance:''}</p></details><button id="regenerate" disabled={!state.workAllowed||state.retained||!!state.pending} hidden={!hasResult} onClick={()=>void action('regenerate')}>Regenerate</button><div className="actions"><button id="retry" disabled={!state.workAllowed||state.retained||!!state.pending} hidden={!material||!canRetry||loading&&!captions} onClick={()=>void action('retryMaterial')}>Retry Download</button><button id="copy" onClick={()=>material&&void copy(material.source_url)}>Copy Original Link</button><button id="viewed" disabled={state.retained} onClick={()=>void markViewed()}>Mark as Read</button></div><p id="message" role="status">{state.message}</p></div></>;
   }
   mountSurface(host('material').parentElement!,<Surface/>);
   return {

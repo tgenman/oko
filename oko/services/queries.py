@@ -176,6 +176,10 @@ class ReadingQueries:
         return self._facts.original(identity)
 
     @repository_access
+    def unified_publication(self, identity: str) -> dict[str, Any]:
+        return self._facts.unified_publication(identity)
+
+    @repository_access
     def source_deleted(self, identity: str) -> bool:
         return self._publications().source_deleted(identity)
 

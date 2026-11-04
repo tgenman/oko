@@ -44,8 +44,8 @@ def test_web_media_is_downloaded_locally_with_no_reader_credentials(tmp_path):
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         material = client.get('/api/v3/publication/'+settled(client)[0]['id']).json()
         assert (material['completeness']['state']=='complete') is True
-        assert len([media for media in material['media'] if media['role'] == 'attachment']) == 1
-        attachment = [media for media in material['media'] if media['role'] == 'attachment'][0]
+        assert len([media for media in material['media'] if media['url'] is not None]) == 1
+        attachment = [media for media in material['media'] if media['url'] is not None][0]
         assert attachment['kind'] == 'image'
         assert client.get(attachment['url']).content == b'fixture-photo'
         assert any(url.startswith('https://cdn.example/') for url,_,_ in requests)
@@ -68,7 +68,7 @@ def test_media_redirect_cannot_reach_a_local_service(tmp_path):
         material = client.get('/api/v3/publication/'+settled(client)[0]['id']).json()
         assert (material['completeness']['state']=='complete') is False
         assert 'Небезопасный адрес' in material['completeness'].get('message','')
-        assert not [media for media in material['media'] if media['role'] == 'attachment']
+        assert not [media for media in material['media'] if media['url'] is not None]
         assert '127.0.0.1' not in calls
 
 

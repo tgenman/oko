@@ -41,7 +41,7 @@ def material(value: PublicationContent, previous: Material | None = None) -> Mat
             content['blocks'].insert(0,dict(type='text',role='body',text=text))
     # These fields have been consumed into the collection facts. They are not
     # publication content and must not be carried as a second snapshot.
-    for field in ('manifest', 'members', 'description'):
+    for field in ('manifest', 'description'):
         content['extra']['telegram'].pop(field, None)
     value=replace(value,content=content)
     return Material(title, False, reason,

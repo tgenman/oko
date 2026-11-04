@@ -98,10 +98,17 @@ def content(post: TelegramPublication, *, linked_descriptions: bool = False) -> 
     issues = []
     for item, resource in zip(post.media, teaser.source_manifest.resources):
         if item.url:
-            media.append(MediaReference(item.id, item.url, item.original_name, item.mime, item.size, resource_identity(item.url)))
+            origin=resource.origin
+            channel=re.fullmatch(r'telegram:([A-Za-z0-9_]+)/[0-9]+',origin)
+            member=re.fullmatch(r'telegram-web:([1-9][0-9]*):[0-9]+:.+',item.id)
+            original=(f'https://t.me/{channel[1]}/{member[1]}' if channel and member else
+                      publication.url if len(publication.members)<=1 else None)
+            media.append(MediaReference(item.id, item.url, item.original_name, item.mime, item.size, resource_identity(item.url),source_url=item.url,publication_url=original))
             blocks.append(dict(type='media', ref={'$media': item.id}, role='attachment' if resource.kind=='file' else resource.kind))
         elif item.external:
-            blocks.append(dict(type='external_media', kind=item.external.kind, url=item.external.source_url))
+            external=item.external.model_dump(exclude={'kind','source_url','poster_key'},exclude_none=True)
+            blocks.append(dict(type='external_media',kind=item.external.kind,url=item.external.source_url,**external,
+                               **({'poster_ref':item.external.poster_key} if item.external.poster_key else {})))
         else:
             issues.append(AdapterIssue('media_unavailable', item.reason or 'Вложение недоступно',
                 AdapterErrorKind.unavailable, reference(publication.url), item.id))

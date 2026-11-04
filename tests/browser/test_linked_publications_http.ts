@@ -20,7 +20,7 @@ for(const kind of ['rss','telegram'] as const) test(`${kind} root stays readable
  await expect.poll(async()=>{const cards=(await r.api('cards')).items;return !!cards[0]&&(await r.api(`publication/${cards[0].id}`)).theses.result===null;}).toBe(true);
  await expect(r.page.locator('#theses')).not.toContainText(own);
  await r.setArticleState('error');
- await expect(r.page.locator('#completeness')).toContainText('недоступна');
+ await expect(r.page.locator('#completeness')).toContainText('Не удалось загрузить статью');
  await expect(r.page.locator('#text')).toContainText(own);
  const pendingCard=(await r.api('cards')).items[0]!;
  expect((await r.api(`publication/${pendingCard.id}`)).theses.result).toBeNull();
@@ -31,7 +31,7 @@ for(const kind of ['rss','telegram'] as const) test(`${kind} root stays readable
  await r.page.getByRole('button',{name:'Retry Download',exact:true}).click();
  await r.page.getByRole('button',{name:'Show new version',exact:true}).click({timeout:15000});
  await expect(r.page.locator('#text')).toContainText('Article text arrived.');
- if(kind==='telegram') await expect(r.page.locator('#text [aria-label="Статья Telegraph"]')).toBeVisible();
+ await expect(r.page.locator('#text [aria-label="Linked publication"]')).toBeVisible();
  await expect(r.page.locator('#theses')).toContainText('Article text arrived.');
  await expect(r.page.locator('#theses')).toContainText(own);
  await expect(r.page.locator('[data-card]')).toHaveCount(1);
@@ -44,10 +44,10 @@ for(const kind of ['rss','telegram'] as const) test(`${kind} root stays readable
  await expect(r.page.locator('#completeness')).toContainText('Не удалось загрузить вложение');
  await r.setMediaState('ready');
  await r.page.getByRole('button',{name:'Retry Download',exact:true}).click();
- await expect.poll(async()=>{const current=await r.api(`publication/${cards[0]!.id}`);return current.availability==='available'&&current.completeness?.state==='complete'&&current.media.some(m=>m.role==='attachment');}).toBe(true);
+ await expect.poll(async()=>{const current=await r.api(`publication/${cards[0]!.id}`);return current.availability==='available'&&current.completeness?.state==='complete'&&current.media.some(m=>m.kind==='image'&&m.status==='ready'&&m.url!==null);}).toBe(true);
  // The open tab may retain its earlier snapshot; selecting the card accepts current content.
  await r.page.locator('[data-card]').click();
- const image=r.page.locator(kind==='telegram'?'#text .telegraph-article img':'#images img');
+ const image=r.page.locator('#text .linked-publication img');
  await expect(image).toHaveAttribute('src',/^blob:/);
  await r.page.screenshot({path:artifactPath(`linked-${kind}-ready.png`)});
 });

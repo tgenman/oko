@@ -40,7 +40,7 @@ def test_whole_post_restriction_is_saved_as_unavailable_without_ai(tmp_path):
         assert 'недоступна' in material['completeness']['message'].lower()
         assert material['text'] == ''
         assert material['external_attachments'] == []
-        assert [media for media in material['media'] if media['role'] == 'attachment'] == []
+        assert [media for media in material['media'] if media['url'] is not None] == []
         frame = client.get('/api/v3/publication/'+cards[0]['id']).json()
         assert frame['post_web_unavailable'] is True
         assert cards[0]['post_web_unavailable'] is True

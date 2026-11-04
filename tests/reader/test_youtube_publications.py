@@ -48,11 +48,11 @@ def test_youtube_captions_and_theses_are_ready_while_cover_is_held(tmp_path,high
             card=wait_for(client,lambda:next((card for card in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/publication/'+card['id']).json()['theses']['result']),None))
             material=client.get('/api/v3/publication/'+card['id']).json()
             assert material['text']=='Original raw captions.'
-            assert captions_calls==[VIDEO] and [media for media in material['media'] if media['role'] == 'attachment']
+            assert captions_calls==[VIDEO] and [media for media in material['media'] if media['url'] is not None]
             task=json.loads(json.loads(next(request for request in models if request.url.path=='/v1/chat/completions').content)['messages'][1]['content'])
             assert task['sources'][0]['text']=='Original raw captions.'
             release.set()
-            wait_for(client,lambda:any(a['kind']=='image' for a in [media for media in client.get('/api/v3/publication/'+card['id']).json()['media'] if media['role'] == 'attachment']))
+            wait_for(client,lambda:any(a['kind']=='image' for a in [media for media in client.get('/api/v3/publication/'+card['id']).json()['media'] if media['url'] is not None]))
         finally:
             release.set()
 
@@ -156,18 +156,18 @@ def test_youtube_metadata_refresh_keeps_caption_file_and_accepted_processing(tmp
         client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':''})
         subscribe(client)
         presence(client,'reader')
-        card=wait_for(client,lambda:next((card for card in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/publication/'+card['id']).json()['theses']['result'] and any(a['kind']=='image' for a in [a for a in client.get('/api/v3/publication/'+card['id']).json()['media'] if a['role']=='attachment'])),None))
+        card=wait_for(client,lambda:next((card for card in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/publication/'+card['id']).json()['theses']['result'] and any(a['kind']=='image' for a in [a for a in client.get('/api/v3/publication/'+card['id']).json()['media'] if a['url'] is not None])),None))
         original=client.get('/api/v3/publication/'+card['id']).json()
-        caption_url=next(a['url'] for a in [media for media in original['media'] if media['role'] == 'attachment'] if a['kind']=='file')
+        caption_url=next(a['url'] for a in [media for media in original['media'] if media['url'] is not None] if a['kind']=='file')
         count=sum(request.url.path=='/v1/chat/completions' for request in models)
         phase[0]=True
         client.post('/api/v3/collect')
-        updated=wait_for(client,lambda:(m if (m:=client.get('/api/v3/publication/'+card['id']).json())['title']=='New title' and not m['loading'] and any(a['kind']=='image' for a in [media for media in m['media'] if media['role'] == 'attachment']) else None))
+        updated=wait_for(client,lambda:(m if (m:=client.get('/api/v3/publication/'+card['id']).json())['title']=='New title' and not m['loading'] and any(a['kind']=='image' for a in [media for media in m['media'] if media['url'] is not None]) else None))
         assert updated['text']=='Stable original captions.'
         assert updated['theses']['result']==original['theses']['result']
-        assert next(a['url'] for a in [media for media in updated['media'] if media['role'] == 'attachment'] if a['kind']=='file')==caption_url
+        assert next(a['url'] for a in [media for media in updated['media'] if media['url'] is not None] if a['kind']=='file')==caption_url
         assert captions_calls==[VIDEO] and sum(request.url.path=='/v1/chat/completions' for request in models)==count
-        cover=next(a['url'] for a in [media for media in updated['media'] if media['role'] == 'attachment'] if a['kind']=='image')
+        cover=next(a['url'] for a in [media for media in updated['media'] if media['url'] is not None] if a['kind']=='image')
         assert client.get(cover).content==PNG+b'changed'
 
 

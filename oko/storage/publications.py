@@ -274,7 +274,6 @@ class Publications:
             # The mutable source manifest is owned by the saved reader facts;
             # the adapter copy is an input, not a second persisted snapshot.
             telegram.pop('manifest', None)
-            telegram.pop('members', None)
             telegram.pop('description', None)
         media=[]
         identities={}
@@ -306,6 +305,7 @@ class Publications:
             identities[ref.key]=identity
             ready=bool(unchanged and previous and previous['status']=='ready' and previous['storage_key'] and existing_file(self.store.root,previous['storage_key']) is not None)
             media.append(dict(id=identity,publication_id=item,resource_key=ref.key,source_locator=ref.locator,
+                source_url=ref.source_url if ref.source_url is not None else previous.get('source_url') if unchanged and previous else None,
                 name=ref.name or (previous['name'] if ready and previous else ''),mime_type=previous['mime_type'] if ready and previous else ref.mime_type,
                 size_bytes=previous['size_bytes'] if ready and previous else ref.size_bytes,
                 storage_key=previous['storage_key'] if ready and previous else None,
@@ -334,7 +334,15 @@ class Publications:
                                 row.update(status='pending_download',reason='')
         for block in content.get('blocks',[]):
             if block['type']=='media':
-                block['media_id']=identities[block.pop('ref')['$media']]
+                key=block.pop('ref')['$media']
+                block['media_id']=identities[key]
+                selected=next(row for row in media if row['id']==block['media_id'])
+                reference=next((ref for ref in value.media if ref.key==key),None)
+                block['source_url']=selected.get('source_url')
+                block['publication_url']=(reference.publication_url if reference and reference.publication_url else
+                    None if value.metadata.reference.key.platform.value=='telegram' and len(material.members)>1 else value.metadata.reference.url)
+            elif block['type']=='external_media' and 'poster_ref' in block:
+                block['poster_media_id']=identities.get(block.pop('poster_ref'))
         content.setdefault('extra',{}).update(_reader=header,
             _links=[dict(platform=ref.key.platform.value,external_id=ref.key.external_id,url=ref.url) for ref in value.linked_publications])
         collection_reason='' if youtube is not None or material.reason.startswith('Вложения ещё не загружены') else material.reason
@@ -375,6 +383,9 @@ class Publications:
         from oko.collection.adapters import ExternalKey,Platform
         links=content['extra'].pop('_links',[])
         links_changed=publication_links.sync(store,item,tuple(ExternalReference(ExternalKey(Platform(ref['platform']),ref['external_id']),ref['url']) for ref in links),effects)
+        content['blocks']=[block for block in content.get('blocks',[]) if block.get('type')!='publication']
+        content['blocks'].extend(dict(type='publication',publication_id=row['id'],source_url=row['url'])
+                                 for row in publication_links.children(store,item))
         previous = saved_content(old['content'])
         previous_title=previous.get('extra',{}).get('_reader',{}).get('title',old['title'])
         same = not links_changed and publication_input.blocks(previous)==publication_input.blocks(content) and previous_title==content['extra']['_reader']['title']
@@ -410,7 +421,7 @@ class Publications:
         for row in media:
             if row['status']=='unavailable' and row.get('reader_code')!='subtitles_absent' and row.get('reason') and row.get('reader_reason')!=row['reason']:
                 effects.unavailable_media[row['id']]=('media-unavailable',row['reason'])
-            store.db.execute('INSERT INTO media_files ( id , publication_id , resource_key , source_locator , name , mime_type , size_bytes , storage_key , status , resource_identity ) VALUES ( %(id)s , %(publication_id)s , %(resource_key)s , %(source_locator)s , %(name)s , %(mime_type)s , %(size_bytes)s , %(storage_key)s , %(status)s , %(resource_identity)s )', row)
+            store.db.execute('INSERT INTO media_files ( id , publication_id , resource_key , source_locator , source_url , name , mime_type , size_bytes , storage_key , status , resource_identity ) VALUES ( %(id)s , %(publication_id)s , %(resource_key)s , %(source_locator)s , %(source_url)s , %(name)s , %(mime_type)s , %(size_bytes)s , %(storage_key)s , %(status)s , %(resource_identity)s )', row)
         effects.media.add(item)
         if source_changed and old['platform'] in ('other_web','telegraph'):
             for row in media:
@@ -456,6 +467,8 @@ class Publications:
         row=material_read.item(self.store.db,item)
         assert row is not None
         content=saved_content(row['content'],mutable=True)
+        has_header=isinstance(content.get('extra',{}).get('_reader'),dict)
+        content.setdefault('extra',{}).setdefault('_reader',{})
         fetch=material_read.jobs(self.store.db,item).get('fetch')
         collection_reason=''
         if row['status']=='pending_collection':
@@ -468,7 +481,8 @@ class Publications:
             if not collection_reason and not content.get('extra',{}).get('_reader',{}).get('source_manifest',{}).get('post_web_unavailable'):
                 collection_reason='Публикация ожидает сбора'
         media_rows=self.store.media.publication_rows(item)
-        self.store.media.project_completeness(content,media_rows,collection_reason=collection_reason)
+        if has_header:self.store.media.project_completeness(content,media_rows,collection_reason=collection_reason)
+        else:self.store.media.project_header(content,media_rows,collection_reason=collection_reason)
         header=deepcopy(content['extra']['_reader'])
         header['title']=row['title']
         youtube=content.get('extra', {}).get('youtube')

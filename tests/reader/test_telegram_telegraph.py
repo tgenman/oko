@@ -39,13 +39,13 @@ def test_direct_articles_are_complete_local_and_unique_without_recursive_crawlin
         linked = material['linked_content']
         assert linked['post_text'] == POST
         assert [a['title'] for a in linked['articles']] == ['Title One', 'Title Two']
-        assert linked['articles'][0]['media_urls'] == [[media for media in material['media'] if media['role'] == 'attachment'][0]['url']]
+        assert linked['articles'][0]['media_urls'] == [[media for media in material['media'] if media['url'] is not None][0]['url']]
         assert material['text'].count('Article One') == 1
         assert material['text'].count('Article Two') == 1
         assert 'Photo caption' in material['text']
         assert (material['completeness']['state']=='complete') is True
-        assert len([media for media in material['media'] if media['role'] == 'attachment']) == 1
-        assert client.get([media for media in material['media'] if media['role'] == 'attachment'][0]['url']).content == b'article-photo'
+        assert len([media for media in material['media'] if media['url'] is not None]) == 1
+        assert client.get([media for media in material['media'] if media['url'] is not None][0]['url']).content == b'article-photo'
         assert not any('example.org' in url for url in calls)
         assert sum('/getPage/One?' in url for url in calls) == 2  # Metadata, then media locator validation.
         assert sum('/getPage/Two?' in url for url in calls) == 1
@@ -102,7 +102,7 @@ def test_article_completion_and_retry_keep_previous_copy_without_false_edit(tmp_
         assert (loaded['completeness']['state']=='complete') is True and 'previous_versions' not in loaded
         assert 'Version one' in loaded['text']
         assert loaded['revision_id'] != pending['revision_id']
-        image = [media for media in loaded['media'] if media['role'] == 'attachment'][0]['url']
+        image = [media for media in loaded['media'] if media['url'] is not None][0]['url']
         phase[0] = 2
         client.post('/api/v3/materials/'+identity+'/retry')
         settled(client)

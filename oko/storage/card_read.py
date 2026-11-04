@@ -19,7 +19,9 @@ def _preview_source(store: 'Store', identity: str) -> tuple[dict[str, Any], str]
     row = material_read.item(store.db, identity)
     assert row is not None
     content = saved_content(row['content'])
-    own = content['extra']['_reader']
+    own = content.get('extra',{}).get('_reader')
+    if not isinstance(own,dict):
+        own = store.publications.original(identity)[0]
     # Copy only the two collections extended by linked publications. Large
     # manifests, reply previews and source documents remain borrowed facts.
     header = dict(own, title=own.get('title', row['title']), attachments=list(own.get('attachments', [])),

@@ -28,10 +28,10 @@ def test_rss_edit_keeps_only_latest_media_and_explicit_replay_can_return_viewed(
         item = wait_cards(client)[0]['id']
         revision[0] = 2
         client.post('/api/v3/collect')
-        current = wait_for(client, lambda: m if (m := client.get('/api/v3/publication/' + item).json()).get('text','').endswith('Версия 2') and any(a['kind']=='image' and client.get(a['url']).content==PNG+b'2' for a in [media for media in m['media'] if media['role'] == 'attachment']) else None)
+        current = wait_for(client, lambda: m if (m := client.get('/api/v3/publication/' + item).json()).get('text','').endswith('Версия 2') and any(a['kind']=='image' and client.get(a['url']).content==PNG+b'2' for a in [media for media in m['media'] if media['url'] is not None]) else None)
         assert current['revision_id']
         assert 'previous_versions' not in current
-        assert client.get(next(a['url'] for a in [media for media in current['media'] if media['role'] == 'attachment'] if a['kind']=='image')).content == PNG + b'2'
+        assert client.get(next(a['url'] for a in [media for media in current['media'] if media['url'] is not None] if a['kind']=='image')).content == PNG + b'2'
         client.post('/api/v3/collect')
         wait_for(client, lambda: client.get('/api/v3/status/details').json()['work']==[{'phase':'idle'}])
         assert 'previous_versions' not in client.get('/api/v3/publication/' + item).json()
@@ -39,7 +39,7 @@ def test_rss_edit_keeps_only_latest_media_and_explicit_replay_can_return_viewed(
         assert client.get('/api/v3/publication/' + item).json()['text'].endswith('Версия 2')
         presence(client, 'test')
         client.post('/api/v3/materials/' + item + '/viewed')
-        assert client.get(next(a['url'] for a in [media for media in current['media'] if media['role'] == 'attachment'] if a['kind']=='image')).status_code == 404
+        assert client.get(next(a['url'] for a in [media for media in current['media'] if media['url'] is not None] if a['kind']=='image')).status_code == 404
         assert not (tmp_path / 'content' / item).exists()
         revision[0] = 3
         client.post('/api/v3/collect')

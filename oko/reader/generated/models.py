@@ -1,7 +1,7 @@
 # Generated from api/openapi.yaml; do not edit.
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import (
@@ -815,12 +815,30 @@ class ProcessorSelection(RootModel[Literal["codex", "llamacpp"] | ProcessorSelec
     )
 
 
-class MediaItem(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["image", "video", "audio", "circle", "file"]
-    mime: StrictStr | None
-    role: Literal["image", "attachment"]
-    url: MediaUrl
+class PublicationBlock1(WireModel):
+    model_config = ConfigDict(extra="allow")
+    role: Literal["body", "description"]
+    text: StrictStr
+    type: Literal["text"]
+
+
+class RemovedItem(WireModel):
+    model_config = ConfigDict(extra="allow")
+    block_index: StrictInt = Field(..., ge=0)
+    publication_id: MaterialId
+    text: StrictStr
+
+
+class Point(WireModel):
+    model_config = ConfigDict(extra="allow")
+    source_publication_ids: list[MaterialId]
+    text: StrictStr
+
+
+class PublicationSummary(WireModel):
+    model_config = ConfigDict(extra="allow")
+    extra: dict[str, Any] | MISSING = MISSING
+    points: list[Point] | MISSING = MISSING
 
 
 class ReadingFolder(WireModel):
@@ -2120,6 +2138,79 @@ class Provenance(
     )
 
 
+class PublicationBlock2(WireModel):
+    model_config = ConfigDict(extra="allow")
+    author: StrictStr | None
+    source_url: SourceUrl | None
+    text: StrictStr
+    type: Literal["quote"]
+
+
+class PublicationBlock3(WireModel):
+    model_config = ConfigDict(extra="allow")
+    caption: StrictStr | None | MISSING = MISSING
+    language: StrictStr | None | MISSING = MISSING
+    media_id: MaterialId
+    publication_url: SourceUrl | None
+    role: Literal["image", "cover", "video", "audio", "attachment", "subtitles"]
+    source_url: SourceUrl | None
+    type: Literal["media"]
+
+
+class PublicationBlock4(WireModel):
+    model_config = ConfigDict(extra="allow")
+    publication_id: MaterialId
+    source_url: SourceUrl
+    type: Literal["publication"]
+
+
+class PublicationBlock5(WireModel):
+    model_config = ConfigDict(extra="allow")
+    author: StrictStr | None | MISSING = MISSING
+    duration: StrictStr | None | MISSING = MISSING
+    kind: Literal["image", "video", "audio", "document", "unsupported", "web"]
+    poster_media_id: MaterialId | None | MISSING = MISSING
+    reason: StrictStr | None | MISSING = MISSING
+    restriction: StrictStr | None | MISSING = MISSING
+    size_label: StrictStr | None | MISSING = MISSING
+    title: StrictStr | None | MISSING = MISSING
+    type: Literal["external_media"]
+    url: SourceUrl
+
+
+class PublicationBlock(
+    RootModel[
+        PublicationBlock1
+        | PublicationBlock2
+        | PublicationBlock3
+        | PublicationBlock4
+        | PublicationBlock5
+    ]
+):
+    model_config = ConfigDict(allow_inf_nan=False)
+    root: (
+        PublicationBlock1
+        | PublicationBlock2
+        | PublicationBlock3
+        | PublicationBlock4
+        | PublicationBlock5
+    ) = Field(..., examples=[{"role": "body", "text": "Example", "type": "text"}])
+
+
+class PublicationDocument(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    blocks: list[PublicationBlock] | MISSING = MISSING
+    extra: dict[str, Any] | MISSING = MISSING
+
+
+class PublicationFilteredContent(WireModel):
+    model_config = ConfigDict(extra="allow")
+    blocks: list[PublicationBlock] | MISSING = MISSING
+    hidden: StrictBool | MISSING = MISSING
+    reason: StrictStr | MISSING = MISSING
+    removed: list[RemovedItem] | MISSING = MISSING
+
+
 class PublicationReference(WireModel):
     model_config = ConfigDict(extra="forbid")
     material_id: MaterialId
@@ -2140,6 +2231,48 @@ class Filter(WireModel):
     error: StrictStr | None
     result: Result | None
     state: Literal["disabled", "pending", "processing", "ready", "error"]
+
+
+class Job(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    object_id: StrictStr
+    operation: StrictStr
+    reason_code: StrictStr | None
+    reason_message: StrictStr | None
+    retry_at: Timestamp | None
+    status: Literal[
+        "blocked", "pending", "running", "done", "failed", "unavailable", "cancelled"
+    ]
+
+
+class LinkedPublication(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    content: PublicationDocument
+    id: MaterialId
+    source_url: SourceUrl
+    status: Literal[
+        "pending_collection",
+        "pending_filtering",
+        "filter_out",
+        "pending_summary",
+        "ready",
+    ]
+    title: StrictStr
+
+
+class MediaItem(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    id: MaterialId
+    kind: Literal["image", "video", "audio", "circle", "file"]
+    mime: StrictStr | None
+    name: StrictStr
+    reason_code: StrictStr | None
+    reason_message: StrictStr | None
+    role: Literal["image", "attachment"]
+    size_bytes: StrictInt | None = Field(..., ge=0)
+    source_url: SourceUrl | None
+    status: Literal["pending_download", "ready", "unavailable"]
+    url: MediaUrl | None
 
 
 class Result1(WireModel):
@@ -3405,21 +3538,40 @@ class PublicationResponse(WireModel):
     availability: Literal["available", "pending"]
     changed: StrictBool
     completeness: ContentCompleteness | None
+    content: PublicationDocument
     description: StrictStr
+    discovered_at: Timestamp
     external_attachments: list[ExternalAttachment]
+    external_id: StrictStr
     feed_id: FeedId
     filter: Filter
+    filtered_content: PublicationFilteredContent
     id: MaterialId
+    jobs: list[Job]
     linked_content: LinkedContent | None
+    linked_publications: list[LinkedPublication]
     loading: StrictBool
     media: list[MediaItem]
+    media_ids: list[MaterialId]
+    platform: Literal[
+        "telegram", "youtube", "telegraph", "instagram", "twitter", "other_web", "rss"
+    ]
     post_web_unavailable: StrictBool
+    processing_metadata: dict[str, Any]
     published_at: Timestamp | None
     reply_preview: ReplyPreview | None
     revision_id: RevisionId | None
     source: SourceReference
     source_deleted: StrictBool
     source_url: SourceUrl
+    status: Literal[
+        "pending_collection",
+        "pending_filtering",
+        "filter_out",
+        "pending_summary",
+        "ready",
+    ]
+    summarized_content: PublicationSummary
     text: StrictStr
     theses: Theses
     title: StrictStr

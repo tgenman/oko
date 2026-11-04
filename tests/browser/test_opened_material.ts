@@ -124,9 +124,9 @@ test('viewing retains loaded media and playback, rejects late media and switchin
   const r = await reader();
   try {
     await r.start([material('A', {media: [
-      {url:'/api/v3/materials/A/images/image-2.png',kind:'image',role:'image',mime:null},
-      {url: '/api/v3/materials/A/media/media-1.webm', kind: 'video', role:'attachment',mime: 'video/webm'},
-      {url: '/api/v3/materials/A/media/media-2.webm', kind: 'circle', role:'attachment',mime: 'video/webm'},
+      {id:'image',name:'image',size_bytes:null,source_url:null,status:'ready',reason_code:null,reason_message:null,url:'/api/v3/materials/A/images/image-2.png',kind:'image',role:'image',mime:null},
+      {id:'video',name:'video',size_bytes:null,source_url:null,status:'ready',reason_code:null,reason_message:null,url: '/api/v3/materials/A/media/media-1.webm', kind: 'video', role:'attachment',mime: 'video/webm'},
+      {id:'circle',name:'circle',size_bytes:null,source_url:null,status:'ready',reason_code:null,reason_message:null,url: '/api/v3/materials/A/media/media-2.webm', kind: 'circle', role:'attachment',mime: 'video/webm'},
     ]}),material('B')]);
     const base64 = await videoFixture(r.page);
     await r.page.evaluate(({base64, png}) => {
@@ -239,7 +239,8 @@ test('new text waits for a button, keeps its paragraph and never mixes summaries
     await expect(r.page.locator('#theses')).toHaveText('Старые тезисы');
     await r.page.locator('#text [data-reading-paragraph]').nth(25).evaluate(node=>node.scrollIntoView({block:'start'}));
     const before=await r.page.locator('#text [data-reading-paragraph]').nth(25).boundingBox();
-    const fresh={...old,text:'Новый первый абзац\n\n'.repeat(8)+text,revision_id:'new',theses:{state:'ready' as const,error:null,result:{points:['Новые тезисы'],references:[[]],provenance:{kind:'unknown' as const,reason:'not_recorded' as const}}}};
+    const freshText='Новый первый абзац\n\n'.repeat(8)+text;
+    const fresh={...old,text:freshText,content:{blocks:[{type:'text' as const,role:'body' as const,text:freshText}]},summarized_content:{points:[{text:'Новые тезисы',source_publication_ids:[]}]},revision_id:'new',theses:{state:'ready' as const,error:null,result:{points:['Новые тезисы'],references:[[]],provenance:{kind:'unknown' as const,reason:'not_recorded' as const}}}};
     await r.page.evaluate(fresh=>readerTransport.replies.set('/api/v3/publication/A',{body:fresh}),fresh);
     await expect(r.page.locator('#material-update-button')).toBeVisible();
     await expect(r.page.locator('#text')).toHaveText(text);
@@ -282,12 +283,12 @@ test('storage replacement rejects old media replies and stages the replacement b
       };
     });
     await r.start([material('A',{revision_id:'old',media:[]})]);
-    await r.page.evaluate(url=>{const reply=readerTransport.replies.get('/api/v3/publication/A');if(!reply?.body||typeof reply.body!=='object')throw new Error('Missing material fixture');reply.body={...reply.body,media:[{kind:'image',role:'image',url,mime:null}]};},url);
+    await r.page.evaluate(url=>{const reply=readerTransport.replies.get('/api/v3/publication/A');if(!reply?.body||typeof reply.body!=='object')throw new Error('Missing material fixture');reply.body={...reply.body,media:[{id:'image',name:'image',size_bytes:null,source_url:null,status:'ready',reason_code:null,reason_message:null,kind:'image',role:'image',url,mime:null}]};},url);
     await r.page.evaluate(url=>readerTransport.held.set(url,true),url);
     await r.page.locator('[data-card="A"]').click();await expect(r.page.locator('#text')).toHaveText('Текст A');await r.page.waitForFunction(url=>readerTransport.pending.has(url),url);
     await r.page.evaluate(()=>{
       readerTransport.held.set('test-storage-reset',true);
-      readerTransport.replies.set('/api/v3/publication/A',{body:{...readerTransport.replies.get('/api/v3/publication/A')!.body!,text:'Другой экземпляр',revision_id:'old'}});
+      readerTransport.replies.set('/api/v3/publication/A',{body:{...readerTransport.replies.get('/api/v3/publication/A')!.body!,text:'Другой экземпляр',content:{blocks:[{type:'text',role:'body',text:'Другой экземпляр'}]},revision_id:'old'}});
     });
     // Wait for the request after reset: the already in-flight pre-reset poll
     // can discover the new text before the injected reset is accepted.
@@ -308,7 +309,7 @@ test('reply context is a compact separate card with safe navigation and local ex
     await r.page.locator('#cards').getByRole('button',{name:/^A/}).click();
     const card=r.page.locator('#material .reply-preview');
     await expect(card).toBeVisible();
-    await expect(r.page.locator('#text')).toHaveText('Текст A');
+    await expect(r.page.locator('#text p').last()).toHaveText('Текст A');
     const link=card.locator('a');
     assert.equal(await link.getAttribute('href'),'https://t.me/fixture/10');
     assert.equal(await link.getAttribute('target'),'_blank');
@@ -375,6 +376,7 @@ test('a late old-library publication response cannot cross an accepted storage r
      const response=await original(url,{...options,headers}),body=await response.json();
      const reason=identity===replacement?'NEW LIBRARY':'OLD LIBRARY';
      body.filter={state:'ready',result:{hidden:true,reason,text:'Original text',removed:[],provenance:{kind:'unknown',reason:'not_recorded'}},error:null};
+     body.filtered_content={hidden:true,reason,removed:[],blocks:[]};
      if(identity!==replacement&&!state.oldHeld){state.oldHeld=true;await new Promise<void>(resolve=>{state.release=resolve;});state.oldDelivered=true;}
      if(identity===replacement&&!state.newOpen)await new Promise<void>(resolve=>{state.releaseNew.push(resolve);});
      return new Response(JSON.stringify(body),{headers:{'Content-Type':'application/json',ETag:'"'+reason+'"','X-Oko-Storage-Id':identity||response.headers.get('X-Oko-Storage-Id')!}});
@@ -411,6 +413,7 @@ test('processing and error states show the current attempt without inventing a r
     const headers=new Headers(options?.headers);headers.delete('If-None-Match');
     const response=await original(url,{...options,headers}),body=await response.json();
     body.theses={state:state.mode,result:null,error:state.mode==='error'?'Processor unavailable':null};
+    body.jobs=[{operation:'theses',object_id:'A',status:state.mode==='processing'?'running':state.mode==='error'?'failed':'pending',reason_code:null,reason_message:state.mode==='error'?'Processor unavailable':null,retry_at:null}];
     return new Response(JSON.stringify(body),{headers:{'Content-Type':'application/json',ETag:'"'+state.mode+'"'}});
    };
   });
