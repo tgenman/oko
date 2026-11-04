@@ -40,7 +40,7 @@ def test_default_automatic_interval_and_manual_collection_do_not_shift_timer(tmp
         source.reached(1)  # Existing initial collection.
         clock.now = 999  # 899 seconds after startup.
         source.unchanged(1)
-        assert client.post('/api/v3/collect', json={'scope': 'feed', 'feed_id': 'demo'}).status_code == 200
+        assert client.post('/api/v3/collect', json={'scope': 'feed', 'feed_id': 'fixture'}).status_code == 200
         source.reached(2)
         clock.now = 1000
         source.reached(3)  # Default 15 minutes; the manual command did not postpone it.

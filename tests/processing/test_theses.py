@@ -11,12 +11,12 @@ import httpx
 from fastapi.testclient import TestClient
 
 from tests.support.app import create_app
-from tests.support.demo_source import DemoSource
+from tests.support.synthetic_source import SyntheticSource
 
 
 def test_local_theses_follow_inherited_prompt_and_delete_with_original(tmp_path: Path):
     calls = []
-    with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=model_transport(calls)), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test', ai_transport=model_transport(calls)), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
         assert client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True}).status_code == 200
         assert client.post('/api/v3/processors/llamacpp/check').json()['locality'] == 'local'
@@ -37,14 +37,14 @@ def test_local_theses_follow_inherited_prompt_and_delete_with_original(tmp_path:
 
 def test_unknown_remote_boundary_never_receives_forbidden_content(tmp_path: Path):
     calls = []
-    with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=model_transport(calls)), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test', ai_transport=model_transport(calls)), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'https://models.example.org', 'model': 'local:latest', 'local_execution': True})
         client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
         m = wait_for(client, lambda: (m if (m := client.get('/api/v3/publication/' + item).json())['theses']['error'] else None))
         assert 'Запрещена публичная' in m['theses']['error']
         assert not any(r.url.path == '/v1/chat/completions' for r in calls)
-        client.patch('/api/v3/feeds/demo', json={'public_ai': True})
+        client.patch('/api/v3/feeds/fixture', json={'public_ai': True})
         wait_for(client, lambda: client.get('/api/v3/publication/' + item).json()['theses']['result'])
         assert any(r.url.path == '/v1/chat/completions' for r in calls)
 
@@ -56,7 +56,7 @@ def test_http_success_without_finished_attributed_result_is_not_theses(tmp_path:
         if request.url.path != '/v1/chat/completions':
             return good.handler(request)
         return httpx.Response(200, json={'choices': [{'finish_reason': 'stop', 'message': {'role': 'assistant', 'content': json.dumps({'points': [{'text': 'Выдуманный тезис', 'sources': [{'id': 'outsider', 'url': 'https://evil.org'}]}]})}}]})
-    with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test', ai_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
         client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
@@ -95,7 +95,7 @@ class HeldModel(httpx.AsyncBaseTransport):
 
 def test_permission_change_invalidates_late_output_and_keeps_one_ai_request(tmp_path: Path):
     held = HeldModel()
-    with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=held), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test', ai_transport=held), headers=HEADERS) as client:
         try:
             item = setup_reader(client, theses=True)
             client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
@@ -118,7 +118,7 @@ def test_permission_change_invalidates_late_output_and_keeps_one_ai_request(tmp_
 
 def test_viewed_during_ai_never_reappears_and_stop_is_bounded(tmp_path: Path, record_property):
     held = HeldModel()
-    with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=held), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test', ai_transport=held), headers=HEADERS) as client:
         try:
             item = setup_reader(client, theses=True)
             client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
@@ -147,7 +147,7 @@ def test_model_error_remains_visible_without_leaking_response(tmp_path: Path):
     good = model_transport(calls)
     def respond(request):
         return httpx.Response(200, json=reply) if request.url.path == '/v1/chat/completions' else good.handler(request)
-    with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=httpx.MockTransport(respond)), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test', ai_transport=httpx.MockTransport(respond)), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
         client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
@@ -169,7 +169,7 @@ def test_unverified_local_server_never_receives_forbidden_content(tmp_path: Path
                 {'id': 'other', 'owned_by': 'llamacpp', 'meta': {'size': 100}},
                 *([{'id': 'local:latest', 'owned_by': 'llamacpp', 'meta': {'size': 100}}] if case == 'router' else [])]})
         return good.handler(request)
-    with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=httpx.MockTransport(respond)), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test', ai_transport=httpx.MockTransport(respond)), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
         config = {'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest'}
         if case != 'unconfirmed':
@@ -195,7 +195,7 @@ def test_reader_can_retry_theses_after_model_response_is_fixed(tmp_path: Path):
             return httpx.Response(200, json={'choices': []})
         return good.handler(request)
 
-    with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=httpx.MockTransport(respond)), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test', ai_transport=httpx.MockTransport(respond)), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
         client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
@@ -216,7 +216,7 @@ def test_local_router_checks_selected_model_before_sending_forbidden_public_inpu
         if request.url.path == '/props':
             assert request.url.params['model'] == 'local:latest'
         return native.handler(request)
-    with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test', ai_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
         assert client.post('/api/v3/processors/llamacpp/check').json()['locality'] == 'local'
@@ -232,7 +232,7 @@ def test_theses_disable_reasoning_to_leave_budget_for_finished_json(tmp_path: Pa
         if request.url.path == '/v1/chat/completions' and json.loads(request.content).get('reasoning_effort') != 'none':
             return httpx.Response(200, json={'choices': [{'finish_reason': 'length', 'message': {'role': 'assistant', 'content': '', 'reasoning_content': 'unfinished'}}]})
         return native.handler(request)
-    with TestClient(create_app(tmp_path, source=DemoSource(), token='test', ai_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test', ai_transport=httpx.MockTransport(reply)), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
         client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})

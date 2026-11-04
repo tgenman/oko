@@ -30,9 +30,9 @@ def test_completion_metadata_includes_hidden_and_survives_restart(tmp_path):
         assert nav['feeds'][0]['count'] == 0
         assert nav['feeds'][0]['has_unviewed'] is True
         assert len(read_all_cards(client, '/api/v3/cards?show_hidden=true')) == 1
-        preview = client.post('/api/v3/folders/demo/completion/preview').json()
-        assert client.post('/api/v3/folders/demo/completion',json={'token':preview['token']}).status_code == 200
+        preview = client.post('/api/v3/folders/fixture/completion/preview').json()
+        assert client.post('/api/v3/folders/fixture/completion',json={'token':preview['token']}).status_code == 200
         assert client.get('/api/v3/reading-composition').json()['feeds'][0]['has_unviewed'] is False
-        assert client.get('/api/v3/subscriptions').json()['feeds'][0]['id'] == 'demo'
+        assert client.get('/api/v3/subscriptions').json()['feeds'][0]['id'] == 'fixture'
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         assert client.get('/api/v3/reading-composition').json()['feeds'][0]['has_unviewed'] is False

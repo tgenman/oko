@@ -1,7 +1,7 @@
 import asyncio
 from fastapi.testclient import TestClient
 from tests.support.synthetic_material import material as Material
-from tests.support.demo_source import DemoSource
+from tests.support.synthetic_source import SyntheticSource
 from oko.services.collection import CollectionService
 from oko.storage.transaction import transaction
 from tests.support.app import create_app
@@ -10,7 +10,7 @@ from tests.support.source import StructuredSource
 from tests.processing.test_url_input_http_independent import GatedModel
 
 def test_http_does_not_publish_late_summary_after_linked_title_roundtrip(tmp_path):
-    model=GatedModel();app=create_app(tmp_path,source=DemoSource(),token='test',ai_transport=model)
+    model=GatedModel();app=create_app(tmp_path,source=SyntheticSource(),token='test',ai_transport=model)
     try:
         with TestClient(app,headers=HEADERS) as client:
             item=setup_reader(client,theses=True)

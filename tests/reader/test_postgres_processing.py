@@ -10,7 +10,7 @@ from tests.support.worker_library import worker_library, workers, pass_worker, s
 
 def test_codex_choice_changes_only_future_work_on_postgres(postgres_url, tmp_path):
     from fastapi.testclient import TestClient
-    from tests.support.demo_source import DemoSource
+    from tests.support.synthetic_source import SyntheticSource
     from tests.support.app import create_app
     from tests.support.codex import CodexService
     from tests.support.reader import HEADERS, wait_for
@@ -29,12 +29,12 @@ def test_codex_choice_changes_only_future_work_on_postgres(postgres_url, tmp_pat
         return {kind: dict(model=model, reasoning_effort=effort, fast=fast) for kind in ('filter', 'theses')}
     service = Models()
     with TestClient(create_app(tmp_path, token='test', api_only=True, database_url=postgres_url,
-                              source=DemoSource(), codex_client=service), headers=HEADERS) as client:
+                              source=SyntheticSource(), codex_client=service), headers=HEADERS) as client:
         assert client.patch('/api/v3/settings/oko/global', json={'theses': False, 'prompt_filters': ''}).status_code == 200
         assert client.put('/api/v3/power', json={'enabled': True}).status_code == 200
         item = wait_cards(client, 3)[0]['id']
         assert client.put('/api/v3/processors/codex', json=configuration('test-small')).status_code == 200
-        assert client.patch('/api/v3/feeds/demo', json={'public_ai': True}).status_code == 200
+        assert client.patch('/api/v3/feeds/fixture', json={'public_ai': True}).status_code == 200
         assert client.patch('/api/v3/settings/oko/global', json={'processor': 'codex', 'theses': True}).status_code == 200
         wait_for(client, lambda: all(client.get('/api/v3/publication/'+card['id']).json()['theses']['result'] for card in read_all_cards(client, '/api/v3/cards')))
         count = len(service.inputs)
@@ -265,7 +265,7 @@ def test_interrupted_attempt_uses_new_model_on_next_attempt(postgres_url, tmp_pa
 
     store, item, execution, tasks = worker_library(tmp_path, database_url=postgres_url)
     try:
-        store.subscriptions.update_feed('demo', FeedPatch(public_ai=True))
+        store.subscriptions.update_feed('fixture', FeedPatch(public_ai=True))
         store.subscriptions.update_settings('oko', 'global', Overrides(processor='codex'))
         store.settings_changed()
         store.configure_codex(CodexSettings.model_validate(configuration()))

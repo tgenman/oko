@@ -7,7 +7,7 @@ from oko.storage.transaction import transaction
 from oko.storage.job_repository import JobRepository
 from oko.collection.adapters import AdapterIssue, AdapterErrorKind
 
-def discovered(store: Store, publications: list[Publication], cursor: str, job: Job, feed: str='demo', namespace: str='', **options: Any) -> None:
+def discovered(store: Store, publications: list[Publication], cursor: str, job: Job, feed: str='fixture', namespace: str='', **options: Any) -> None:
     with transaction(store.db):
         jobs=JobRepository(store)
         if not jobs.valid(job): return

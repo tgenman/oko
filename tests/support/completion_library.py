@@ -12,6 +12,6 @@ def library(root, database_url, count):
             row = dict(template, id=identity, external_id='completion:'+identity)
             marks = ['%s::integer::boolean' if isinstance(row[field], bool) else '%s' for field in fields]
             store.db.execute('INSERT INTO publications('+','.join(fields)+') VALUES ('+','.join(marks)+')', tuple(row[field] for field in fields))
-            store.db.execute('INSERT INTO feed_publications (feed_id,publication_id,is_primary) VALUES ( %s , %s , true )', ('demo', identity))
+            store.db.execute('INSERT INTO feed_publications (feed_id,publication_id,is_primary) VALUES ( %s , %s , true )', ('fixture', identity))
     store.db.close()
 

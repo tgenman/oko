@@ -40,7 +40,7 @@ def test_old_download_success_or_error_cannot_replace_a_refreshed_locator(tmp_pa
         service=worker.service
         material=image_material(source,store,item)
         accept_material(store,service,item,material)
-        job=store.jobs.next_job(store.clock(),feeds=['demo'],media_only=True)
+        job=store.jobs.next_job(store.clock(),feeds=['fixture'],media_only=True)
         assert job
         task=asyncio.create_task(worker._execute(job))
         await asyncio.wait_for(entered.wait(),2)
@@ -67,7 +67,7 @@ def test_media_key_cannot_read_outside_library(tmp_path, kind):
         service=CollectionService(execution.require_store)
         source=StructuredSource(None)
         accept_material(store,service,item,image_material(source,store,item))
-        job=store.jobs.next_job(store.clock(),feeds=['demo'],media_only=True)
+        job=store.jobs.next_job(store.clock(),feeds=['fixture'],media_only=True)
         external=tmp_path/'outside.txt'
         external.write_text('private')
         if kind == 'absolute':
@@ -99,7 +99,7 @@ def test_reader_http_does_not_serve_a_media_key_outside_the_library(tmp_path):
         service=CollectionService(execution.require_store)
         source=StructuredSource(None)
         accept_material(store,service,item,image_material(source,store,item))
-        job=store.jobs.next_job(store.clock(),feeds=['demo'],media_only=True)
+        job=store.jobs.next_job(store.clock(),feeds=['fixture'],media_only=True)
         secret=tmp_path/'outside.txt'
         secret.write_text('private')
         with store.jobs.transaction(lambda:True):
@@ -125,7 +125,7 @@ def test_failed_media_attempt_and_diagnostic_roll_back_together(tmp_path, monkey
         source=Failing(None)
         worker=collection_worker(tmp_path,store,source)
         accept_material(store,worker.service,item,image_material(source,store,item))
-        job=store.jobs.next_job(store.clock(),feeds=['demo'],media_only=True)
+        job=store.jobs.next_job(store.clock(),feeds=['fixture'],media_only=True)
         def fail_diagnostic(*args, **kwargs):
             raise RuntimeError('diagnostic failure')
         monkeypatch.setattr(worker,'_finish_collection',fail_diagnostic)

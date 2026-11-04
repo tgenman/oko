@@ -17,7 +17,7 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
         WHERE j.id=ANY(%s) AND j.kind='fetch' AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL) ORDER BY j.id,root.id""",(job_ids,)).fetchall()
     youtube_jobs={row['id'] for row in rows if row['feed_kind']=='youtube'}
     profile_codes=('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')
-    feeds=sorted({row['owner'] or row['item'] or 'demo' for row in rows if row['problem_code'] in profile_codes and isinstance(row['owner'] or row['item'] or 'demo',str)})
+    feeds=sorted({row['owner'] or row['item'] or '' for row in rows if row['problem_code'] in profile_codes and isinstance(row['owner'] or row['item'] or '',str)})
     suppressed: set[str]=set()
     if feeds and not include_suppressed:
         for start in range(0,len(feeds),100):
@@ -34,7 +34,7 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
         if code in ('codex-choice','ai-permission','youtube-admission','processor-config') or row['viewed']:continue
         if not include_youtube and code is None and row['feed_kind']=='youtube' and store.youtube.ready_at()>now:continue
         code=code or 'work-fetch'
-        feed=row['owner'] or row['item'] or 'demo'
+        feed=row['owner'] or row['item'] or ''
         if code in profile_codes and feed in suppressed:continue
         item=row['item'] or ''
         shared=code.startswith('source-')
@@ -49,7 +49,7 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
             if row['error']:body['reason']=row['error']
             if code=='source-reconnect':body.update(section='action',next_step='Проверьте привязку источника; доступ не изменяется автоматически.')
             results[group]=body
-        legacy_feed=row['feed_id'] or row['item'] or 'demo'
+        legacy_feed=row['feed_id'] or row['item'] or ''
         legacy_identity='job:'+code+':'+legacy_feed+':fetch'+('' if shared else ':'+item)
         if legacy_identity!=identity:results[group]['_legacy_id']=legacy_identity
         obj=dict(kind='material',id=row['affected'])

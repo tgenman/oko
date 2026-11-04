@@ -94,7 +94,7 @@ def test_history_reports_manifest_pause_and_terminal_facts():
 
 
 def test_existing_reading_fields_and_demo_position_are_preserved():
-    assert accepts('SubscriptionFolder', {'id': 'demo', 'title': 'Тестовый источник', 'position': -1})
+    assert accepts('SubscriptionFolder', {'id': 'fixture', 'title': 'Тестовый источник', 'position': -1})
     assert accepts('ReadingComposition', {'folders': [], 'feeds': [], 'count': 0})
     assert not accepts('ReadingComposition', {'folders': [], 'feeds': []})
 
@@ -110,9 +110,9 @@ def test_command_context_covers_checks_and_empty_patches():
     assert accepts('CommandContext', {'operation': 'codex_check'})
     assert accepts('CommandContext', {'operation': 'processor_check'})
     assert accepts('CommandContext', {'operation': 'verify_feed'})
-    assert accepts('CommandContext', {'operation': 'preview_completion', 'folder_id': 'demo'})
+    assert accepts('CommandContext', {'operation': 'preview_completion', 'folder_id': 'fixture'})
     assert accepts('CommandContext', {'operation': 'settings_patch', 'target': {'scope': 'oko', 'owner': 'global'}, 'keys': []})
-    assert accepts('CommandContext', {'operation': 'feed_patch', 'feed_id': 'demo', 'fields': []})
+    assert accepts('CommandContext', {'operation': 'feed_patch', 'feed_id': 'fixture', 'fields': []})
 
 
 def test_current_problem_snapshot_does_not_accept_finished_problems():

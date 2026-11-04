@@ -40,8 +40,8 @@ def test_settings_reconciliation_and_problem_roll_back_together(tmp_path,postgre
             before=store.db.execute("SELECT id,body,finished FROM reader_problems WHERE body::jsonb->>'processing_job_id'=%s AND finished IS NULL",(str(row['id']),)).fetchone()
         with pytest.raises(ValueError,match='rollback'):
             with transaction(store.db):
-                store.subscriptions.update_settings('feed','demo',Overrides(filter_enabled=False))
-                store.settings_changed('feed','demo')
+                store.subscriptions.update_settings('feed','fixture',Overrides(filter_enabled=False))
+                store.settings_changed('feed','fixture')
                 assert store.db.execute('SELECT status FROM jobs WHERE id=%s',(row['id'],)).fetchone()[0]=='blocked'
                 raise ValueError('rollback')
         assert store.db.execute('SELECT status FROM jobs WHERE id=%s',(row['id'],)).fetchone()[0]=='pending'

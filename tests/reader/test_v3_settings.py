@@ -2,11 +2,11 @@ from fastapi.testclient import TestClient
 
 from tests.support.app import create_app
 from tests.support.reader import HEADERS
-from tests.support.demo_source import DemoSource
+from tests.support.synthetic_source import SyntheticSource
 
 
 def test_settings_inheritance_reset_and_command_receipt(tmp_path):
-    with TestClient(create_app(tmp_path, token='test', api_only=True, source=DemoSource()), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, token='test', api_only=True, source=SyntheticSource()), headers=HEADERS) as client:
         path = '/api/v3/settings/oko/global'
         before = client.get(path)
         assert before.status_code == 200, before.text
@@ -26,7 +26,7 @@ def test_settings_inheritance_reset_and_command_receipt(tmp_path):
 
 def test_observations_cannot_replace_confirmed_outcome_and_survive_restart(tmp_path):
     context = {'operation': 'settings_patch', 'target': {'scope': 'oko', 'owner': 'global'}, 'keys': ['theses']}
-    with TestClient(create_app(tmp_path, token='test', api_only=True, source=DemoSource()), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, token='test', api_only=True, source=SyntheticSource()), headers=HEADERS) as client:
         assert client.patch('/api/v3/settings/oko/global', json={'theses': False}, headers={'X-Oko-Action': 'saved'}).status_code == 200
         for result in ('unknown', 'failed'):
             reply = client.post('/api/v3/command-observations', json={'id': 'saved', 'context': context, 'result': result})
@@ -34,7 +34,7 @@ def test_observations_cannot_replace_confirmed_outcome_and_survive_restart(tmp_p
             assert reply.json()['outcome'] == 'succeeded'
         reply = client.post('/api/v3/command-observations', json={'id': 'saved', 'context': {'operation': 'codex_save'}, 'result': 'unknown'})
         assert reply.status_code == 409, reply.text
-    with TestClient(create_app(tmp_path, token='test', api_only=True, source=DemoSource()), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, token='test', api_only=True, source=SyntheticSource()), headers=HEADERS) as client:
         assert client.get('/api/v3/commands/saved').json()['outcome'] == 'succeeded'
 
 
@@ -95,7 +95,7 @@ def test_general_theses_off_youtube_defaults_on_with_public_ai_and_explicit_deni
 
 
 def test_enabling_filter_requires_effective_prompt_and_rolls_back_invalid_patch(tmp_path):
-    with TestClient(create_app(tmp_path, token='test', api_only=True, source=DemoSource()), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, token='test', api_only=True, source=SyntheticSource()), headers=HEADERS) as client:
         path = '/api/v3/settings/oko/global'
         rejected = client.patch(path, json={'filter_enabled': True})
         assert rejected.status_code == 400, rejected.text

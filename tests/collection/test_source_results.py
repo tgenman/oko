@@ -16,7 +16,7 @@ def test_configuration_detaches_history_and_keeps_youtube_discovery_cache():
         return httpx.Response(200, text=feed_xml())
 
     async def check():
-        sources = Sources(None, 'demo', True, httpx.MockTransport(reply), NoCaptions(), None)
+        sources = Sources(None, 'fixture', True, httpx.MockTransport(reply), NoCaptions(), None)
         history = dict(mode='count',count=1,run='fixture')
         settings = SourceSettings('video', 'youtube', 'https://www.youtube.com/feeds/videos.xml?channel_id='+('UC'+'a'*22), 1, history)
         updates = sources.configure([settings])

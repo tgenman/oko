@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from tests.support.app import create_app
 from tests.support.reader import Clock, wait_for
 from tests.support.cards import read_all_cards
-from tests.support.demo_source import DemoSource
+from tests.support.synthetic_source import SyntheticSource
 
 HEADERS = {'Authorization': 'Bearer test-token'}
 
@@ -11,7 +11,7 @@ HEADERS = {'Authorization': 'Bearer test-token'}
 def test_collection_and_process_continue_without_any_browser(tmp_path):
     clock = Clock()
     exits = []
-    with TestClient(create_app(tmp_path, source=DemoSource(), token='test-token', **clock.options(),
+    with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test-token', **clock.options(),
                                lease=6, grace=15, shutdown=lambda: exits.append(True)), headers=HEADERS) as client:
         wait_for(client, lambda: len(read_all_cards(client, '/api/v3/cards')) == 3)
         clock.now += 3600
@@ -49,7 +49,7 @@ def test_processing_completes_without_browser_after_restart(tmp_path):
     with TestClient(create_app(tmp_path, token='test-token', ai_transport=model_transport(calls)), headers=HEADERS) as client:
         assert client.put('/api/v3/processors/llamacpp', json={'endpoint':'http://127.0.0.1:8080','model':'local:latest','local_execution':True}).status_code == 200
         assert client.patch('/api/v3/settings/oko/global', json={'processor':'llamacpp','theses':True,'prompt_filters':''}).status_code == 200
-    with TestClient(create_app(tmp_path, source=DemoSource(), token='test-token', ai_transport=model_transport(calls)), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test-token', ai_transport=model_transport(calls)), headers=HEADERS) as client:
         cards = wait_for(client, lambda: read_all_cards(client, '/api/v3/cards'))
         wait_for(client, lambda: client.get('/api/v3/publication/'+cards[0]['id']).json().get('theses',{}).get('result'))
         assert calls

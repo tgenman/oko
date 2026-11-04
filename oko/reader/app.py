@@ -37,11 +37,13 @@ def create_app(root: Path, *, source: Source | None = None, token: str | None = 
                fault: Callable[[str], None] = lambda _: None,
                shutdown: Callable[[], None] = lambda: None,
                lease: float = 6, grace: float = 15, api_only: bool = False, persistent: bool = False,
-               public_url: str | None = None, source_feed: str = 'demo',
+               public_url: str | None = None, source_feed: str = '',
                rss_enabled: bool = False, rss_transport: httpx.AsyncBaseTransport | None = None,
                ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None,
                youtube_captions: CaptionsClient | None = None, youtube_history: HistoryClient | None = None, wall_clock: Callable[[], float] = time.time, database_url: str | None = None,
                metrics_token: str | None = None) -> FastAPI:
+    if source is not None and not source_feed:
+        raise ValueError('Injected source requires a feed identity')
     if not api_only:
         from oko.reader.static import validate_frontend
         validate_frontend()

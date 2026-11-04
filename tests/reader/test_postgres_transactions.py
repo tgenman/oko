@@ -1,5 +1,6 @@
 """Repository transaction ownership against real PostgreSQL and independent readers."""
 from tests.support.cards import read_all_cards
+from tests.support.storage import ensure_fixture
 from contextlib import contextmanager
 
 import pytest
@@ -170,8 +171,8 @@ def test_reader_role_needs_no_schema_ownership_or_migration_credentials(postgres
             reader_dsn = make_conninfo(postgres_url, user=role, password='synthetic-reader-only')
             store = Store(tmp_path, lambda _: None, database_url=reader_dsn)
             try:
-                store.subscriptions.ensure_demo()
-                assert store.subscriptions.feeds()[0]['id'] == 'demo'
+                ensure_fixture(store.db)
+                assert store.subscriptions.feeds()[0]['id'] == 'fixture'
                 store.set_work_enabled(True)
                 assert store.work_enabled() is True
             finally:

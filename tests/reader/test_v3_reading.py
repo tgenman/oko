@@ -1,13 +1,13 @@
 from tests.support.cards import read_all_cards, read_publications_for_cards
 from tests.support.v3 import TestClient
-from tests.support.demo_source import DemoSource
+from tests.support.synthetic_source import SyntheticSource
 from oko.reader.generated import models as wire
 from tests.support.app import create_app
 from tests.support.reader import HEADERS, setup_reader
 
 
 def test_reading_and_explicit_completion_receipts(tmp_path):
-    with TestClient(create_app(tmp_path, token='test', api_only=True, source=DemoSource()), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, token='test', api_only=True, source=SyntheticSource()), headers=HEADERS) as client:
         item = setup_reader(client, theses=False)
         response = client.get('/api/v3/cards')
         assert response.status_code == 200, response.text
@@ -39,7 +39,7 @@ def test_reading_and_explicit_completion_receipts(tmp_path):
 
 
 def test_reading_errors_are_typed_and_queries_strict(tmp_path):
-    with TestClient(create_app(tmp_path, token='test', api_only=True, source=DemoSource()), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, token='test', api_only=True, source=SyntheticSource()), headers=HEADERS) as client:
         for path in ['/api/v3/cards?show_hidden=1', '/api/v3/cards?sort=bad', '/api/v3/cards?feed=', '/api/v3/cards?sort=newest&sort=oldest', '/api/v3/cards?extra=true']:
             response = client.get(path)
             assert response.status_code == 422, (path, response.text)
@@ -93,7 +93,7 @@ def test_hidden_filter_theses_restoration_and_processing_receipts(tmp_path):
 
 def test_public_codex_denial_has_domain_waiting_reason(tmp_path):
     from tests.support.reader import wait_for
-    with TestClient(create_app(tmp_path, token='test', api_only=True, source=DemoSource()), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, token='test', api_only=True, source=SyntheticSource()), headers=HEADERS) as client:
         item = setup_reader(client, theses=False)
         client.patch('/api/v3/settings/oko/global', json={'theses':True,'processor':'codex'})
         wait_for(client, lambda: any(w.get('reason') == 'public_ai_not_allowed' for w in client.get('/api/v3/status/details').json()['work']))

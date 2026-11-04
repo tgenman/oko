@@ -2393,7 +2393,7 @@ class Problems:
         special={'codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'}
         if not isinstance(code,str) or code.startswith('source-') or code in special:
             return None
-        feed = row['feed_id'] or row['item'] or 'demo'
+        feed = row['feed_id'] or row['item'] or ''
         return str('job:' + code + ':' + feed + ':' + row['kind'] + ':' + row['item'])
 
     def deletion_candidates(self, job_id: int, now: float) -> list[dict[str, Any]]:
@@ -2427,7 +2427,7 @@ class Problems:
         if identity is None:
             return None
         code = row['problem_code'] or 'work-' + row['kind']
-        feed = row['feed_id'] or row['item'] or 'demo'
+        feed = row['feed_id'] or row['item'] or ''
         kind = row['kind']
         title = 'Удаление фида не завершено' if kind=='feed-delete' else 'Удаление не завершено'
         next_step = ('Включите обработку, чтобы повторить попытку.' if row['status']=='blocked' else
@@ -2646,7 +2646,7 @@ class Problems:
         counts: dict[str,int]={}
         for row in rows:
             feed=row['item']
-            if not isinstance(feed,str) or not feed or feed=='demo':
+            if not isinstance(feed,str) or not feed:
                 continue
             code=row['problem_code'] or 'work-discover'
             identity='job:'+code+':'+feed+':discover'+('' if code.startswith('source-') else ':'+feed)
@@ -2676,7 +2676,7 @@ class Problems:
                 WHERE j.id=ANY(%s)""",([row['id'] for row in legacy_sources],)).fetchall()
             for row in legacy_rows:
                 code=row['problem_code'] or 'work-discover'
-                owner=row['legacy_owner'] or row['item'] or 'demo'
+                owner=row['legacy_owner'] or row['item'] or ''
                 legacy_keys.add('job:'+code+':'+owner+':discover'+('' if code.startswith('source-') else ':'+(row['item'] or '')))
         simple=[(row,identity) for row,identity in pairs if counts[identity]==1 and row['item'] not in publication_ids and row['item'] not in deleting_feeds and identity not in occupied and row['item'] not in prior_feeds and identity not in legacy_keys]
         if not simple:return rows
@@ -2726,8 +2726,8 @@ class Problems:
                 parsed.append((record,code,feeds))
                 all_feeds.update(feeds)
             with self.db:
-                aliases=sorted(all_feeds | ({''} if 'demo' in all_feeds else set()))
-                active={(row['item'] or 'demo',row['code']) for row in self.db.execute("SELECT item,coalesce(problem_code,'work-discover') AS code FROM jobs WHERE kind='discover' AND (item=ANY(%s) OR (item IS NULL AND %s=1)) AND status IN ('pending','running','failed','unavailable','blocked') AND (error IS NOT NULL OR problem_code IS NOT NULL)",(aliases,'demo' in all_feeds))} if aliases else set()
+                aliases=sorted(all_feeds)
+                active={(row['item'] or '',row['code']) for row in self.db.execute("SELECT item,coalesce(problem_code,'work-discover') AS code FROM jobs WHERE kind='discover' AND item=ANY(%s) AND status IN ('pending','running','failed','unavailable','blocked') AND (error IS NOT NULL OR problem_code IS NOT NULL)",(aliases,))} if aliases else set()
                 legacy_active: set[tuple[str,str]] = set()
                 if all_feeds:
                     legacy_active.update((row['feed_id'],row['code']) for row in self.db.execute("""SELECT owner.feed_id,coalesce(j.problem_code,'work-discover') AS code FROM feed_publications owner
@@ -2780,15 +2780,17 @@ class Problems:
             FROM (SELECT %s::text AS item) j LEFT JOIN publications items ON items.id=j.item
             LEFT JOIN publication_links link ON link.target_publication_id=items.id
             LEFT JOIN publications linked_root ON linked_root.id=link.source_publication_id AND linked_root.viewed=0""",(row['feed_id'],row['item'])).fetchall()
-        return sorted({r['feed'] or row['item'] or 'demo' for r in rows})
+        return sorted({r['feed'] or row['item'] or '' for r in rows})
 
     def sync_discover(self, job_id: int, now: float, *, previous_codes: tuple[str,...] = ()) -> None:
         changed = self.db.execute("SELECT * FROM jobs WHERE id=%s AND kind='discover'", (job_id,)).fetchone()
         if not changed:
             return
-        feed = changed['item'] or 'demo'
+        feed = changed['item'] or ''
+        if not feed:
+            return
         old = self.db.execute("SELECT identity,body FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:discover' AND (body::jsonb->'objects') @> %s::jsonb", (json.dumps([dict(kind='feed',id=feed)]),)).fetchall()
-        jobs=self.db.execute("SELECT * FROM jobs WHERE kind='discover' AND (item=ANY(%s) OR (item IS NULL AND %s=1)) AND status IN ('pending','running','failed','unavailable','blocked') AND (error IS NOT NULL OR problem_code IS NOT NULL) ORDER BY id",(['','demo'] if feed=='demo' else [feed],feed=='demo')).fetchall()
+        jobs=self.db.execute("SELECT * FROM jobs WHERE kind='discover' AND item=ANY(%s) AND status IN ('pending','running','failed','unavailable','blocked') AND (error IS NOT NULL OR problem_code IS NOT NULL) ORDER BY id",([feed],)).fetchall()
         feed_row=self.db.execute('SELECT connection FROM feeds WHERE id=%s',(feed,)).fetchone()
         deleting=bool(feed_row and feed_row['connection']=='deleting')
         candidates: dict[str,dict[str,Any]]={}
@@ -3092,7 +3094,7 @@ class Problems:
                 continue
             if row['viewed'] and kind not in ('delete','feed-delete','discover','read'):
                 continue
-            feed=(row['item'] if kind in ('discover','read','feed-delete') else row['resolved_feed_id'] or row['feed_id']) or row['item'] or 'demo'
+            feed=(row['item'] if kind in ('discover','read','feed-delete') else row['resolved_feed_id'] or row['feed_id']) or row['item'] or ''
             if candidate is None:
                 candidate=dict(id='processor:configuration',code='processor-config',section='action',title='Требуется настройка обработчика',
                     consequence='Око продолжает попытки удаления.' if kind in ('delete','feed-delete') else 'Сохранённое содержимое остаётся доступным.',
@@ -3401,7 +3403,7 @@ class Problems:
                 batch=source_ids[start:start+400]
                 feeds.update({row['id']:dict(row) for row in self.db.execute('SELECT id,kind FROM feeds WHERE id=ANY(%s)',(batch,))})
             profile_codes=('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')
-            job_feeds={job['resolved_feed_id'] or job['feed_id'] or job['item'] or 'demo' for job in jobs if job['problem_code'] in profile_codes}
+            job_feeds={job['resolved_feed_id'] or job['feed_id'] or job['item'] or '' for job in jobs if job['problem_code'] in profile_codes}
             if job_feeds:
                 needles=[json.dumps([dict(kind='feed',id=feed)]) for feed in sorted(job_feeds)]
                 for row in self.db.execute("SELECT body FROM reader_problems WHERE identity LIKE 'profile:%%' AND finished IS NULL AND (body::jsonb->'objects') @> ANY(%s::jsonb[])",(needles,)):
@@ -3409,7 +3411,7 @@ class Problems:
         source_owned: set[str]=set()
         if scope_items is None:
             source_keys={
-                'job:'+job['problem_code']+':'+(job['resolved_feed_id'] or job['feed_id'] or job['item'] or 'demo')+':'+job['kind']
+                'job:'+job['problem_code']+':'+(job['resolved_feed_id'] or job['feed_id'] or job['item'] or '')+':'+job['kind']
                 for job in jobs if isinstance(job['problem_code'],str) and job['problem_code'].startswith('source-')
                 and job['kind'] in ('fetch','download_media','filter','theses','delete','feed-delete')
             }
@@ -3454,7 +3456,7 @@ class Problems:
             if code == 'youtube-admission':
                 continue
             code = code or 'work-' + job['kind']
-            feed = resolved_feed or job['item'] or 'demo'
+            feed = resolved_feed or job['item'] or ''
             if code in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') and feed in profile_feeds:
                 continue
             if job['viewed'] and job['kind'] not in ('delete','feed-delete'):
@@ -3484,7 +3486,7 @@ class Problems:
                     groups[group_key]['reason'] = job['error']
                 if code == 'source-reconnect':
                     groups[group_key].update(section='action', next_step='Проверьте привязку источника; доступ не изменяется автоматически.', action=None)
-            legacy_feed = job['feed_id'] or job['item'] or 'demo'
+            legacy_feed = job['feed_id'] or job['item'] or ''
             legacy_identity = 'job:' + code + ':' + legacy_feed + ':' + job['kind'] + ('' if shared else ':' + job['item'])
             if identity.startswith('job:') and legacy_identity != identity and not code.startswith('source-'):
                 groups[group_key].setdefault('_legacy_ids',set()).add(legacy_identity)
@@ -3762,7 +3764,7 @@ class Problems:
             job=rows[0]
             objects=records[identity].get('objects')
             if (job['kind'] not in ('delete','feed-delete','read')
-                and job['feed'] == (job['feed_id'] or job['item'] or 'demo')
+                and job['feed'] == (job['feed_id'] or job['item'] or '')
                 and isinstance(objects,list) and any(isinstance(obj,dict) and obj.get('kind')=='material' and obj.get('id')==job['item'] for obj in objects)
                 and job['status']=='done' and job['error'] is None and job['problem_code'] is None):
                 result.add(identity)

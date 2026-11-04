@@ -50,9 +50,9 @@ def test_http_inherited_settings_use_one_consistent_database_snapshot(tmp_path, 
     import threading
     from concurrent.futures import ThreadPoolExecutor
     import psycopg
-    from tests.support.demo_source import DemoSource
+    from tests.support.synthetic_source import SyntheticSource
 
-    app = create_app(tmp_path, token='test', api_only=True, source=DemoSource(), database_url=settings_database)
+    app = create_app(tmp_path, token='test', api_only=True, source=SyntheticSource(), database_url=settings_database)
     with TestClient(app, headers=HEADERS) as client, psycopg.connect(settings_database) as writer:
         assert client.put('/api/v3/power', json={'enabled': False}).status_code == 200
         folder = client.get('/api/v3/subscriptions').json()['feeds'][0]['folder_id']

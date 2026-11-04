@@ -7,7 +7,7 @@ from tests.support.storage import database
 from pathlib import Path
 from fastapi.testclient import TestClient
 from tests.support.app import create_app
-from tests.support.demo_source import DemoSource
+from tests.support.synthetic_source import SyntheticSource
 
 HEADERS = {'Authorization': 'Bearer test-token'}
 
@@ -41,7 +41,7 @@ def test_delete_failure_is_visible_and_retried_without_content_in_errors(tmp_pat
     def fault(point):
         if point == 'before_delete' and fail:
             raise OSError('secret content in provider exception')
-    with TestClient(create_app(tmp_path, source=DemoSource(), token='test-token', fault=fault, clock=clock), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test-token', fault=fault, clock=clock), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global', json={'theses': False})
         presence(client, 'a')
         for _ in range(100):
@@ -74,7 +74,7 @@ def test_corrupt_database_is_reported_and_never_replaced(tmp_path: Path, postgre
 
 
 def test_restart_keeps_failed_deletion_retryable_and_blocks_collection(tmp_path: Path):
-    class CountingSource(DemoSource):
+    class CountingSource(SyntheticSource):
         def __init__(self):
             self.calls = 0
         async def discover(self, cursor):
@@ -85,7 +85,7 @@ def test_restart_keeps_failed_deletion_retryable_and_blocks_collection(tmp_path:
     def fault(point):
         if point == 'before_delete' and fail:
             raise OSError('temporary disk error')
-    with TestClient(create_app(tmp_path, source=DemoSource(), token='test-token', fault=fault, clock=clock), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test-token', fault=fault, clock=clock), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global', json={'theses': False})
         presence(client, 'a')
         for _ in range(100):

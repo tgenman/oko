@@ -104,9 +104,9 @@ def test_lost_successful_reply_is_reconciled_and_only_failed_draft_can_be_abando
 
 
 def test_viewing_removes_scoped_diagnostic_content_from_server_and_disk(tmp_path):
-    from tests.support.demo_source import DemoSource
+    from tests.support.synthetic_source import SyntheticSource
     from tests.support.reader import setup_reader
-    with TestClient(create_app(tmp_path, token='test', source=DemoSource()), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, token='test', source=SyntheticSource()), headers=HEADERS) as client:
         item=setup_reader(client,theses=False)
         title=client.get('/api/v3/publication/'+item).json()['title']
         assert client.post('/api/v3/diagnostics',json={'source':'material','message':title,'material_ids':[item]}).status_code==200

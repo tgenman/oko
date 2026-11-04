@@ -6,7 +6,7 @@ import pytest
 
 from fastapi.testclient import TestClient
 
-from tests.support.demo_source import DemoSource
+from tests.support.synthetic_source import SyntheticSource
 from tests.support.app import create_app
 from tests.support.reader import Clock, wait_for
 
@@ -17,7 +17,7 @@ HEADERS = {'Authorization': 'Bearer test'}
 def test_explicit_execution_collects_without_presence_until_stop(tmp_path, api_only):
     clock = Clock()
     exits = []
-    with TestClient(create_app(tmp_path, token='test', source=DemoSource(), clock=clock,
+    with TestClient(create_app(tmp_path, token='test', source=SyntheticSource(), clock=clock,
                                api_only=api_only, shutdown=lambda: exits.append(True)), headers=HEADERS) as client:
         cards = wait_for(client, lambda: read_all_cards(client, '/api/v3/cards'))
         assert len(cards) == 3

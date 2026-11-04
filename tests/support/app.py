@@ -3,6 +3,7 @@ from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
 
+import time
 import httpx
 from fastapi import FastAPI
 
@@ -91,4 +92,13 @@ def create_app(root: Path, **options: Any) -> FastAPI:
     if not defaults.get('database_url'):
         from tests.support.storage import database_url
         defaults['database_url'] = database_url(root)
+    if defaults.get('source') is not None and 'source_feed' not in defaults:
+        from tests.support.storage import ensure_fixture
+        from oko.storage.postgres_connection import PostgresConnection
+        connection = PostgresConnection(defaults['database_url'])
+        try:
+            ensure_fixture(connection, defaults.get('wall_clock', time.time))
+        finally:
+            connection.close()
+        defaults['source_feed'] = 'fixture'
     return production_app(root, **defaults)

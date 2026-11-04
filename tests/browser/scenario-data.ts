@@ -248,7 +248,7 @@ export type Feed = {
     /**
      * Kind
      */
-    kind: 'demo' | 'rss' | 'telegram' | 'youtube' | 'unresolved';
+    kind: 'rss' | 'telegram' | 'youtube' | 'unresolved';
     /**
      * Original Urls
      */
@@ -268,7 +268,7 @@ export type Feed = {
     /**
      * Transport
      */
-    transport?: 'demo' | 'rss' | 'telegram' | 'youtube' | null;
+    transport?: 'rss' | 'telegram' | 'youtube' | null;
 };
 
 export type FeedVerification = {
@@ -1009,7 +1009,7 @@ export type SubscriptionFeed = {
     /**
      * Kind
      */
-    kind: 'demo' | 'rss' | 'telegram' | 'youtube' | 'unresolved';
+    kind: 'rss' | 'telegram' | 'youtube' | 'unresolved';
     /**
      * Original Urls
      */
@@ -1029,7 +1029,7 @@ export type SubscriptionFeed = {
     /**
      * Transport
      */
-    transport?: 'demo' | 'rss' | 'telegram' | 'youtube' | null;
+    transport?: 'rss' | 'telegram' | 'youtube' | null;
 };
 
 export type SubscriptionFolder = {

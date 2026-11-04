@@ -86,7 +86,7 @@ def test_claim_and_saved_context_are_one_transaction_and_survive_restart(tmp_pat
     store,item,execution,tasks=worker_library(tmp_path)
     asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
     context=saved(store,item)['processing_metadata']['_pass']
-    assert context['feed_id']=='demo' and context['revision']
+    assert context['feed_id']=='fixture' and context['revision']
     store.db.close()
     reopened=Store(tmp_path,lambda _:None)
     execution._store=reopened
@@ -106,14 +106,14 @@ def test_shared_filter_winner_keeps_its_feed_for_summary_after_restart(tmp_path)
             store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=False,theses=True,prompt_theses='Other feed rules'))
             store.processing.reconcile_accepted_item(item)
         asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
-        assert saved(store,item)['processing_metadata']['_pass']['feed_id'] == 'demo'
+        assert saved(store,item)['processing_metadata']['_pass']['feed_id'] == 'fixture'
         store.db.close()
         store = Store(tmp_path,lambda _:None)
         execution._store=store
         asyncio.run(pass_worker(workers(execution,tasks)[1],tasks))
         result = saved(store,item)
         assert result['summarized_content']['points']
-        assert result['processing_metadata']['_pass']['feed_id'] == 'demo'
+        assert result['processing_metadata']['_pass']['feed_id'] == 'fixture'
         assert result['processing_metadata']['_pass']['settings']['values']['prompt_theses'] != 'Other feed rules'
     finally:
         store.db.close()
@@ -135,7 +135,7 @@ def test_competing_workers_commit_one_shared_processing_context(tmp_path):
             if tasks._ai:
                 await tasks._ai
             chosen = saved(store,item)['processing_metadata']['_pass']['feed_id']
-            assert chosen in ('demo',second)
+            assert chosen in ('fixture',second)
             assert len([call for call in calls if call.url.path=='/v1/chat/completions']) == 1
             completed = store.db.execute("SELECT kind,input_snapshot->>'feed_id' AS feed FROM jobs WHERE item=%s AND kind IN ('filter','theses') AND status='done'", (item,)).fetchall()
             assert len(completed)==1 and completed[0]['feed']==chosen
@@ -159,7 +159,7 @@ def test_late_result_from_deleted_selected_feed_is_rejected(tmp_path):
             second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other',title='Other',folder='Other',verification='synthetic'))['id']
             with transaction(store.db):
                 store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
-                store.subscriptions.update_settings('feed','demo',Overrides(filter_enabled=False))
+                store.subscriptions.update_settings('feed','fixture',Overrides(filter_enabled=False))
                 store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=True))
                 store.processing.reconcile_accepted_item(item)
             worker = workers(execution,tasks,httpx.MockTransport(model))[0]
@@ -186,7 +186,7 @@ def test_no_feed_is_chosen_when_every_candidate_is_disallowed(tmp_path):
         second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other', title='Other', folder='Other', verification='synthetic'))['id']
         with transaction(store.db):
             store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
-            store.subscriptions.update_settings('feed','demo',Overrides(processor='codex'))
+            store.subscriptions.update_settings('feed','fixture',Overrides(processor='codex'))
             store.subscriptions.update_settings('feed',second,Overrides(processor='codex'))
             store.processing.reconcile_accepted_item(item)
         with transaction(store.db):
@@ -227,7 +227,7 @@ def test_collection_failure_does_not_stop_filter_and_summary_crons(tmp_path):
         async def fetch(self,publication):raise AssertionError('unexpected fetch')
     store,item,execution,tasks=worker_library(tmp_path)
     with store.db:
-        store.db.execute("UPDATE feeds SET cursor='' WHERE id='demo'")
+        store.db.execute("UPDATE feeds SET cursor='' WHERE id='fixture'")
     store.db.close()
     with TestClient(create_app(tmp_path,source=FailedSource(),token='test',api_only=True,ai_transport=transport([],theses=True)),headers=HEADERS) as client:
         wait_for(client,lambda:client.get('/api/v3/publication/'+item).json()['theses']['result'])
@@ -249,8 +249,8 @@ def test_new_revision_does_not_shorten_source_wait(tmp_path):
         deadline=store.wall_clock()+120
         next_at=store.clock()+120
         store.db.execute("UPDATE jobs SET status = 'pending' , wait_scope = 'source:synthetic' , retry_at = %s , next = %s , error = 'source wait' WHERE kind = 'filter'",(deadline,next_at))
-        store.subscriptions.update_feed('demo',FeedPatch(importance='high'))
-        store.settings_changed('feed','demo')
+        store.subscriptions.update_feed('fixture',FeedPatch(importance='high'))
+        store.settings_changed('feed','fixture')
         worker.service.reconcile()
     row=store.db.execute("SELECT retry_at,next,wait_scope,error FROM jobs WHERE kind='filter'").fetchone()
     assert tuple(row)==(deadline,next_at,'source:synthetic','source wait')
@@ -265,7 +265,7 @@ def test_linked_source_privacy_change_reconciles_parent_job_atomically(tmp_path)
     try:
         other = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/linked-feed',title='Linked',folder='Other',verification='synthetic'))['id']
         with transaction(store.db):
-            store.subscriptions.update_feed('demo',FeedPatch(public_ai=True))
+            store.subscriptions.update_feed('fixture',FeedPatch(public_ai=True))
             store.subscriptions.update_feed(other,FeedPatch(public_ai=True))
             memberships.lock_graph(store.db)
             store.db.execute("""INSERT INTO publications(id,url,platform,external_id,complete,content,title,discovered_at)
@@ -306,15 +306,15 @@ def test_discovery_page_and_continuation_roll_back_together(tmp_path):
     store, _, _, _ = worker_library(tmp_path,fault=fault)
     try:
         with store.db:
-            store.db.execute("UPDATE feeds SET cursor='' WHERE id='demo'")
-            store.jobs.enqueue_discovery()
-        job=store.jobs.next_job(store.clock(),feeds=['demo'])
+            store.db.execute("UPDATE feeds SET cursor='' WHERE id='fixture'")
+            store.jobs.enqueue_discovery('fixture')
+        job=store.jobs.next_job(store.clock(),feeds=['fixture'])
         assert job and job.kind=='discover'
         worker=collection_worker(tmp_path,store,StructuredSource(Paginated()))
         asyncio.run(worker._execute(job))
-        assert store.db.execute("SELECT cursor FROM feeds WHERE id='demo'").fetchone()[0] == ''
+        assert store.db.execute("SELECT cursor FROM feeds WHERE id='fixture'").fetchone()[0] == ''
         assert store.db.execute("SELECT 1 FROM publications WHERE url='https://example.org/next'").fetchone() is None
-        assert not store.db.execute("SELECT last_collection_result FROM feeds WHERE id='demo'").fetchone()[0].get('success_at')
+        assert not store.db.execute("SELECT last_collection_result FROM feeds WHERE id='fixture'").fetchone()[0].get('success_at')
         assert store.db.execute("SELECT status FROM jobs WHERE id=%s", (job.id,)).fetchone()[0] != 'done'
     finally:
         store.db.close()
@@ -351,10 +351,10 @@ def test_failed_delete_problem_follows_job_without_status_read(tmp_path, postgre
     try:
         with store.db:
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('item','rss','item',1)")
-            row=store.db.execute("INSERT INTO jobs(kind,item,status,generation,payload) VALUES ('delete','item','running',1,%s) RETURNING id", (json.dumps({'cleanup_feed':'demo'}),)).fetchone()
+            row=store.db.execute("INSERT INTO jobs(kind,item,status,generation,payload) VALUES ('delete','item','running',1,%s) RETURNING id", (json.dumps({'cleanup_feed':'fixture'}),)).fetchone()
         job=Job(row['id'],'delete','item',1)
         def current():
-            return store.db.execute("SELECT id,body FROM reader_problems WHERE identity='job:delete:demo:delete:item' AND finished IS NULL").fetchone()
+            return store.db.execute("SELECT id,body FROM reader_problems WHERE identity='job:delete:fixture:delete:item' AND finished IS NULL").fetchone()
         with pytest.raises(ValueError,match='rollback'):
             with transaction(store.db):
                 store.jobs.retry(job,1,'Ошибка удаления',code='delete')
@@ -364,7 +364,7 @@ def test_failed_delete_problem_follows_job_without_status_read(tmp_path, postgre
         store.jobs.retry(job,1,'Ошибка удаления',code='delete')
         problem=current()
         assert problem is not None
-        assert not any(c['id']=='job:delete:demo:delete:item' for c in store.problems.candidates(5))
+        assert not any(c['id']=='job:delete:fixture:delete:item' for c in store.problems.candidates(5))
         with store.db:
             store.db.execute("UPDATE jobs SET next=0 WHERE id=%s", (job.id,))
         claimed=store.jobs.next_job(1,deleting_only=True)

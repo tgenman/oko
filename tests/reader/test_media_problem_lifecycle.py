@@ -2,7 +2,7 @@ import json
 from oko.collection.adapters import AdapterIssue,AdapterErrorKind
 from oko.storage.job_types import Job
 from oko.storage.transaction import transaction
-from tests.support.storage import Store
+from tests.support.storage import Store, ensure_fixture
 
 
 def test_media_failure_and_finish_without_status_read(tmp_path,postgres_url):
@@ -47,9 +47,9 @@ def test_real_material_replacement_rolls_back_file_job_and_problem(tmp_path,post
     from tests.support.source import StructuredSource,publication_packet
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
-        store.ensure_demo();publication=Publication('p','https://example.test/p',1)
+        ensure_fixture(store.db);publication=Publication('p','https://example.test/p',1)
         with transaction(store.db):
-            effects=store.collect_discovery([publication_packet(publication)],'{}');store.jobs.apply_collection(effects)
+            effects=store.collect_discovery([publication_packet(publication)],'{}','fixture');store.jobs.apply_collection(effects)
         item=store.db.execute("SELECT id FROM publications WHERE url='https://example.test/p'").fetchone()[0]
         file='00000000-0000-4000-8000-000000000001'
         with store.db:

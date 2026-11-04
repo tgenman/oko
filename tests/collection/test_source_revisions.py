@@ -212,7 +212,7 @@ def test_revision_waits_for_public_ai_permission_instead_of_reusing_old_theses(t
     with TestClient(create_app(tmp_path, source=source, token='test-token', ai_transport=model_transport(calls)), headers=HEADERS) as client:
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'https://remote.test', 'model': 'local:latest', 'local_execution': False})
         client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
-        feed = 'demo'
+        feed = 'fixture'
         client.patch('/api/v3/feeds/' + feed, json={'public_ai': True})
         presence(client, 'test')
         item = wait_cards(client)[0]['id']

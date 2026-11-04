@@ -335,19 +335,19 @@ class JobRepository:
         return row[0] if row else None
 
 
-    def enqueue_discovery(self, feed: str = 'demo', next_at: float = 0) -> None:
+    def enqueue_discovery(self, feed: str, next_at: float = 0) -> None:
         # Monotonic deadlines belong to this process; persist their wall-clock
         # equivalent so a continuation keeps its remaining delay after restart.
         retry_at = self.store.wall_clock()+max(0,next_at-self.store.clock()) if next_at else None
         with self.store.db:
-            prior=self.store.db.execute("SELECT id,processor_visible,problem_code FROM jobs WHERE kind='discover' AND item=%s",('' if feed=='demo' else feed,)).fetchone()
+            prior=self.store.db.execute("SELECT id,processor_visible,problem_code FROM jobs WHERE kind='discover' AND item=%s",(feed,)).fetchone()
             affected=[prior['id']] if prior and (prior['processor_visible'] or prior['problem_code']=='processor-config') else []
             previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
             changed=job_write(self.store.db, """INSERT INTO jobs(kind,item,next,retry_at,queued_wall)
                 VALUES ('discover',%s,%s,%s,extract(epoch FROM clock_timestamp()))
                 ON CONFLICT(kind,item) DO UPDATE SET queued_wall=excluded.queued_wall,status='pending',
                     next=excluded.next,retry_at=excluded.retry_at,error=NULL WHERE jobs.status='done' RETURNING id,error,problem_code""",
-                ('' if feed=='demo' else feed,next_at,retry_at)).fetchone()
+                (feed,next_at,retry_at)).fetchone()
             if changed and (changed['error'] is not None or changed['problem_code'] is not None):self.store.problems.sync_discover(changed['id'],self.store.wall_clock())
             if changed and affected:self.store.problems.finish_processor_change(affected,previous,self.store.wall_clock())
 
@@ -356,7 +356,7 @@ class JobRepository:
         with self.store.db:
             for row in self.store.db.execute('SELECT DISTINCT i . id FROM publications i JOIN feed_publications owner ON owner.publication_id=i.id AND owner.is_primary AND owner.is_unviewed JOIN media_files m ON m . publication_id = i . id WHERE owner.feed_id = %s AND i . viewed = 0', (feed,)).fetchall():
                 self.retry_media(row['id'],revalidate_ready=False)
-        discovery = '' if feed == 'demo' else feed
+        discovery = feed
         active = self.store.db.execute("SELECT 1 FROM jobs WHERE kind = 'discover' AND item = %s AND ( status = 'running' OR ( status = 'pending' AND error IS NULL AND next <= %s ) )", (discovery,self.store.clock())).fetchone()
         with self.store.db:
             memberships.lock_graph(self.store.db)
@@ -427,7 +427,7 @@ class JobRepository:
             self.store.incomplete_draft.mark_job('fetch',item)
 
 
-    def next_job(self, now: float, deleting_only: bool = False, source_feed: str = 'demo', feeds: list[str] | None = None, ai_only: bool = False, include_deletions: bool = True, media_only: bool = False, captions_only: bool = False, dependency_feeds: list[str] | None = None, processing_kind: str | None = None) -> Job | None:
+    def next_job(self, now: float, deleting_only: bool = False, source_feed: str = '', feeds: list[str] | None = None, ai_only: bool = False, include_deletions: bool = True, media_only: bool = False, captions_only: bool = False, dependency_feeds: list[str] | None = None, processing_kind: str | None = None) -> Job | None:
         if media_only and not ai_only and not deleting_only:
             if processing_kind is not None:
                 return None
@@ -483,7 +483,7 @@ class JobRepository:
             (jobs.item IS NULL OR EXISTS ({blocked_history} AND m.item=jobs.item OFFSET 0)))"""
         query += " AND NOT (kind='feed-delete' AND EXISTS (SELECT 1 FROM jobs d WHERE d.kind='delete' AND d.status!='done' AND d.payload::jsonb->>'cleanup_feed'=jobs.item))"
         query += " ORDER BY CASE kind WHEN 'delete' THEN 0 WHEN 'feed-delete' THEN 0 WHEN 'discover' THEN 1 WHEN 'filter' THEN 2 WHEN 'read' THEN 2 ELSE 3 END,id LIMIT 1"
-        params = (now,) if deleting_only or ai_only else (now, *available, *dependencies) if media_only else (now, *('' if f == 'demo' else f for f in available), *available, *dependencies)
+        params = (now,) if deleting_only or ai_only else (now, *available, *dependencies) if media_only else (now, *available, *available, *dependencies)
         row = self.store.db.execute(query, params).fetchone()
         if ai_only and row is not None and row['kind'] in ('filter','theses'):
             if not self.store.db.in_transaction:
