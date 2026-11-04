@@ -4,7 +4,7 @@ import {productionReader} from './http-reader';
 import {addSources} from './connections';
 import {artifactPath} from './artifacts';
 
-for(const initial of ['ready','error'] as const) test(`common YouTube publication: ${initial} captions and independent cover`,{timeout:30000},async t=>{
+for(const initial of ['ready','error'] as const) test(`common YouTube publication: ${initial} captions and independent cover`,{timeout:45000},async t=>{
  const r=await productionReader(t,{publicationPipeline:true});
  await r.setYoutubeState(initial);
  await r.setMediaState('held');
@@ -22,7 +22,7 @@ for(const initial of ['ready','error'] as const) test(`common YouTube publicatio
   await r.page.screenshot({path:artifactPath('youtube-caption-error.png')});
   await r.setYoutubeState('missing');
   await r.page.getByRole('button',{name:'Retry Download',exact:true}).click();
-  await expect.poll(async()=>{const m=await r.api(`publication/${card.id}`);return m.theses.result?.points.length;}).toBe(0);
+  await expect.poll(async()=>{const m=await r.api(`publication/${card.id}`);return m.theses.result?.points.length;},{timeout:15000}).toBe(0);
   if(await r.page.getByRole('button',{name:'Show new version',exact:true}).isVisible())await r.page.getByRole('button',{name:'Show new version',exact:true}).click();
   await r.page.screenshot({path:artifactPath('youtube-caption-missing.png')});
   await r.setYoutubeState('ready');

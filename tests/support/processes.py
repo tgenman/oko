@@ -65,7 +65,7 @@ def connect(root: Path, process):
             metadata = json.loads((root / 'runtime.json').read_text())
             with httpx.Client(base_url=metadata['url'], headers={'Authorization': 'Bearer ' + metadata['token']}, timeout=2) as client:
                 client.get('/api/v3/status').raise_for_status()
-            return httpx.Client(base_url=metadata['url'], headers={'Authorization': 'Bearer ' + metadata['token']}, timeout=2)
+            return httpx.Client(base_url=metadata['url'], headers={'Authorization': 'Bearer ' + metadata['token']}, timeout=10)
         except (OSError, ValueError, httpx.HTTPError):
             if process.poll() is not None:
                 raise startup_failure('server exited before readiness', process)

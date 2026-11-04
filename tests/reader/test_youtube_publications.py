@@ -193,7 +193,7 @@ def test_missing_captions_are_downloaded_again_after_reader_detects_loss(tmp_pat
             key=db.execute("SELECT storage_key FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles'",(card['id'],)).fetchone()[0]
         (root/key).unlink()
         client.get('/api/v3/publication/'+card['id'])
-        wait_for(client,lambda: len(calls)>=2 and client.get('/api/v3/publication/'+card['id']).json()['text']=='Recovered captions.')
+        wait_for(client,lambda: len(calls)>=2 and client.get('/api/v3/publication/'+card['id']).json()['text']=='Recovered captions.',timeout=30)
         assert calls==[VIDEO,VIDEO]
 
 

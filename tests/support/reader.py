@@ -16,8 +16,8 @@ class Clock:
 HEADERS = {'Authorization': 'Bearer test'}
 
 
-def wait_for(client, predicate):
-    deadline = time.monotonic() + 10
+def wait_for(client, predicate, *, timeout=10):
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         value = predicate()
         if value:
