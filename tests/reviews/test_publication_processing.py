@@ -140,7 +140,7 @@ def test_confirmed_empty_input_completes_without_model(tmp_path):
         return httpx.Response(200,content=b'photo',headers={'content-type':'image/jpeg'}) if request.url.host=='cdn.example' else httpx.Response(200,text=page([(11,text[0]+photo)]))
     with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(source),ai_transport=coordinated_transport(calls)),headers=HEADERS) as client:
         setup(client)
-        item=settled(client)[0]['id']
+        item=settled(client,timeout=15)[0]['id']
         wait_for(client,lambda:client.get('/api/v3/publication/'+item).json()['theses']['result'])
         row=stored(root,item)
         assert row['status']=='ready'
@@ -153,7 +153,7 @@ def test_confirmed_empty_input_completes_without_model(tmp_path):
         accepted=row['processing_metadata']
     with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(source),ai_transport=coordinated_transport(calls)),headers=HEADERS) as client:
         client.post('/api/v3/collect')
-        settled(client)
+        settled(client,timeout=15)
         assert stored(root,item)['processing_metadata']==accepted
         assert calls==[]
         text[0]='Text appeared'
@@ -210,7 +210,7 @@ def test_rule_change_rejects_late_filter_and_uses_one_new_feed_snapshot(tmp_path
     with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,ai_transport=httpx.MockTransport(model)),headers=HEADERS) as client:
         try:
             setup(client)
-            assert started.wait(20),client.get('/api/v3/status/details').json()
+            assert started.wait(3)
             client.patch('/api/v3/settings/oko/global',json={'prompt_filters':'Keep the text.','prompt_theses':'New summary rule.'})
             release.set()
             card=wait_for(client,lambda:next((c for c in read_publications_for_cards(client, '/api/v3/cards') if c['theses']['result']),None))
@@ -284,7 +284,7 @@ def test_processing_does_not_wait_for_the_media_lane(tmp_path):
     with TestClient(create_app(root,token='test',api_only=True,rss_transport=httpx.MockTransport(source),ai_transport=coordinated_transport(calls)),headers=HEADERS) as client:
         try:
             setup(client)
-            assert started.wait(3)
+            assert started.wait(20),client.get('/api/v3/status/details').json()
             card=wait_for(client,lambda:next((c for c in read_publications_for_cards(client, '/api/v3/cards') if c['theses']['result']),None))
             assert stored(root,card['id'])['status']=='ready'
             assert [media for media in card['media'] if media['role'] == 'attachment']==[]
