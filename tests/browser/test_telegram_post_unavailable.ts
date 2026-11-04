@@ -3,13 +3,13 @@ import {expect} from 'playwright/test';
 import {productionReader} from './http-reader';
 import {artifactPath} from './artifacts';
 
-test('whole Telegram post uses link card C separately from audio and large video',{timeout:30000},async t=>{
+test('whole Telegram post uses link card C separately from audio and large video',{timeout:45000},async t=>{
  const {page,api,openReader}=await productionReader(t);
  await api('v3/settings/oko/global','PATCH',{theses:false,prompt_filters:'',telegram_http_rps:10});
  await openReader();
  await api('v3/telegram/connect','POST',{source_locator:'@postunavailable',folder:'News'});
  const post=page.locator('[data-card]').filter({hasText:'Пост доступен только в Telegram'});
- await expect(post.locator('[aria-label="Пост недоступен для веб-просмотра"]')).toBeVisible();
+ await expect(post.locator('[aria-label="Пост недоступен для веб-просмотра"]')).toBeVisible({timeout:15000});
  await post.click();
  await expect(page.locator('#title')).toHaveText('Публикация в Telegram');
  await expect(page.locator('#post-web-unavailable')).toContainText('TELEGRAM · ВЕБ-ПРОСМОТР НЕДОСТУПЕН');

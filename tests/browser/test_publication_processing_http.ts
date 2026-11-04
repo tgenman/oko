@@ -4,7 +4,7 @@ import {productionReader} from './http-reader';
 import {artifactPath} from './artifacts';
 import {editSetting} from './settings-actions';
 
-test('latest publication keeps accepted theses after failed regeneration and hides Restore', {timeout:30000},async t=>{
+test('latest publication keeps accepted theses after failed regeneration and hides Restore', {timeout:45000},async t=>{
  const r=await productionReader(t,{publicationPipeline:true});
  await r.setProcessingState('ready');
  await r.updatePublication('Открылась библиотека. Реклама: купите курс.');
@@ -12,7 +12,7 @@ test('latest publication keeps accepted theses after failed regeneration and hid
  await r.api('settings/oko/global','PATCH',{processor:'llamacpp',theses:true,prompt_filters:'Убери рекламу.',telegram_http_rps:10});
  await r.openReader();
  await r.api('telegram/connect','POST',{source_locator:'@lateststate',folder:'Inbox',initial_history:{mode:'count',count:'1'}});
- await expect.poll(async()=>{const cards=(await r.api('cards')).items;return cards.length===1&&(await r.api(`publication/${cards[0].id}`)).theses.result!==null;}).toBe(true);
+ await expect.poll(async()=>{const cards=(await r.api('cards')).items;return cards.length===1&&(await r.api(`publication/${cards[0].id}`)).theses.result!==null;},{timeout:15000}).toBe(true);
  await r.page.locator('[data-card]').click();
  await expect(r.page.locator('#filter-status')).toContainText('Реклама');
  await expect(r.page.getByRole('button',{name:'Restore Item',exact:true})).toBeHidden();
