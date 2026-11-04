@@ -9,8 +9,10 @@ type Sample={id:string;phase:'first'|'repeat';ms:number};
 declare global {interface Window {readingBenchmark:{expected:string;started:number;phase:Sample['phase'];samples:Sample[]};}}
 
 for(const perFeed of [26,100] as const)for(const active of [false,true]){
- test(`saved reading latency: ${perFeed*4} materials, ${active?'active processing':'idle'}`,{timeout:180000},async t=>{
+ test(`saved reading latency: ${perFeed*4} materials, ${active?'active processing':'idle'}`,{timeout:perFeed===100?360000:180000},async t=>{
+  t.diagnostic(`Preparing ${perFeed*4}-publication synthetic library and starting reader`);
   const r=await productionReader(t,{collection:false,processingDelay:active?.15:0,library:{perFeed,active}});
+  t.diagnostic('Reader started; measuring opening latency');
   await r.page.addInitScript(()=>{
     const state=window.readingBenchmark={expected:'',started:0,phase:'first' as const,samples:[] as Sample[]};
     document.addEventListener('click',event=>{

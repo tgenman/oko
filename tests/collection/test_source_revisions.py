@@ -77,14 +77,23 @@ def test_confirmed_remote_deletion_keeps_local_copy_but_absence_is_not_deletion(
 
 
 def test_interrupted_version_publish_keeps_old_until_fresh_retry(tmp_path):
+    import asyncio
+    import threading
     from oko.collection.contracts import Publication
     from tests.support.synthetic_material import material as Material
     class Editable:
         changes = None
         text = 'Первая версия'
+        hold = False
+        retry_started = threading.Event()
+        release_retry = threading.Event()
         async def discover(self, cursor):
             return DiscoveryResult(tuple([Publication('one', 'https://source.test/one', time.time())]), 'one')
         async def fetch(self, publication):
+            if self.hold:
+                self.retry_started.set()
+                while not self.release_retry.is_set():
+                    await asyncio.sleep(.01)
             return FetchResult(Material('Новость', self.text))
     source = Editable()
     interrupted = [False]
@@ -103,16 +112,21 @@ def test_interrupted_version_publish_keeps_old_until_fresh_retry(tmp_path):
         wait_for(client, lambda: any(p['code']=='material_save_failed' for p in client.get('/api/v3/status/details').json()['problems']['current']))
         assert client.get('/api/v3/publication/' + item).json()['text'] == 'Первая версия'
         assert 'previous_versions' not in client.get('/api/v3/publication/' + item).json()
-    with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
-        assert client.get('/api/v3/publication/' + item).json()['text'] == 'Первая версия'
-        source.text = 'Третья версия после восстановления'
-        presence(client, 'test')
-        current = wait_for(client, lambda: m if (m := client.get('/api/v3/publication/' + item).json()).get('text') == source.text else None)
-        assert 'previous_versions' not in current
-        assert 'previous_versions' not in current
-        client.post('/api/v3/materials/' + item + '/viewed')
-        assert not (tmp_path / 'content' / item).exists()
-        assert not (tmp_path / 'staging' / item).exists()
+    source.hold = True
+    source.text = 'Третья версия после восстановления'
+    try:
+        with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
+            # Restart may immediately retry. Hold that fetch until recovery is checked.
+            assert source.retry_started.wait(10), 'retry did not start after restart'
+            assert client.get('/api/v3/publication/' + item).json()['text'] == 'Первая версия'
+            source.release_retry.set()
+            current = wait_for(client, lambda: m if (m := client.get('/api/v3/publication/' + item).json()).get('text') == source.text else None)
+            assert 'previous_versions' not in current
+            client.post('/api/v3/materials/' + item + '/viewed')
+            assert not (tmp_path / 'content' / item).exists()
+            assert not (tmp_path / 'staging' / item).exists()
+    finally:
+        source.release_retry.set()
 
 
 
