@@ -3111,7 +3111,7 @@ class Problems:
         return candidate
 
     def refresh_processor_visibility(self, job_ids: list[int]) -> bool:
-        """Prototype: refresh only explicitly affected Jobs; caller owns transaction."""
+        """Refresh only explicitly affected jobs; the caller owns the transaction."""
         changed=False
         for start in range(0,len(job_ids),400):
             rows=self.db.execute("""UPDATE jobs j SET processor_visible=requested.visible,processor_caption=requested.caption FROM (

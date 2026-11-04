@@ -564,7 +564,7 @@ class Store:
         return self.reading.folder_contents(folder)
 
     def set_processor_viewed(self, items: list[str], viewed: bool) -> None:
-        """Prototype: keep processor visibility in the same graph transaction."""
+        """Keep processor visibility in the same graph transaction."""
         membership_graph.lock_graph(self.db)
         source_effects=CollectionEffects()
         publication_links.capture_source_groups(self,source_effects,set(items))
