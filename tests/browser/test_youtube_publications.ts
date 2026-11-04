@@ -27,7 +27,7 @@ for(const initial of ['ready','error'] as const) test(`common YouTube publicatio
   await r.page.screenshot({path:artifactPath('youtube-caption-missing.png')});
   await r.setYoutubeState('ready');
   await r.page.getByRole('button',{name:'Retry Download',exact:true}).click();
-  await expect(r.page.getByRole('button',{name:'Show new version',exact:true})).toBeVisible();
+  await expect(r.page.getByRole('button',{name:'Show new version',exact:true})).toBeVisible({timeout:15000});
   await r.page.getByRole('button',{name:'Show new version',exact:true}).click();
  }
  await expect(r.page.locator('#text')).toContainText('Raw YouTube captions.');

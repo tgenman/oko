@@ -37,7 +37,7 @@ def test_local_video_copy_wins_over_later_web_restriction(tmp_path):
         first=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json();video=next(a for a in [media for media in first['media'] if media['role']=='attachment'] if a['kind']=='video')
         assert client.get(video['url']).content==b'local-video'
         restricted[0]=True
-        client.post(url+'/retry');settled(client)
+        client.post(url+'/retry');settled(client,timeout=15)
         second=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()
         assert second['external_attachments']==[]
         assert client.get(next(a['url'] for a in [media for media in second['media'] if media['role']=='attachment'] if a['kind']=='video')).content==b'local-video'

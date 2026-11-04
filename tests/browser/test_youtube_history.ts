@@ -125,7 +125,11 @@ test('late settings response cannot replace a newer waiting history', async()=>{
     });
     await expect(r.page.locator('#history-progress')).toContainText('YouTube недоступен');
     await r.page.evaluate(()=>readerTransport.held.set('/api/v3/status/details',true));
-    await r.page.evaluate(()=>readerTransport.release('/api/v3/settings/feed/yt',readerTransport.replies.get('/api/v3/settings/feed/yt')!.body));
+    await r.page.evaluate(()=>{
+      const t=readerTransport,body=t.replies.get('/api/v3/settings/feed/yt')!.body!,old=structuredClone(body);
+      body.feed!.initial_history=window.readerFixtures.history({mode:'count',count:3,loaded:0,available:0,state:'waiting',discovery_error:'YouTube недоступен'});
+      t.release('/api/v3/settings/feed/yt',old);
+    });
     await expect(r.page.locator('#settings-message')).toHaveText('History download started');
     await expect(r.page.locator('#history-progress')).toContainText('YouTube недоступен');
   }finally{await r.close();}
@@ -192,5 +196,42 @@ test('confirmed stop wins over status observed before cancellation', async()=>{
     await r.page.evaluate(()=>readerTransport.release('/api/v3/settings/feed/yt',{},503));
     await expect(r.page.locator('#settings-message')).toHaveText('History download stopped');
     await expect(r.page.locator('#youtube-history-start')).toBeEnabled();
+  }finally{await r.close();}
+});
+
+for(const intervening of ['old','newer','newer_fetched'] as const) test(`${intervening} status during history refresh keeps the latest run`, async()=>{
+  const r=await reader();
+  try{
+    await r.start([]);
+    await r.page.evaluate(()=>{
+      const t=readerTransport,settings=t.replies.get('/api/v3/settings/oko/global')!.body;
+      const old=window.readerFixtures.history({mode:'count',count:1,loaded:0,available:1,state:'done',scan_complete:true,frozen:true,run:'old'});
+      const fresh=window.readerFixtures.history({mode:'count',count:3,loaded:3,available:3,state:'done',scan_complete:true,frozen:true,run:'new'});
+      const feed={id:'yt',title:'Video',kind:'youtube',transport:'youtube',folder_id:'f',original_urls:['https://www.youtube.com/feeds/videos.xml?channel_id=UCaaaaaaaaaaaaaaaaaaaaaa'],importance:'normal',initial_history:old};
+      t.replies.set('/api/v3/subscriptions',{body:{folders:[{id:'f',title:'Folder'}],feeds:[feed]}});
+      t.replies.set('/api/v3/settings/feed/yt',{body:{...settings,feed}});
+      t.replies.set('POST /api/v3/feeds/yt/history',{body:fresh});
+    });
+    await r.page.locator('#feeds-open').click();await r.page.locator('[data-owner="feed/yt"]').click();await feedOptions(r.page);
+    await expect(r.page.locator('#history-progress')).toContainText('Loaded 0 of 1');
+    await r.page.locator('#youtube-history-count').fill('3');
+    await r.page.evaluate(()=>readerTransport.held.set('/api/v3/settings/feed/yt',true));
+    await r.page.locator('#youtube-history-start').click();
+    await r.page.waitForFunction(()=>readerTransport.pending.has('/api/v3/settings/feed/yt'));
+    await r.page.evaluate((kind)=>{
+      const t=readerTransport,history=window.readerFixtures.history({mode:'count',count:kind==='old'?1:7,loaded:kind==='old'?1:7,available:kind==='old'?1:7,state:'done',scan_complete:true,frozen:true,run:kind==='old'?'old':'later'});
+      t.replies.set('/api/v3/status',{body:{stage:'Готово',errors:[],sources:[],ready_sources:1,total_sources:1,initial_histories:[{...history,feed_id:'yt'}]}});
+    },intervening);
+    await expect(r.page.locator('#history-progress')).toContainText(intervening==='old'?'Loaded 1 of 1':'Loaded 7 of 7');
+    await r.page.evaluate((kind)=>{
+      const t=readerTransport,body=t.replies.get('/api/v3/settings/feed/yt')!.body!;
+      body.feed!.initial_history=window.readerFixtures.history({mode:'count',count:3,loaded:3,available:3,state:'done',scan_complete:true,frozen:true,run:'new'});
+      if(kind==='newer_fetched')body.feed!.initial_history=window.readerFixtures.history({mode:'count',count:9,loaded:9,available:9,state:'done',scan_complete:true,frozen:true,run:'latest'});
+      const captured=structuredClone(body);
+      if(kind==='newer')body.feed!.initial_history=window.readerFixtures.history({mode:'count',count:7,loaded:7,available:7,state:'done',scan_complete:true,frozen:true,run:'later'});
+      t.held.set('/api/v3/status/details',true);t.release('/api/v3/settings/feed/yt',captured);
+    },intervening);
+    await expect(r.page.locator('#settings-message')).toHaveText('History download started');
+    await expect(r.page.locator('#history-progress')).toContainText(intervening==='old'?'Loaded 3 of 3':intervening==='newer'?'Loaded 7 of 7':'Loaded 9 of 9');
   }finally{await r.close();}
 });
