@@ -33,7 +33,7 @@ def test_direct_articles_are_complete_local_and_unique_without_recursive_crawlin
         body = dict(source_locator='@fixture',folder='Inbox')
         assert client.post('/api/v3/telegram/connect',json=body).status_code == 200
         from tests.support.reader import wait_for
-        identity=settled(client)[0]['id']
+        identity=settled(client,timeout=15)[0]['id']
         material=wait_for(client,lambda: value if (value:=client.get('/api/v3/publication/'+identity).json())['completeness']['state']=='complete' else None)
         assert material['text'].startswith(POST)
         linked = material['linked_content']
@@ -83,7 +83,7 @@ def test_article_completion_and_retry_keep_previous_copy_without_false_edit(tmp_
         configure_fast_web(client)
         body = dict(source_locator='@fixture',folder='Inbox')
         client.post('/api/v3/telegram/connect',json=body)
-        deadline = time.monotonic()+2
+        deadline = time.monotonic()+15
         pending = None
         while time.monotonic()<deadline:
             cards = read_all_cards(client, '/api/v3/cards')

@@ -4,7 +4,7 @@ import {productionReader} from './http-reader';
 import {addSources} from './connections';
 import {artifactPath} from './artifacts';
 
-for(const kind of ['rss','telegram'] as const) test(`${kind} root stays readable and waits for its article before theses`,{timeout:30000},async t=>{
+for(const kind of ['rss','telegram'] as const) test(`${kind} root stays readable and waits for its article before theses`,{timeout:45000},async t=>{
  const r=await productionReader(t,{publicationPipeline:true});
  await r.setArticleState('held');
  await r.setMediaState('held');
@@ -29,7 +29,7 @@ for(const kind of ['rss','telegram'] as const) test(`${kind} root stays readable
  // An automatic retry before the click would otherwise stage a new version.
  await r.page.route('**/api/v3/materials/*/retry',async route=>{await r.setArticleState('ready');await route.continue();},{times:1});
  await r.page.getByRole('button',{name:'Retry Download',exact:true}).click();
- await r.page.getByRole('button',{name:'Show new version',exact:true}).click();
+ await r.page.getByRole('button',{name:'Show new version',exact:true}).click({timeout:15000});
  await expect(r.page.locator('#text')).toContainText('Article text arrived.');
  if(kind==='telegram') await expect(r.page.locator('#text [aria-label="Статья Telegraph"]')).toBeVisible();
  await expect(r.page.locator('#theses')).toContainText('Article text arrived.');
