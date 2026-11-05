@@ -19,7 +19,7 @@ class CollectionPublications:
         return publication_links.feedless(self._store, item)
 
     def reference(self, item: str) -> ExternalReference | None:
-        row=self._store.db.execute('SELECT platform,external_id,url FROM publications WHERE id=%s AND viewed=0',(item,)).fetchone()
+        row=self._store.db.execute('SELECT platform,external_id,url FROM publications WHERE id=%s',(item,)).fetchone()
         return ExternalReference(ExternalKey(Platform(row['platform']),row['external_id']),row['url']) if row else None
 
     def feed(self, item: str) -> str:

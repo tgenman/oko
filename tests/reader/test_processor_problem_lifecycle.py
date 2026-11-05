@@ -64,7 +64,7 @@ def test_mark_viewed_through_store_closes_processor_without_status_get(tmp_path,
     try:
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('item','rss','item',0)")
+            store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('item','rss','item')")
             store.db.execute("UPDATE publications SET feed_id='feed' WHERE id='item'")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('filter','item','running',1) RETURNING id").fetchone()[0]
         store.jobs.retry(Job(job_id,'filter','item',1),1,'missing',code='processor-config')
@@ -84,7 +84,7 @@ def test_http_etag_after_caption_deadline_without_host_tick(tmp_path,postgres_ur
         def setup():
             store=app.state.host.require_store()
             with store.db:
-                store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('p','youtube','p',0)")
+                store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','youtube','p')")
                 store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','youtube:subtitles','synthetic','captions','pending')")
                 job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('download_media','m','running',1) RETURNING id").fetchone()[0]
             store.jobs.retry(Job(job_id,'download_media','m',1),1,'missing',code='processor-config')

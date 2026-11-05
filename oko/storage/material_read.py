@@ -114,14 +114,14 @@ def material_inputs(db: Database, identities: set[str], *, include_subtitles: bo
             WHERE m.publication_id=ANY(%s)""",(batch,)):
             value.media[row['publication_id']].append(row)
         value.children.update({identity: [] for identity in batch})
-        for row in db.execute(f"SELECT l . source_publication_id AS reader_source , i . * , {owner_expr('i')} AS reader_feed_id , j . reason_message AS fetch_error FROM publication_links l JOIN publications i ON i . id = l . target_publication_id LEFT JOIN jobs j ON j . kind = 'fetch' AND j . item = i . id WHERE l . source_publication_id = ANY ( %s ) AND i . viewed = 0 ORDER BY l . rowid", (batch,)):
+        for row in db.execute(f"SELECT l . source_publication_id AS reader_source , i . * , {owner_expr('i')} AS reader_feed_id , j . reason_message AS fetch_error FROM publication_links l JOIN publications i ON i . id = l . target_publication_id LEFT JOIN jobs j ON j . kind = 'fetch' AND j . item = i . id WHERE l . source_publication_id = ANY ( %s ) ORDER BY l . rowid", (batch,)):
             value.children[row['reader_source']].append(row)
             value.related_items[row['id']] = row
         value.memberships.update({identity: [] for identity in batch})
         for row in db.execute('SELECT id AS publication_id,feed_id FROM publications WHERE feed_id IS NOT NULL AND id=ANY(%s) ORDER BY id', (batch,)):
             value.memberships[row['publication_id']].append(row['feed_id'])
         value.owners.update({identity: set() for identity in batch})
-        for row in db.execute('SELECT m.id AS reader_source , m . feed_id FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m WHERE m.id = ANY ( %s ) UNION SELECT l . source_publication_id AS reader_source , m . feed_id FROM publication_links l JOIN (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m ON m.id = l . target_publication_id WHERE l . source_publication_id = ANY ( %s )', (batch, batch)):
+        for row in db.execute('SELECT m.id AS reader_source , m . feed_id FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m WHERE m.id = ANY ( %s ) UNION SELECT l . source_publication_id AS reader_source , m . feed_id FROM publication_links l JOIN (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m ON m.id = l . target_publication_id WHERE l . source_publication_id = ANY ( %s )', (batch, batch)):
             value.owners[row['reader_source']].add(row['feed_id'])
     # Linked publications participate in the same read snapshot. Prefetch their
     # jobs and media in batches before projecting any of their saved content.

@@ -2,7 +2,7 @@ import {newsTitle} from './title';
 import {copyText} from '../browser-platform';
 import {useEffect,useLayoutEffect,useRef} from 'react';
 import {createPortal} from 'react-dom';
-import {readCards,retryMaterial} from '../api/generated/sdk.gen';
+import {readCards,rebuildPublication} from '../api/generated/sdk.gen';
 import type {CardView as ReadingCard} from './resources';
 import {type ReaderApi} from '../api/reader';
 import {mountSurface} from '../renderer';
@@ -30,7 +30,7 @@ export function createNewsActions({readerApi,isStopped,onViewed,onRefresh,onPrev
   }catch(error){reportError(error,'Mark news as read');if(current(state))store.set({...store.get(),busy:false,message:`Could not confirm whether the items were marked. Retrying is safe. ${errorMessage(error)}`});}
   finally{if(run===operation)run=null;store.set({...store.get()});onRefresh();}
  }
- async function reload(){const state=store.get(),target=state.target;if(!target||state.busy||isStopped()||inFlight.has(target.card.id))return;inFlight.add(target.card.id);store.set({...state,busy:true,message:''});try{await readerApi.command({operation:'retry_material',material_id:target.card.id},headers=>retryMaterial({client:readerApi.client,headers,path:{item:target.card.id}}));if(current(state)){close();store.set({...store.get(),notice:'Publication reload queued'});}}catch(error){reportError(error,'Reload publication');if(current(state))store.set({...store.get(),busy:false,message:errorMessage(error)});}finally{inFlight.delete(target.card.id);onRefresh();}}
+ async function reload(){const state=store.get(),target=state.target;if(!target||state.busy||isStopped()||inFlight.has(target.card.id))return;inFlight.add(target.card.id);store.set({...state,busy:true,message:''});try{await readerApi.command({operation:'rebuild_publication',material_id:target.card.id},headers=>rebuildPublication({client:readerApi.client,headers,path:{item:target.card.id}}));if(current(state)){close();store.set({...store.get(),notice:'Publication reload queued'});}}catch(error){reportError(error,'Reload publication');if(current(state))store.set({...store.get(),busy:false,message:errorMessage(error)});}finally{inFlight.delete(target.card.id);onRefresh();}}
  async function copy(){const state=store.get(),url=state.target?.card.source_url;if(!url)return;try{await copyText(url);if(current(state)){close();store.set({...store.get(),notice:'Link copied'});}}catch(error){reportError(error,'Copy link');if(current(state))store.set({...store.get(),message:'Could not copy link: '+errorMessage(error)});}}
  function Surface(){const state=useStore(store),{target,confirmation}=state;const ref=useRef<HTMLDivElement>(null),dialog=useRef<HTMLDialogElement>(null);
   useLayoutEffect(()=>{if(target&&!confirmation)ref.current?.querySelector<HTMLElement>('[role=menuitem]:not(:disabled)')?.focus({preventScroll:true});},[state.generation,!!confirmation]);

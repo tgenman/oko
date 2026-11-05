@@ -61,8 +61,8 @@ def group_candidates(store: Any, keys: list[str], now: float, sticky: set[str] |
                   WHERE file.publication_id=p.id AND mj.status IN ('pending','running') AND mj.reason_message IS NULL AND mj.reason_code IS NULL) AS media_waiting,
           CASE WHEN p.platform='youtube' THEN EXISTS(SELECT 1 FROM media_files file JOIN jobs mj ON mj.kind='download_media' AND mj.item=file.id
                   WHERE file.publication_id=p.id AND file.resource_key='youtube:subtitles' AND mj.status='pending' AND mj.reason_code IS NULL) ELSE FALSE END AS caption_waiting
-        FROM pg_temp.oko_incomplete_facts p JOIN (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m ON m.id=p.id JOIN feeds f ON f.id=m.feed_id
-        LEFT JOIN jobs j ON j.kind='fetch' AND j.item=p.id WHERE p.incomplete_group_key COLLATE "C"=ANY(%s) AND p.viewed=0 AND p.content ? 'blocks'
+        FROM pg_temp.oko_incomplete_facts p JOIN (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m ON m.id=p.id JOIN feeds f ON f.id=m.feed_id
+        LEFT JOIN jobs j ON j.kind='fetch' AND j.item=p.id WHERE p.incomplete_group_key COLLATE "C"=ANY(%s) AND p.content ? 'blocks'
         ORDER BY p.incomplete_group_key,p.id''',(keys,)).fetchall()
     if not rows:return {}
     roots=[row['id'] for row in rows]
@@ -276,7 +276,7 @@ class TransactionGroupDraft:
                     FROM reader_problems r WHERE r.finished IS NULL AND r.body::jsonb->>'code'='material-incomplete'
                     AND r.body::jsonb->'objects' @> jsonb_build_array(jsonb_build_object('kind','material','id',p.id))
                     ORDER BY r.created,r.id LIMIT 1),p.incomplete_group_key)
-                FROM pg_temp.oko_incomplete_facts p WHERE p.id=ANY(%s) AND p.viewed=0
+                FROM pg_temp.oko_incomplete_facts p WHERE p.id=ANY(%s)
                 ON CONFLICT(item) DO NOTHING""",(ordered[start:start+100],))
         return bool(relevant)
 
@@ -327,7 +327,7 @@ class TransactionGroupDraft:
                 if known:db.execute('UPDATE pg_temp.oko_incomplete_work SET sticky=true WHERE item=ANY(%s)',(sorted(known),))
                 save_keys(db,items)
                 refresh_youtube_flags(self.store,items)
-                db.execute("""UPDATE pg_temp.oko_incomplete_work w SET new_key=p.incomplete_group_key,unknown=p.incomplete_group_unknown,forgotten=p.viewed<>0
+                db.execute("""UPDATE pg_temp.oko_incomplete_work w SET new_key=p.incomplete_group_key,unknown=p.incomplete_group_unknown,forgotten=false
                     FROM pg_temp.oko_incomplete_facts p WHERE w.item=p.id AND w.item=ANY(%s)""",(items,))
                 db.execute('UPDATE pg_temp.oko_incomplete_work w SET forgotten=true WHERE item=ANY(%s) AND NOT EXISTS (SELECT 1 FROM publications p WHERE p.id=w.item)',(items,))
             db.execute('INSERT INTO pg_temp.oko_incomplete_groups(key) SELECT DISTINCT new_key FROM pg_temp.oko_incomplete_work WHERE new_key IS NOT NULL ON CONFLICT(key) DO NOTHING')
@@ -1060,7 +1060,7 @@ def refresh_youtube_flags(store: Any, roots: list[str]) -> None:
             FROM (SELECT * FROM jobs WHERE kind='fetch' AND item=ANY(%s) OFFSET 0) j
             LEFT JOIN pg_temp.oko_incomplete_facts p ON p.id=j.item
             LEFT JOIN publication_links link ON link.target_publication_id=p.id
-            LEFT JOIN pg_temp.oko_incomplete_facts root ON root.id=link.source_publication_id AND root.viewed=0
+            LEFT JOIN pg_temp.oko_incomplete_facts root ON root.id=link.source_publication_id
             LEFT JOIN feeds f ON f.id=coalesce({owner_expr('p')},{owner_expr('root')},j.feed_id)
             GROUP BY j.id""",(targets[start:start+400],)).fetchall()
         if rows:

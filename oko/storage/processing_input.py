@@ -107,7 +107,7 @@ def live_settings(store: 'Store', item: str, feed: str | None = None) -> dict[st
     current=store.subscriptions.effective('feed',feed,details=False)
     allowed=current['feed']['public_ai']
     inputs = material_read.current(store.db)
-    owners = inputs.owners[item] if inputs is not None and item in inputs.owners else {row[0] for row in store.db.execute('SELECT DISTINCT m . feed_id FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m WHERE m.id = %s OR m.id IN ( SELECT target_publication_id FROM publication_links WHERE source_publication_id = %s )',(item,item))}
+    owners = inputs.owners[item] if inputs is not None and item in inputs.owners else {row[0] for row in store.db.execute('SELECT DISTINCT m . feed_id FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m WHERE m.id = %s OR m.id IN ( SELECT target_publication_id FROM publication_links WHERE source_publication_id = %s )',(item,item))}
     for owner in owners:
         allowed=allowed and store.subscriptions.effective('feed',owner,details=False)['feed']['public_ai']
     rules=dict(feed_id=feed,public_ai=allowed,importance=current['feed']['importance'],values={key:value['value'] for key,value in current['effective'].items() if key in ('prompt_filters','theses','prompt_theses','processor')})
@@ -133,7 +133,7 @@ def settings(store: 'Store', item: str) -> dict[str, Any]:
 
 def input_hash(store: 'Store', item: str, kind: str) -> str | None:
     row=material_read.item(store.db,item)
-    if not row or row['viewed'] or row['feed_id'] is None or row['status']=='pending_collection' or 'blocks' not in row['content']:
+    if not row or row['feed_id'] is None or row['status']=='pending_collection' or 'blocks' not in row['content']:
         return None
     feed=processing_feed(store,item,kind)
     current=store.subscriptions.effective('feed',feed,details=False)

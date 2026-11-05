@@ -6,7 +6,7 @@ import {artifactPath} from './artifacts';
 
 test('retry preserves collected text and media without stored history', {timeout:30000}, async t=>{
   const r=await productionReader(t,{publicationPipeline:true});
-  await r.api('settings/oko/global','PATCH',{theses:false,prompt_filters:'',telegram_http_rps:10});
+  await r.api('settings/oko/global','PATCH',{theses:false,prompt_filters:'',telegram_http_rps:10,retry_initial_seconds:1,retry_max_seconds:1});
   await r.openReader();
   await r.api('telegram/connect','POST',{source_locator:'@lateststate',folder:'Inbox',initial_history:{mode:'count',count:'1'}});
   await expect(r.page.locator('[data-card]')).toHaveCount(1);
@@ -36,4 +36,36 @@ test('retry preserves collected text and media without stored history', {timeout
   await expect(r.page.locator('#text')).toContainText('Initial publication');
   await r.page.reload();
   await expect(r.page.locator('#material')).toBeHidden();
+});
+
+test('reader rebuilds the publication from its context menu', {timeout:30000}, async t=>{
+  const r=await productionReader(t,{publicationPipeline:true});
+  await r.api('settings/oko/global','PATCH',{theses:false,prompt_filters:'',telegram_http_rps:10,retry_initial_seconds:1,retry_max_seconds:1});
+  await r.openReader();
+  await r.api('telegram/connect','POST',{source_locator:'@lateststate',folder:'Inbox',initial_history:{mode:'count',count:'1'}});
+  await expect(r.page.locator('[data-card]')).toHaveCount(1);
+  await expect.poll(async()=>{const cards=(await r.api('cards')).items;return !!cards[0]&&!cards[0].loading;}).toBe(true);
+  const id=(await r.api('cards')).items[0].id;
+  await r.page.locator('[data-card]').click();
+  await expect(r.page.locator('#text')).toContainText('Initial publication');
+  await r.updatePublication('Rebuilt publication');
+  await r.setMediaState('held');
+  await r.page.locator('[data-card]').click({button:'right'});
+  const command=r.page.waitForResponse(response=>response.url().endsWith(`/materials/${id}/rebuild`)&&response.request().method()==='POST');
+  await r.page.getByRole('menuitem',{name:'Reload Publication',exact:true}).click();
+  assert.equal((await command).status(),200);
+  await expect.poll(async()=>{const publication=await r.api(`publication/${id}`);return publication.jobs.some((job:any)=>job.operation==='rebuild'&&job.status==='running');}).toBe(true);
+  await expect(r.page.locator('#text')).toContainText('Initial publication');
+  await expect(r.page.locator('#images img')).toHaveAttribute('src',/^blob:/);
+  await r.page.screenshot({path:artifactPath('publication-rebuild-waiting-desktop.png')});
+  await r.setMediaState('error');
+  await expect.poll(async()=>{const publication=await r.api(`publication/${id}`);return publication.jobs.some((job:any)=>job.operation==='rebuild'&&job.status==='pending'&&job.reason_message);}).toBe(true);
+  await expect(r.page.locator('#text')).toContainText('Initial publication');
+  await r.setMediaState('ready');
+  await expect.poll(async()=>{const publication=await r.api(`publication/${id}`);return publication.text;}).toBe('Rebuilt publication');
+  await r.page.reload();
+  await r.page.locator('[data-card]').click();
+  await expect(r.page.locator('#text')).toContainText('Rebuilt publication');
+  await expect(r.page.locator('#images img')).toHaveAttribute('src',/^blob:/);
+  await r.page.screenshot({path:artifactPath('publication-rebuilt-desktop.png')});
 });

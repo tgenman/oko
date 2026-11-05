@@ -231,6 +231,13 @@ class ReaderApplication:
                     self.jobs.refresh_feed(source_feed)
 
 
+    async def rebuild_publication(self, item: str) -> None:
+        async with self._actions:
+            self.require_work()
+            with transaction(self.require_store().db):
+                if not self.require_store().jobs.enqueue_rebuild(item):
+                    raise ActionError('missing','Публикация не найдена')
+
     async def retry_material(self, item: str) -> None:
         async with self._actions:
             self.require_work()

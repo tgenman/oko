@@ -293,6 +293,8 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
                 await runtime.regenerate(value.material_id.root)
             elif isinstance(value, wire.CommandRetryMaterial):
                 await runtime.retry_material(value.material_id.root)
+            elif isinstance(value, wire.CommandRebuildPublication):
+                await runtime.rebuild_publication(value.material_id.root)
             elif isinstance(value, wire.CommandRetryTheses):
                 await runtime.retry_theses(value.material_id.root)
             elif isinstance(value, wire.CommandRetryFilter):
@@ -310,6 +312,10 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
     @router.post('/api/v3/materials/{item}/retry', response_model=wire.CommandAcknowledgement)
     async def retry_material(request: Request, item: str) -> wire.CommandAcknowledgement:
         return await execute(request, wire.CommandContext(wire.CommandRetryMaterial(operation='retry_material', material_id=identity(item))))
+
+    @router.post('/api/v3/materials/{item}/rebuild', response_model=wire.CommandAcknowledgement)
+    async def rebuild_publication(request: Request, item: str) -> wire.CommandAcknowledgement:
+        return await execute(request, wire.CommandContext(wire.CommandRebuildPublication(operation='rebuild_publication', material_id=identity(item))))
 
     @router.post('/api/v3/materials/{item}/theses/retry', response_model=wire.CommandAcknowledgement)
     async def retry_theses(request: Request, item: str) -> wire.CommandAcknowledgement:

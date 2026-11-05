@@ -34,7 +34,7 @@ class ReadingComposition:
             'feed': 'i.feed_id=%(owner)s',
             'folder': 'f.folder_id=%(owner)s',
         }[scope]
-        selected=f"SELECT i.id, coalesce(i.published_at, i.discovered_at) AS ordering_time FROM publications i JOIN feeds f ON f.id=i.feed_id WHERE i.viewed=0 AND (%(hidden)s=1 OR i.status IS DISTINCT FROM 'filter_out') AND {membership}"
+        selected=f"SELECT i.id, coalesce(i.published_at, i.discovered_at) AS ordering_time FROM publications i JOIN feeds f ON f.id=i.feed_id WHERE (%(hidden)s=1 OR i.status IS DISTINCT FROM 'filter_out') AND {membership}"
         cte=f"WITH selected AS ({selected}), ordered AS (SELECT id, CASE WHEN %(sort)s='oldest' THEN ordering_time ELSE -ordering_time END AS stamp FROM selected)"
         args=dict(owner=target.get('feed_id',target.get('folder_id','')),sort=options['sort'],hidden=int(options['show_hidden']),cursor=cursor,limit=limit+1)
         db=self._store.db
@@ -51,11 +51,11 @@ class ReadingComposition:
         feeds = self._store.subscriptions.feeds()
         feed_counts={row['feed']:row for row in self._store.db.execute("""SELECT i.feed_id AS feed, count(*) AS unviewed,
             count(*) FILTER (WHERE i.status IS DISTINCT FROM 'filter_out') AS visible
-            FROM publications i WHERE i.viewed=0 AND i.feed_id IS NOT NULL GROUP BY i.feed_id""")}
+            FROM publications i WHERE i.feed_id IS NOT NULL GROUP BY i.feed_id""")}
         folder_counts={row['folder']:row['visible'] for row in self._store.db.execute("""SELECT f.folder_id AS folder,
             count(*) AS visible FROM publications i JOIN feeds f ON f.id=i.feed_id
-            WHERE i.viewed=0 AND i.status IS DISTINCT FROM 'filter_out' GROUP BY f.folder_id""")}
-        visible=expect_row(self._store.db.execute("SELECT count(*) FROM publications i WHERE i.viewed=0 AND i.status IS DISTINCT FROM 'filter_out' AND i.feed_id IS NOT NULL").fetchone())[0]
+            WHERE i.status IS DISTINCT FROM 'filter_out' GROUP BY f.folder_id""")}
+        visible=expect_row(self._store.db.execute("SELECT count(*) FROM publications i WHERE i.status IS DISTINCT FROM 'filter_out' AND i.feed_id IS NOT NULL").fetchone())[0]
         return dict(folders=[dict(folder,count=folder_counts.get(folder['id'],0)) for folder in folders],
                     feeds=[dict(feed,count=feed_counts[feed['id']]['visible'] if feed['id'] in feed_counts else 0,
                                 has_unviewed=bool(feed_counts[feed['id']]['unviewed']) if feed['id'] in feed_counts else False) for feed in feeds],
@@ -64,7 +64,7 @@ class ReadingComposition:
     def _contents(self, owner: str, scope: str) -> FolderContents:
         self._store.subscriptions.check_owner(scope, owner)
         condition = 'i.feed_id = %s' if scope == 'feed' else 'f.folder_id = %s'
-        rows = list(self._store.db.execute(f"SELECT i.id, COALESCE(i.content #> '{{extra,telegram,members}}','[]'::jsonb)::text AS members, i.feed_id FROM publications i JOIN feeds f ON f.id=i.feed_id WHERE i.viewed=0 AND {condition} ORDER BY i.id", (owner,)))
+        rows = list(self._store.db.execute(f"SELECT i.id, COALESCE(i.content #> '{{extra,telegram,members}}','[]'::jsonb)::text AS members, i.feed_id FROM publications i JOIN feeds f ON f.id=i.feed_id WHERE {condition} ORDER BY i.id", (owner,)))
         # Pending and damaged publications both have a visible card. Completion
         # still captures every member, including those with no current feed.
         return FolderContents(tuple((row['id'], row['members']) for row in rows),
@@ -92,5 +92,5 @@ class ReadingComposition:
             batch = selected[start:start+400]
             marks = ','.join('%s' for _ in batch)
             members.update(row[0] for row in self._store.db.execute(
-                f'SELECT id FROM publications WHERE viewed = 0 AND id IN ( {marks} )', batch))
+                f'SELECT id FROM publications WHERE id IN ( {marks} )', batch))
         return members

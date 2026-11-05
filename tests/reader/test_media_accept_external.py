@@ -11,7 +11,7 @@ def test_media_accept_changed_identity_and_problem_roll_back_together(tmp_path,p
     try:
         content={'blocks':[{'type':'media','role':'image','media_id':old_media}],'extra':{'_reader':{'full':True,'reason':'','attachments':[]}}}
         with store.db:
-            store.db.execute("INSERT INTO publications(id,viewed,platform,external_id,url,content) VALUES ('p',0,'rss','p','https://p.test',%s)",(json.dumps(content),))
+            store.db.execute("INSERT INTO publications(id,platform,external_id,url,content) VALUES ('p','rss','p','https://p.test',%s)",(json.dumps(content),))
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status,storage_key) VALUES (%s,'p','image','x','image','ready','media/old')",(old_media,))
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation,reason_code,reason_message) VALUES ('download_media',%s,'running',1,'media-too-large','original failure') RETURNING id",(old_media,)).fetchone()[0]
             store.problems.sync_media_problem(job,[],1)

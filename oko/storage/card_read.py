@@ -37,7 +37,7 @@ def _preview_source(store: 'Store', identity: str) -> dict[str, Any]:
 
 def card(store: 'Store', identity: str) -> dict[str, Any] | None:
     row = material_read.item(store.db, identity)
-    if row is None or row['viewed']:
+    if row is None:
         return None
     if 'reader_hidden' in row.keys():
         hidden=bool(row['reader_hidden'])

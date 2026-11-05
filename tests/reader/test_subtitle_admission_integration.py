@@ -13,7 +13,7 @@ def test_http_etag_stays_stable_when_admission_and_subtitle_materialize(tmp_path
             store=app.state.host.require_store()
             with transaction(store.db):
                 store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
-                store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('p','youtube','p',0)")
+                store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','youtube','p')")
                 store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
                 store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','youtube:subtitles','x','f','pending_download')")
                 job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('download_media','m','running',1) RETURNING id").fetchone()[0]

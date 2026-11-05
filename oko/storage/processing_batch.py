@@ -45,13 +45,15 @@ def _stage(store: 'Store', batch: list[str], kind: Kind, *, preserve_cancelled: 
     with material_read.material_inputs(store.db,set(batch)), reading_snapshot():
         for item in batch:
             row = material_read.item(store.db,item)
-            if not row or row['viewed'] or row['platform'] is None or row['feed_id'] is None or 'blocks' not in row['content']:
+            if not row or row['platform'] is None or row['feed_id'] is None or 'blocks' not in row['content']:
                 continue
             operation = store.filters if kind=='filter' else store.processing.theses
             input_hash = operation.input_hash(item)
             revision = repository.revision(item)
             jobs = material_read.jobs(store.db,item)
             job = jobs.get(kind)
+            if job and job['payload'].get('preserved_source_revision') == processing_input.source_revision_hash(store,item) and repository.satisfied(item,kind):
+                continue
             snapshot = job['input_snapshot'] if job else None
             previous = snapshot.get('input_hash') if isinstance(snapshot,dict) else None
             if job and job['status']=='running' and job['payload'].get('input_revision')==revision:

@@ -73,7 +73,7 @@ class Store(ProductionStore):
 
 
 def legacy_publication(self: ProductionStore, item: str) -> Publication | None:
-    row = self.db.execute("SELECT *, COALESCE(content #> '{extra,telegram,members}','[]'::jsonb)::text AS members FROM publications WHERE id = %s AND viewed = 0", (item,)).fetchone()
+    row = self.db.execute("SELECT *, COALESCE(content #> '{extra,telegram,members}','[]'::jsonb)::text AS members FROM publications WHERE id = %s", (item,)).fetchone()
     if row:
         header, text = self.publications.original(item) if 'blocks' in row['content'] else ({},'')
         reference=ExternalReference(ExternalKey(Platform(row['platform']),row['external_id']),row['url'])

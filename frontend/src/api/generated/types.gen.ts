@@ -570,6 +570,8 @@ export type CommandContext = ({
 } & CommandRetryTheses) | ({
     operation: 'retry_material';
 } & CommandRetryMaterial) | ({
+    operation: 'rebuild_publication';
+} & CommandRebuildPublication) | ({
     operation: 'retry_filter';
 } & CommandRetryFilter) | ({
     operation: 'viewed';
@@ -640,6 +642,11 @@ export type CommandProcessorCheck = {
 
 export type CommandProcessorSave = {
     operation: 'processor_save';
+};
+
+export type CommandRebuildPublication = {
+    material_id: MaterialId;
+    operation: 'rebuild_publication';
 };
 
 export type CommandReceipt = ({
@@ -4458,6 +4465,66 @@ export type AttachmentResponses = {
 };
 
 export type AttachmentResponse = AttachmentResponses[keyof AttachmentResponses];
+
+export type RebuildPublicationData = {
+    body?: never;
+    headers?: {
+        /**
+         * Command correlation only, never execution idempotency. Missing value generates an ID; supplied invalid value returns 422. Echoed for tracked mutations.
+         */
+        'X-Oko-Action'?: CommandId;
+    };
+    path: {
+        /**
+         * URI-decoded once. Version numbers use decimal digits >= 1; opaque IDs are not parsed by clients.
+         */
+        item: string;
+    };
+    query?: never;
+    url: '/api/v3/materials/{item}/rebuild';
+};
+
+export type RebuildPublicationErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    400: ActionInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    404: ResourceNotFoundError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    409: RuntimeStoppedError | RuntimeDisabledError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: AddFeed503Errors;
+};
+
+export type RebuildPublicationError = RebuildPublicationErrors[keyof RebuildPublicationErrors];
+
+export type RebuildPublicationResponses = {
+    /**
+     * Schedule an atomic replacement while the previous copy remains available.
+     */
+    200: CommandAcknowledgement;
+};
+
+export type RebuildPublicationResponse = RebuildPublicationResponses[keyof RebuildPublicationResponses];
 
 export type RegenerateData = {
     body?: never;

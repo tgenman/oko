@@ -54,13 +54,13 @@ def test_delete_failure_is_visible_and_retried_without_content_in_errors(tmp_pat
         client.post(f'/api/v3/materials/{item}/viewed')
         assert client.get(f'/api/v3/publication/{item}').status_code == 404
         assert any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status/details').json()['problems']['current'])
-        assert retained(tmp_path,item)
+        assert not retained(tmp_path,item)
         from tests.support.storage import database
         from oko.storage.material_read import item as stored_item
         with database(tmp_path) as db:
-            assert stored_item(db,item)['reader_feed_id'] == cards[0]['feed_id']
-            job = db.execute("SELECT reason_code,reason_message FROM jobs WHERE kind='delete' AND item=%s",(item,)).fetchone()
-            assert job is not None and tuple(job)==('delete','Ошибка удаления')
+            assert stored_item(db,item) is None
+            job = db.execute("SELECT reason_code,reason_message,payload->>'cleanup_feed' FROM jobs WHERE kind='delete' AND item=%s",(item,)).fetchone()
+            assert job is not None and tuple(job)==('delete','Ошибка удаления',cards[0]['feed_id'])
         fail = False
         clock.now += 1.1
         wait_for(client, lambda: not any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status/details').json()['problems']['current']))
@@ -113,7 +113,7 @@ def test_restart_keeps_failed_deletion_retryable_and_blocks_collection(tmp_path:
         assert status['runtime_state']=='running'
         assert any(p['code']=='feed_delete_failed' for p in status['problems']['current'])
         assert source.calls == 0
-        assert retained(tmp_path,item)
+        assert not retained(tmp_path,item)
         fail = False
         clock.now += 1.2
         wait_for(client, lambda: source.calls == 1 and not retained(tmp_path,item))
@@ -141,6 +141,9 @@ def test_restart_finishes_cleanup_after_files_were_removed(tmp_path: Path):
     clock.now+=2
     with TestClient(create_app(tmp_path,**kwargs),headers=HEADERS) as client:
         presence(client,'reader')
-        wait_for(client,lambda: not retained(tmp_path,item))
+        def cleanup_finished():
+            with database(tmp_path) as db:
+                return not db.execute('SELECT id FROM jobs WHERE item=%s',(item,)).fetchall()
+        wait_for(client,cleanup_finished)
         with database(tmp_path) as db:
             assert db.execute('SELECT id FROM jobs WHERE item=%s',(item,)).fetchall()==[]

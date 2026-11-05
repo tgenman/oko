@@ -322,17 +322,17 @@ def test_late_captions_cannot_publish_after_reader_action(tmp_path, action):
                 # Deletion defers while the caption attempt owns a media path.
                 # Let its scheduled retry run after that attempt has released it.
                 clock.now += .2
-                wait_for(client, lambda: db.execute('SELECT id FROM publications WHERE id=%s', (item,)).fetchone() is None)
+                wait_for(client, lambda: not db.execute('SELECT id FROM jobs WHERE id=ANY(%s)',(media_job_ids,)).fetchall())
             rows = db.execute('SELECT content,filtered_content,summarized_content FROM publications').fetchall()
             assert all(late_text not in value for row in rows for value in row)
-            publication = db.execute('SELECT viewed FROM publications WHERE id=%s', (item,)).fetchone()
+            publication = db.execute('SELECT 1 FROM publications WHERE id=%s', (item,)).fetchone()
             subtitles = db.execute("SELECT status,storage_key FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles'", (item,)).fetchall()
             if action == 'viewed':
                 assert publication is None
                 assert db.execute('SELECT id FROM media_files WHERE publication_id=%s', (item,)).fetchall() == []
                 assert db.execute('SELECT id FROM jobs WHERE id=ANY(%s)',(media_job_ids,)).fetchall() == []
             else:
-                assert publication == (0,)
+                assert publication == (1,)
                 assert len(subtitles) == 1
                 assert subtitles[0][0] != 'ready' and subtitles[0][1] is None
         files = media_files()

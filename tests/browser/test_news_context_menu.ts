@@ -58,14 +58,14 @@ test('failed batch reports an error and keeps all selected items',async()=>{
 test('news context menu reloads a full copy without marking it viewed',async()=>{
  const r=await reader();try{
   await r.start([material('reload')]);
-  await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/materials/reload/retry',{body:{ok:true}}));
+  await r.page.evaluate(()=>readerTransport.replies.set('/api/v3/materials/reload/rebuild',{body:{ok:true}}));
   await r.page.locator('[data-card="reload"]').click();
   await expect(r.page.locator('#text')).toContainText('Текст reload');
   await r.page.locator('[data-card="reload"]').click({button:'right'});
   await expect(r.page.getByRole('menuitem',{name:'Reload Publication',exact:true})).toBeVisible();
   await r.page.screenshot({path:artifactPath('telegram-reload-menu-desktop.png')});
   await r.page.getByRole('menuitem',{name:'Reload Publication',exact:true}).click();
-  await expect.poll(()=>r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url.endsWith('/retry')).length)).toBe(1);
+  await expect.poll(()=>r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url.endsWith('/rebuild')).length)).toBe(1);
   await expect(r.page.locator('#news-context-menu')).toHaveCount(0);
   await expect(r.page.locator('#text')).toContainText('Текст reload');
   expect(await r.page.evaluate(()=>readerTransport.requests.filter(q=>q.url.endsWith('/viewed')).length)).toBe(0);

@@ -34,7 +34,7 @@ def job_keys(store: 'Store', job_id: int, code: str | None = None) -> set[str]:
         LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
         LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
         LEFT JOIN publication_links l ON l.target_publication_id=coalesce(items.id,media_owner.id)
-        LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id AND viewed=0 OFFSET 0) root ON true
+        LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id OFFSET 0) root ON true
         WHERE j.id=%s AND coalesce(%s,j.reason_code) LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete')""",(code,job_id,code)).fetchall()
     return {'job:'+r['reason_code']+':'+(r['owner'] or r['feed_id'] or r['item'] or '')+':'+r['kind'] for r in rows}
 
@@ -48,7 +48,7 @@ def job_keys_with_previous_feed(store: 'Store', job_id: int, feed: str | None) -
         LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
         LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
         LEFT JOIN publication_links l ON l.target_publication_id=coalesce(items.id,media_owner.id)
-        LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id AND viewed=0 OFFSET 0) root ON true
+        LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id OFFSET 0) root ON true
         WHERE j.id=%s AND j.reason_code LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete')""",(feed,job_id)).fetchall()
     if not rows:return None
     kind=rows[0]['kind']
@@ -62,7 +62,7 @@ def job_keys_many(store: 'Store', job_ids: list[int]) -> dict[int,tuple[str,set[
         LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
         LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
         LEFT JOIN publication_links l ON l.target_publication_id=coalesce(items.id,media_owner.id)
-        LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id AND viewed=0 OFFSET 0) root ON true
+        LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id OFFSET 0) root ON true
         WHERE j.id=ANY(%s) AND j.reason_code LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete')""",(job_ids,)).fetchall()
     groups: dict[int,tuple[str,set[str]]]={}
     for row in rows:
@@ -80,10 +80,9 @@ def group_snapshot(store: 'Store', identity: str, kind: str, now: float, *, excl
             SELECT g.code,g.owner,g.owner AS item FROM source_groups g
             UNION SELECT g.code,g.owner,m.publication_id FROM source_groups g JOIN source_members m ON m.feed_id=g.owner
             UNION SELECT g.code,g.owner,l.target_publication_id FROM source_groups g JOIN source_members m ON m.feed_id=g.owner
-                JOIN publications root ON root.id=m.publication_id AND root.viewed=0
+                JOIN publications root ON root.id=m.publication_id
                 CROSS JOIN LATERAL (SELECT target_publication_id FROM publication_links WHERE source_publication_id=root.id OFFSET 0) l
             UNION SELECT g.code,g.owner,c.item FROM source_groups g CROSS JOIN LATERAL (SELECT item FROM jobs WHERE kind='delete' AND payload::jsonb->>'cleanup_feed'=g.owner OFFSET 0) c
-                JOIN publications p ON p.id=c.item AND p.viewed=1
         ), targets AS MATERIALIZED (
             SELECT j.id FROM items i CROSS JOIN LATERAL (SELECT id FROM jobs WHERE kind=%s AND item=i.item AND reason_code=i.code AND reason_code LIKE 'source-%%' AND octet_length(reason_code)<=1000 OFFSET 0) j
             UNION SELECT j.id FROM items i CROSS JOIN LATERAL (SELECT id FROM media_files WHERE publication_id=i.item OFFSET 0) m
@@ -91,12 +90,12 @@ def group_snapshot(store: 'Store', identity: str, kind: str, now: float, *, excl
             UNION SELECT j.id FROM source_groups g CROSS JOIN LATERAL (SELECT id FROM jobs WHERE kind=%s AND feed_id=g.owner AND reason_code=g.code AND reason_code LIKE 'source-%%' AND octet_length(reason_code)<=1000 AND coalesce(octet_length(feed_id),0)<=1000 OFFSET 0) j
         ) SELECT j.id,j.kind,j.item,j.status,j.reason_message,j.reason_code,j.feed_id,m.resource_key,
             coalesce({owner_expr('items')},{owner_expr('media_owner')},{owner_expr('root')},j.feed_id) AS owner,
-            coalesce(items.viewed,media_owner.viewed) AS viewed,coalesce(root.id,m.publication_id,j.item) AS affected
+            coalesce(root.id,m.publication_id,j.item) AS affected
         FROM targets t CROSS JOIN LATERAL (SELECT * FROM jobs WHERE id=t.id OFFSET 0) j
         LEFT JOIN publications items ON items.id=j.item LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
         LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
         LEFT JOIN publication_links l ON l.target_publication_id=coalesce(items.id,media_owner.id)
-        LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id AND viewed=0 OFFSET 0) root ON true
+        LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id OFFSET 0) root ON true
         WHERE (j.status IN ('pending','running','failed','unavailable','blocked') OR (j.status='done' AND j.kind='fetch' AND j.reason_message IS NOT NULL AND j.reason_code IS NOT NULL))
         {'AND NOT (j.id=ANY(%s))' if exclude else ''}
         ORDER BY j.kind,j.item,j.id,root.id""",(codes,owners,owners,kind,kind,kind,*([sorted(exclude)] if exclude else []))).fetchall()
@@ -108,7 +107,6 @@ def group_snapshot(store: 'Store', identity: str, kind: str, now: float, *, excl
         owner=row['owner'] or row['feed_id'] or row['item'] or ''
         if 'job:'+row['reason_code']+':'+owner+':'+kind!=identity:continue
         members.add(row['id'])
-        if row['viewed'] and kind not in ('delete','feed-delete'):continue
         if kind=='download_media' and row['resource_key']=='youtube:subtitles':
             timed=True
             if paused:continue
@@ -405,7 +403,7 @@ def previous_keys_many(store: 'Store', rows: list[tuple[int,str]]) -> dict[int,t
             LEFT JOIN publications items ON items.id=j.item LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
             LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
             LEFT JOIN publication_links l ON l.target_publication_id=coalesce(items.id,media_owner.id)
-            LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id AND viewed=0 OFFSET 0) root ON true""",([r[0] for r in batch],[r[1] for r in batch])).fetchall()
+            LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id OFFSET 0) root ON true""",([r[0] for r in batch],[r[1] for r in batch])).fetchall()
         for row in found:
             if row['id'] not in result:result[row['id']]=(row['kind'],set())
             result[row['id']][1].add('job:'+row['reason_code']+':'+(row['owner'] or row['feed_id'] or row['item'] or '')+':'+row['kind'])
@@ -446,7 +444,7 @@ def job_evidence_many(store: 'Store', rows: Sequence[tuple[int,str | None]]) -> 
             LEFT JOIN publications items ON items.id=j.item LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
             LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
             LEFT JOIN publication_links l ON l.target_publication_id=coalesce(items.id,media_owner.id)
-            LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id AND viewed=0 OFFSET 0) root ON true
+            LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id OFFSET 0) root ON true
             WHERE j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND coalesce(v.code,j.reason_code) LIKE 'source-%%'""",([r[0] for r in batch],[r[1] for r in batch])).fetchall()
         for row in found:
             owner=row['owner'] or row['feed_id'] or row['item'] or ''
@@ -466,7 +464,7 @@ def job_evidence_with_previous_feed(store: 'Store', job_id: int, feed: str | Non
         LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
         LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
         LEFT JOIN publication_links l ON l.target_publication_id=coalesce(items.id,media_owner.id)
-        LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id AND viewed=0 OFFSET 0) root ON true
+        LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id OFFSET 0) root ON true
         WHERE j.id=%s AND j.reason_code LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete')""",(feed,job_id)).fetchall()
     evidence: dict[str,set[tuple[str,str]]]={}
     for row in rows:

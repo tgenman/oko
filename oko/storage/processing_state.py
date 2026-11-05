@@ -19,14 +19,14 @@ class ProcessingRepository:
 
     def candidates(self, kind: Kind, *, item: str) -> list[tuple[str,str | None]]:
         # Reconciliation is publication-owned; there is no stage queue to scan.
-        query = "SELECT i.id FROM publications i WHERE i.id=%s AND i.viewed=0 AND i.platform IS NOT NULL AND i.feed_id IS NOT NULL AND i.content ? 'blocks'"
+        query = "SELECT i.id FROM publications i WHERE i.id=%s AND i.platform IS NOT NULL AND i.feed_id IS NOT NULL AND i.content ? 'blocks'"
         parameters: tuple[str | int, ...] = (item,)
         rows=self.store.db.execute(query,parameters).fetchall()
         operation=self.store.filters if kind=='filter' else self.store.processing.theses
         return [(row[0],operation.input_hash(row[0])) for row in rows]
 
     def prepare(self, item: str, kind: Kind) -> ProcessingPreparation:
-        row=self.store.db.execute("SELECT i.* FROM publications i WHERE i.id = %s AND i.viewed = 0",(item,)).fetchone()
+        row=self.store.db.execute("SELECT i.* FROM publications i WHERE i.id = %s",(item,)).fetchone()
         if row is None or row['feed_id'] is None:return ProcessingPreparation('disabled',reason='not_eligible')
         enabled = publication_input.stage_enabled(self.store, item, kind)
         if not enabled:return ProcessingPreparation('disabled',reason='stage_disabled')
@@ -52,8 +52,8 @@ class ProcessingRepository:
         operation=self.store.filters if value.kind=='filter' else self.store.processing.theses
         # The Job owner checks generation before acceptance; input_hash is scoped
         # to this stage so unrelated settings do not invalidate an active call.
-        row=self.store.db.execute('SELECT viewed FROM publications WHERE id=%s',(value.item,)).fetchone()
-        if row is None or row['viewed']:
+        row=self.store.db.execute('SELECT id FROM publications WHERE id=%s',(value.item,)).fetchone()
+        if row is None:
             return False
         try:
             return tuple(publication_input.sources(self.store,value.item,value.kind))==tuple(value.request.sources) and (not value.public_processor or not value.public_ai or publication_input.live_settings(self.store,value.item)['public_ai'])

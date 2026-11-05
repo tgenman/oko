@@ -139,7 +139,7 @@ def build_app(root, token, *, persistent=False, public_url=None,collection=True,
         if request.url.host=='t.me' and '/lateststate' in request.url.path:
             path = root/'fixture-publication.txt'
             text = path.read_text() if path.is_file() else 'Initial publication'
-            photo = '<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/photo.jpg\')"></a>'
+            photo = '<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://controlled.example/photo.jpg\')"></a>'
             return httpx.Response(200, text=page([(11, text+photo)]).replace('fixture/', 'lateststate/'))
         return response(request)
     models=model_transport([])

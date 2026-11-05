@@ -1155,3 +1155,39 @@ def test_migration_rejects_unowned_incomplete_flag(connections,flag):
         with pytest.raises(psycopg.errors.RaiseException,match='p'):
             migrate(db,MIGRATIONS)
         assert db.execute("SELECT content #> '{extra,_reader,full}' FROM publications WHERE id='p'").fetchone()==(flag,)
+
+
+def test_viewed_cleanup_migration_preserves_job_after_removing_publication(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db,MIGRATIONS[:116])
+        db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('old','rss','old',1)")
+        db.execute("INSERT INTO jobs(kind,item,status,payload,reason_code,reason_message) VALUES ('delete','old','pending','{\"cleanup_feed\":\"feed\"}','delete','temporary')")
+        db.execute("INSERT INTO jobs(kind,item,status) VALUES ('fetch','old','running')")
+        migrate(db,MIGRATIONS)
+        assert db.execute("SELECT 1 FROM publications WHERE id='old'").fetchone() is None
+        assert db.execute("SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='publications' AND column_name='viewed'").fetchone() is None
+        assert db.execute("SELECT status,payload->>'cleanup_feed',reason_message FROM jobs WHERE kind='delete' AND item='old'").fetchone()==('pending','feed','temporary')
+        assert db.execute("SELECT status FROM jobs WHERE kind='fetch' AND item='old'").fetchone()==('cancelled',)
+
+
+def test_viewed_cleanup_migration_stops_for_retained_media(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db,MIGRATIONS[:116])
+        db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('old','rss','old',1)")
+        db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('media','old','image','https://media.test/image','image','pending')")
+        with pytest.raises(psycopg.errors.RaiseException,match='still have links or media'):
+            migrate(db,MIGRATIONS)
+        assert db.execute("SELECT 1 FROM publications WHERE id='old'").fetchone()==(1,)
+        assert db.execute("SELECT 1 FROM media_files WHERE id='media'").fetchone()==(1,)
+
+
+def test_viewed_cleanup_migration_stops_for_unknown_state(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db,MIGRATIONS[:116])
+        db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('unknown','rss','unknown',NULL)")
+        with pytest.raises(psycopg.errors.RaiseException,match='Ambiguous viewed state'):
+            migrate(db,MIGRATIONS)
+        assert db.execute("SELECT 1 FROM publications WHERE id='unknown'").fetchone()==(1,)

@@ -3,7 +3,9 @@ from oko.domain.publication import PublicationIdentityConflict, PublicationOwner
 from oko.collection.request_observation import Capture
 import asyncio
 from copy import deepcopy
+from dataclasses import replace
 from datetime import datetime,timezone
+from functools import partial
 from collections.abc import Awaitable, Callable
 import secrets
 from typing import Any
@@ -85,7 +87,8 @@ class CollectionWorker:
         self.jobs = JobControl(self.execution, clock)
         self._telegram_bindings: dict[str, TelegramBinding] = {}
         self._last_collection = clock()
-        self._last_media_cleanup = clock()
+        # Recover unfinished file cleanup on startup, then run it hourly.
+        self._last_media_cleanup = clock()-3600
 
     @property
     def diagnostics(self) -> Journal | None:
@@ -181,6 +184,9 @@ class CollectionWorker:
     async def _execute_observed(self, job: Job, capture: Capture) -> None:
         if job.kind == 'download_media':
             await self._execute_media(job,capture)
+            return
+        if job.kind == 'rebuild':
+            await self._execute_rebuild(job)
             return
         diagnostic_materials.set((job.item,) if job.kind in ('fetch','delete') else ())
         capture_scope.set(secrets.token_hex(16))
@@ -348,6 +354,132 @@ class CollectionWorker:
             attempt = self.jobs._collection_active.get(job.id)
             if attempt and attempt.job.generation == job.generation:
                 del self.jobs._collection_active[job.id]
+
+    async def _execute_rebuild(self, job: Job) -> None:
+        import os
+        import shutil
+        from pathlib import Path
+        from uuid import uuid4
+        from oko.collection.rebuild_types import PreparedFile,PreparedReplacement
+        from oko.storage import files
+        from oko.storage.media_paths import existing_file
+        from oko.storage.rebuild import RebuildRepository
+        from oko.storage.collection_effects import CollectionEffectCapture
+        from oko.workers.rebuild import collect
+
+        current=None
+        staging: Path | None=None
+        created: list[Path]=[]
+        active: set[Path]=set()
+        committed=[False]
+        try:
+            async with self.execution._actions:
+                current=self.execution._store
+                if not current or not self._live() or not current.jobs.valid(job):return
+                feed=self.service.feed(job.item)
+                reference=self.service.reference(job.item)
+                revision=self.service.revision(job.item)
+                adapter=self._collection.publication_adapter(feed)
+                if reference is None or adapter is None:raise ValueError('Rebuild adapter unavailable')
+                staging=current.root/'staging'/job.item/('rebuild-'+str(job.id)+'-'+str(job.generation))
+                active=current.media.active_paths
+                active.add(staging)
+            def admitted() -> bool:
+                return bool(current and self.execution._store is current and self._live() and current.jobs.valid(job))
+            staged=await collect(adapter,self._collection.article_adapter(),reference,staging,admitted,active)
+            if staged[0].value.metadata.reference.key!=reference.key:
+                raise ValueError('Rebuild returned another publication identity')
+            async with self.execution._actions:
+                if not admitted():return
+                snapshots=[]
+                for index,value in enumerate(staged):
+                    ref=value.value.metadata.reference
+                    row=current.db.execute('SELECT id FROM publications WHERE platform=%s AND external_id=%s',
+                        (ref.key.platform.value,ref.key.external_id)).fetchone()
+                    identity=job.item if index==0 else row['id'] if row else str(uuid4())
+                    if row and row['id']!=identity:raise ValueError('Rebuild identity changed')
+                    old=current.media.publication_rows(identity) if row else []
+                    snapshots.append((identity,old,self.service.revision(identity) if row else None))
+            replacements=[]
+            for value,(identity,old,_) in zip(staged,snapshots,strict=True):
+                previous={row['resource_key']:row for row in old}
+                prepared=[]
+                for staged_file in value.files:
+                    media=staged_file.media
+                    existing=previous.get(media.key)
+                    if existing and media.source_url is None and existing['source_locator']==media.locator:
+                        media=replace(media,source_url=existing['source_url'])
+                    old_path=existing_file(current.root,existing['storage_key']) if existing else None
+                    same=bool(staged_file.path and existing and existing['status']=='ready' and old_path and
+                              files.file_digest(staged_file.path)==files.file_digest(old_path))
+                    media_id=existing['id'] if same and existing else str(uuid4())
+                    path=old_path if same else None
+                    size=staged_file.path.stat().st_size if staged_file.path else None
+                    if staged_file.path and not same:
+                        directory=current.root/'media'/identity
+                        directory.mkdir(parents=True,exist_ok=True)
+                        path=directory/media_id
+                        active.add(path)
+                        with staged_file.path.open('rb') as stream:os.fsync(stream.fileno())
+                        os.link(staged_file.path,path)
+                        created.append(path)
+                        files.fsync_directory(directory)
+                    prepared.append(PreparedFile(media.key,media_id,str(path.relative_to(current.root)) if path else None,
+                                                 media,size,staged_file.issue))
+                replacements.append(PreparedReplacement(identity,value.value,tuple(prepared)))
+            async with self.execution._actions:
+                if not admitted():return
+                if self.service.revision(job.item)!=revision:
+                    raise AdapterException(AdapterIssue('rebuild-stale','Публикация изменилась во время пересборки',AdapterErrorKind.temporary))
+                for replacement,(_,_,old_revision) in zip(replacements[1:],snapshots[1:],strict=True):
+                    if old_revision is not None and self.service.revision(replacement.identity)!=old_revision:
+                        raise AdapterException(AdapterIssue('rebuild-stale','Связанная публикация изменилась во время пересборки',AdapterErrorKind.temporary))
+                repository=RebuildRepository(db=current.db,publications=current.publications,media=current.media,
+                    capture=CollectionEffectCapture(current),clock=current.wall_clock,fault=current.fault)
+                with current.jobs.transaction(self._live):
+                    if not admitted():return
+                    current.jobs.after_commit(lambda:committed.__setitem__(0,True))
+                    current.jobs.begin_collection(job)
+                    effects=repository.accept(job.item,tuple(replacements))
+                    current.jobs.apply_collection(effects,job=job)
+                    current.jobs.finish(job)
+                    for replacement in replacements:
+                        current.jobs.after_commit(partial(current.publications.prune,replacement.identity))
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            record_caught('runtime._execute_rebuild')
+            async with self.execution._actions:
+                if current and self.execution._store is current and self._live() and current.jobs.valid(job):
+                    if isinstance(error,AdapterException):
+                        issue=error.issue
+                    elif isinstance(error,SourceDeferred):
+                        issue=error.adapter_issue or AdapterIssue(error.code or 'source-wait',error.label,
+                            AdapterErrorKind.source_wait,scope=getattr(error,'scope','source:'+feed),
+                            retry_at=datetime.fromtimestamp(current.wall_clock()+max(0,error.delay),timezone.utc))
+                    elif isinstance(error,SourceError):
+                        if error.adapter_issue:
+                            issue=error.adapter_issue
+                        elif error.retryable and error.delay>0:
+                            issue=AdapterIssue(error.code or 'source-unavailable',error.label,AdapterErrorKind.source_wait,
+                                scope='source:'+feed,retry_at=datetime.fromtimestamp(current.wall_clock()+error.delay,timezone.utc))
+                        else:
+                            issue=AdapterIssue(error.code or 'source-unavailable',error.label,
+                                AdapterErrorKind.temporary if error.retryable else AdapterErrorKind.permanent)
+                    else:
+                        issue=AdapterIssue('rebuild-failed',str(error) or 'Ошибка пересборки',AdapterErrorKind.permanent if isinstance(error,ValueError) else AdapterErrorKind.temporary)
+                    with current.jobs.transaction(self._live):
+                        current.jobs.retry(job,self._clock(),issue.message,issue=issue)
+        finally:
+            if staging is not None:
+                active.discard(staging)
+                for path in list(active):
+                    if staging in path.parents:
+                        active.discard(path)
+                shutil.rmtree(staging,ignore_errors=True)
+            for path in created:
+                active.discard(path)
+                if not committed[0]:path.unlink(missing_ok=True)
 
     def _reject_media_input(self, current: Store, job: Job, download: MediaDownload) -> bool:
         if self.media.current(job.item,download):return False
@@ -518,7 +650,11 @@ class CollectionWorker:
                 if job:
                     if media_lane:
                         self.jobs._media_jobs[lane] = job
-                    self.jobs._lane_feeds[lane] = job.item if job.kind in ('discover', 'read', 'feed-delete') else self.service.feed(job.item)
+                    if job.kind=='delete':
+                        owner=self.execution._store.db.execute("SELECT payload->>'cleanup_feed' FROM jobs WHERE id=%s",(job.id,)).fetchone()
+                        self.jobs._lane_feeds[lane]=owner[0] if owner and owner[0] else job.item
+                    else:
+                        self.jobs._lane_feeds[lane] = job.item if job.kind in ('discover', 'read', 'feed-delete') else self.service.feed(job.item)
                     self.jobs._lanes[lane] = asyncio.create_task(self._execute(job))
 
 

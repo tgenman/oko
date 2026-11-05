@@ -279,3 +279,20 @@ def test_process_death_at_media_acceptance_never_exposes_uncommitted_bytes(tmp_p
             client.post('/api/v3/materials/'+item+'/retry')
         ready=wait_for(client,lambda:(m if (m := client.get('/api/v3/publication/'+item).json()) and any(media['url'] is not None for media in m['media']) else None))
         assert client.get([media for media in ready['media'] if media['url'] is not None][0]['url']).content==b'process-media'
+
+
+def test_cleanup_preserves_active_rebuild_staging(tmp_path,postgres_url):
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        staging=tmp_path/'staging'/'publication'/'rebuild-1-1'
+        staging.mkdir(parents=True)
+        (staging/'partial').write_bytes(b'partial')
+        store.media.active_paths.add(staging)
+        store.media.cleanup()
+        assert (staging/'partial').exists()
+        store.media.active_paths.remove(staging)
+        store.media.cleanup()
+        assert not staging.exists()
+    finally:
+        store.db.close()

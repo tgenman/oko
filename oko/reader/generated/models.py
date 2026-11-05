@@ -1643,6 +1643,12 @@ class CommandPreviewCompletion(WireModel):
     operation: Literal["preview_completion"]
 
 
+class CommandRebuildPublication(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    material_id: MaterialId
+    operation: Literal["rebuild_publication"]
+
+
 class CommandRegenerate(WireModel):
     model_config = ConfigDict(extra="forbid")
     material_id: MaterialId
@@ -2839,6 +2845,7 @@ class CommandContext(
         | CommandRegenerate
         | CommandRetryTheses
         | CommandRetryMaterial
+        | CommandRebuildPublication
         | CommandRetryFilter
         | CommandViewed
         | CommandCodexCheck
@@ -2871,6 +2878,7 @@ class CommandContext(
         | CommandRegenerate
         | CommandRetryTheses
         | CommandRetryMaterial
+        | CommandRebuildPublication
         | CommandRetryFilter
         | CommandViewed
         | CommandCodexCheck

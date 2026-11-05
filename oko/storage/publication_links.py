@@ -20,7 +20,7 @@ def children(store: 'Store',item: str) -> list[Row]:
     inputs = current(store.db)
     if inputs is not None and item in inputs.children:
         return inputs.children[item]
-    return list(store.db.execute(f"SELECT i . * , {owner_expr('i')} AS reader_feed_id , j . reason_message AS fetch_error FROM publication_links l JOIN publications i ON i . id = l . target_publication_id LEFT JOIN jobs j ON j . kind = 'fetch' AND j . item = i . id WHERE l . source_publication_id = %s AND i . viewed = 0 ORDER BY l . rowid",(item,)).fetchall())
+    return list(store.db.execute(f"SELECT i . * , {owner_expr('i')} AS reader_feed_id , j . reason_message AS fetch_error FROM publication_links l JOIN publications i ON i . id = l . target_publication_id LEFT JOIN jobs j ON j . kind = 'fetch' AND j . item = i . id WHERE l . source_publication_id = %s ORDER BY l . rowid",(item,)).fetchall())
 
 
 def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], effects: CollectionDiagnostics) -> bool:
@@ -84,9 +84,6 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
                 effects.delete_problems_checked.add(identity)
             if row['url']!=ref.url:
                 raise ValueError('Conflicting linked publication identity')
-            if row['viewed'] and row['reader_feed_id'] is None:
-                store.set_processor_viewed([identity],False)
-                effects.fetch[identity]=True
         targets.append(identity)
     store.db.execute('DELETE FROM publication_links WHERE source_publication_id = %s',(item,))
     store.db.executemany('INSERT INTO publication_links VALUES ( %s , %s ) ON CONFLICT DO NOTHING',[(item,target) for target in targets])
@@ -261,7 +258,7 @@ def prune(store: 'Store', candidates: set[str], *, effects: CollectionDiagnostic
         ) edge
     ), needed(id) AS (
         SELECT root.id FROM component c CROSS JOIN LATERAL (
-            SELECT i.id FROM publications i WHERE i.id=c.id AND i.viewed=0
+            SELECT i.id FROM publications i WHERE i.id=c.id
                 AND i.feed_id IS NOT NULL OFFSET 0
         ) root
         UNION
@@ -270,9 +267,13 @@ def prune(store: 'Store', candidates: set[str], *, effects: CollectionDiagnostic
         ) edge
     )
     SELECT candidate.id FROM component c CROSS JOIN LATERAL (
-        SELECT i.id FROM publications i WHERE i.id=c.id AND i.platform IS NOT NULL AND i.viewed=0 OFFSET 0
+        SELECT i.id FROM publications i WHERE i.id=c.id AND i.platform IS NOT NULL OFFSET 0
     ) candidate WHERE NOT EXISTS (SELECT 1 FROM needed n WHERE n.id=candidate.id)''', (sorted(candidates),)).fetchall()
     items = [row['id'] for row in rows]
+    processor_jobs=store.problems.processor_jobs_for_materials(items)
+    processor_previous=store.problems.prepare_processor_change(processor_jobs,store.wall_clock()) if processor_jobs else None
+    if processor_previous is not None:
+        processor_previous['objects']=[obj for obj in processor_previous['objects'] if obj['kind']!='material' or obj['id'] not in items]
     if effects is not None:
         capture_root_deletion_problems(store,effects,set(items))
     store.publications.forget_many(items,effects=effects)
@@ -281,7 +282,17 @@ def prune(store: 'Store', candidates: set[str], *, effects: CollectionDiagnostic
         marks = ','.join('%s' for _ in batch)
         store.jobs.forget_input('filter', batch)
         store.jobs.forget_input('theses', batch)
-        store.set_processor_viewed(batch,True)
+        # The deletion Job owns the remaining on-disk cleanup independently of
+        # the publication row.  Revoke in-flight work before dropping that row.
+        store.db.execute("""INSERT INTO jobs(kind,item,status)
+            SELECT 'delete',id,'pending' FROM publications WHERE id=ANY(%s)
+            ON CONFLICT(kind,item) DO UPDATE SET status='pending',generation=jobs.generation+1,next=0""",(batch,))
+        store.db.execute("""UPDATE jobs SET status='cancelled',generation=generation+1
+            WHERE item=ANY(%s) AND kind NOT IN ('delete','discover','read','feed-delete')
+              AND status<>'cancelled'""",(batch,))
+        store.db.execute('DELETE FROM publications WHERE id=ANY(%s)',(batch,))
+    if processor_jobs:
+        store.problems.finish_processor_change(processor_jobs,processor_previous,store.wall_clock(),removed_outcome='irrelevant')
 
 
 def project_header(store: 'Store', item: str, header: dict[str,Any]) -> dict[str,Any]:

@@ -9,7 +9,6 @@ def test_delete_problem_event_get_is_read_only_and_finish_rollback(tmp_path,post
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('item','rss','item',1)")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('delete','item','running',1) RETURNING id").fetchone()[0]
         job=Job(job_id,'delete','item',1)
         store.jobs.retry(job,1,'error',code='delete')

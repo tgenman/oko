@@ -12,7 +12,7 @@ def test_processor_failure_suppresses_then_restores_incomplete_atomically(tmp_pa
         with transaction(store.db):
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
             content=json.dumps({'blocks':[{'type':'text','role':'body','text':'partial'}],'extra':{}})
-            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,content,status) VALUES ('p','rss','p',0,%s,'pending_collection')",(content,))
+            store.db.execute("INSERT INTO publications(id,platform,external_id,content,status) VALUES ('p','rss','p',%s,'pending_collection')",(content,))
             store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','p','done',1) RETURNING id").fetchone()[0]
             store.db.execute("INSERT INTO jobs(kind,item,status,generation,reason_message,reason_code) SELECT 'fetch','foreign-'||n,'failed',1,'foreign','processor-config' FROM generate_series(1,10000)n")
