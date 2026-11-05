@@ -55,7 +55,7 @@ def test_migration_restores_media_block_with_circle_presentation(postgres_databa
     with psycopg.connect(postgres_database_url,autocommit=True) as db:
         migrate(db,MIGRATIONS[:112])
         content={'blocks':[],'extra':{'_reader':{'attachments':[{'name':'clip','media_id':'m','kind':'circle','mime':'video/mp4'}]}}}
-        db.execute("INSERT INTO publications(id,platform,external_id,url,content) VALUES ('p','telegram','p','https://example.test/post',%s::jsonb)",(json.dumps(content),))
+        db.execute("INSERT INTO publications(id,platform,external_id,url,content,media_ids) VALUES ('p','telegram','p','https://example.test/post',%s::jsonb,'[\"m\"]')",(json.dumps(content),))
         db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,source_url,name,mime_type,status) VALUES ('m','p','clip','https://cdn.example/file','https://cdn.example/file','clip','video/mp4','pending_download')")
         migrate(db,MIGRATIONS)
         block=db.execute("SELECT content->'blocks'->0 FROM publications WHERE id='p'").fetchone()[0]
@@ -77,7 +77,7 @@ def test_migration_adds_circle_presentation_to_existing_video_block(postgres_dat
         migrate(db,MIGRATIONS[:112])
         content={'blocks':[{'type':'media','role':'video','media_id':'m','source_url':'https://cdn.example/file','publication_url':'https://example.test/post'}],
                  'extra':{'_reader':{'attachments':[{'name':'clip','media_id':'m','kind':'circle','mime':'video/mp4'}]}}}
-        db.execute("INSERT INTO publications(id,platform,external_id,url,content) VALUES ('p','telegram','p','https://example.test/post',%s::jsonb)",(json.dumps(content),))
+        db.execute("INSERT INTO publications(id,platform,external_id,url,content,media_ids) VALUES ('p','telegram','p','https://example.test/post',%s::jsonb,'[\"m\"]')",(json.dumps(content),))
         db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,source_url,name,mime_type,status) VALUES ('m','p','clip','https://cdn.example/file','https://cdn.example/file','clip','video/mp4','pending_download')")
         migrate(db,MIGRATIONS)
         blocks=db.execute("SELECT content->'blocks' FROM publications WHERE id='p'").fetchone()[0]

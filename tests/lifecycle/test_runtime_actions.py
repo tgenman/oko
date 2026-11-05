@@ -76,7 +76,8 @@ def test_reload_restores_missing_local_media_without_stopping_reader(tmp_path: P
             storage_key=db.execute("SELECT storage_key FROM media_files WHERE publication_id = %s AND status = 'ready'",(card['id'],)).fetchone()[0]
         (tmp_path/storage_key).unlink()
         client.post('/api/v3/materials/' + card['id'] + '/retry')
-        value=wait_for(client,lambda: value if (value := client.get('/api/v3/publication/'+card['id']).json()) and any(media['url'] is not None for media in value['media']) and not value['loading'] else None)
+        from tests.support.publications import loading
+        value=wait_for(client,lambda: value if (value := client.get('/api/v3/publication/'+card['id']).json()) and any(media['url'] is not None for media in value['media']) and not loading(value) else None)
         assert client.get('/api/v3/status').json()['runtime_state']=='running'
         assert client.get([media for media in value['media'] if media['url'] is not None][0]['url']).content==b'media'
         assert client.post('/api/v3/materials/' + card['id'] + '/viewed').status_code == 200

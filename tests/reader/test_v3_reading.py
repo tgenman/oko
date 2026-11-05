@@ -18,7 +18,7 @@ def test_reading_and_explicit_completion_receipts(tmp_path):
         material = client.get('/api/v3/publication/' + item)
         assert material.status_code == 200, material.text
         value = wire.PublicationResponse.model_validate(material.json())
-        assert value.availability == 'available' and value.text
+        assert material.json()['content'].get('blocks')
         assert value.feed_id == card.feed_id
         assert len(read_all_cards(client, '/api/v3/cards')) == 3
         result = client.post('/api/v3/materials/' + item + '/viewed', headers={'X-Oko-Action':'view-one'})
@@ -65,20 +65,20 @@ def test_hidden_filter_theses_restoration_and_processing_receipts(tmp_path):
     from tests.support.filters import setup_filters
     with TestClient(create_app(tmp_path, token='test', api_only=True, source=FilterSource(), ai_transport=transport([], theses=True)), headers=HEADERS) as client:
         setup_filters(client)
-        cards = wait_for(client, lambda: (v if len(v := read_publications_for_cards(client, '/api/v3/cards?show_hidden=true')) == 3 and all(c['filter']['state'] == 'ready' for c in v) else None))
-        hidden = next(c for c in cards if c['filter']['result']['hidden'])
+        cards = wait_for(client, lambda: (v if len(v := read_publications_for_cards(client, '/api/v3/cards?show_hidden=true')) == 3 and all('hidden' in c['filtered_content'] for c in v) else None))
+        hidden = next(c for c in cards if c['filtered_content']['hidden'])
         assert len(read_all_cards(client, '/api/v3/cards')) == 2
         assert client.get('/api/v3/reading-composition').json()['count'] == 2
-        assert hidden['filter']['result']['provenance']['kind'] == 'local'
+        assert hidden['processing_metadata']['filter']['processor'] == 'llamacpp'
         assert client.post('/api/v3/materials/' + hidden['id'] + '/filter/restore', headers={'X-Oko-Action':'restore-hidden'}).status_code == 404
         assert len(read_all_cards(client, '/api/v3/cards')) == 2
         client.patch('/api/v3/settings/oko/global', json={'theses':True})
-        item = next(c['id'] for c in cards if not c['filter']['result']['hidden'])
+        item = next(c['id'] for c in cards if not c['filtered_content']['hidden'])
         path = '/api/v3/materials/' + item
         publication_path = '/api/v3/publication/' + item
-        value = wait_for(client, lambda: (v if (v := client.get(publication_path).json())['theses']['result'] else None))
-        assert value['theses']['result']['provenance']['kind'] == 'local'
-        assert value['text']
+        value = wait_for(client, lambda: (v if (v := client.get(publication_path).json())['summarized_content'].get('points') else None))
+        assert value['processing_metadata']['summary']['processor'] == 'llamacpp'
+        assert value['content']['blocks']
         for suffix in ['regenerate','theses/retry','filter/retry']:
             key = suffix.replace('/','-')
             response = client.post(path + '/' + suffix, headers={'X-Oko-Action':key})
@@ -98,8 +98,8 @@ def test_public_codex_denial_has_domain_waiting_reason(tmp_path):
         item = setup_reader(client, theses=False)
         client.patch('/api/v3/settings/oko/global', json={'theses':True,'processor':'codex'})
         wait_for(client, lambda: any(w.get('reason') == 'public_ai_not_allowed' for w in client.get('/api/v3/status/details').json()['work']))
-        wait_for(client, lambda: 'Запрещена публичная' in (client.get('/api/v3/publication/' + item).json()['theses']['error'] or ''))
-        assert client.get('/api/v3/publication/' + item).json()['theses']['result'] is None
+        wait_for(client, lambda: any('Запрещена публичная' in (job['reason_message'] or '') for job in client.get('/api/v3/publication/' + item).json()['jobs'] if job['operation']=='theses'))
+        assert 'points' not in client.get('/api/v3/publication/' + item).json()['summarized_content']
 
 
 def test_cards_sort_unknown_publication_dates_by_discovery_time(tmp_path):
@@ -206,7 +206,7 @@ def test_reader_ignores_legacy_completeness_flags_when_job_and_status_are_ready(
             content['extra'].pop('_collection_reason',None)
             db.execute("UPDATE publications SET content=%s,status='ready' WHERE id=%s",(json.dumps(content),item))
         material=client.get('/api/v3/publication/'+item).json()
-        assert material['completeness']['state']=='complete'
+        assert material['status']=='ready'
         assert 'Obsolete reason' not in str(material)
 
 
@@ -221,7 +221,7 @@ def test_unavailable_collection_without_reason_is_not_shown_as_waiting(tmp_path)
             db.execute("UPDATE publications SET status='pending_collection' WHERE id=%s",(item,))
             db.execute("INSERT INTO jobs(kind,item,status,reason_code,reason_message) VALUES ('fetch',%s,'unavailable',NULL,NULL) ON CONFLICT(kind,item) DO UPDATE SET status='unavailable',reason_code=NULL,reason_message=NULL",(item,))
         material=client.get('/api/v3/publication/'+item).json()
-        assert 'недоступна' in material['completeness']['message'].lower()
+        assert any(job['operation']=='fetch' and job['status']=='unavailable' and job['reason_message'] is None for job in material['jobs'])
 
 
 def test_saved_publication_does_not_duplicate_completeness_in_content(tmp_path):

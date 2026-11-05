@@ -18,11 +18,11 @@ for(const initial of ['ready','error'] as const) test(`common YouTube publicatio
  expect(card.source_url).toBe('https://www.youtube.com/watch?v=abcdefghijk');
  if(initial==='error'){
   await expect(r.page.locator('#completeness')).toContainText('Synthetic caption error');
-  expect((await r.api(`publication/${card.id}`)).theses.result).toBeNull();
+  expect((await r.api(`publication/${card.id}`)).summarized_content.points).toBeUndefined();
   await r.page.screenshot({path:artifactPath('youtube-caption-error.png')});
   await r.setYoutubeState('missing');
   await r.page.getByRole('button',{name:'Retry Download',exact:true}).click();
-  await expect.poll(async()=>{const m=await r.api(`publication/${card.id}`);return m.theses.result?.points.length;},{timeout:15000}).toBe(0);
+  await expect.poll(async()=>{const m=await r.api(`publication/${card.id}`);return m.summarized_content.points?.length;},{timeout:15000}).toBe(0);
   if(await r.page.getByRole('button',{name:'Show new version',exact:true}).isVisible())await r.page.getByRole('button',{name:'Show new version',exact:true}).click();
   await r.page.screenshot({path:artifactPath('youtube-caption-missing.png')});
   await r.setYoutubeState('ready');
@@ -31,7 +31,7 @@ for(const initial of ['ready','error'] as const) test(`common YouTube publicatio
   await r.page.getByRole('button',{name:'Show new version',exact:true}).click();
  }
  await expect(r.page.locator('#text')).toContainText('Raw YouTube captions.');
- await expect.poll(async()=>Boolean((await r.api(`publication/${card.id}`)).theses.result?.points.length)).toBe(true);
+ await expect.poll(async()=>Boolean((await r.api(`publication/${card.id}`)).summarized_content.points?.length)).toBe(true);
  const material=await r.api(`publication/${card.id}`);
  expect(material.media.some(a=>a.role==='attachment'&&a.kind==='image'&&a.status==='pending_download'&&a.url===null)).toBe(true);
  await r.page.screenshot({path:artifactPath(`youtube-${initial}-captions-before-cover.png`)});

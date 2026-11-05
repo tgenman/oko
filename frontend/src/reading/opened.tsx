@@ -7,7 +7,6 @@ import {newsTitle} from './title';
 import {copyText} from '../browser-platform';
 import {useEffect,useLayoutEffect,useRef,useState} from 'react';
 import {publication,regenerate,retryMaterial,retryTheses,retryFilter,viewed} from '../api/generated/sdk.gen';
-import type {Attachment,ReplyPreview as ReplyContext} from '../api/generated/types.gen';
 import type {PublicationResponse} from '../api/generated/types.gen';
 import type {CardView as Card} from './resources';
 import {ReaderError,type ReaderApi} from '../api/reader';
@@ -16,7 +15,9 @@ import {reportError} from '../status/debug';
 import {createStore,useStore,host,errorMessage} from './store';
 
 type MediaFetch=(path:string,signal?:AbortSignal,cache?:RequestCache)=>Promise<Response>;
-type Material = PublicationResponse;
+type Attachment={kind:PublicationResponse['media'][number]['kind'];url:string;mime:string};
+type QuoteContext={author:string|null;text:string;source_url:string|null};
+type Publication = PublicationResponse;
 type DisplayContent = PublicationResponse & {images: string[]; attachments: Attachment[]};
 type OpenCard=Pick<Card,'id'>&Partial<Card>;
 type Session={id:string;sourceTitle?:string;sourceFeed?:Navigation['feeds'][number];folder_id:string|undefined;etag:string|null;loading:boolean;detached:boolean;reset:boolean;assetsPaused:boolean;assetEpoch:number;assets:AbortController;controller:AbortController};
@@ -74,7 +75,7 @@ function PublicationText({material,session,fetchMedia,sourceUrl,revision,inlineM
     const render=(values:typeof blocks,base:string,linked:boolean)=>values.map((block,index)=>{
       if(block.type==='text'&&block.role==='body')return <Markdown key={index} text={block.text} sourceUrl={base}/>;
       if(block.type==='text'&&block.role==='description')return <section key={index} id={!linked?'description-panel':undefined}><h3>Description</h3><div id={!linked?'description':undefined}><Markdown text={block.text} sourceUrl={base}/></div></section>;
-      if(block.type==='quote')return <ReplyPreview key={session.id+'/'+revision+'/'+index} id={!linked&&index===values.findIndex(value=>value.type==='quote')?'reply-preview':undefined} preview={block}/>;
+      if(block.type==='quote')return <QuoteBlock key={session.id+'/'+revision+'/'+index} id={!linked&&index===values.findIndex(value=>value.type==='quote')?'reply-preview':undefined} preview={block}/>;
       if(block.type==='media'){
         const file=material.media.find(value=>value.id===block.media_id);
         const occurrence=values.slice(0,index).filter(previous=>previous.type==='media'&&previous.media_id===block.media_id).length;
@@ -94,7 +95,7 @@ function PublicationText({material,session,fetchMedia,sourceUrl,revision,inlineM
   }
   return null;
 }
-function ReplyPreview({preview,id}:{preview:ReplyContext;id?:string}) {
+function QuoteBlock({preview,id}:{preview:QuoteContext;id?:string}) {
   const [expanded,setExpanded]=useState(false);
   let href:string|undefined;
   try {const url=new URL(preview.source_url||'');if(['http:','https:'].includes(url.protocol)&&!url.username&&!url.password)href=url.href;}catch{/* Missing/unsafe source remains readable. */}
@@ -107,7 +108,7 @@ function ReplyPreview({preview,id}:{preview:ReplyContext;id?:string}) {
 type SummaryReference={material_id:string;source_url:string|null};
 function Points({points,references}:{points:string[];references:SummaryReference[][]}) {return <>{points.map((point,index)=><li key={index}>{point}{(references[index]||[]).map((ref,i)=>ref.source_url?<a key={i} href={ref.source_url} target="_blank" rel="noopener noreferrer"> Source</a>:<span key={i}> Source unavailable ({ref.material_id})</span>)}</li>)}</>;}
 
-function summaryResult(material:Material):{points:string[];references:SummaryReference[][]}|null {
+function summaryResult(material:Publication):{points:string[];references:SummaryReference[][]}|null {
   const raw=material.summarized_content.points;
   if(!raw)return null;
   const sources=new Map([[material.id,material.source_url],...material.linked_publications.map(article=>[article.id,article.source_url] as const)]);
@@ -119,7 +120,7 @@ function summaryResult(material:Material):{points:string[];references:SummaryRef
   return {points,references};
 }
 
-function summaryProvenance(material:Material):string {
+function summaryProvenance(material:Publication):string {
   const value=material.processing_metadata.summary;
   if(!value||typeof value!=='object')return 'Unknown model';
   const processor='processor'in value&&typeof value.processor==='string'?value.processor:null;
@@ -131,7 +132,7 @@ function summaryProvenance(material:Material):string {
   return [processor,model,effort,fast].filter(Boolean).join(' · ');
 }
 
-function availableContent(material:Material):DisplayContent|null {
+function availableContent(material:Publication):DisplayContent|null {
   if(material.status==='pending_collection'&&!material.content.blocks?.length)return null;
   const subtitleIds=new Set([...(material.content.blocks||[]),...material.linked_publications.flatMap(article=>article.content.blocks||[])].filter(block=>block.type==='media'&&block.role==='subtitles').map(block=>block.media_id));
   return {...material,
@@ -140,7 +141,7 @@ function availableContent(material:Material):DisplayContent|null {
 }
 
 export function createOpenedMaterial({readerApi,fetchMedia,onViewed,onChanged,getFeed,getStorage}:{getStorage:()=>string|null;getFeed:(id:string)=>Navigation['feeds'][number]|undefined;readerApi:ReaderApi;fetchMedia:MediaFetch;onViewed:(id:string)=>void;onChanged:(changed:boolean)=>void}) {
-  const store=createStore({session:null as Session|null,material:null as Material|null,empty:'Select an item',message:'',processingOpen:false,workAllowed:true,pending:null as Material|null,retained:false,generation:0});
+  const store=createStore({session:null as Session|null,material:null as Publication|null,empty:'Select an item',message:'',processingOpen:false,workAllowed:true,pending:null as Publication|null,retained:false,generation:0});
   const active=(session:Session)=>store.get().session===session&&!session.controller.signal.aborted;
   function clear(empty='Select an item') {store.get().session?.controller.abort();store.set({session:null,material:null,empty,message:'',processingOpen:false,workAllowed:store.get().workAllowed,pending:null,retained:false,generation:0});}
   function update(next:ReturnType<typeof store.get>) {const restore=readingPosition();store.set(next);restore();}
@@ -155,8 +156,8 @@ export function createOpenedMaterial({readerApi,fetchMedia,onViewed,onChanged,ge
   function acceptPublication(value:PublicationResponse,session:Session) {
     const next=value,state=store.get(),shown=state.material;
     const feed=getFeed(next.feed_id);if(feed){session.sourceFeed=feed;session.sourceTitle=feed.title;}
-    const linked=(value:Material)=>value.linked_publications.map(article=>[article.id,article.title,article.source_url,article.content.blocks]);
-    const textMedia=(value:Material)=>{const ids=new Set((value.content.blocks||[]).filter(block=>block.type==='media'&&block.role==='subtitles').map(block=>block.media_id));return value.media.filter(file=>ids.has(file.id)&&file.status==='ready').map(file=>[file.id,file.url]);};
+    const linked=(value:Publication)=>value.linked_publications.map(article=>[article.id,article.title,article.source_url,article.content.blocks]);
+    const textMedia=(value:Publication)=>{const ids=new Set((value.content.blocks||[]).filter(block=>block.type==='media'&&block.role==='subtitles').map(block=>block.media_id));return value.media.filter(file=>ids.has(file.id)&&file.status==='ready').map(file=>[file.id,file.url]);};
     const changedTextMedia=!!shown&&!!shown.summarized_content.points&&JSON.stringify(textMedia(shown))!==JSON.stringify(textMedia(next));
     const changed=!!shown&&!!availableContent(shown)&&(changedTextMedia||session.reset||!availableContent(next)||JSON.stringify(next.content.blocks)!==JSON.stringify(shown.content.blocks)||JSON.stringify(linked(next))!==JSON.stringify(linked(shown))||next.title!==shown.title);
     if(changed)update({...state,pending:next,message:'A new version is available. Updates for the displayed version may be unavailable.'});

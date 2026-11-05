@@ -17,13 +17,13 @@ for(const kind of ['rss','telegram'] as const) test(`${kind} root stays readable
  await r.page.locator('[data-card]').click();
  const own=kind==='rss'?'Own announcement.':'Own Telegram post.';
  await expect(r.page.locator('#text')).toContainText(own);
- await expect.poll(async()=>{const cards=(await r.api('cards')).items;return !!cards[0]&&(await r.api(`publication/${cards[0].id}`)).theses.result===null;}).toBe(true);
+ await expect.poll(async()=>{const cards=(await r.api('cards')).items;return !!cards[0]&&(await r.api(`publication/${cards[0].id}`)).summarized_content.points===undefined;}).toBe(true);
  await expect(r.page.locator('#theses')).not.toContainText(own);
  await r.setArticleState('error');
  await expect(r.page.locator('#completeness')).toContainText('Не удалось загрузить статью');
  await expect(r.page.locator('#text')).toContainText(own);
  const pendingCard=(await r.api('cards')).items[0]!;
- expect((await r.api(`publication/${pendingCard.id}`)).theses.result).toBeNull();
+ expect((await r.api(`publication/${pendingCard.id}`)).summarized_content.points).toBeUndefined();
  await r.page.screenshot({path:artifactPath(`linked-${kind}-error.png`)});
  // Make the source available at the real retry, before the backend receives it.
  // An automatic retry before the click would otherwise stage a new version.
@@ -37,14 +37,14 @@ for(const kind of ['rss','telegram'] as const) test(`${kind} root stays readable
  await expect(r.page.locator('[data-card]')).toHaveCount(1);
  const cards=(await r.api('cards')).items;
  const material=await r.api(`publication/${cards[0].id}`);
- if(material.availability!=='available'||!material.theses.result) throw new Error('Missing accepted theses');
- const refs=material.theses.result.references.flat();
- expect(refs.some(ref=>ref.material_id!==cards[0].id&&ref.source_url.includes(kind==='rss'?'linked.example':'telegra.ph'))).toBe(true);
+ if(!material.summarized_content.points) throw new Error('Missing accepted theses');
+ const refs=material.summarized_content.points.flatMap(point=>point.source_publication_ids);
+ expect(material.linked_publications.some(article=>refs.includes(article.id)&&article.source_url.includes(kind==='rss'?'linked.example':'telegra.ph'))).toBe(true);
  await r.setMediaState('error');
  await expect(r.page.locator('#completeness')).toContainText('Не удалось загрузить вложение');
  await r.setMediaState('ready');
  await r.page.getByRole('button',{name:'Retry Download',exact:true}).click();
- await expect.poll(async()=>{const current=await r.api(`publication/${cards[0]!.id}`);return current.availability==='available'&&current.completeness?.state==='complete'&&current.media.some(m=>m.kind==='image'&&m.status==='ready'&&m.url!==null);}).toBe(true);
+ await expect.poll(async()=>{const current=await r.api(`publication/${cards[0]!.id}`);return current.status!=='pending_collection'&&current.media.some(m=>m.kind==='image'&&m.status==='ready'&&m.url!==null);}).toBe(true);
  // The open tab may retain its earlier snapshot; selecting the card accepts current content.
  await r.page.locator('[data-card]').click();
  const image=r.page.locator('#text .linked-publication img');

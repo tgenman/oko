@@ -124,4 +124,7 @@ MIGRATIONS = (
     Migration(116, 'publication-rebuild-job', (Path(__file__).parent / 'postgres' / '116-publication-rebuild-job.sql').read_text()),
     Migration(117, 'handoff-viewed-cleanup', (Path(__file__).parent / 'postgres' / '117-handoff-viewed-cleanup.sql').read_text()),
     Migration(118, 'remove-publication-viewed', (Path(__file__).parent / 'postgres' / '118-remove-publication-viewed.sql').read_text()),
+    Migration(119, 'publication-contract-audit', (Path(__file__).parent / 'postgres' / '119-publication-contract-audit.sql').read_text(),
+              (Path(__file__).parent / 'postgres' / 'prelude-publication-filter-extra.sql').read_text(), 96, 114),
+    Migration(120, 'remove-processing-revision', (Path(__file__).parent / 'postgres' / '120-remove-processing-revision.sql').read_text()),
 )

@@ -53,7 +53,7 @@ class JobControl:
                     if feeds is None or attempt.feed in feeds:
                         self._store.jobs.collection_interrupt(attempt.job, attempt.feed, attempt.saved, max(0., self._clock()-attempt.started))
                 self._store.jobs.interrupted(feeds)
-                self._store.jobs.invalidate_processing()
+                self._store.jobs.invalidate_processing(feeds)
 
     async def cancel(self, feeds: set[str] | None = None, *, invalidate: bool = True) -> None:
         if feeds is None:

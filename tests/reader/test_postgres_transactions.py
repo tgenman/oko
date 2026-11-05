@@ -1,4 +1,5 @@
 """Repository transaction ownership against real PostgreSQL and independent readers."""
+from tests.support.publications import body_text
 from tests.support.cards import read_all_cards
 from tests.support.storage import ensure_fixture
 from contextlib import contextmanager
@@ -112,7 +113,7 @@ def test_reader_http_collection_media_settings_viewed_and_restart(postgres_url, 
         card = wait_cards(client)[0]
         item = card['id']
         material = wait_for(client, lambda: (value if (value := client.get('/api/v3/publication/' + item).json()) and any(media['url'] is not None for media in value['media']) else None))
-        assert 'Collected text' in material['text']
+        assert 'Collected text' in body_text(material)
         frame = client.get('/api/v3/navigation')
         assert frame.status_code == 200, frame.text
         storage_id = frame.headers['X-Oko-Storage-Id']

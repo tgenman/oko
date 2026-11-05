@@ -7,8 +7,6 @@ import hashlib
 import math
 import re
 from datetime import datetime, timezone
-from oko.collection.contracts import SourceManifest
-from oko.collection.external_media import expected_incomplete
 from oko.storage.reading import reading_snapshot
 from oko.storage import problem_links
 from oko.storage.reader_status import changed as status_changed
@@ -4207,13 +4205,3 @@ class Problems:
                 next_step='Проверьте журнал диагностики.',objects=[],action=None,
                 operation='producer:'+job['kind'],created_at=None,finished_at=None,outcome=None,state='current',next_at=None))
         return dict(current=current, recent=recent, count=len(current), updated_at=now)
-
-
-    @staticmethod
-    def header(raw: str | None) -> dict[str,Any]:
-        if not raw:
-            return {}
-        value=json.loads(raw)
-        manifest=SourceManifest.model_validate_json(json.dumps(value['source_manifest'])) if value.get('source_manifest') else None
-        value['expected_incomplete']=expected_incomplete(manifest)
-        return {field:value[field] for field in ('title','full','captions','reason','expected_incomplete') if field in value}

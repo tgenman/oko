@@ -20,10 +20,11 @@ def test_hidden_fallback_is_ignored_but_active_restriction_is_not(tmp_path, acti
         added = client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox')).json()
         identity = settled(client)[0]['id']
         content = client.get('/api/v3/publication/' + identity).json()
-        assert content['completeness']['state'] == ('incomplete' if active else 'complete')
-        assert 'Available text 🔵' in content['text'] and '[Source](https://example.test/source)' in content['text']
-        assert content['external_attachments'] == [] and [media for media in content['media'] if media['url'] is not None] == []
-        assert content['post_web_unavailable'] is False
+        from tests.support.publications import body_text,reasons
+        assert bool(reasons(content)) == active
+        assert 'Available text 🔵' in body_text(content) and '[Source](https://example.test/source)' in body_text(content)
+        assert not any(block['type']=='external_media' for block in content['content'].get('blocks',[]))
+        assert [media for media in content['media'] if media['url'] is not None] == []
         state = client.get('/api/v3/collection-status/' + added['feed_id']).json()['source']
         assert state['state'] == ('error' if active else 'complete')
         assert client.get('/api/v3/status/details').json()['problems']['count'] == (1 if active else 0)

@@ -14,7 +14,6 @@ from psycopg import sql
 from psycopg.conninfo import make_conninfo
 from oko.storage.store import Store as ProductionStore
 from oko.collection.adapters import ExternalKey, ExternalReference, Platform
-from oko.collection.contracts import SourceManifest
 from tests.support.legacy_source import Material, Publication
 import json
 from oko.storage.postgres_connection import PostgresConnection
@@ -75,11 +74,9 @@ class Store(ProductionStore):
 def legacy_publication(self: ProductionStore, item: str) -> Publication | None:
     row = self.db.execute("SELECT *, COALESCE(content #> '{extra,telegram,members}','[]'::jsonb)::text AS members FROM publications WHERE id = %s", (item,)).fetchone()
     if row:
-        header, text = self.publications.original(item) if 'blocks' in row['content'] else ({},'')
         reference=ExternalReference(ExternalKey(Platform(row['platform']),row['external_id']),row['url'])
-        teaser = Material(header.get('title',''),header.get('full',False),header.get('reason',''),
-            members=tuple(json.loads(row['members'])),description=header.get('description',''),
-            source_manifest=SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if header.get('source_manifest') else None) if 'blocks' in row['content'] else None
+        description=next((block['text'] for block in row['content'].get('blocks',[]) if block.get('type')=='text' and block.get('role')=='description'),'')
+        teaser = Material(row['title'],members=tuple(json.loads(row['members'])),description=description) if 'blocks' in row['content'] else None
         return Publication(row['external_id'],row['url'],row['published_at'] or 0.,teaser,tuple(json.loads(row['members'])),row['published_at'] is not None,adapter_reference=reference)
     return None
 

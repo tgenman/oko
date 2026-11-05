@@ -36,6 +36,7 @@ def test_web_full_copy_is_not_polled_and_terminal_reload_keeps_old_media(tmp_pat
         assert downloads == ['Original']
         client.post('/api/v3/materials/'+item+'/retry')
         kept=client.get('/api/v3/publication/'+item).json()
-        assert kept['text']=='Original' and kept['revision_id']==old['revision_id']
+        assert kept['content']==old['content']
+        assert any(block.get('text')=='Original' for block in kept['content']['blocks'])
         assert client.get([a for a in kept['media'] if a['url'] is not None][0]['url']).content==b'old-image'
         assert downloads==['Original']

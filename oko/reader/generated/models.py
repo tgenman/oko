@@ -16,7 +16,6 @@ from pydantic import (
 )
 from pydantic.experimental.missing_sentinel import MISSING
 
-from oko.reader.wire import DateValue as date
 from oko.reader.wire import TimestampValue as datetime
 from oko.reader.wire import UriValue as AnyUrl
 from oko.reader.wire import WireModel, boolean_constant, integer_constant
@@ -114,14 +113,6 @@ class CodexModelDescriptor(WireModel):
     reasoning_efforts: list[StrictStr]
 
 
-class CodexResultProvenance(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    fast: StrictBool
-    kind: Literal["codex"]
-    model: StrictStr = Field(..., min_length=1)
-    reasoning_effort: StrictStr = Field(..., min_length=1)
-
-
 class CollectionCounts(WireModel):
     model_config = ConfigDict(extra="forbid")
     collecting: StrictInt = Field(..., ge=0)
@@ -160,12 +151,6 @@ class CollectionRequestFailure(WireModel):
 class LastSuccessSeconds(RootModel[StrictFloat]):
     model_config = ConfigDict(allow_inf_nan=False)
     root: StrictFloat = Field(..., ge=0.0)
-
-
-class CollectionTelegramProfileUnconfigured(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    role: Literal["collection"]
-    state: Literal["unconfigured"]
 
 
 class CommandAddFeed(WireModel):
@@ -242,11 +227,6 @@ class CommandYoutubeConfigure(WireModel):
     operation: Literal["youtube_configure"]
 
 
-class CompleteContent(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    state: Literal["complete"]
-
-
 class CompleteFeedRequest(WireModel):
     model_config = ConfigDict(extra="forbid")
     token: StrictStr = Field(..., max_length=100, min_length=1)
@@ -267,11 +247,6 @@ class CompletionPreview(WireModel):
 class CompositionChangedErrorDetails(WireModel):
     model_config = ConfigDict(extra="forbid")
     preview: CompletionPreview
-
-
-class ConfigurationRef(RootModel[StrictStr]):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: StrictStr = Field(..., examples=["example"], min_length=1)
 
 
 class CredentialsClear(WireModel):
@@ -509,11 +484,6 @@ class HostNotAllowedError(WireModel):
     message: StrictStr
 
 
-class IanaTimezone(RootModel[StrictStr]):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: StrictStr = Field(..., examples=["Europe/Moscow"], min_length=1)
-
-
 class IdentityUnconfirmedErrorDetails(WireModel):
     model_config = ConfigDict(extra="forbid")
     feed_id: FeedId | None
@@ -524,21 +494,6 @@ class Importance(RootModel[Literal["normal", "elevated", "high"]]):
     root: Literal["normal", "elevated", "high"] = Field(..., examples=["normal"])
 
 
-class IncompleteContent(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    message: StrictStr
-    reason: Literal[
-        "article_unavailable",
-        "media_unavailable",
-        "captions_unavailable",
-        "source_unavailable",
-        "source_incomplete",
-        "external_attachment",
-        "post_web_unavailable",
-    ]
-    state: Literal["incomplete"]
-
-
 class InternalErrorError(WireModel):
     model_config = ConfigDict(extra="forbid")
     code: Literal["internal_error"]
@@ -546,12 +501,6 @@ class InternalErrorError(WireModel):
     details: None
     diagnostic_id: StrictStr = Field(..., min_length=1)
     message: StrictStr
-
-
-class KnownLocalModel(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    name: StrictStr = Field(..., min_length=1)
-    state: Literal["known"]
 
 
 class LifetimePolicy(RootModel[ExplicitLifetimePolicy | ClientPresenceLifetimePolicy]):
@@ -568,11 +517,6 @@ class LifetimePolicyIncompatibleError(WireModel):
     details: None
     diagnostic_id: DiagnosticId | None
     message: StrictStr
-
-
-class LocalDate(RootModel[date]):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: date = Field(..., examples=["2026-10-14"])
 
 
 class LocalProcessorCheck(WireModel):
@@ -674,12 +618,6 @@ class OriginNotAllowedError(WireModel):
     message: StrictStr
 
 
-class PersonalTelegramProfileUnconfigured(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    role: Literal["personal"]
-    state: Literal["unconfigured"]
-
-
 class PositiveDecimal(RootModel[StrictStr]):
     model_config = ConfigDict(allow_inf_nan=False)
     root: StrictStr = Field(
@@ -760,31 +698,6 @@ class ProblemResource(WireModel):
     problem_id: ProblemId
 
 
-class ProcessingCancelled(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    state: Literal["cancelled"]
-
-
-class ProcessingDisabled(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    state: Literal["disabled"]
-
-
-class ProcessingQueued(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    state: Literal["queued"]
-
-
-class ProcessingReady(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    state: Literal["ready"]
-
-
-class ProcessingRunning(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    state: Literal["running"]
-
-
 class ProcessorChoiceInvalidErrorDetails(WireModel):
     model_config = ConfigDict(extra="forbid")
     reason: StrictStr
@@ -836,8 +749,7 @@ class Point(WireModel):
 
 
 class PublicationSummary(WireModel):
-    model_config = ConfigDict(extra="allow")
-    extra: dict[str, Any] | MISSING = MISSING
+    model_config = ConfigDict(extra="forbid")
     points: list[Point] | MISSING = MISSING
 
 
@@ -919,13 +831,6 @@ class RenameFolderRequest(WireModel):
     )
 
 
-class ReplyPreview(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    author: StrictStr | None
-    source_url: StrictStr | None = Field(..., pattern="^https?://[^\\s]+$")
-    text: StrictStr
-
-
 class RequestInvalidErrorDetails(WireModel):
     model_config = ConfigDict(extra="forbid")
     violations: list[FieldViolation] = Field(..., min_length=1)
@@ -935,11 +840,6 @@ class RetrySettings(WireModel):
     model_config = ConfigDict(extra="forbid")
     initial_seconds: StrictInt = Field(..., ge=1, le=86400)
     max_seconds: StrictInt = Field(..., ge=1, le=86400)
-
-
-class RevisionId(RootModel[StrictStr]):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: StrictStr = Field(..., examples=["example"], min_length=1)
 
 
 class RuntimeDisabledError(WireModel):
@@ -1169,22 +1069,6 @@ class SubscriptionFolder(WireModel):
     title: StrictStr
 
 
-class TelegramMessageId(RootModel[StrictStr]):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: StrictStr = Field(..., examples=["123"], pattern="^[1-9][0-9]*$")
-
-
-class TelegramPeerId(RootModel[StrictStr]):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: StrictStr = Field(..., examples=["-1001234567890"], pattern="^-?[1-9][0-9]*$")
-
-
-class TelegramProfileConfiguration(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    configuration_ref: ConfigurationRef
-    label: StrictStr
-
-
 class TelegramRole(RootModel[Literal["personal", "collection"]]):
     model_config = ConfigDict(allow_inf_nan=False)
     root: Literal["personal", "collection"] = Field(..., examples=["personal"])
@@ -1194,11 +1078,6 @@ class TelegramUnconfiguredAccess(WireModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["unconfigured"]
     source_locator: StrictStr = Field(..., min_length=1)
-
-
-class TelegramUserId(RootModel[StrictStr]):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: StrictStr = Field(..., examples=["9007199254740993"], pattern="^[1-9][0-9]*$")
 
 
 class TelegramWebAccess(WireModel):
@@ -1220,24 +1099,6 @@ class Timestamp(RootModel[datetime]):
         description="RFC 3339 timestamp with a mandatory timezone offset, normalized to UTC in responses.",
         examples=["2026-10-15T10:00:00Z"],
     )
-
-
-class UnknownLocalModel(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    state: Literal["unknown"]
-
-
-class UnknownResultProvenance(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["unknown"]
-    reason: Literal["not_recorded"]
-
-
-class UnresolvedSourceReference(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    feed_id: FeedId
-    kind: Literal["unresolved"]
-    source_url: SourceUrl
 
 
 class VerificationExpiredError(WireModel):
@@ -1332,16 +1193,6 @@ class YouTubeState(WireModel):
     )
 
 
-class YoutubeSourceReference(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    captions: Literal[
-        "available", "not_requested", "pending", "running", "unavailable", "error"
-    ]
-    feed_id: FeedId
-    kind: Literal["youtube"]
-    source_url: SourceUrl
-
-
 class AccessImmutableErrorDetails(WireModel):
     model_config = ConfigDict(extra="forbid")
     feed_id: FeedId | None
@@ -1387,13 +1238,6 @@ class ApiVersionRemovedError(WireModel):
     message: StrictStr
 
 
-class Attachment(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["image", "video", "audio", "circle", "file"]
-    mime: StrictStr
-    url: MediaUrl
-
-
 class AuthorizationErrors(
     RootModel[SessionRequiredError | HostNotAllowedError | OriginNotAllowedError]
 ):
@@ -1422,10 +1266,6 @@ class CardListItem(WireModel):
     hidden: StrictBool
     id: MaterialId
     loading: StrictBool
-    post_web_unavailable: StrictBool = Field(
-        ...,
-        description="Source-confirmed restriction of the whole post through Telegram web; separate from external media.",
-    )
     preview_url: MediaUrl | None
     published_at: Timestamp | None
     source_url: SourceUrl | None = Field(
@@ -1558,37 +1398,6 @@ class CollectionSource(WireModel):
     waiting_count: StrictInt = Field(..., ge=0)
 
 
-class CollectionTelegramProfileIdentityMismatch(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    checked_at: Timestamp
-    configuration_ref: ConfigurationRef
-    message: StrictStr
-    reason: Literal["account_identity_mismatch"]
-    role: Literal["collection"]
-    state: Literal["identity_mismatch"]
-    verified_user_id: TelegramUserId
-
-
-class CollectionTelegramProfileReady(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    checked_at: Timestamp
-    configuration_ref: ConfigurationRef
-    role: Literal["collection"]
-    state: Literal["ready"]
-    verified_user_id: TelegramUserId
-
-
-class CollectionTelegramProfileUnavailable(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    checked_at: Timestamp
-    configuration_ref: ConfigurationRef
-    message: StrictStr
-    reason: WaitingReason
-    role: Literal["collection"]
-    state: Literal["unavailable"]
-    verified_user_id: TelegramUserId | None
-
-
 class CommandAcknowledgement(WireModel):
     model_config = ConfigDict(extra="forbid")
     command_id: CommandId
@@ -1719,13 +1528,6 @@ class CompositionChangedError(WireModel):
     message: StrictStr
 
 
-class ContentCompleteness(RootModel[CompleteContent | IncompleteContent]):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: CompleteContent | IncompleteContent = Field(
-        ..., discriminator="state", examples=[{"state": "complete"}]
-    )
-
-
 class CreateClientSession409Errors(
     RootModel[LifetimePolicyIncompatibleError | RuntimeStoppedError]
 ):
@@ -1833,19 +1635,6 @@ class EffectiveTheses(WireModel):
     model_config = ConfigDict(extra="forbid")
     origin: SettingOrigin
     value: StrictBool
-
-
-class ExternalAttachment(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    author: StrictStr | None
-    duration: StrictStr | None
-    kind: Literal["audio", "video", "image", "document", "unsupported"]
-    poster_url: MediaUrl | None
-    reason: Literal["public_preview_unavailable"]
-    restriction: Literal["size_limit"] | None
-    size_label: StrictStr | None
-    source_url: SourceUrl
-    title: StrictStr | None
 
 
 class FeedActivity(WireModel):
@@ -2007,41 +1796,6 @@ class IdentityUnconfirmedError(WireModel):
     message: StrictStr
 
 
-class LinkedArticle(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    error: StrictStr | None
-    media_urls: list[MediaUrl]
-    source_url: SourceUrl
-    text: StrictStr = Field(
-        ...,
-        description="Saved article Markdown. Failed resources remain safe source links with their error reason at the original position.",
-    )
-    title: StrictStr
-
-
-class LinkedContent(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    articles: list[LinkedArticle]
-    post_text: StrictStr = Field(
-        ...,
-        description="Saved post Markdown, with an inline error next to an article link when its initial load failed.",
-    )
-
-
-class LocalModel(RootModel[KnownLocalModel | UnknownLocalModel]):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: KnownLocalModel | UnknownLocalModel = Field(
-        ..., discriminator="state", examples=[{"name": "example", "state": "known"}]
-    )
-
-
-class LocalResultProvenance(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["local"]
-    model: LocalModel
-    processor_id: Literal["llamacpp"]
-
-
 class MediaUnavailableError(WireModel):
     model_config = ConfigDict(extra="forbid")
     code: Literal["media_unavailable"]
@@ -2056,44 +1810,6 @@ class NewFeedVerification(WireModel):
     candidate: FeedCandidate
     state: Literal["new"]
     verification: StrictStr = Field(..., min_length=1)
-
-
-class PersonalTelegramProfileIdentityMismatch(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    checked_at: Timestamp
-    configuration_ref: ConfigurationRef
-    message: StrictStr
-    reason: Literal["account_identity_mismatch"]
-    role: Literal["personal"]
-    state: Literal["identity_mismatch"]
-    verified_user_id: TelegramUserId
-
-
-class PersonalTelegramProfileReady(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    checked_at: Timestamp
-    configuration_ref: ConfigurationRef
-    role: Literal["personal"]
-    state: Literal["ready"]
-    verified_user_id: TelegramUserId
-
-
-class PersonalTelegramProfileUnavailable(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    checked_at: Timestamp
-    configuration_ref: ConfigurationRef
-    message: StrictStr
-    reason: WaitingReason
-    role: Literal["personal"]
-    state: Literal["unavailable"]
-    verified_user_id: TelegramUserId | None
-
-
-class ProcessingWaiting(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    reason: WaitingReason
-    retry_at: Timestamp | None
-    state: Literal["waiting"]
 
 
 class ProcessorChoiceInvalidError(WireModel):
@@ -2128,19 +1844,6 @@ class ProfileNotConfiguredErrorDetails(WireModel):
 class ProfileUnavailableErrorDetails(WireModel):
     model_config = ConfigDict(extra="forbid")
     retry_at: Timestamp | None
-
-
-class Provenance(
-    RootModel[UnknownResultProvenance | CodexResultProvenance | LocalResultProvenance]
-):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: UnknownResultProvenance | CodexResultProvenance | LocalResultProvenance = (
-        Field(
-            ...,
-            discriminator="kind",
-            examples=[{"kind": "unknown", "reason": "not_recorded"}],
-        )
-    )
 
 
 class PublicationBlock2(WireModel):
@@ -2210,33 +1913,11 @@ class PublicationDocument(WireModel):
 
 
 class PublicationFilteredContent(WireModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
     blocks: list[PublicationBlock] | MISSING = MISSING
     hidden: StrictBool | MISSING = MISSING
     reason: StrictStr | MISSING = MISSING
     removed: list[RemovedItem] | MISSING = MISSING
-
-
-class PublicationReference(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    material_id: MaterialId
-    source_url: SourceUrl
-
-
-class Result(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    hidden: StrictBool
-    provenance: Provenance
-    reason: StrictStr
-    removed: list[StrictStr]
-    text: StrictStr
-
-
-class Filter(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    error: StrictStr | None
-    result: Result | None
-    state: Literal["disabled", "pending", "processing", "ready", "error"]
 
 
 class Job(WireModel):
@@ -2281,49 +1962,39 @@ class MediaItem(WireModel):
     url: MediaUrl | None
 
 
-class Result1(WireModel):
+class PublicationResponse(WireModel):
     model_config = ConfigDict(extra="forbid")
-    points: list[StrictStr]
-    provenance: Provenance
-    references: list[list[PublicationReference]]
-
-
-class Theses(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    error: StrictStr | None
-    result: Result1 | None
-    state: Literal["disabled", "pending", "processing", "ready", "error"]
+    content: PublicationDocument
+    discovered_at: Timestamp
+    external_id: StrictStr
+    feed_id: FeedId
+    filtered_content: PublicationFilteredContent
+    id: MaterialId
+    jobs: list[Job]
+    linked_publications: list[LinkedPublication]
+    media: list[MediaItem]
+    media_ids: list[MaterialId]
+    platform: Literal[
+        "telegram", "youtube", "telegraph", "instagram", "twitter", "other_web", "rss"
+    ]
+    processing_metadata: dict[str, Any]
+    published_at: Timestamp | None
+    source_url: SourceUrl
+    status: Literal[
+        "pending_collection",
+        "pending_filtering",
+        "filter_out",
+        "pending_summary",
+        "ready",
+    ]
+    summarized_content: PublicationSummary
+    title: StrictStr
 
 
 class QuotaWindow(WireModel):
     model_config = ConfigDict(extra="forbid")
     resets_at: Timestamp | None
     used_percent: StrictFloat = Field(..., ge=0.0, le=100.0)
-
-
-class ReadingTextContent(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    availability: Literal["available"]
-    completeness: ContentCompleteness
-    description: StrictStr = Field(
-        ..., description="Source description stored separately from publication text."
-    )
-    linked_content: LinkedContent | None = Field(
-        default=None,
-        description="Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for unrelated content. Combined text remains available for processing and independent clients.",
-    )
-    loading: StrictBool
-    post_web_unavailable: StrictBool = Field(
-        default=False,
-        description="Source-confirmed restriction of the whole post through Telegram web; separate from external media.",
-    )
-    reply_preview: ReplyPreview | None
-    revision_id: RevisionId
-    text: StrictStr = Field(
-        ...,
-        description="Original stored publication text. Filtering is delivered separately for this source revision.",
-    )
-    version: StrictInt = Field(..., ge=1, le=9007199254740991)
 
 
 class RecoveryChangeSetting(WireModel):
@@ -2394,13 +2065,6 @@ class RequestInvalidError(WireModel):
     details: RequestInvalidErrorDetails
     diagnostic_id: DiagnosticId | None
     message: StrictStr
-
-
-class RssSourceReference(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    feed_id: FeedId
-    kind: Literal["rss"]
-    source_url: SourceUrl
 
 
 class SettingScopeInvalidError(WireModel):
@@ -2539,56 +2203,10 @@ class TelegramConnectResult(WireModel):
     feed_id: FeedId
 
 
-class TelegramProfileIdentityMismatch(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    checked_at: Timestamp
-    configuration_ref: ConfigurationRef
-    message: StrictStr
-    reason: Literal["account_identity_mismatch"]
-    role: TelegramRole
-    state: Literal["identity_mismatch"]
-    verified_user_id: TelegramUserId
-
-
-class TelegramProfileReady(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    checked_at: Timestamp
-    configuration_ref: ConfigurationRef
-    role: TelegramRole
-    state: Literal["ready"]
-    verified_user_id: TelegramUserId
-
-
 class TelegramProfileResource(WireModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["telegram_profile"]
     role: TelegramRole
-
-
-class TelegramProfileUnavailable(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    checked_at: Timestamp
-    configuration_ref: ConfigurationRef
-    message: StrictStr
-    reason: WaitingReason
-    role: TelegramRole
-    state: Literal["unavailable"]
-    verified_user_id: TelegramUserId | None
-
-
-class TelegramProfileUnconfigured(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    role: TelegramRole
-    state: Literal["unconfigured"]
-
-
-class TelegramSourceReference(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    access: TelegramAccess
-    feed_id: FeedId
-    kind: Literal["telegram"]
-    message_ids: list[TelegramMessageId]
-    source_url: SourceUrl
 
 
 class TelegramWebConnectRequest(WireModel):
@@ -2605,31 +2223,6 @@ class TelegramWebConnectRequest(WireModel):
         validate_default=True,
     )
     source_locator: StrictStr = Field(..., max_length=4000, min_length=1)
-
-
-class ThesesPoint(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    references: list[PublicationReference]
-    text: StrictStr
-
-
-class UnfinishedProcessingAttempt(
-    RootModel[
-        ProcessingQueued
-        | ProcessingRunning
-        | ProcessingWaiting
-        | ProcessingCancelled
-        | ProcessingDisabled
-    ]
-):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: (
-        ProcessingQueued
-        | ProcessingRunning
-        | ProcessingWaiting
-        | ProcessingCancelled
-        | ProcessingDisabled
-    ) = Field(..., discriminator="state", examples=[{"state": "queued"}])
 
 
 class VersionUnavailableError(WireModel):
@@ -2791,27 +2384,6 @@ class CollectionTarget(
     model_config = ConfigDict(allow_inf_nan=False)
     root: AllCollectionTarget | FeedCollectionTarget | FolderCollectionTarget = Field(
         ..., discriminator="scope", examples=[{"scope": "all"}]
-    )
-
-
-class CollectionTelegramProfileState(
-    RootModel[
-        CollectionTelegramProfileUnconfigured
-        | CollectionTelegramProfileReady
-        | CollectionTelegramProfileUnavailable
-        | CollectionTelegramProfileIdentityMismatch
-    ]
-):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: (
-        CollectionTelegramProfileUnconfigured
-        | CollectionTelegramProfileReady
-        | CollectionTelegramProfileUnavailable
-        | CollectionTelegramProfileIdentityMismatch
-    ) = Field(
-        ...,
-        discriminator="state",
-        examples=[{"role": "collection", "state": "unconfigured"}],
     )
 
 
@@ -2997,14 +2569,6 @@ class ExistingTelegramFeed(WireModel):
     title: StrictStr
 
 
-class FilterResult(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    hidden: StrictBool
-    provenance: Provenance
-    reason: StrictStr
-    removed: list[StrictStr]
-
-
 class FolderSettingsSnapshot(WireModel):
     model_config = ConfigDict(extra="forbid")
     effective: EffectiveSettingsValues
@@ -3095,27 +2659,6 @@ class OkoSettingsSnapshot(WireModel):
     scope: Literal["oko"]
 
 
-class PersonalTelegramProfileState(
-    RootModel[
-        PersonalTelegramProfileUnconfigured
-        | PersonalTelegramProfileReady
-        | PersonalTelegramProfileUnavailable
-        | PersonalTelegramProfileIdentityMismatch
-    ]
-):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: (
-        PersonalTelegramProfileUnconfigured
-        | PersonalTelegramProfileReady
-        | PersonalTelegramProfileUnavailable
-        | PersonalTelegramProfileIdentityMismatch
-    ) = Field(
-        ...,
-        discriminator="state",
-        examples=[{"role": "personal", "state": "unconfigured"}],
-    )
-
-
 class ProcessorUnavailableError(WireModel):
     model_config = ConfigDict(extra="forbid")
     code: Literal["processor_unavailable"]
@@ -3161,12 +2704,6 @@ class ProfileUnavailableError(WireModel):
     message: StrictStr
 
 
-class PublicationTheses(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    points: list[ThesesPoint]
-    provenance: Provenance
-
-
 class RecoveryRetryCollection(WireModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["retry_collection"]
@@ -3195,33 +2732,6 @@ class RssSubscriptionFeed(WireModel):
     public_ai: StrictBool | None
     title: StrictStr
     transport: Literal["rss"] | None
-
-
-class SourceReference(
-    RootModel[
-        UnresolvedSourceReference
-        | RssSourceReference
-        | YoutubeSourceReference
-        | TelegramSourceReference
-    ]
-):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: (
-        UnresolvedSourceReference
-        | RssSourceReference
-        | YoutubeSourceReference
-        | TelegramSourceReference
-    ) = Field(
-        ...,
-        discriminator="kind",
-        examples=[
-            {
-                "feed_id": "example",
-                "kind": "rss",
-                "source_url": "https://example.test/post/1",
-            }
-        ],
-    )
 
 
 class SourceUnavailableError(WireModel):
@@ -3282,27 +2792,6 @@ class TelegramConnectRequest(RootModel[TelegramWebConnectRequest]):
     )
 
 
-class TelegramProfileState(
-    RootModel[
-        TelegramProfileUnconfigured
-        | TelegramProfileReady
-        | TelegramProfileUnavailable
-        | TelegramProfileIdentityMismatch
-    ]
-):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: (
-        TelegramProfileUnconfigured
-        | TelegramProfileReady
-        | TelegramProfileUnavailable
-        | TelegramProfileIdentityMismatch
-    ) = Field(
-        ...,
-        discriminator="state",
-        examples=[{"role": "personal", "state": "unconfigured"}],
-    )
-
-
 class TelegramUnconfiguredSubscriptionFeed(WireModel):
     model_config = ConfigDict(extra="forbid")
     access: TelegramUnconfiguredAccess
@@ -3335,20 +2824,6 @@ class TelegramWebSubscriptionFeed(WireModel):
     original_urls: list[SourceLocator]
     public_ai: StrictBool | None
     title: StrictStr
-
-
-class ThesesAttemptState(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    attempt: UnfinishedProcessingAttempt
-    diagnostic_message: StrictStr | None
-    result: PublicationTheses | None
-
-
-class ThesesReadyState(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    attempt: ProcessingReady
-    diagnostic_message: StrictStr | None
-    result: PublicationTheses
 
 
 class UnresolvedSubscriptionFeed(WireModel):
@@ -3519,66 +2994,10 @@ class FeedHistoryState(WireModel):
     history: HistoryState
 
 
-class FilterAttemptState(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    attempt: UnfinishedProcessingAttempt
-    diagnostic_message: StrictStr | None
-    result: FilterResult | None
-
-
-class FilterReadyState(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    attempt: ProcessingReady
-    diagnostic_message: StrictStr | None
-    result: FilterResult
-
-
 class HistoryConflictErrorDetails(WireModel):
     model_config = ConfigDict(extra="forbid")
     feed_id: FeedId
     history: HistoryState
-
-
-class PublicationResponse(WireModel):
-    model_config = ConfigDict(extra="forbid")
-    availability: Literal["available", "pending"]
-    completeness: ContentCompleteness | None
-    content: PublicationDocument
-    description: StrictStr
-    discovered_at: Timestamp
-    external_attachments: list[ExternalAttachment]
-    external_id: StrictStr
-    feed_id: FeedId
-    filter: Filter
-    filtered_content: PublicationFilteredContent
-    id: MaterialId
-    jobs: list[Job]
-    linked_content: LinkedContent | None
-    linked_publications: list[LinkedPublication]
-    loading: StrictBool
-    media: list[MediaItem]
-    media_ids: list[MaterialId]
-    platform: Literal[
-        "telegram", "youtube", "telegraph", "instagram", "twitter", "other_web", "rss"
-    ]
-    post_web_unavailable: StrictBool
-    processing_metadata: dict[str, Any]
-    published_at: Timestamp | None
-    reply_preview: ReplyPreview | None
-    revision_id: RevisionId | None
-    source: SourceReference
-    source_url: SourceUrl
-    status: Literal[
-        "pending_collection",
-        "pending_filtering",
-        "filter_out",
-        "pending_summary",
-        "ready",
-    ]
-    summarized_content: PublicationSummary
-    text: StrictStr
-    theses: Theses
-    title: StrictStr
 
 
 class RecoveryIntent(
@@ -3823,48 +3242,6 @@ class NavigationFeed(WireModel):
     has_unviewed: StrictBool = Field(
         ...,
         description="True while any known publication in this feed is not viewed in Oko, including hidden, loading and unavailable publications. Independent of the visible count and Telegram read state.",
-    )
-
-
-class PreviousMedia404Errors(
-    RootModel[ResourceNotFoundError | VersionUnavailableError | MediaUnavailableError]
-):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: ResourceNotFoundError | VersionUnavailableError | MediaUnavailableError = (
-        Field(
-            ...,
-            discriminator="code",
-            examples=[
-                {
-                    "code": "resource_not_found",
-                    "command_id": None,
-                    "details": {
-                        "resource": {"kind": "material", "material_id": "example"}
-                    },
-                    "diagnostic_id": None,
-                    "message": "example",
-                }
-            ],
-        )
-    )
-
-
-class PreviousVersion404Errors(
-    RootModel[ResourceNotFoundError | VersionUnavailableError]
-):
-    model_config = ConfigDict(allow_inf_nan=False)
-    root: ResourceNotFoundError | VersionUnavailableError = Field(
-        ...,
-        discriminator="code",
-        examples=[
-            {
-                "code": "resource_not_found",
-                "command_id": None,
-                "details": {"resource": {"kind": "material", "material_id": "example"}},
-                "diagnostic_id": None,
-                "message": "example",
-            }
-        ],
     )
 
 

@@ -11,6 +11,10 @@ from tests.support.v3 import TestClient
 HEADERS={'Authorization':'Bearer test'}
 
 
+def body_text(publication):
+    return '\n\n'.join(b['text'] for b in publication['content'].get('blocks',[]) if b['type']=='text' and b['role']=='body')
+
+
 def test_rebuild_keeps_old_text_and_media_until_new_file_is_ready(tmp_path):
     phase=[0]
     started,release=threading.Event(),threading.Event()
@@ -36,9 +40,9 @@ def test_rebuild_keeps_old_text_and_media_until_new_file_is_ready(tmp_path):
             assert client.post('/api/v3/materials/'+item+'/rebuild').status_code==200
             assert started.wait(10)
             held=client.get('/api/v3/publication/'+item).json()
-            assert held['text']=='Old text' and client.get(old_url).content==b'old-image'
+            assert body_text(held)=='Old text' and client.get(old_url).content==b'old-image'
             release.set()
-            current=wait_for(client,lambda:(v if (v:=client.get('/api/v3/publication/'+item).json())['text']=='New text' else None),timeout=15)
+            current=wait_for(client,lambda:(v if body_text(v:=client.get('/api/v3/publication/'+item).json())=='New text' else None),timeout=15)
             new_url=next(m['url'] for m in current['media'] if m['url'])
             assert client.get(new_url).content==b'new-image'
         finally:
@@ -71,14 +75,14 @@ def test_rebuild_failure_keeps_old_copy_and_retries_after_restart(tmp_path):
         phase[0]=1
         assert client.post('/api/v3/materials/'+item+'/rebuild').status_code==200
         failed=wait_for(client,lambda:(v if (v:=client.get('/api/v3/publication/'+item).json()) and any(j['operation']=='rebuild' and j['status']=='pending' and j['reason_message'] for j in v['jobs']) else None))
-        assert failed['text']=='Old text' and client.get(old_url).content==b'old-image'
+        assert body_text(failed)=='Old text' and client.get(old_url).content==b'old-image'
     phase[0]=2
     offset[0]+=5
     with TestClient(create_app(tmp_path,**options),headers=HEADERS) as client:
         old=client.get('/api/v3/publication/'+item).json()
-        assert old['text']=='Old text' and client.get(old_url).content==b'old-image'
+        assert body_text(old)=='Old text' and client.get(old_url).content==b'old-image'
         release.set()
-        current=wait_for(client,lambda:(v if (v:=client.get('/api/v3/publication/'+item).json())['text']=='New text' else None),timeout=15)
+        current=wait_for(client,lambda:(v if body_text(v:=client.get('/api/v3/publication/'+item).json())=='New text' else None),timeout=15)
         new_url=next(m['url'] for m in current['media'] if m['url'])
         assert client.get(new_url).content==b'new-image'
         assert calls.count(1)>=1 and calls.count(2)>=1
@@ -119,11 +123,12 @@ def test_rebuild_shared_article_preserves_other_publication_results(tmp_path):
             client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'})
             def ready():
                 values=read_publications_for_cards(client,'/api/v3/cards')
-                return values if len(values)==2 and all(v['theses']['result'] for v in values) else None
+                return values if len(values)==2 and all(v['summarized_content'].get('points') for v in values) else None
             cards=wait_for(client,ready,timeout=20)
             a=next(c for c in cards if c['source_url'].endswith('/11'))['id']
             b=next(c for c in cards if c['source_url'].endswith('/12'))['id']
             before=client.get('/api/v3/publication/'+b).json()
+            assert '_revision' not in before['processing_metadata'] and '_revision_input' not in before['processing_metadata']
             assert 'Old shared article' in str(before['linked_publications'])
             model_count=len([r for r in calls if r.url.path=='/v1/chat/completions'])
             hold_model[0]=True
@@ -136,14 +141,14 @@ def test_rebuild_shared_article_preserves_other_publication_results(tmp_path):
             phase[0]=1
             assert client.post('/api/v3/materials/'+a+'/rebuild').status_code==200
             assert started.wait(10), [g['message'] for g in client.get('/api/v3/diagnostics').json()['groups']]
-            assert 'New Post A' not in client.get('/api/v3/publication/'+a).json()['text']
+            assert 'New Post A' not in body_text(client.get('/api/v3/publication/'+a).json())
             assert 'Old shared article' in str(client.get('/api/v3/publication/'+b).json()['linked_publications'])
             release.set()
             after=wait_for(client,lambda:(v if 'New shared article' in str((v:=client.get('/api/v3/publication/'+b).json())['linked_publications']) else None),timeout=20)
-            assert 'New Post A' in client.get('/api/v3/publication/'+a).json()['text']
+            assert 'New Post A' in body_text(client.get('/api/v3/publication/'+a).json())
             hold_model[0]=False
             model_release.set()
-            assert after['theses']['result']==before['theses']['result']
+            assert after['summarized_content']==before['summarized_content']
             assert after['processing_metadata']==before['processing_metadata']
             assert after['status']==before['status']
             assert len([r for r in calls if r.url.path=='/v1/chat/completions'])<=model_count+2
@@ -153,7 +158,7 @@ def test_rebuild_shared_article_preserves_other_publication_results(tmp_path):
     with TestClient(create_app(tmp_path,**options),headers=HEADERS) as client:
         after=client.get('/api/v3/publication/'+b).json()
         assert 'New shared article' in str(after['linked_publications'])
-        assert after['theses']['result']==before['theses']['result']
+        assert after['summarized_content']==before['summarized_content']
         assert after['processing_metadata']==before['processing_metadata']
 
 
@@ -199,7 +204,7 @@ def test_rebuild_reuses_results_only_when_its_input_is_unchanged(tmp_path):
         client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'})
         def ready():
             cards=read_publications_for_cards(client,'/api/v3/cards')
-            return cards[0] if cards and cards[0]['theses']['result'] else None
+            return cards[0] if cards and cards[0]['summarized_content'].get('points') else None
         item=wait_for(client,ready,timeout=20)['id']
         before=client.get('/api/v3/publication/'+item).json()
         count=len([r for r in calls if r.url.path=='/v1/chat/completions'])
@@ -209,13 +214,13 @@ def test_rebuild_reuses_results_only_when_its_input_is_unchanged(tmp_path):
             return value if any(j['operation']=='rebuild' and j['status']=='done' for j in value['jobs']) else None
         same=wait_for(client,rebuilt,timeout=20)
         assert same['processing_metadata']==before['processing_metadata']
-        assert same['theses']['result']==before['theses']['result']
+        assert same['summarized_content']==before['summarized_content']
         assert len([r for r in calls if r.url.path=='/v1/chat/completions'])==count
         phase[0]=1
         assert client.post('/api/v3/materials/'+item+'/rebuild').status_code==200
         def changed():
             value=client.get('/api/v3/publication/'+item).json()
-            return value if value['text']=='Changed input' and value['theses']['result'] and len([r for r in calls if r.url.path=='/v1/chat/completions'])>count else None
+            return value if body_text(value)=='Changed input' and value['summarized_content'].get('points') and len([r for r in calls if r.url.path=='/v1/chat/completions'])>count else None
         updated=wait_for(client,changed,timeout=20)
         assert updated['processing_metadata']!=before['processing_metadata']
 
@@ -243,7 +248,7 @@ def test_rebuild_preserves_source_wait_when_requested_again(tmp_path):
         with database(tmp_path) as db:
             second=db.execute("SELECT retry_at,wait_scope FROM jobs WHERE kind='rebuild' AND item=%s",(item,)).fetchone()
             assert tuple(second)==tuple(first)
-        assert client.get('/api/v3/publication/'+item).json()['text']=='Initial text'
+        assert body_text(client.get('/api/v3/publication/'+item).json())=='Initial text'
         assert calls.count(1)==1
 
 
@@ -272,7 +277,7 @@ def test_replaced_file_without_prior_job_is_cleaned_after_restart(tmp_path):
         client.portal.call(disable_prune)
         phase[0]=1
         assert client.post('/api/v3/materials/'+item+'/rebuild').status_code==200
-        wait_for(client,lambda:client.get('/api/v3/publication/'+item).json()['text']=='New text',timeout=15)
+        wait_for(client,lambda:body_text(client.get('/api/v3/publication/'+item).json())=='New text',timeout=15)
         assert old_path.exists()
         with database(tmp_path) as db:
             assert db.execute("SELECT 1 FROM jobs WHERE kind='download_media' AND item=%s AND payload->>'retired_media_key'=%s",(old['id'],old['storage_key'])).fetchone()

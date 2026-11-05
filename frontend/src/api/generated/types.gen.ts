@@ -99,12 +99,6 @@ export type ApiVersionRemovedErrorDetails = {
     api_version: string;
 };
 
-export type Attachment = {
-    kind: 'image' | 'video' | 'audio' | 'circle' | 'file';
-    mime: string;
-    url: MediaUrl;
-};
-
 export type AuthorizationErrors = ({
     code: 'session_required';
 } & SessionRequiredError) | ({
@@ -123,10 +117,6 @@ export type CardListItem = {
     hidden: boolean;
     id: MaterialId;
     loading: boolean;
-    /**
-     * Source-confirmed restriction of the whole post through Telegram web; separate from external media.
-     */
-    post_web_unavailable: boolean;
     preview_url: MediaUrl | null;
     published_at: Timestamp | null;
     /**
@@ -320,13 +310,6 @@ export type CodexProcessorState = {
     configuration: CodexConfiguration | null;
 };
 
-export type CodexResultProvenance = {
-    fast: boolean;
-    kind: 'codex';
-    model: string;
-    reasoning_effort: string;
-};
-
 export type CodexUnavailable = {
     auth: 'unknown' | 'missing' | 'chatgpt' | 'api_key' | 'unchecked';
     limits_checked: boolean;
@@ -446,49 +429,6 @@ export type CollectionTarget = ({
 } & FeedCollectionTarget) | ({
     scope: 'folder';
 } & FolderCollectionTarget);
-
-export type CollectionTelegramProfileIdentityMismatch = {
-    checked_at: Timestamp;
-    configuration_ref: ConfigurationRef;
-    message: string;
-    reason: 'account_identity_mismatch';
-    role: 'collection';
-    state: 'identity_mismatch';
-    verified_user_id: TelegramUserId;
-};
-
-export type CollectionTelegramProfileReady = {
-    checked_at: Timestamp;
-    configuration_ref: ConfigurationRef;
-    role: 'collection';
-    state: 'ready';
-    verified_user_id: TelegramUserId;
-};
-
-export type CollectionTelegramProfileState = ({
-    state: 'unconfigured';
-} & CollectionTelegramProfileUnconfigured) | ({
-    state: 'ready';
-} & CollectionTelegramProfileReady) | ({
-    state: 'unavailable';
-} & CollectionTelegramProfileUnavailable) | ({
-    state: 'identity_mismatch';
-} & CollectionTelegramProfileIdentityMismatch);
-
-export type CollectionTelegramProfileUnavailable = {
-    checked_at: Timestamp;
-    configuration_ref: ConfigurationRef;
-    message: string;
-    reason: WaitingReason;
-    role: 'collection';
-    state: 'unavailable';
-    verified_user_id: TelegramUserId | null;
-};
-
-export type CollectionTelegramProfileUnconfigured = {
-    role: 'collection';
-    state: 'unconfigured';
-};
 
 /**
  * The command was accepted. Asynchronous work may still be running; this is not evidence it completed.
@@ -767,10 +707,6 @@ export type CommandYoutubeConfigure = {
     operation: 'youtube_configure';
 };
 
-export type CompleteContent = {
-    state: 'complete';
-};
-
 export type CompleteFeedRequest = {
     token: string;
 };
@@ -802,14 +738,6 @@ export type CompositionChangedError = {
 export type CompositionChangedErrorDetails = {
     preview: CompletionPreview;
 };
-
-export type ConfigurationRef = string;
-
-export type ContentCompleteness = ({
-    state: 'complete';
-} & CompleteContent) | ({
-    state: 'incomplete';
-} & IncompleteContent);
 
 export type CreateClientSession409Errors = ({
     code: 'lifetime_policy_incompatible';
@@ -1106,18 +1034,6 @@ export type ExplicitLifetimePolicy = {
     kind: 'explicit';
 };
 
-export type ExternalAttachment = {
-    author: string | null;
-    duration: string | null;
-    kind: 'audio' | 'video' | 'image' | 'document' | 'unsupported';
-    poster_url: MediaUrl | null;
-    reason: 'public_preview_unavailable';
-    restriction: 'size_limit' | null;
-    size_label: string | null;
-    source_url: SourceUrl;
-    title: string | null;
-};
-
 export type FeedActivity = {
     /**
      * Time this subscription was created in Oko. Null when the date is unknown.
@@ -1227,25 +1143,6 @@ export type FieldViolation = {
     location: 'body' | 'path' | 'query' | 'header';
     message: string;
     segments: Array<string | number>;
-};
-
-export type FilterAttemptState = {
-    attempt: UnfinishedProcessingAttempt;
-    diagnostic_message: string | null;
-    result: FilterResult | null;
-};
-
-export type FilterReadyState = {
-    attempt: ProcessingReady;
-    diagnostic_message: string | null;
-    result: FilterResult;
-};
-
-export type FilterResult = {
-    hidden: boolean;
-    provenance: Provenance;
-    reason: string;
-    removed: Array<string>;
 };
 
 export type FinishedProblem = {
@@ -1479,8 +1376,6 @@ export type HostNotAllowedError = {
     message: string;
 };
 
-export type IanaTimezone = string;
-
 export type IdentityUnconfirmedError = {
     code: 'identity_unconfirmed';
     command_id: CommandId | null;
@@ -1501,23 +1396,12 @@ export type Image404Errors = ({
 
 export type Importance = 'normal' | 'elevated' | 'high';
 
-export type IncompleteContent = {
-    message: string;
-    reason: 'article_unavailable' | 'media_unavailable' | 'captions_unavailable' | 'source_unavailable' | 'source_incomplete' | 'external_attachment' | 'post_web_unavailable';
-    state: 'incomplete';
-};
-
 export type InternalErrorError = {
     code: 'internal_error';
     command_id: CommandId | null;
     details: null;
     diagnostic_id: string;
     message: string;
-};
-
-export type KnownLocalModel = {
-    name: string;
-    state: 'known';
 };
 
 export type LifetimePolicy = ({
@@ -1533,33 +1417,6 @@ export type LifetimePolicyIncompatibleError = {
     diagnostic_id: string | null;
     message: string;
 };
-
-export type LinkedArticle = {
-    error: string | null;
-    media_urls: Array<MediaUrl>;
-    source_url: SourceUrl;
-    /**
-     * Saved article Markdown. Failed resources remain safe source links with their error reason at the original position.
-     */
-    text: string;
-    title: string;
-};
-
-export type LinkedContent = {
-    articles: Array<LinkedArticle>;
-    /**
-     * Saved post Markdown, with an inline error next to an article link when its initial load failed.
-     */
-    post_text: string;
-};
-
-export type LocalDate = string;
-
-export type LocalModel = ({
-    state: 'known';
-} & KnownLocalModel) | ({
-    state: 'unknown';
-} & UnknownLocalModel);
 
 export type LocalProcessorCheck = {
     locality: 'local' | 'remote';
@@ -1605,12 +1462,6 @@ export type LocalProcessorConfigurationRequest = {
 
 export type LocalProcessorState = {
     configuration: LocalProcessorConfiguration | null;
-};
-
-export type LocalResultProvenance = {
-    kind: 'local';
-    model: LocalModel;
-    processor_id: 'llamacpp';
 };
 
 export type MaterialId = string;
@@ -1698,68 +1549,11 @@ export type OriginNotAllowedError = {
     message: string;
 };
 
-export type PersonalTelegramProfileIdentityMismatch = {
-    checked_at: Timestamp;
-    configuration_ref: ConfigurationRef;
-    message: string;
-    reason: 'account_identity_mismatch';
-    role: 'personal';
-    state: 'identity_mismatch';
-    verified_user_id: TelegramUserId;
-};
-
-export type PersonalTelegramProfileReady = {
-    checked_at: Timestamp;
-    configuration_ref: ConfigurationRef;
-    role: 'personal';
-    state: 'ready';
-    verified_user_id: TelegramUserId;
-};
-
-export type PersonalTelegramProfileState = ({
-    state: 'unconfigured';
-} & PersonalTelegramProfileUnconfigured) | ({
-    state: 'ready';
-} & PersonalTelegramProfileReady) | ({
-    state: 'unavailable';
-} & PersonalTelegramProfileUnavailable) | ({
-    state: 'identity_mismatch';
-} & PersonalTelegramProfileIdentityMismatch);
-
-export type PersonalTelegramProfileUnavailable = {
-    checked_at: Timestamp;
-    configuration_ref: ConfigurationRef;
-    message: string;
-    reason: WaitingReason;
-    role: 'personal';
-    state: 'unavailable';
-    verified_user_id: TelegramUserId | null;
-};
-
-export type PersonalTelegramProfileUnconfigured = {
-    role: 'personal';
-    state: 'unconfigured';
-};
-
 export type PositiveDecimal = string;
 
 export type PowerRequest = {
     enabled: boolean;
 };
-
-export type PreviousMedia404Errors = ({
-    code: 'resource_not_found';
-} & ResourceNotFoundError) | ({
-    code: 'version_unavailable';
-} & VersionUnavailableError) | ({
-    code: 'media_unavailable';
-} & MediaUnavailableError);
-
-export type PreviousVersion404Errors = ({
-    code: 'resource_not_found';
-} & ResourceNotFoundError) | ({
-    code: 'version_unavailable';
-} & VersionUnavailableError);
 
 export type Problem = CurrentProblem | RetryingProblem | FinishedProblem;
 
@@ -1777,32 +1571,6 @@ export type ProblemSnapshot = {
     current: Array<CurrentProblem | RetryingProblem>;
     recent: Array<FinishedProblem>;
     updated_at: Timestamp;
-};
-
-export type ProcessingCancelled = {
-    state: 'cancelled';
-};
-
-export type ProcessingDisabled = {
-    state: 'disabled';
-};
-
-export type ProcessingQueued = {
-    state: 'queued';
-};
-
-export type ProcessingReady = {
-    state: 'ready';
-};
-
-export type ProcessingRunning = {
-    state: 'running';
-};
-
-export type ProcessingWaiting = {
-    reason: WaitingReason;
-    retry_at: Timestamp | null;
-    state: 'waiting';
 };
 
 export type ProcessorChoiceInvalidError = {
@@ -1886,14 +1654,6 @@ export type ProfileUnavailableErrorDetails = {
     retry_at: Timestamp | null;
 };
 
-export type Provenance = ({
-    kind: 'unknown';
-} & UnknownResultProvenance) | ({
-    kind: 'codex';
-} & CodexResultProvenance) | ({
-    kind: 'local';
-} & LocalResultProvenance);
-
 export type PublicationBlock = {
     role: 'body' | 'description';
     text: string;
@@ -1951,34 +1711,13 @@ export type PublicationFilteredContent = {
         text: string;
         [key: string]: unknown;
     }>;
-    [key: string]: unknown;
-};
-
-export type PublicationReference = {
-    material_id: MaterialId;
-    source_url: SourceUrl;
 };
 
 export type PublicationResponse = {
-    availability: 'available' | 'pending';
-    completeness: ContentCompleteness | null;
     content: PublicationDocument;
-    description: string;
     discovered_at: Timestamp;
-    external_attachments: Array<ExternalAttachment>;
     external_id: string;
     feed_id: FeedId;
-    filter: {
-        error: string | null;
-        result: {
-            hidden: boolean;
-            provenance: Provenance;
-            reason: string;
-            removed: Array<string>;
-            text: string;
-        } | null;
-        state: 'disabled' | 'pending' | 'processing' | 'ready' | 'error';
-    };
     filtered_content: PublicationFilteredContent;
     id: MaterialId;
     jobs: Array<{
@@ -1989,7 +1728,6 @@ export type PublicationResponse = {
         retry_at: Timestamp | null;
         status: 'blocked' | 'pending' | 'running' | 'done' | 'failed' | 'unavailable' | 'cancelled';
     }>;
-    linked_content: LinkedContent | null;
     linked_publications: Array<{
         content: PublicationDocument;
         id: MaterialId;
@@ -1997,7 +1735,6 @@ export type PublicationResponse = {
         status: 'pending_collection' | 'pending_filtering' | 'filter_out' | 'pending_summary' | 'ready';
         title: string;
     }>;
-    loading: boolean;
     media: Array<{
         id: MaterialId;
         kind: 'image' | 'video' | 'audio' | 'circle' | 'file';
@@ -2013,45 +1750,22 @@ export type PublicationResponse = {
     }>;
     media_ids: Array<MaterialId>;
     platform: 'telegram' | 'youtube' | 'telegraph' | 'instagram' | 'twitter' | 'other_web' | 'rss';
-    post_web_unavailable: boolean;
     processing_metadata: {
         [key: string]: unknown;
     };
     published_at: Timestamp | null;
-    reply_preview: ReplyPreview | null;
-    revision_id: RevisionId | null;
-    source: SourceReference;
     source_url: SourceUrl;
     status: 'pending_collection' | 'pending_filtering' | 'filter_out' | 'pending_summary' | 'ready';
     summarized_content: PublicationSummary;
-    text: string;
-    theses: {
-        error: string | null;
-        result: {
-            points: Array<string>;
-            provenance: Provenance;
-            references: Array<Array<PublicationReference>>;
-        } | null;
-        state: 'disabled' | 'pending' | 'processing' | 'ready' | 'error';
-    };
     title: string;
 };
 
 export type PublicationSummary = {
-    extra?: {
-        [key: string]: unknown;
-    };
     points?: Array<{
         source_publication_ids: Array<MaterialId>;
         text: string;
         [key: string]: unknown;
     }>;
-    [key: string]: unknown;
-};
-
-export type PublicationTheses = {
-    points: Array<ThesesPoint>;
-    provenance: Provenance;
 };
 
 export type QuotaWindow = {
@@ -2076,31 +1790,6 @@ export type ReadingFolder = {
 };
 
 export type ReadingStorageId = string;
-
-export type ReadingTextContent = {
-    availability: 'available';
-    completeness: ContentCompleteness;
-    /**
-     * Source description stored separately from publication text.
-     */
-    description: string;
-    /**
-     * Saved Telegram post and directly linked Telegraph articles, belonging to this revision. Null for unrelated content. Combined text remains available for processing and independent clients.
-     */
-    linked_content?: LinkedContent | null;
-    loading: boolean;
-    /**
-     * Source-confirmed restriction of the whole post through Telegram web; separate from external media.
-     */
-    post_web_unavailable?: boolean;
-    reply_preview: ReplyPreview | null;
-    revision_id: RevisionId;
-    /**
-     * Original stored publication text. Filtering is delivered separately for this source revision.
-     */
-    text: string;
-    version: number;
-};
 
 export type RecoveryChangeSetting = {
     keys: Array<SettingKey>;
@@ -2200,12 +1889,6 @@ export type RenameFolderRequest = {
     title: string;
 };
 
-export type ReplyPreview = {
-    author: string | null;
-    source_url: string | null;
-    text: string;
-};
-
 export type RequestInvalidError = {
     code: 'request_invalid';
     command_id: CommandId | null;
@@ -2256,14 +1939,6 @@ export type RetryingProblem = {
      * Human-readable subject explanation; clients branch on code, not this text.
      */
     title: string;
-};
-
-export type RevisionId = string;
-
-export type RssSourceReference = {
-    feed_id: FeedId;
-    kind: 'rss';
-    source_url: SourceUrl;
 };
 
 export type RssSubscriptionFeed = {
@@ -2427,16 +2102,6 @@ export type SourceIdentityConflictErrorDetails = {
  */
 export type SourceLocator = string;
 
-export type SourceReference = ({
-    kind: 'unresolved';
-} & UnresolvedSourceReference) | ({
-    kind: 'rss';
-} & RssSourceReference) | ({
-    kind: 'youtube';
-} & YoutubeSourceReference) | ({
-    kind: 'telegram';
-} & TelegramSourceReference);
-
 export type SourceState = {
     changes: string | null;
     feed_id: FeedId;
@@ -2575,72 +2240,12 @@ export type TelegramConnectResult = {
     feed_id: FeedId;
 };
 
-export type TelegramMessageId = string;
-
-export type TelegramPeerId = string;
-
-export type TelegramProfileConfiguration = {
-    configuration_ref: ConfigurationRef;
-    label: string;
-};
-
-export type TelegramProfileIdentityMismatch = {
-    checked_at: Timestamp;
-    configuration_ref: ConfigurationRef;
-    message: string;
-    reason: 'account_identity_mismatch';
-    role: TelegramRole;
-    state: 'identity_mismatch';
-    verified_user_id: TelegramUserId;
-};
-
-export type TelegramProfileReady = {
-    checked_at: Timestamp;
-    configuration_ref: ConfigurationRef;
-    role: TelegramRole;
-    state: 'ready';
-    verified_user_id: TelegramUserId;
-};
-
 export type TelegramProfileResource = {
     kind: 'telegram_profile';
     role: TelegramRole;
 };
 
-export type TelegramProfileState = ({
-    state: 'unconfigured';
-} & TelegramProfileUnconfigured) | ({
-    state: 'ready';
-} & TelegramProfileReady) | ({
-    state: 'unavailable';
-} & TelegramProfileUnavailable) | ({
-    state: 'identity_mismatch';
-} & TelegramProfileIdentityMismatch);
-
-export type TelegramProfileUnavailable = {
-    checked_at: Timestamp;
-    configuration_ref: ConfigurationRef;
-    message: string;
-    reason: WaitingReason;
-    role: TelegramRole;
-    state: 'unavailable';
-    verified_user_id: TelegramUserId | null;
-};
-
-export type TelegramProfileUnconfigured = {
-    role: TelegramRole;
-    state: 'unconfigured';
-};
-
 export type TelegramRole = 'personal' | 'collection';
-
-export type TelegramSourceReference = {
-    access: TelegramAccess;
-    feed_id: FeedId;
-    kind: 'telegram';
-    message_ids: Array<TelegramMessageId>;
-    source_url: SourceUrl;
-};
 
 export type TelegramUnconfiguredAccess = {
     kind: 'unconfigured';
@@ -2662,8 +2267,6 @@ export type TelegramUnconfiguredSubscriptionFeed = {
     public_ai: boolean | null;
     title: string;
 };
-
-export type TelegramUserId = string;
 
 export type TelegramWebAccess = {
     kind: 'web';
@@ -2705,54 +2308,10 @@ export type TelegramWebSubscriptionFeed = {
     title: string;
 };
 
-export type ThesesAttemptState = {
-    attempt: UnfinishedProcessingAttempt;
-    diagnostic_message: string | null;
-    result: PublicationTheses | null;
-};
-
-export type ThesesPoint = {
-    references: Array<PublicationReference>;
-    text: string;
-};
-
-export type ThesesReadyState = {
-    attempt: ProcessingReady;
-    diagnostic_message: string | null;
-    result: PublicationTheses;
-};
-
 /**
  * RFC 3339 timestamp with a mandatory timezone offset, normalized to UTC in responses.
  */
 export type Timestamp = string;
-
-export type UnfinishedProcessingAttempt = ({
-    state: 'queued';
-} & ProcessingQueued) | ({
-    state: 'running';
-} & ProcessingRunning) | ({
-    state: 'waiting';
-} & ProcessingWaiting) | ({
-    state: 'cancelled';
-} & ProcessingCancelled) | ({
-    state: 'disabled';
-} & ProcessingDisabled);
-
-export type UnknownLocalModel = {
-    state: 'unknown';
-};
-
-export type UnknownResultProvenance = {
-    kind: 'unknown';
-    reason: 'not_recorded';
-};
-
-export type UnresolvedSourceReference = {
-    feed_id: FeedId;
-    kind: 'unresolved';
-    source_url: SourceUrl;
-};
 
 export type UnresolvedSubscriptionFeed = {
     /**
@@ -2858,13 +2417,6 @@ export type YouTubeState = {
      * Number of consecutive limits, or null when the legacy value is unknown.
      */
     strikes: number | null;
-};
-
-export type YoutubeSourceReference = {
-    captions: 'available' | 'not_requested' | 'pending' | 'running' | 'unavailable' | 'error';
-    feed_id: FeedId;
-    kind: 'youtube';
-    source_url: SourceUrl;
 };
 
 export type YoutubeSubscriptionFeed = {

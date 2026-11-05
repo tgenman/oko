@@ -65,14 +65,13 @@ def test_new_input_rejects_old_success_and_old_error_without_harming_replacement
         await worker.tick()
         await asyncio.wait_for(entered.wait(),2)
         old=dict(store.db.execute("SELECT * FROM jobs WHERE kind='filter'").fetchone())
-        old_revision=saved(store,item)['processing_metadata']['_revision']
         source=StructuredSource(None)
         with store.jobs.transaction(execution._live):
             job_for_collection=running_collection_job(store,'fetch',item)
             _,effects=collection_service(execution.require_store).collected_content(item,source.describe(store.publication(item),Material('Title','New input')).adapter_content)
             apply_simulated_collection(store,effects,job=job_for_collection)
         changed=saved(store,item)
-        assert changed['processing_metadata']['_revision']!=old_revision
+        assert '_revision' not in changed['processing_metadata']
         with store.jobs.transaction(execution._live):
             worker.service.reconcile()
         replacement=dict(store.db.execute("SELECT * FROM jobs WHERE kind='filter'").fetchone())
@@ -231,7 +230,7 @@ def test_collection_failure_does_not_stop_filter_and_summary_crons(tmp_path):
         store.db.execute("UPDATE feeds SET cursor='' WHERE id='fixture'")
     store.db.close()
     with TestClient(create_app(tmp_path,source=FailedSource(),token='test',api_only=True,ai_transport=transport([],theses=True)),headers=HEADERS) as client:
-        wait_for(client,lambda:client.get('/api/v3/publication/'+item).json()['theses']['result'])
+        wait_for(client,lambda:client.get('/api/v3/publication/'+item).json()['summarized_content'].get('points'))
         def stopped_source():
             with database(tmp_path) as db:
                 return db.execute("SELECT status FROM jobs WHERE kind='discover'").fetchone()[0]=='failed'
@@ -329,13 +328,13 @@ def test_missing_subtitle_repair_is_rediscovered_after_restart(tmp_path):
     try:
         with store.db:
             content = store.db.execute('SELECT content FROM publications WHERE id=%s', (item,)).fetchone()[0]
-            content['extra']['youtube'] = {'captions':'available','captions_digest':'missing'}
-            content['blocks'].append(dict(type='media',role='subtitles',media_id='missing-caption'))
+            content['extra']['youtube'] = {}
+            content['blocks'].append(dict(type='media',role='subtitles',media_id='missing-caption',source_url=None,publication_url=None))
             store.db.execute("UPDATE publications SET platform='youtube',content=%s WHERE id=%s", (json.dumps(content),item))
             store.db.execute("""INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status,storage_key)
                 VALUES ('missing-caption',%s,'youtube:subtitles','https://example.test/captions','captions.txt','ready','missing-caption.txt')""", (item,))
         with read_snapshot(store.db):
-            store.original(item)
+            youtube_media.subtitle_path(store,'missing-caption')
             assert item in store.processing._repairs
         store.db.close()
         store = Store(tmp_path, lambda _: None)
@@ -483,7 +482,7 @@ def test_publication_title_wins_after_content_migration(tmp_path):
     reopened=Store(tmp_path,lambda _:None)
     try:
         reopened.processing.recover()
-        assert reopened.original(item)[0]['title']=='Title'
+        assert reopened.db.execute('SELECT title FROM publications WHERE id=%s',(item,)).fetchone()[0]=='Title'
         assert reopened.filters.read(item)['status']=='done'
         assert reopened.processing.theses.read(item) is not None
     finally:

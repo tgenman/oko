@@ -1,4 +1,5 @@
 """Manual refresh through the reader HTTP boundary and synthetic sources."""
+from tests.support.publications import body_text,summary
 from tests.support.cards import read_all_cards
 import httpx
 import pytest
@@ -55,14 +56,14 @@ def test_refresh_preserves_successfully_collected_copy_without_recollecting(tmp_
     with TestClient(create_app(tmp_path,token='test',api_only=True,source=source),headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
         cards=wait_for(client,lambda:(cards if len(cards:=read_all_cards(client, '/api/v3/cards'))==2 and all(not c['loading'] for c in cards) else None))
-        copies={c['id']:client.get('/api/v3/publication/'+c['id']).json()['text'] for c in cards}
+        copies={c['id']:body_text(client.get('/api/v3/publication/'+c['id']).json()) for c in cards}
         assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'fixture'}).status_code==200
         wait_for(client,lambda:source.cursors==[None,'2'])
         time.sleep(.12)
         assert source.calls=={'1':1,'2':1}
         assert source.cursors==[None,'2']
         for item,text in copies.items():
-            assert client.get('/api/v3/publication/'+item).json()['text']==text
+            assert body_text(client.get('/api/v3/publication/'+item).json())==text
         assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'fixture'}).status_code==200
         time.sleep(.12)
         assert source.calls=={'1':1,'2':1}
@@ -89,11 +90,11 @@ def test_refresh_retries_failed_theses_but_keeps_ready_results(tmp_path):
         client.patch('/api/v3/settings/oko/global',json={'theses':True,'prompt_filters':''})
         cards=wait_for(client,lambda:(c if len(c:=read_all_cards(client, '/api/v3/cards'))==3 else None))
         wait_for(client,lambda:len(set(model.calls))==3)
-        wait_for(client,lambda:sum(client.get('/api/v3/publication/'+c['id']).json()['theses']['state']=='ready' for c in cards)==2)
+        wait_for(client,lambda:sum(summary(client.get('/api/v3/publication/'+c['id']).json()) is not None for c in cards)==2)
         old=list(model.calls)
         model.failed=False
         assert client.post('/api/v3/collect',json={'scope':'feed','feed_id':'fixture'}).status_code==200
-        wait_for(client,lambda:all(client.get('/api/v3/publication/'+c['id']).json()['theses']['state']=='ready' for c in cards))
+        wait_for(client,lambda:all(summary(client.get('/api/v3/publication/'+c['id']).json()) is not None for c in cards))
         assert len(model.calls)==len(old)+1
         assert model.calls[-1]==old[0]
 

@@ -1,4 +1,5 @@
 """Runtime invariants retained after removing the obsolete file migration tools."""
+from tests.support.publications import body_text,summary
 from tests.support.cards import read_all_cards
 import asyncio
 import json
@@ -41,10 +42,10 @@ def test_postgres_runs_all_workers_http_media_and_restart(tmp_path):
     with TestClient(app,headers={'Authorization':'Bearer test'}) as client:
         presence(client)
         assert client.post('/api/v3/collect').status_code==200
-        cards=wait_for(client,lambda: rows if len(rows:=read_all_cards(client, '/api/v3/cards'))==2 and all(client.get('/api/v3/publication/'+row['id']).json()['theses']['result'] for row in rows) else None)
+        cards=wait_for(client,lambda: rows if len(rows:=read_all_cards(client, '/api/v3/cards'))==2 and all(summary(client.get('/api/v3/publication/'+row['id']).json()) for row in rows) else None)
         newest=next(card for card in cards if card['id']!=item)
         material=wait_for(client,lambda: value if (value := client.get('/api/v3/publication/'+newest['id']).json()) and any(media['url'] is not None for media in value['media']) else None)
-        assert 'New useful text' in material['text']
+        assert 'New useful text' in body_text(material)
         assert client.get([media for media in material['media'] if media['url'] is not None][0]['url']).content==b'synthetic-image'
         assert client.get('/api/v3/status').status_code==200
     with database(target) as db:
@@ -58,7 +59,7 @@ def test_postgres_runs_all_workers_http_media_and_restart(tmp_path):
     with TestClient(create_app(target,token='test',api_only=True,ai_transport=httpx.MockTransport(model)),headers={'Authorization':'Bearer test'}) as client:
         restored=read_all_cards(client, '/api/v3/cards')
         assert {card['id'] for card in restored}=={card['id'] for card in cards}
-        assert all(client.get('/api/v3/publication/'+card['id']).json()['theses']['result'] for card in restored)
+        assert all(summary(client.get('/api/v3/publication/'+card['id']).json()) for card in restored)
         reopened=client.get('/api/v3/publication/'+newest['id']).json()
         assert client.get([media for media in reopened['media'] if media['url'] is not None][0]['url']).content==b'synthetic-image'
     assert len(calls)==generated

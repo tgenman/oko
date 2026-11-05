@@ -37,15 +37,13 @@ def test_whole_post_restriction_is_saved_as_unavailable_without_ai(tmp_path):
             assert job and tuple(job)==('pending_collection','unavailable','post-web-unavailable')
         assert client.get('/api/v3/status/details').json()['problems']['count'] > 0
         assert material['status']=='pending_collection'
-        assert 'недоступна' in material['completeness']['message'].lower()
-        assert material['text'] == ''
-        assert material['external_attachments'] == []
+        assert not any(block.get('text') for block in material['content'].get('blocks',[]) if block['type']=='text')
+        assert not any(block['type']=='external_media' for block in material['content'].get('blocks',[]))
         assert [media for media in material['media'] if media['url'] is not None] == []
         frame = client.get('/api/v3/publication/'+cards[0]['id']).json()
         assert any(job['operation']=='fetch' and job['status']=='unavailable' for job in frame['jobs'])
         assert cards[0]['title'] == 'Пост доступен только в Telegram'
-        assert material['filter']['state'] == 'disabled'
-        assert material['theses']['state'] == 'disabled'
+        assert not any(job['operation'] in ('filter','theses') and job['status'] in ('pending','running') for job in material['jobs'])
         assert codex.inputs == []
         baseline = len(fetches)
         client.post('/api/v3/collect'); settled(client)
@@ -70,11 +68,12 @@ def test_previous_local_text_is_kept_when_whole_post_becomes_restricted(tmp_path
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
         url = '/api/v3/materials/'+settled(client)[0]['id']
-        assert client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['text'] == 'Saved own text'
+        from tests.support.publications import body_text
+        assert body_text(client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()) == 'Saved own text'
         restricted[0] = True
         client.post(url+'/retry'); settled(client)
         content = client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()
-        assert content['text'] == 'Saved own text'
+        assert body_text(content) == 'Saved own text'
         assert content['status']!='pending_collection'
         assert 'changed' not in content and 'source_deleted' not in content
         assert client.get('/api/v3/status/details').json()['problems']['count'] == 0

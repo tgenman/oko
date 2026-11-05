@@ -46,7 +46,7 @@ def test_delete_failure_is_visible_and_retried_without_content_in_errors(tmp_pat
         presence(client, 'a')
         for _ in range(100):
             cards = read_all_cards(client, '/api/v3/cards')
-            if len(cards) == 3 and all((client.get('/api/v3/publication/' + card['id']).json()['availability'] == 'available') for card in cards):
+            if len(cards) == 3 and all((client.get('/api/v3/publication/' + card['id']).json()['content'].get('blocks') is not None) for card in cards):
                 break
             time.sleep(.02)
         item = cards[0]['id']
@@ -98,7 +98,7 @@ def test_restart_keeps_failed_deletion_retryable_and_blocks_collection(tmp_path:
         presence(client, 'a')
         for _ in range(100):
             cards = read_all_cards(client, '/api/v3/cards')
-            if len(cards) == 3 and all((client.get('/api/v3/publication/' + c['id']).json()['availability'] == 'available') for c in cards):
+            if len(cards) == 3 and all((client.get('/api/v3/publication/' + c['id']).json()['content'].get('blocks') is not None) for c in cards):
                 break
             time.sleep(.02)
         item = cards[0]['id']
@@ -132,7 +132,7 @@ def test_restart_finishes_cleanup_after_files_were_removed(tmp_path: Path):
     with TestClient(create_app(tmp_path,**kwargs),headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global',json={'theses':False})
         presence(client,'reader')
-        item=wait_for(client,lambda: next((card['id'] for card in read_all_cards(client,'/api/v3/cards') if client.get('/api/v3/publication/'+card['id']).json()['availability']=='available'),None))
+        item=wait_for(client,lambda: next((card['id'] for card in read_all_cards(client,'/api/v3/cards') if client.get('/api/v3/publication/'+card['id']).json()['content'].get('blocks') is not None),None))
         assert client.post('/api/v3/materials/'+item+'/viewed').status_code==200
         wait_for(client,lambda: any(problem['code']=='feed_delete_failed' for problem in client.get('/api/v3/status/details').json()['problems']['current']))
         with database(tmp_path) as db:

@@ -1,4 +1,5 @@
 """Forward-only web restrictions keep metadata as an explicitly incomplete excerpt."""
+from tests.support.publications import body_text,reasons
 import time
 import httpx
 import pytest
@@ -19,8 +20,8 @@ def test_metadata_does_not_replace_a_genuine_full_local_copy(tmp_path):
         path='/api/v3/materials/'+settled(client)[0]['id']
         restricted[0]=True;client.post(path+'/retry');settled(client)
         content=client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json()
-        assert content['text']=='Complete original body'
-        assert not content.get('post_web_unavailable')
+        assert body_text(content)=='Complete original body'
+        assert not any(job['operation']=='fetch' and job['reason_code']=='post-web-unavailable' for job in content['jobs'])
         assert 'previous_versions' not in content and 'changed' not in content
 
 
@@ -45,13 +46,13 @@ def test_restricted_source_preserves_legacy_conflicting_quote(tmp_path):
             content['extra'].setdefault('_reader',{})['reply_preview']=dict(text='Legacy quote',author=None,source_url=None)
             db.execute('UPDATE publications SET content=%s WHERE id=%s',(json.dumps(content),item))
         path='/api/v3/materials/'+item
-        assert client.get('/api/v3/publication/'+item).json()['reply_preview']['text']=='Block quote'
+        assert next(b for b in client.get('/api/v3/publication/'+item).json()['content']['blocks'] if b['type']=='quote')['text']=='Block quote'
         restricted[0]=True
         client.post(path+'/retry')
         settled(client)
         saved=client.get('/api/v3/publication/'+item).json()
-        assert not saved.get('post_web_unavailable')
-        assert saved['reply_preview']['text']=='Block quote'
+        assert 'post_web_unavailable' not in saved
+        assert next(b for b in saved['content']['blocks'] if b['type']=='quote')['text']=='Block quote'
 
 
 def test_preview_rate_limit_keeps_runtime_wait_and_saved_fragment(tmp_path):
@@ -70,7 +71,7 @@ def test_preview_rate_limit_keeps_runtime_wait_and_saved_fragment(tmp_path):
             if source['state']=='waiting':break
             time.sleep(.02)
         assert source['state']=='waiting' and source['operation']['retry_at']
-        assert 'Saved fragment' in client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json()['text']
+        assert 'Saved fragment' in body_text(client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json())
         assert 'HTTP 429' not in str(client.get(path.replace('/api/v3/materials/', '/api/v3/publication/')).json()['content']['blocks'])
         from tests.support.storage import database
         item=path.rsplit('/',1)[-1]
@@ -78,7 +79,7 @@ def test_preview_rate_limit_keeps_runtime_wait_and_saved_fragment(tmp_path):
             job=db.execute("SELECT reason_message FROM jobs WHERE kind='fetch' AND item=%s",(item,)).fetchone()
             assert db.execute('SELECT status FROM publications WHERE id=%s',(item,)).fetchone()[0]=='pending_collection'
         assert job and job['reason_message']
-        assert job['reason_message'] in client.get('/api/v3/publication/'+item).json()['completeness']['message']
+        assert job['reason_message'] in reasons(client.get('/api/v3/publication/'+item).json())
         import json
         old_reason=job['reason_message']
         with database(tmp_path) as db:
@@ -90,7 +91,7 @@ def test_preview_rate_limit_keeps_runtime_wait_and_saved_fragment(tmp_path):
         with database(tmp_path) as db:
             job=db.execute("SELECT reason_message,wait_scope,retry_at FROM jobs WHERE kind='fetch' AND item=%s",(item,)).fetchone()
         assert job and job['reason_message'] is None and job['wait_scope'] and job['retry_at']
-        assert old_reason not in client.get('/api/v3/publication/'+item).json()['completeness']['message']
+        assert old_reason not in reasons(client.get('/api/v3/publication/'+item).json())
 
 
 def test_saved_preview_is_readable_while_publication_collection_is_pending(tmp_path):
@@ -110,7 +111,7 @@ def test_saved_preview_is_readable_while_publication_collection_is_pending(tmp_p
             db.execute("UPDATE publications SET status='pending_collection' WHERE id=%s",(item,))
         result=client.get('/api/v3/publication/'+item)
         assert result.status_code==200
-        assert 'Saved partial text' in result.json()['text']
+        assert 'Saved partial text' in body_text(result.json())
         from tests.support.cards import read_all_cards
         card=next(card for card in read_all_cards(client,'/api/v3/cards') if card['id']==item)
         assert card['title']!='Материал загружается'

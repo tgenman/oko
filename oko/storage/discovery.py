@@ -1,5 +1,6 @@
 """Persistence of a discovered publication page in the caller's transaction."""
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Any
 import json
 
@@ -14,16 +15,17 @@ from oko.storage.publications import Publications
 from oko.storage.subscriptions import SubscriptionRepository
 from oko.storage.reader_versions import ReaderVersions
 from oko.storage.collection_effects import CollectionEffectCapture
+from oko.storage.history_publication import loaded as history_loaded
 
 
 class DiscoveryRepository:
     def __init__(self, *, db: Connection, publications: Publications, subscriptions: SubscriptionRepository,
                  versions: ReaderVersions, effects: CollectionEffectCapture,
-                 original: Callable[[str], tuple[dict[str, Any], str]],
+                 root: Path,
                  clock: Callable[[], float], fault: Callable[[str], None]) -> None:
         self._db, self._publications, self._subscriptions = db, publications, subscriptions
         self._versions, self._effects = versions, effects
-        self._original, self._clock, self._fault = original, clock, fault
+        self._root, self._clock, self._fault = root, clock, fault
 
     def accept(self,publications: Sequence[PublicationContent],cursor: str,feed: str,namespace: str = '',*,description: str | None = None,successful: bool = True) -> CollectionEffects:
         try:
@@ -105,7 +107,7 @@ class DiscoveryRepository:
             for item in history_items:
                 row=expect_row(self._db.execute('SELECT content FROM publications WHERE id = %s',(item,)).fetchone())
                 if 'blocks' in row['content']:
-                    self._subscriptions.history.saved(item,bool(self._original(item)[0].get('full')))
+                    self._subscriptions.history.saved(item,history_loaded(self._db,self._root,item))
         if selection:
             self._subscriptions.history.discovery_state(feed,selection)
         effects.processing_items.update(saved_items)

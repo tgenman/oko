@@ -1,3 +1,4 @@
+from tests.support.publications import subtitle_text,reasons
 """YouTube media and processing through the target reader HTTP pipeline."""
 from tests.support.cards import read_all_cards
 import asyncio
@@ -45,9 +46,9 @@ def test_youtube_captions_and_theses_are_ready_while_cover_is_held(tmp_path,high
                 assert client.patch('/api/v3/feeds/'+feed,json={'importance':'high'}).status_code==200
             presence(client,'reader')
             assert started.wait(3)
-            card=wait_for(client,lambda:next((card for card in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/publication/'+card['id']).json()['theses']['result']),None))
+            card=wait_for(client,lambda:next((card for card in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/publication/'+card['id']).json()['summarized_content'].get('points')),None))
             material=client.get('/api/v3/publication/'+card['id']).json()
-            assert material['text']=='Original raw captions.'
+            assert subtitle_text(client,material)=='Original raw captions.'
             assert captions_calls==[VIDEO] and [media for media in material['media'] if media['url'] is not None]
             task=json.loads(json.loads(next(request for request in models if request.url.path=='/v1/chat/completions').content)['messages'][1]['content'])
             assert task['sources'][0]['text']=='Original raw captions.'
@@ -79,11 +80,11 @@ def test_confirmed_missing_captions_complete_without_model_but_error_does_not(tm
             presence(client,'reader')
             card=wait_for(client,lambda:(cards[0] if (cards:=read_all_cards(client, '/api/v3/cards')) else None))
             if missing:
-                value=wait_for(client,lambda:(value if (value:=client.get('/api/v3/publication/'+card['id']).json())['theses']['result'] is not None else None))
-                assert value['theses']['result']['points']==[]
+                value=wait_for(client,lambda:(value if (value:=client.get('/api/v3/publication/'+card['id']).json())['summarized_content'].get('points') is not None else None))
+                assert value['summarized_content']['points']==[]
             else:
-                wait_for(client,lambda:'Temporary caption error' in client.get('/api/v3/publication/'+card['id']).json()['completeness'].get('message',''))
-                assert client.get('/api/v3/publication/'+card['id']).json()['theses']['result'] is None
+                wait_for(client,lambda:'Temporary caption error' in reasons(client.get('/api/v3/publication/'+card['id']).json()))
+                assert client.get('/api/v3/publication/'+card['id']).json()['summarized_content'].get('points') is None
             assert not any(request.url.path=='/v1/chat/completions' for request in models)
             with database(root) as db:
                 row=db.execute('SELECT status , processing_metadata FROM publications WHERE id = %s',(card['id'],)).fetchone()
@@ -118,7 +119,7 @@ def test_youtube_summary_uses_filtered_captions(tmp_path):
         client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':'Remove advertising'})
         subscribe(client)
         presence(client,'reader')
-        card=wait_for(client,lambda:next((card for card in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/publication/'+card['id']).json()['theses']['result']),None))
+        card=wait_for(client,lambda:next((card for card in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/publication/'+card['id']).json()['summarized_content'].get('points')),None))
         assert any(call['operation']=='filter' for call in calls)
         summary=next(call for call in calls if call['operation']=='theses')
         assert summary['sources'][0]['text']=='Useful words. '
@@ -135,13 +136,13 @@ def test_youtube_summary_uses_filtered_captions(tmp_path):
             media=blocks[index]['media_id']
         assert metadata['summary']['input_hash']==digest(summary['sources'])
         material=client.get('/api/v3/publication/'+card['id']).json()
-        assert material['text']=='Useful words. Ad text.'
-        assert material['filter']['result']['text']=='Useful words. '
-        old_summary=material['theses']['result']
+        assert subtitle_text(client,material)=='Useful words. Ad text.'
+        assert '\n\n'.join(b['text'] for b in material['filtered_content']['blocks'] if b['type']=='text' and b['role']=='body')=='Useful words. '
+        old_summary=material['summarized_content'].get('points')
         client.patch('/api/v3/settings/oko/global',json={'prompt_filters':'Keep all'})
         assert client.post('/api/v3/materials/'+card['id']+'/filter/retry').status_code==200
         wait_for(client,lambda:client.get('/api/v3/publication/'+card['id']).json()['processing_metadata'].get('filter',{}).get('prompt')=='Keep all')
-        assert client.get('/api/v3/publication/'+card['id']).json()['theses']['result']==old_summary
+        assert client.get('/api/v3/publication/'+card['id']).json()['summarized_content'].get('points')==old_summary
         assert client.post('/api/v3/materials/'+card['id']+'/regenerate').status_code==200
         wait_for(client,lambda:len([call for call in calls if call['operation']=='theses'])==2)
         assert [call for call in calls if call['operation']=='theses'][-1]['sources'][0]['text']=='Useful words. Ad text.'
@@ -167,7 +168,7 @@ def test_youtube_rediscovery_keeps_saved_title_media_and_processing(tmp_path):
         client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':''})
         subscribe(client)
         presence(client,'reader')
-        card=wait_for(client,lambda:next((card for card in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/publication/'+card['id']).json()['theses']['result'] and any(a['kind']=='image' for a in [a for a in client.get('/api/v3/publication/'+card['id']).json()['media'] if a['url'] is not None])),None))
+        card=wait_for(client,lambda:next((card for card in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/publication/'+card['id']).json()['summarized_content'].get('points') and any(a['kind']=='image' for a in [a for a in client.get('/api/v3/publication/'+card['id']).json()['media'] if a['url'] is not None])),None))
         original=client.get('/api/v3/publication/'+card['id']).json()
         caption_url=next(a['url'] for a in [media for media in original['media'] if media['url'] is not None] if a['kind']=='file')
         count=sum(request.url.path=='/v1/chat/completions' for request in models)
@@ -176,8 +177,8 @@ def test_youtube_rediscovery_keeps_saved_title_media_and_processing(tmp_path):
         wait_for(client,lambda:client.get('/api/v3/status/details').json()['work']==[{'phase':'idle'}])
         updated=client.get('/api/v3/publication/'+card['id']).json()
         assert updated['title']=='Old title'
-        assert updated['text']=='Stable original captions.'
-        assert updated['theses']['result']==original['theses']['result']
+        assert subtitle_text(client,updated)=='Stable original captions.'
+        assert updated['summarized_content'].get('points')==original['summarized_content'].get('points')
         assert next(a['url'] for a in [media for media in updated['media'] if media['url'] is not None] if a['kind']=='file')==caption_url
         assert captions_calls==[VIDEO] and sum(request.url.path=='/v1/chat/completions' for request in models)==count
         cover=next(a['url'] for a in [media for media in updated['media'] if media['url'] is not None] if a['kind']=='image')
@@ -201,12 +202,12 @@ def test_missing_captions_are_downloaded_again_after_reader_detects_loss(tmp_pat
         client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':''})
         subscribe(client)
         presence(client,'reader')
-        card=wait_for(client,lambda:next((c for c in read_all_cards(client,'/api/v3/cards') if client.get('/api/v3/publication/'+c['id']).json()['theses']['result']),None))
+        card=wait_for(client,lambda:next((c for c in read_all_cards(client,'/api/v3/cards') if client.get('/api/v3/publication/'+c['id']).json()['summarized_content'].get('points')),None))
         with database(root) as db:
             key=db.execute("SELECT storage_key FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles'",(card['id'],)).fetchone()[0]
         (root/key).unlink()
         client.get('/api/v3/publication/'+card['id'])
-        wait_for(client,lambda: len(calls)>=2 and client.get('/api/v3/publication/'+card['id']).json()['text']=='Recovered captions.',timeout=30)
+        wait_for(client,lambda: len(calls)>=2 and subtitle_text(client,client.get('/api/v3/publication/'+card['id']).json())=='Recovered captions.',timeout=30)
         assert calls==[VIDEO,VIDEO]
 
 
@@ -226,8 +227,11 @@ def test_youtube_description_is_saved_as_common_block(tmp_path):
         subscribe(client)
         presence(client, 'reader')
         card = wait_for(client, lambda: next(iter(read_all_cards(client, '/api/v3/cards')), None))
-        publication = wait_for(client, lambda: data if (data := client.get('/api/v3/publication/'+card['id']).json()).get('description') else None)
-        assert publication['description'] == 'Saved description'
+        def with_description():
+            data=client.get('/api/v3/publication/'+card['id']).json()
+            return data if any(block.get('role')=='description' for block in data['content'].get('blocks',[])) else None
+        publication = wait_for(client,with_description)
+        assert any(block.get('role')=='description' and block.get('text')=='Saved description' for block in publication['content']['blocks'])
     with database(root) as db:
         content = db.execute('SELECT content FROM publications WHERE id=%s', (card['id'],)).fetchone()[0]
         assert any(block.get('role') == 'description' and block.get('text') == 'Saved description' for block in content['blocks'])

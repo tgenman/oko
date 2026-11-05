@@ -1,3 +1,4 @@
+from tests.support.publications import summary,subtitle_text,loading,filter_state
 from tests.support.cards import read_all_cards
 from oko.collection.contracts import DiscoveryResult
 from tests.support.legacy_source import FetchResult
@@ -82,27 +83,27 @@ def test_metadata_updates_reuse_caption_theses_across_restart(tmp_path, prompt_f
                    'model': 'local:latest', 'local_execution': True})
         subscribe(client)
         presence(client, 'reader')
-        original = wait(client, lambda m: m['theses']['result'] and not m['loading'])
+        original = wait(client, lambda m: summary(m) and not loading(m))
         assert summary_calls() == 1 and captions.calls == [VIDEO]
         request = next(r for r in calls if r.url.path == '/v1/chat/completions')
         task = json.loads(json.loads(request.content)['messages'][1]['content'])
-        expected=' Источники сохраняются точно.' if prompt_filters else original['text']
+        expected=' Источники сохраняются точно.' if prompt_filters else subtitle_text(client,original)
         assert task['sources'][0]['text'] == expected
 
         for field, value in [('title', 'Updated title'), ('preview', PNG + b'changed')]:
             metadata[field] = value
             client.post('/api/v3/collect')
-            updated = wait(client, lambda m: not m['loading'] and m['filter']['state'] in ('disabled','ready'))
-            assert updated['revision_id'] == original['revision_id']
-            assert updated['text'] == original['text']
-            assert updated['theses']['result'] == original['theses']['result']
+            updated = wait(client, lambda m: not loading(m) and filter_state(m) in ('disabled','ready'))
+            assert updated['content']==original['content'] and updated['media_ids']==original['media_ids']
+            assert subtitle_text(client,updated) == subtitle_text(client,original)
+            assert summary(updated)==summary(original)
             assert summary_calls() == 1 and captions.calls == [VIDEO]
             original = updated
 
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         presence(client, 'reader')
-        material = wait(client, lambda m: m['theses']['result'] and not m['loading'])
-        assert material['theses']['result'] == original['theses']['result']
+        material = wait(client, lambda m: summary(m) and not loading(m))
+        assert summary(material)==summary(original)
         assert summary_calls() == 1 and captions.calls == [VIDEO]
         client.post('/api/v3/materials/' + material['id'] + '/viewed')
         assert not (tmp_path / 'content' / material['id']).exists()
@@ -131,11 +132,11 @@ def test_changed_caption_text_requires_new_theses(tmp_path):
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080',
                    'model': 'local:latest', 'local_execution': True})
         presence(client, 'reader')
-        original = wait(client, lambda m: m['theses']['result'] and not m['loading'])
+        original = wait(client, lambda m: summary(m) and not loading(m))
         source.text = 'Changed saved transcript'
         client.post('/api/v3/collect')
-        wait(client, lambda m: m['theses']['result'] and m['text'] == source.text and not m['loading'])
+        wait(client, lambda m: summary(m) and m['text'] == source.text and not loading(m))
         requests = [json.loads(json.loads(r.content)['messages'][1]['content'])
                     for r in calls if r.url.path == '/v1/chat/completions']
-        assert [r['sources'][0]['text'] for r in requests] == [original['text'], source.text]
+        assert [r['sources'][0]['text'] for r in requests] == [subtitle_text(client,original), source.text]
         assert requests[0]['sources'][0]['version'] != requests[1]['sources'][0]['version']

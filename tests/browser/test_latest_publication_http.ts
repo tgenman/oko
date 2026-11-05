@@ -1,3 +1,4 @@
+import {text,loading} from './publication-facts';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {expect} from 'playwright/test';
@@ -17,7 +18,7 @@ test('retry preserves collected text and media without stored history', {timeout
   const cards=(await r.api('cards')).items, id=cards[0].id;
   await r.updatePublication('Updated publication');
   await r.api(`materials/${id}/retry`,'POST');
-  await expect.poll(async()=>{const material=await r.api(`publication/${id}`);return material.availability==='available'&&material.text==='Initial publication'&&!material.loading;}).toBe(true);
+  await expect.poll(async()=>{const material=await r.api(`publication/${id}`);return material.status!=='pending_collection'&&text(material)==='Initial publication'&&!loading(material);}).toBe(true);
   await r.page.reload();
   await expect(r.page.locator('[data-card]')).toHaveCount(1);
   await r.page.locator('[data-card]').click();
@@ -25,8 +26,8 @@ test('retry preserves collected text and media without stored history', {timeout
   await expect(r.page.locator('#images img')).toHaveAttribute('src',/^blob:/);
   await expect(r.page.locator('#versions')).toBeHidden();
   const current=await r.api(`publication/${id}`);
-  assert.equal(current.availability,'available');
-  if(current.availability==='available') assert.equal('previous_versions' in current,false);
+  assert.notEqual(current.status,'pending_collection');
+  assert.equal('previous_versions' in current,false);
   await r.page.screenshot({path:artifactPath('latest-publication-desktop.png')});
   await r.page.setViewportSize({width:390,height:844});
   await r.page.locator('#text').scrollIntoViewIfNeeded();
@@ -62,7 +63,7 @@ test('reader rebuilds the publication from its context menu', {timeout:30000}, a
   await expect.poll(async()=>{const publication=await r.api(`publication/${id}`);return publication.jobs.some((job:any)=>job.operation==='rebuild'&&job.status==='pending'&&job.reason_message);}).toBe(true);
   await expect(r.page.locator('#text')).toContainText('Initial publication');
   await r.setMediaState('ready');
-  await expect.poll(async()=>{const publication=await r.api(`publication/${id}`);return publication.text;}).toBe('Rebuilt publication');
+  await expect.poll(async()=>{const publication=await r.api(`publication/${id}`);return text(publication);}).toBe('Rebuilt publication');
   await r.page.reload();
   await r.page.locator('[data-card]').click();
   await expect(r.page.locator('#text')).toContainText('Rebuilt publication');

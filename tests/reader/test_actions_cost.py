@@ -56,3 +56,60 @@ def test_command_problem_and_outcome_roll_back_together(tmp_path):
         assert store.problems.command_record('synthetic-pending').result=='unknown'
     finally:
         store.db.close()
+
+
+def test_stop_checks_pending_subtitles_in_batches(tmp_path,postgres_url):
+    import json
+    from tests.support.storage import Store
+    from oko.storage.transaction import transaction
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with transaction(store.db):
+            for number in range(40):
+                item='p'+str(number);media='m'+str(number)
+                content={'blocks':[{'type':'media','role':'subtitles','media_id':media,'source_url':None,'publication_url':None}],'extra':{'youtube':{}}}
+                store.db.execute("INSERT INTO publications(id,platform,external_id,content,media_ids) VALUES (%s,'youtube',%s,%s::jsonb,%s)",(item,item,json.dumps(content),json.dumps([media])))
+                store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES (%s,%s,'youtube:subtitles','opaque','captions','pending_download')",(media,item))
+                store.db.execute("INSERT INTO jobs(kind,item,status,payload) VALUES ('theses',%s,'pending','{\"input_revision\":\"stale\"}')",(item,))
+        queries=[]
+        store.db._trace=queries.append
+        with transaction(store.db):
+            store.jobs.invalidate_processing()
+        store.db._trace=None
+        assert not any('SELECT publication_id FROM media_files WHERE id=' in query for query in queries)
+    finally:
+        store.db._trace=None
+        store.db.close()
+
+
+def test_scoped_stop_checks_only_affected_publications(tmp_path,postgres_url,monkeypatch):
+    from oko.storage import processing_input
+    from oko.storage.transaction import transaction
+    from tests.support.storage import Store
+
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    checked=[]
+    actual_revision=processing_input.revision
+    def record_revision(store,item):
+        checked.append(item)
+        return actual_revision(store,item)
+    monkeypatch.setattr(processing_input,'revision',record_revision)
+    try:
+        with transaction(store.db):
+            store.db.execute("INSERT INTO feeds(id,platform,external_id) VALUES ('target','rss','target'),('other','rss','other')")
+            for number in range(40):
+                item='p'+str(number)
+                feed='target' if number==0 else 'other'
+                store.db.execute("INSERT INTO publications(id,platform,external_id,feed_id,content) VALUES (%s,'rss',%s,%s,%s::jsonb)",(item,item,feed,'{"blocks":[],"extra":{}}'))
+                store.db.execute("INSERT INTO jobs(kind,item,status,payload) VALUES ('theses',%s,'pending','{\"input_revision\":\"stale\"}')",(item,))
+            store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('p1','p0')")
+        with transaction(store.db):
+            store.jobs.invalidate_processing(set())
+        assert checked==[]
+        with transaction(store.db):
+            store.jobs.invalidate_processing({'target'})
+        assert set(checked)=={'p0','p1'}
+        rows=store.db.execute("SELECT item,generation FROM jobs WHERE kind='theses' ORDER BY item").fetchall()
+        assert dict((row['item'],row['generation']) for row in rows)=={f'p{n}':int(n in (0,1)) for n in range(40)}
+    finally:
+        store.db.close()

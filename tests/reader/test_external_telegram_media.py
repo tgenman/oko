@@ -40,7 +40,7 @@ def test_local_video_copy_wins_over_later_web_restriction(tmp_path):
         restricted[0]=True
         client.post(url+'/retry');settled(client,timeout=15)
         second=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()
-        assert second['external_attachments']==[]
+        assert not any(block['type']=='external_media' for block in second['content'].get('blocks',[]))
         assert client.get(next(a['url'] for a in [media for media in second['media'] if media['url'] is not None] if a['kind']=='video')).content==b'local-video'
         problems=client.get('/api/v3/status/details').json()['problems']
         assert problems['count']==0,problems
@@ -95,14 +95,15 @@ def test_external_document_metadata_text_and_restart(tmp_path):
         card=next(c for c in cards if c['title']=='Own caption')
         url='/api/v3/materials/'+card['id']
         content=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()
-        assert content['text']=='Own caption'
+        from tests.support.publications import body_text
+        assert body_text(content)=='Own caption'
         assert card['external_attachment_kinds']==['document']
         media=next(block for block in content['content']['blocks'] if block['type']=='external_media')
         assert media['title']=='Бесы.txt' and media['size_label']=='36.2 KB'
         assert media.get('author') is None and media['url']=='https://t.me/fixture/13'
         empty=next(c for c in cards if c['title']=='Файл доступен в Telegram')
         empty_content=client.get('/api/v3/publication/'+empty['id']).json()
-        assert empty_content['text']==''
+        assert body_text(empty_content)==''
         assert next(block for block in empty_content['content']['blocks'] if block['type']=='external_media').get('size_label') is None
         assert client.get('/api/v3/status/details').json()['problems']['count']==0
         assert all('/s/' in request for request in requests)

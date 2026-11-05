@@ -613,7 +613,7 @@ export type Material = {
     /**
      * Description
      */
-    reply_preview?: import('../../frontend/src/api/generated/types.gen').ReplyPreview | null;
+    reply_preview?: {author:string|null;text:string;source_url:string|null} | null;
     description?: string;
     /**
      * Display Text

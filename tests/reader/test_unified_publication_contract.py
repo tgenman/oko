@@ -45,9 +45,12 @@ def test_publication_response_contains_linked_article_media_and_jobs(tmp_path):
             response=client.get('/api/v3/publication/'+item)
             assert response.status_code==200
             value=response.json()
-            return value if 'Article body' in value.get('text','') and value.get('media') else None
+            return value if any(block.get('text')=='Article body' for article in value['linked_publications'] for block in article['content'].get('blocks',[])) and value.get('media') else None
         result=wait_for(client,collected)
         assert {'content','filtered_content','summarized_content','processing_metadata','media','linked_publications','jobs'} <= result.keys()
+        assert '_revision' not in result['processing_metadata'] and '_revision_input' not in result['processing_metadata']
+        assert not {'source','description','linked_content','reply_preview','post_web_unavailable','external_attachments',
+                    'text','filter','theses','availability','revision_id','completeness','loading'} & result.keys()
         assert not any(key.startswith('_') for key in result['content'].get('extra',{}))
         assert all(set(job)=={'operation','object_id','status','reason_code','reason_message','retry_at'} for job in result['jobs'])
         article=result['linked_publications'][0]
@@ -167,7 +170,7 @@ def test_common_content_is_readable_without_reader_metadata(tmp_path):
     with TestClient(create_app(root,token='test',api_only=True,rss_enabled=True,rss_transport=httpx.MockTransport(rss_source)),headers=HEADERS) as client:
         import_feed(client);presence(client,'reader')
         item=wait_cards(client,idle=False)[0]['id']
-        wait_for(client,lambda:'Article body' in client.get('/api/v3/publication/'+item).json().get('text',''))
+        wait_for(client,lambda:any(b.get('text')=='Article body' for article in client.get('/api/v3/publication/'+item).json()['linked_publications'] for b in article['content'].get('blocks',[])))
         with database(root) as db:
             db.execute("UPDATE publications SET content=content #- '{extra,_reader}' WHERE id=%s OR id IN (SELECT target_publication_id FROM publication_links WHERE source_publication_id=%s)",(item,item))
             db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,source_url,name,mime_type,status) VALUES ('sample-video',%s,'video','https://cdn.example/v.mp4','https://cdn.example/v.mp4','video.mp4','video/mp4','pending_download')",(item,))
@@ -178,7 +181,8 @@ def test_common_content_is_readable_without_reader_metadata(tmp_path):
         assert any(block.get('text')=='Own excerpt' for block in response.json()['content']['blocks'])
         assert next(media for media in response.json()['media'] if media['id']=='sample-video')['kind']=='video'
         assert next(media for media in response.json()['media'] if media['id']=='sample-circle')['kind']=='circle'
-        assert any(card['id']==item and card['title']=='Announcement' for card in read_all_cards(client,'/api/v3/cards'))
+        card=next(card for card in read_all_cards(client,'/api/v3/cards') if card['id']==item)
+        assert card['title']=='Announcement' and 'post_web_unavailable' not in card
 
 
 def test_card_and_publication_prefer_the_saved_title_over_body(tmp_path):

@@ -1,4 +1,5 @@
 """Revision lifecycle through the agreed reader API and external HTTP seam."""
+from tests.support.publications import captions_state,body_text,subtitle_text,loading
 from oko.collection.contracts import DiscoveryResult
 from tests.support.legacy_source import FetchResult
 from tests.support.presence import presence, close_presence
@@ -66,11 +67,11 @@ def test_confirmed_remote_deletion_keeps_local_copy_but_absence_is_not_deletion(
         item = wait_cards(client)[0]['id']
         removed[0] = True
         client.post('/api/v3/collect')
-        wait_for(client,lambda:client.get('/api/v3/publication/'+item).json()['text'].endswith('Локальная копия'))
+        wait_for(client,lambda:body_text(client.get('/api/v3/publication/'+item).json()).endswith('Локальная копия'))
         retained=client.get('/api/v3/publication/'+item).json()
-        assert retained['text'].endswith('Локальная копия')
+        assert body_text(retained).endswith('Локальная копия')
         assert 'previous_versions' not in retained
-        assert (retained['completeness']['state']=='complete') is True
+        assert retained['status']=='ready'
         client.post('/api/v3/materials/' + item + '/viewed')
         assert client.get('/api/v3/publication/' + item).status_code == 404
 
@@ -267,14 +268,14 @@ def test_disabling_youtube_theses_keeps_existing_captions_without_refetch(tmp_pa
         card = wait_cards(client)[0]
         item = card['id']
         original = client.get('/api/v3/publication/' + item).json()
-        assert original['source']['captions'] == 'available'
+        assert captions_state(original) == 'available'
         count = captions.calls
         client.patch('/api/v3/settings/feed/' + feed, json={'theses': False})
         client.post('/api/v3/collect')
-        wait_for(client, lambda: not client.get('/api/v3/publication/' + item).json().get('loading') and client.get('/api/v3/status/details').json()['ready_sources'] == 1)
+        wait_for(client, lambda: not loading(client.get('/api/v3/publication/' + item).json()) and client.get('/api/v3/status/details').json()['ready_sources'] == 1)
         retained = client.get('/api/v3/publication/' + item).json()
-        assert retained['text'] == 'Уже сохранённые субтитры'
-        assert retained['source']['captions'] == 'available'
-        assert retained['revision_id'] == original['revision_id']
+        assert subtitle_text(client,retained) == 'Уже сохранённые субтитры'
+        assert captions_state(retained) == 'available'
+        assert retained['content'] == original['content'] and retained['media_ids']==original['media_ids']
         assert 'changed' not in retained and 'previous_versions' not in retained
         assert captions.calls == count

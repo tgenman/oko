@@ -167,6 +167,7 @@ def request_settings(store: 'Store', item: str) -> tuple[dict[str, Any], bool]:
 def filtered(content: dict[str, Any], item: str, result: dict[str, Any]) -> dict[str, Any]:
     from oko.processing.contracts import ProcessingError
     output=deepcopy(content)
+    output.pop('extra',None)
     for block in output['blocks']:
         block.setdefault('source_publication_id',item)
     removed=[]
@@ -196,9 +197,4 @@ def source_revision_hash(store: 'Store', item: str) -> str:
 
 
 def revision(store: 'Store', item: str) -> str:
-    row=material_read.item(store.db,item)
-    metadata=json.loads(row['processing_metadata']) if row else {}
-    current=source_revision_hash(store,item)
-    if metadata.get('_revision_input')!=current:
-        return digest(['unreconciled',metadata.get('_revision'),current])
-    return str(metadata.get('_revision',''))
+    return source_revision_hash(store,item)

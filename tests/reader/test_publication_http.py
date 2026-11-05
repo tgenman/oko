@@ -22,7 +22,7 @@ def test_running_retry_takes_precedence_over_previous_processing_error(tmp_path)
         assert response.status_code == 200
         publication = response.json()
         assert 'source_position' not in publication and 'originals' not in publication
-        assert all('id' not in media for media in publication['media'])
+        assert all('id' in media for media in publication['media'])
         assert client.get('/api/v3/publication/'+items[0], headers={'If-None-Match': response.headers['etag']}).status_code == 304
         def fail():
             store=app.state.host.require_store()
@@ -31,13 +31,13 @@ def test_running_retry_takes_precedence_over_previous_processing_error(tmp_path)
             assert job and job.kind=='theses'
             store.jobs.retry(job,store.clock(),'Previous failure',30,code='synthetic')
         client.portal.call(fail)
-        failed=client.get('/api/v3/publication/'+items[0]).json()['theses']
-        assert failed['state']=='error' and failed['error']=='Previous failure', failed
+        failed=next(job for job in client.get('/api/v3/publication/'+items[0]).json()['jobs'] if job['operation']=='theses')
+        assert failed['status']=='pending' and failed['reason_message']=='Previous failure', failed
         def start():
             store=app.state.host.require_store()
             with store.db:store.db.execute("UPDATE jobs SET next=0 WHERE kind='theses' AND item=%s",(items[0],))
             job=store.jobs.next_job(store.clock(),ai_only=True)
             assert job and job.kind=='theses'
         client.portal.call(start)
-        running=client.get('/api/v3/publication/'+items[0]).json()['theses']
-        assert running['state']=='processing' and running['error'] is None
+        running=next(job for job in client.get('/api/v3/publication/'+items[0]).json()['jobs'] if job['operation']=='theses')
+        assert running['status']=='running'

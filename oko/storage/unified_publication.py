@@ -67,7 +67,6 @@ def project(db: Database, root: Path, item: str, now: float, wall: float) -> dic
                              reason_code=job['reason_code'],reason_message=job['reason_message'],retry_at=_timestamp(deadline)))
     media_ids=json.loads(row['media_ids']) if isinstance(row['media_ids'],str) else row['media_ids']
     filtered=_json(row['filtered_content'])
-    filtered.pop('extra',None)
     original_media={block['media_id']:block for document in documents.values() for block in document.get('blocks',[])
                     if block.get('type')=='media' and 'media_id' in block}
     for block in filtered.get('blocks',[]):

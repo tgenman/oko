@@ -6,7 +6,6 @@ from oko.domain.collection import CollectionEffects
 from oko.storage.collection_diagnostics import CollectionDiagnostics
 from oko.storage.collection_effects import CollectionEffectCapture
 from oko.storage.database import Connection
-from oko.storage.media import MediaFiles
 from oko.storage.publications import Publications
 from oko.storage import memberships
 from oko.storage.job_writes import execute as job_write
@@ -15,9 +14,9 @@ from oko.storage.reading import reading_snapshot
 
 
 class RebuildRepository:
-    def __init__(self, *, db: Connection, publications: Publications, media: MediaFiles,
+    def __init__(self, *, db: Connection, publications: Publications,
                  capture: CollectionEffectCapture, clock: Callable[[],float], fault: Callable[[str],None]) -> None:
-        self._db,self._publications,self._media,self._capture,self._clock,self._fault=db,publications,media,capture,clock,fault
+        self._db,self._publications,self._capture,self._clock,self._fault=db,publications,capture,clock,fault
 
     def accept(self, item: str, replacements: tuple[PreparedReplacement,...]) -> CollectionEffects:
         if not self._db.in_transaction or not self._db.transaction_depth:
@@ -63,10 +62,6 @@ class RebuildRepository:
                     if source:
                         block['source_url']=source.media.source_url
                         block['publication_url']=source.media.publication_url
-            header=prepared.content.get('extra',{}).get('_reader',{})
-            for attachment in header.get('attachments',[]):
-                if attachment.get('media_id') in mapping:attachment['media_id']=mapping[attachment['media_id']]
-            self._media.project_header(prepared.content,prepared.media)
             self._publications.publish(replacement.identity,prepared,effects,preserve_processing=replacement.identity!=item)
             for value in replacement.files:
                 job_write(self._db,"""INSERT INTO jobs(kind,item,status,reason_code,reason_message) VALUES ('download_media',%s,'done',%s,%s)

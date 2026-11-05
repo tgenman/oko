@@ -1,3 +1,4 @@
+from tests.support.publications import summary,filter_result,filter_state
 """Worker invariants on PostgreSQL: accepted output, restart and late completion."""
 from tests.support.cards import read_all_cards
 import asyncio
@@ -36,16 +37,16 @@ def test_codex_choice_changes_only_future_work_on_postgres(postgres_url, tmp_pat
         assert client.put('/api/v3/processors/codex', json=configuration('test-small')).status_code == 200
         assert client.patch('/api/v3/feeds/fixture', json={'public_ai': True}).status_code == 200
         assert client.patch('/api/v3/settings/oko/global', json={'processor': 'codex', 'theses': True}).status_code == 200
-        wait_for(client, lambda: all(client.get('/api/v3/publication/'+card['id']).json()['theses']['result'] for card in read_all_cards(client, '/api/v3/cards')))
+        wait_for(client, lambda: all(summary(client.get('/api/v3/publication/'+card['id']).json()) for card in read_all_cards(client, '/api/v3/cards')))
         count = len(service.inputs)
         assert client.put('/api/v3/processors/codex', json=configuration('test-large', 'high', True)).status_code == 200
         material = client.get('/api/v3/publication/' + item).json()
-        assert material['theses']['result']['points'][0] == 'test-small'
-        assert material['theses']['result']['provenance']['model'] == 'test-small'
+        assert material['summarized_content']['points'][0]['text'] == 'test-small'
+        assert material['processing_metadata']['summary']['model'] == 'test-small'
         assert len(service.inputs) == count
         assert client.post('/api/v3/materials/' + item + '/theses/retry').status_code == 200
-        changed = wait_for(client, lambda: (value if (value := client.get('/api/v3/publication/' + item).json())['theses']['result'] and value['theses']['result']['provenance'].get('model') == 'test-large' else None))
-        assert changed['theses']['result']['points'][0] == 'test-large'
+        changed = wait_for(client, lambda: (value if summary(value := client.get('/api/v3/publication/' + item).json()) and value['processing_metadata']['summary'].get('model') == 'test-large' else None))
+        assert changed['summarized_content']['points'][0]['text'] == 'test-large'
         assert len(service.inputs) == count + 1
 
 
@@ -62,11 +63,11 @@ def test_disabling_filter_keeps_ready_result_and_hiddenness_over_http(postgres_u
     finally:
         store.db.close()
     with TestClient(create_app(tmp_path, token='test', api_only=True, database_url=postgres_url), headers=HEADERS) as client:
-        before = client.get('/api/v3/publication/' + item).json()['filter']
-        assert before['state'] == 'ready' and before['result']['hidden'] is True
+        before = client.get('/api/v3/publication/' + item).json()['filtered_content']
+        assert before['hidden'] is True
         reply = client.patch('/api/v3/settings/oko/global', json={'filter_enabled': False})
         assert reply.status_code == 200, reply.text
-        assert client.get('/api/v3/publication/' + item).json()['filter'] == before
+        assert client.get('/api/v3/publication/' + item).json()['filtered_content'] == before
         assert read_all_cards(client, '/api/v3/cards') == []
         assert [card['id'] for card in read_all_cards(client, '/api/v3/cards?show_hidden=true')] == [item]
 
@@ -99,8 +100,8 @@ def test_http_disabling_filter_does_not_cancel_started_model_call(postgres_url, 
             response = client.patch('/api/v3/settings/oko/global', json={'filter_enabled': False})
             assert response.status_code == 200, response.text
             release.set()
-            result = wait_for(client, lambda: (value if (value := client.get('/api/v3/publication/' + item).json())['filter']['state'] == 'ready' else None))
-            assert result['filter']['result'] is not None
+            result = wait_for(client, lambda: (value if filter_state(value := client.get('/api/v3/publication/' + item).json()) == 'ready' else None))
+            assert filter_result(result) is not None
         finally:
             release.set()
 
@@ -121,8 +122,8 @@ def test_disabled_filter_without_a_result_is_reported_disabled_over_http(postgre
     with TestClient(create_app(tmp_path, token='test', api_only=True, database_url=postgres_url), headers=HEADERS) as client:
         response = client.get('/api/v3/publication/' + item)
         assert response.status_code == 200, response.text
-        assert response.json()['filter']['state'] == 'disabled'
-        assert response.json()['filter']['result'] is None
+        assert filter_result(response.json()) is None
+        assert not any(job['operation']=='filter' and job['status'] in ('pending','running') for job in response.json()['jobs'])
 
 
 def test_disabling_theses_keeps_ready_result_over_http(postgres_url, tmp_path):
@@ -139,13 +140,13 @@ def test_disabling_theses_keeps_ready_result_over_http(postgres_url, tmp_path):
     finally:
         store.db.close()
     with TestClient(create_app(tmp_path, token='test', api_only=True, database_url=postgres_url), headers=HEADERS) as client:
-        before = client.get('/api/v3/publication/' + item).json()['theses']
-        assert before['state'] == 'ready' and before['result'] is not None
+        before = client.get('/api/v3/publication/' + item).json()['summarized_content']
+        assert before.get('points')
         response = client.patch('/api/v3/settings/oko/global', json={'theses': False})
         assert response.status_code == 200, response.text
-        assert client.get('/api/v3/publication/' + item).json()['theses'] == before
+        assert client.get('/api/v3/publication/' + item).json()['summarized_content'] == before
         assert client.patch('/api/v3/settings/oko/global', json={'theses': True}).status_code == 200
-        assert client.get('/api/v3/publication/' + item).json()['theses'] == before
+        assert client.get('/api/v3/publication/' + item).json()['summarized_content'] == before
 
 
 def test_disabled_theses_without_result_are_reported_disabled_over_http(postgres_url, tmp_path):
@@ -164,8 +165,8 @@ def test_disabled_theses_without_result_are_reported_disabled_over_http(postgres
     with TestClient(create_app(tmp_path, token='test', api_only=True, database_url=postgres_url), headers=HEADERS) as client:
         response = client.get('/api/v3/publication/' + item)
         assert response.status_code == 200, response.text
-        assert response.json()['theses']['state'] == 'disabled'
-        assert response.json()['theses']['result'] is None
+        assert summary(response.json()) is None
+        assert not any(job['operation']=='theses' and job['status'] in ('pending','running') for job in response.json()['jobs'])
 
 
 def test_http_rule_change_keeps_started_attempt(postgres_url, tmp_path):
@@ -205,7 +206,7 @@ def test_http_rule_change_keeps_started_attempt(postgres_url, tmp_path):
             response = client.patch('/api/v3/settings/oko/global',json={'prompt_filters':'New rules'})
             assert response.status_code == 200, response.text
             release.set()
-            wait_for(client,lambda: client.get('/api/v3/publication/'+item).json()['filter']['state']=='ready')
+            wait_for(client,lambda: filter_state(client.get('/api/v3/publication/'+item).json())=='ready')
             with psycopg.connect(postgres_url) as db:
                 filtered = json.loads(db.execute('SELECT filtered_content FROM publications WHERE id=%s',(item,)).fetchone()[0])
             assert filtered['hidden'] is True
@@ -242,8 +243,8 @@ def test_http_processor_model_change_keeps_started_filter(postgres_url, tmp_path
             response=client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:new','local_execution':True})
             assert response.status_code==200, response.text
             release.set()
-            result=wait_for(client,lambda:(value if (value:=client.get('/api/v3/publication/'+item).json())['filter']['state']=='ready' else None))
-            assert result['filter']['result'] is not None
+            result=wait_for(client,lambda:(value if filter_state(value:=client.get('/api/v3/publication/'+item).json())=='ready' else None))
+            assert filter_result(result) is not None
             assert len(attempts)==1
         finally:
             release.set()

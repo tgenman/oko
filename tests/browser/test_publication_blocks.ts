@@ -16,7 +16,7 @@ test('common blocks show quote, description, linked article and original media l
   try{
     const url='/api/v3/materials/article/media/image';
     await r.start([material('A',{
-      text:'Old projection',description:'',reply_preview:null,linked_content:null,
+      text:'Old projection',
       content:{blocks:[
         {type:'quote',text:'Quoted words',author:'Author',source_url:'https://example.org/quoted'},
         {type:'text',role:'description',text:'Common description'},
@@ -87,7 +87,7 @@ test('text and media follow their common block order',async()=>{
 test('external media uses its common block without platform-specific data',async()=>{
   const r=await reader();
   try{
-    await r.start([material('A',{external_attachments:[],content:{blocks:[
+    await r.start([material('A',{content:{blocks:[
       {type:'text',role:'body',text:'Post body'},
       {type:'external_media',kind:'audio',url:'https://example.org/audio',title:'A recorded lesson',author:'Author'}]}})]);
     await r.page.locator('[data-card="A"]').click();
@@ -101,7 +101,7 @@ test('external media uses its common block without platform-specific data',async
 test('quote stays at its position between text blocks',async()=>{
   const r=await reader();
   try{
-    await r.start([material('A',{reply_preview:null,content:{blocks:[
+    await r.start([material('A',{content:{blocks:[
       {type:'text',role:'body',text:'Before quote'},
       {type:'quote',text:'Quoted words',author:'Author',source_url:'https://example.org/quoted'},
       {type:'text',role:'body',text:'After quote'}]}})]);
