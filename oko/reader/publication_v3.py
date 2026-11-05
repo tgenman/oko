@@ -83,6 +83,14 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
             unified=current.unified_publication(item)
         original=content.get('text','')
         filtered=value['filter']
+        filter_job=next((job for job in unified['jobs'] if job['operation']=='filter' and job['object_id']==item),None)
+        if filter_job and filter_job['status']=='running':
+            filtered['state']='processing'
+        elif filter_job and filter_job['reason_message'] and filter_job['status'] in ('pending','failed','unavailable'):
+            filtered['state']='error'
+            filtered['error']=filter_job['reason_message']
+        elif filter_job and filter_job['status']=='pending':
+            filtered['state']='pending'
         summarized=value['theses']
         f=filtered['result']
         summary=summarized['result']

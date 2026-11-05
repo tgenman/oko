@@ -2,6 +2,7 @@
 import asyncio
 import time
 from collections.abc import Callable
+from dataclasses import replace
 import httpx
 from oko.execution import Execution
 from oko.workers.control import JobControl
@@ -70,19 +71,19 @@ class ProcessingWorker:
                 # Snapshot and successful claim are committed together.
                 jobs.save_input(job, work)
                 request=work.request.model_copy(update={'generation':job.generation})
-                origin=jobs.origin(job,work.signature)
+                origin=jobs.origin(job,work.input_hash)
                 if origin is None or request.processor!='codex':
                     if request.processor=='codex':
                         codex_config=self.service.codex_config()
                         origin=dict(processor='codex',**codex_config.choice(request.operation).model_dump()) if codex_config else None
                     else:
-                        local_config=self.service.processor_config()
+                        local_config=work.processor_config
                         origin=dict(processor=request.processor,model=local_config.model if local_config else None,parameters=dict(GENERATION_PARAMETERS))
                     if origin:
-                        jobs.save_origin(job,work.signature,origin)
+                        jobs.save_origin(job,work.input_hash,origin)
                 if origin and origin['processor']=='codex':
                     request=request.model_copy(update={'codex_choice':CodexChoice.model_validate({k:origin[k] for k in ('model','reasoning_effort','fast')})})
-                work=ProcessingInput(work.item,work.kind,work.signature,request,work.public_ai,work.no_input)
+                work=replace(work,request=request)
                 self.tasks._ai_feed=self.service.feed(job.item)
                 self.tasks._ai_job=job
             self.tasks._ai=asyncio.create_task(self.execute_attempt(store,job,work,origin))
@@ -103,7 +104,7 @@ class ProcessingWorker:
             diagnostic_source.set('Обработка · '+self.kind+' · '+job.item)
             result=None
             if not work.no_input:
-                config=self.service.processor_config()
+                config=work.processor_config
                 adapter: Codex | LlamaCpp
                 if work.request.processor=='codex':
                     if not work.public_ai:
@@ -120,13 +121,20 @@ class ProcessingWorker:
                     raise
                 if isinstance(adapter,Codex) and self.tasks.metrics:self.tasks.metrics.observe_codex(bool(checked.get('available')))
                 async with self.execution._actions:
+                    permitted=self.service.public_allowed(job.item)
+                    work=replace(work,public_processor=not checked['local'],public_ai=work.public_ai or (not checked['local'] and permitted))
+                    if not checked['local'] and not permitted:
+                        with jobs.transaction(self.execution._live):
+                            if jobs.valid(job):
+                                jobs.fail(job,'Запрещена публичная AI-обработка; выберите локальную модель',code='ai-permission')
+                        return
                     if not self.current(store,jobs,job,work):
                         if self.execution._store is store and self.execution._live():
                             with jobs.transaction(self.execution._live):
                                 if jobs.valid(job):jobs.cancel(job)
                         return
-                    if not checked['local'] and not work.public_ai:
-                        raise ProcessingError('Запрещена публичная AI-обработка; выберите локальную модель',code='ai-permission')
+                    with jobs.transaction(self.execution._live):
+                        jobs.set_public_processor(job,not checked['local'],work.public_ai)
                 result=(await adapter.generate(work.request,jobs.workspace(job)) if isinstance(adapter,Codex) else await adapter.generate(work.request))
             async with self.execution._actions:
                 if self.execution._store is not store or not self.execution._live():

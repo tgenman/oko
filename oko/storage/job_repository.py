@@ -193,21 +193,25 @@ class JobRepository:
         for start in range(0,len(items),400):
             affected.extend(row['id'] for row in db.execute("SELECT id FROM jobs WHERE kind=%s AND item=ANY(%s) AND (processor_visible OR reason_code='processor-config')",(kind,items[start:start+400])))
         processor_previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
-        for item,signature,satisfied,revision in candidates:
-            job=db.execute("SELECT status,payload,reason_code,input_snapshot->>'signature' AS signature,id,reason_message FROM jobs WHERE kind=%s AND item=%s",(kind,item)).fetchone()
-            previous=job['signature'] if job else None
+        for item,input_hash,satisfied,revision in candidates:
+            job=db.execute("SELECT status,payload,reason_code,input_snapshot->>'input_hash' AS input_hash,id,reason_message FROM jobs WHERE kind=%s AND item=%s",(kind,item)).fetchone()
+            previous=job['input_hash'] if job else None
+            if job and job['status']=='running' and job['payload'].get('input_revision')==revision:
+                continue
+            if job and job['status']=='done' and satisfied:
+                continue
             def capture_problem() -> list[dict[str,Any]]:
                 from oko.storage.processing_job_problems import managed_candidates as processing_candidates
                 return processing_candidates(self.store,job['id'],self.store.wall_clock()) if job and job['reason_code'] not in (None,'','processor-config','ai-permission','codex-choice','youtube-admission') and not job['reason_code'].startswith('source-') else []
             previous_problem: list[dict[str,Any]]=[]
-            enabled = processing_input.stage_enabled(self.store, item, kind) if signature is not None else False
-            if preserve_cancelled and job and job['status']=='cancelled' and (previous is None or previous==signature):
+            enabled = processing_input.stage_enabled(self.store, item, kind) if input_hash is not None else False
+            if preserve_cancelled and job and job['status']=='cancelled' and (previous is None or previous==input_hash):
                 continue
-            if job and job['status']=='done' and previous is not None and previous==signature:
+            if job and job['status']=='done' and previous is not None and previous==input_hash:
                 if job['payload'].get('input_revision') != revision:
                     job_write(db, "UPDATE jobs SET payload=jsonb_set(payload,'{input_revision}',to_jsonb(%s::text)) WHERE kind=%s AND item=%s", (revision,kind,item))
                 continue
-            if previous is not None and previous==signature and job and (job['status']=='running' or job['payload'].get('input_revision')==revision):
+            if previous is not None and previous==input_hash and job and job['payload'].get('input_revision')==revision:
                 # Reconsider blocked work only on an input/settings event. Running
                 # attempts are allowed to finish when the switch is turned off.
                 if job['status'] == 'blocked' and enabled:
@@ -232,9 +236,9 @@ class JobRepository:
                     self.store.publications.status(item)
                     if previous_problem:self.store.problems.sync_processing_problem(job['id'],previous_problem,self.store.wall_clock())
                 continue
-            if signature is None and previous is None and (job is None or job[0]=='cancelled'):
+            if input_hash is None and previous is None and (job is None or job[0]=='cancelled'):
                 continue
-            if signature is None:
+            if input_hash is None:
                 if kind=='theses' and job and job['status']=='blocked' and processing_input.stage_enabled(self.store,item,'theses'):
                     filtering = db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()
                     if filtering and filtering['status'] in ('pending','running'):
@@ -247,7 +251,7 @@ class JobRepository:
                 previous_problem=capture_problem()
                 wall=self.store.wall_clock()
                 source_changed=job_write(db, "INSERT INTO jobs (kind,item,status,payload,input_snapshot) VALUES (%s,%s,%s,%s::jsonb,%s::jsonb) ON CONFLICT (kind,item) DO UPDATE SET status=excluded.status,payload=excluded.payload,input_snapshot=excluded.input_snapshot,generation=jobs.generation+1,next=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.next ELSE 0 END,reason_code=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.reason_code ELSE NULL END,reason_message=CASE WHEN excluded.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.reason_message ELSE NULL END WHERE CASE WHEN jobs.reason_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING id,OLD.reason_code AS previous_code",
-                    (kind,item,'done' if satisfied else 'pending' if enabled else 'blocked',json.dumps(dict(input_revision=revision)),json.dumps(dict(signature=signature)),wall,wall,wall)).fetchone()
+                    (kind,item,'done' if satisfied else 'pending' if enabled else 'blocked',json.dumps(dict(input_revision=revision)),json.dumps(dict(input_hash=input_hash)),wall,wall,wall)).fetchone()
                 sync_source_after(source_changed)
                 if kind=='filter' and job:self.store.processing.filter_changed(item)
             if previous_problem and job:self.store.problems.sync_processing_problem(job['id'],previous_problem,self.store.wall_clock())
@@ -262,12 +266,18 @@ class JobRepository:
 
     def save_input(self, job: Job, work: ProcessingInput) -> None:
         selected = processing_input.settings(self.store, job.item)
-        snapshot = dict(signature=work.signature, generation=job.generation, feed_id=selected['feed_id'],
-                        rules=selected['values'], public_ai=work.public_ai, no_input=work.no_input,
+        snapshot = dict(input_hash=work.input_hash, generation=job.generation, feed_id=selected['feed_id'],
+                        rules=selected['values'], public_ai=work.public_ai, public_processor=work.public_processor, no_input=work.no_input,
                         sources=[dict(id=source.id, version=source.version) for source in work.request.sources])
-        changed = self.store.db.execute("UPDATE jobs SET input_snapshot=%s::jsonb WHERE id=%s AND generation=%s AND status='running' AND input_snapshot->>'signature'=%s",
-            (json.dumps(snapshot, ensure_ascii=False), job.id, job.generation, work.signature)).rowcount
+        changed = self.store.db.execute("UPDATE jobs SET input_snapshot=%s::jsonb WHERE id=%s AND generation=%s AND status='running' AND input_snapshot->>'input_hash'=%s",
+            (json.dumps(snapshot, ensure_ascii=False), job.id, job.generation, work.input_hash)).rowcount
         if changed != 1:
+            raise JobRejected('Attempt no longer owns this input')
+
+    def set_public_processor(self, job: Job, public: bool, permitted: bool) -> None:
+        changed=self.store.db.execute("""UPDATE jobs SET input_snapshot=jsonb_set(jsonb_set(input_snapshot,'{public_processor}',to_jsonb(%s::integer<>0),true),'{public_ai}',to_jsonb(%s::integer<>0),true)
+            WHERE id=%s AND generation=%s AND status='running' AND input_snapshot IS NOT NULL""",(public,permitted,job.id,job.generation)).rowcount
+        if changed!=1:
             raise JobRejected('Attempt no longer owns this input')
 
     def claim_processing(self, kind: Kind, now: float) -> Job | None:
@@ -292,13 +302,13 @@ class JobRepository:
             self.store.incomplete_draft.mark_materials([row['item']])
 
     def revoke_changed_running_inputs(self) -> None:
-        """Settings writes revoke only running attempts whose stage input changed."""
+        """Revoke attempts only when their public AI permission is withdrawn."""
         memberships.lock_graph(self.store.db)
-        from oko.storage.processing_input import signature
-        rows = self.store.db.execute("""SELECT id,kind,item,generation,reason_message,reason_code,input_snapshot->>'signature' AS signature
+        rows=self.store.db.execute("""SELECT id,kind,item,generation,reason_message,reason_code,input_snapshot
             FROM jobs WHERE status='running' AND kind IN ('filter','theses')""").fetchall()
         for row in rows:
-            if row['signature'] is None or signature(self.store,row['item'],row['kind']) != row['signature']:
+            snapshot=row['input_snapshot'] or {}
+            if snapshot.get('public_ai') and snapshot.get('public_processor',True) and not processing_input.live_settings(self.store,row['item'])['public_ai']:
                 self._revoke_running_input(row)
 
     def invalidate_source_metadata_inputs(self, item: str, *, title: bool = False, preserve_cancelled: bool = False) -> None:
@@ -350,14 +360,17 @@ class JobRepository:
     def retry_processing(self, item: str, kind: Kind) -> bool:
         db=self.store.db
         memberships.lock_graph(db)
-        before=db.execute("SELECT id,reason_message,reason_code,processor_visible FROM jobs WHERE kind=%s AND item=%s AND input_snapshot IS NOT NULL",(kind,item)).fetchone()
+        before=db.execute("SELECT id,reason_message,reason_code,processor_visible FROM jobs WHERE kind=%s AND item=%s",(kind,item)).fetchone()
         if before is None:
+            return False
+        current_input=processing_input.input_hash(self.store,item,kind)
+        if current_input is None:
             return False
         stage_previous=self.store.problems.saved_processing_candidates([before['id']]).get(before['id'],[]) if before['reason_message'] is not None or before['reason_code'] is not None else []
         affected=[before['id']] if before['processor_visible'] or before['reason_code']=='processor-config' else []
         previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
         self.store.jobs.forget_execution(kind,item)
-        changed=job_write(db, "UPDATE jobs SET status = 'pending' , next = CASE WHEN wait_scope IS NOT NULL THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL THEN retry_at ELSE NULL END , reason_code = NULL , reason_message = NULL , generation = generation + 1 WHERE kind = %s AND item = %s AND CASE WHEN reason_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING id,OLD.reason_code AS previous_code",(kind,item)).fetchone()
+        changed=job_write(db, "UPDATE jobs SET status = 'pending' , input_snapshot=jsonb_build_object('input_hash',%s::text), next = CASE WHEN wait_scope IS NOT NULL THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL THEN retry_at ELSE NULL END , reason_code = NULL , reason_message = NULL , generation = generation + 1 WHERE kind = %s AND item = %s AND CASE WHEN reason_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING id,OLD.reason_code AS previous_code",(current_input,kind,item)).fetchone()
         if changed and (changed['previous_code'] or '').startswith('source-'):
             from oko.storage import source_groups
             source_groups.sync_changed_rows(self.store,[changed],self.store.wall_clock())
@@ -367,11 +380,11 @@ class JobRepository:
         self.store.incomplete_draft.mark_materials([item])
         return True
 
-    def origin(self, job: Job, signature: str) -> dict[str, Any] | None:
-        return self.store.jobs.saved_execution(job,signature)
+    def origin(self, job: Job, input_hash: str) -> dict[str, Any] | None:
+        return self.store.jobs.saved_execution(job,input_hash)
 
-    def save_origin(self, job: Job, signature: str, value: dict[str, Any]) -> None:
-        self.store.jobs.save_execution(job,signature,value)
+    def save_origin(self, job: Job, input_hash: str, value: dict[str, Any]) -> None:
+        self.store.jobs.save_execution(job,input_hash,value)
 
     def fail(self, job: Job, error: str, *, code: str) -> None:
         boundary=nullcontext() if self.store.db.in_transaction else transaction(self.store.db)
@@ -547,7 +560,7 @@ class JobRepository:
             query += """ AND kind IN ('filter','theses') AND NOT EXISTS (SELECT 1 FROM publications i WHERE i.id=jobs.item AND i.platform IS NOT NULL
                 AND NOT ((jobs.kind='filter' AND i.status IN ('pending_filtering','filter_out'))
                       OR (jobs.kind='theses' AND (i.status IN ('pending_summary','ready')
-                          OR (i.status='pending_filtering' AND i.processing_metadata::jsonb->'_pass'->>'feed_id' IS NULL)))))"""
+                          OR i.status='pending_filtering'))))"""
         elif deleting_only:
             query += " AND kind IN ('delete','feed-delete')"
         elif media_only:
@@ -728,17 +741,17 @@ class JobRepository:
                     self.store.problems.sync_deletion(row['id'],[],self.store.wall_clock())
 
 
-    def saved_execution(self, job: Job, signature: str) -> dict[str, Any] | None:
-        row = self.store.db.execute("SELECT execution_settings->'parameters' FROM jobs WHERE id=%s AND execution_settings->>'generation'=%s::text AND execution_settings->>'signature'=%s",
-                                    (job.id, job.generation, signature)).fetchone()
+    def saved_execution(self, job: Job, input_hash: str) -> dict[str, Any] | None:
+        row = self.store.db.execute("SELECT execution_settings->'parameters' FROM jobs WHERE id=%s AND execution_settings->>'generation'=%s::text AND input_snapshot->>'input_hash'=%s",
+                                    (job.id, job.generation, input_hash)).fetchone()
         return dict(row[0]) if row and row[0] is not None else None
 
-    def save_execution(self, job: Job, signature: str, origin: dict[str, Any]) -> None:
+    def save_execution(self, job: Job, input_hash: str, origin: dict[str, Any]) -> None:
         with self.store.db:
             changed = self.store.db.execute("""UPDATE jobs SET execution_settings=jsonb_build_object(
-                'generation',%s::bigint,'signature',%s::text,'parameters',%s::jsonb)
+                'generation',%s::bigint,'parameters',%s::jsonb)
                 WHERE id=%s AND generation=%s AND status='running'""",
-                (job.generation, signature, json.dumps(origin), job.id, job.generation)).rowcount
+                (job.generation, json.dumps(origin), job.id, job.generation)).rowcount
             if changed != 1:
                 raise JobRejected('Attempt no longer owns this job')
 
@@ -1312,8 +1325,8 @@ class JobRepository:
             identities = [row[0] for row in self.store.db.execute("SELECT id FROM jobs WHERE kind=%s AND input_snapshot IS NOT NULL AND (payload::jsonb->>'input_revision') IS NULL", (kind,))]
             for identity in identities:
                 with self.store.db:
-                    row = self.store.db.execute("SELECT id,item,input_snapshot->>'signature' AS signature FROM jobs WHERE id=%s AND kind=%s AND input_snapshot IS NOT NULL AND (payload::jsonb->>'input_revision') IS NULL", (identity,kind)).fetchone()
-                    if row is not None and row['signature']==processing_input.signature(self.store,row['item'],kind):
+                    row = self.store.db.execute("SELECT id,item,input_snapshot->>'input_hash' AS input_hash FROM jobs WHERE id=%s AND kind=%s AND input_snapshot IS NOT NULL AND (payload::jsonb->>'input_revision') IS NULL", (identity,kind)).fetchone()
+                    if row is not None and row['input_hash']==processing_input.input_hash(self.store,row['item'],kind):
                         revision = processing_input.revision(self.store,row['item'])
                         self.store.db.execute("UPDATE jobs SET payload=jsonb_set(payload,'{input_revision}',to_jsonb(%s::text)) WHERE id=%s", (revision,row['id']))
                 yield

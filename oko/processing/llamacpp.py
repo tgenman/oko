@@ -1,45 +1,14 @@
 from oko.diagnostics import record_caught
-import ipaddress
 import json
 from typing import Any
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlencode
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .config import ProcessorConfig, loopback
 from .contracts import ProcessingError, ProcessingRequest, Theses, FilterResult, result_type, processing_instruction
 
 GENERATION_PARAMETERS: dict[str, Any] = dict(temperature=0,max_tokens=4096,reasoning_effort='none')
-
-
-class ProcessorConfig(BaseModel):
-    model_config = ConfigDict(extra='forbid', strict=True, frozen=True)
-    endpoint: str = Field(max_length=2000)
-    model: str = Field(min_length=1, max_length=200)
-    local_execution: bool = False
-
-    @field_validator('endpoint')
-    @classmethod
-    def endpoint_valid(cls, value: str) -> str:
-        parsed = urlsplit(value)
-        if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in ('', '/'):
-            raise ValueError('Укажите http(s) адрес сервера без пути и авторизации')
-        try:
-            parsed.port
-        except ValueError:
-            record_caught('llamacpp.endpoint_valid')
-            raise ValueError('Неверный порт') from None
-        return value.rstrip('/')
-
-
-def loopback(endpoint: str) -> bool:
-    host = urlsplit(endpoint).hostname
-    if host == 'localhost':
-        return True
-    try:
-        return ipaddress.ip_address(host or '').is_loopback
-    except ValueError:
-        return False
 
 
 class LlamaCpp:

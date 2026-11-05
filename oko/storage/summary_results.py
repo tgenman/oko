@@ -15,24 +15,24 @@ class SummaryResults:
         self.store=store
 
     @reading_value
-    def signature(self,item: str) -> str | None:
-        return publication_input.signature(self.store,item,'theses')
+    def input_hash(self,item: str) -> str | None:
+        return publication_input.input_hash(self.store,item,'theses')
 
 
     def request(self,item: str) -> tuple[ProcessingRequest,str,bool] | None:
-        signature=self.signature(item)
-        row=self.store.db.execute("SELECT input_snapshot->>'signature' FROM jobs WHERE kind='theses' AND item=%s",(item,)).fetchone()
-        if not signature or not row or row[0]!=signature:
+        input_hash=self.input_hash(item)
+        row=self.store.db.execute("SELECT input_snapshot->>'input_hash' FROM jobs WHERE kind='theses' AND item=%s",(item,)).fetchone()
+        if not input_hash or not row or row[0]!=input_hash:
             return None
         values,public_ai=publication_input.request_settings(self.store,item)
         request=ProcessingRequest(sources=publication_input.sources(self.store,item,'theses'),
             prompt=values['prompt_theses']['value'],processor=values['processor']['value'],generation=0)
-        return request,signature,public_ai
+        return request,input_hash,public_ai
 
 
     @reading_value
     def status(self,item: str) -> dict[str,Any] | None:
-        if not self.signature(item):
+        if not self.input_hash(item):
             return None
         job=material_read.jobs(self.store.db,item).get('theses')
         if not publication_input.stage_enabled(self.store, item, 'theses') and (not job or job['status'] != 'running'):
@@ -45,7 +45,7 @@ class SummaryResults:
     def read(self,item: str) -> dict[str,Any] | None:
         row=material_read.item(self.store.db,item)
         metadata=json.loads(row['processing_metadata']).get('summary',{}) if row else {}
-        if not metadata or metadata.get('signature')!=self.signature(item) or metadata.get('source_url_stale') or metadata.get('source_title_stale'):
+        if not metadata or not row or row['summarized_content']=='{}' or metadata.get('source_url_stale') or metadata.get('source_title_stale'):
             return None
         assert row is not None
         result=json.loads(row['summarized_content'])

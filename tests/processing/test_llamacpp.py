@@ -6,7 +6,8 @@ import httpx
 import pytest
 
 from oko.processing.contracts import InputSource, ProcessingError, ProcessingRequest
-from oko.processing.llamacpp import LlamaCpp, ProcessorConfig
+from oko.processing.llamacpp import LlamaCpp
+from oko.processing.config import ProcessorConfig
 from tests.support.models import model_transport
 
 

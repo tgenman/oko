@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 from typing import Literal
 from oko.processing.contracts import ProcessingRequest
+from oko.processing.config import ProcessorConfig
 
 Kind = Literal['filter','theses']
 
@@ -9,10 +10,12 @@ Kind = Literal['filter','theses']
 class ProcessingInput:
     item: str
     kind: Kind
-    signature: str
+    input_hash: str
     request: ProcessingRequest
     public_ai: bool
     no_input: bool
+    processor_config: ProcessorConfig | None = None
+    public_processor: bool = True
 
 
 

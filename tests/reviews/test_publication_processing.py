@@ -78,7 +78,8 @@ def test_results_have_atomic_metadata_and_media_change_preserves_processing(tmp_
         assert row['status']=='ready'
         for operation in ('filter','summary'):
             metadata=row['processing_metadata'][operation]
-            assert {'input_hash','settings_hash','processor','model','completed_at'}<=metadata.keys()
+            assert {'input_hash','prompt','processor','model','parameters','completed_at'}<=metadata.keys()
+            assert 'signature' not in metadata and 'settings_hash' not in metadata
             assert metadata['processor']=='llamacpp' and metadata['model']=='local:latest'
         assert row['processing_metadata']['summary']['parameters']=={'temperature':0,'max_tokens':4096,'reasoning_effort':'none'}
         assert row['filtered_content']['removed']==[{'publication_id':item,'block_index':0,'text':'Реклама: купите курс.'}]
@@ -148,6 +149,10 @@ def test_confirmed_empty_input_completes_without_model(tmp_path):
         assert row['filtered_content']['blocks']==[] and row['filtered_content']['removed']==[]
         assert row['processing_metadata']['filter']['reason']=='no_input'
         assert row['processing_metadata']['summary']['reason']=='no_input'
+        for stage in ('filter','summary'):
+            metadata=row['processing_metadata'][stage]
+            assert metadata['prompt'] is None and metadata['processor'] is None and metadata['model'] is None
+            assert metadata['parameters']=={} and metadata['completed_at']
         assert calls==[]
 
         accepted=row['processing_metadata']
@@ -184,44 +189,37 @@ def test_unavailable_input_waits_without_model_and_processes_when_retrieved(tmp_
         assert all(c['sources'][0]['text']=='Retrieved text' for c in calls)
 
 
-def test_rule_change_rejects_late_filter_and_uses_one_new_feed_snapshot(tmp_path):
+def test_running_filter_finishes_with_its_settings_and_summary_uses_new_settings(tmp_path):
     import asyncio
     import threading
     root=publication_root(tmp_path)
     calls=[]
     started,release=threading.Event(),threading.Event()
     native=coordinated_transport(calls)
-    first=[True]
     async def model(request):
         if request.url.path=='/v1/chat/completions':
             task=json.loads(json.loads(request.content)['messages'][1]['content'])
-            if task['operation']=='filter' and first[0]:
-                first[0]=False
+            if task['operation']=='filter':
                 calls.append(task)
                 started.set()
                 while not release.is_set():
-                    try:
-                        await asyncio.sleep(.01)
-                    except asyncio.CancelledError:
-                        pass
-                return httpx.Response(200,json={'choices':[{'finish_reason':'stop','message':{'role':'assistant','content':json.dumps(dict(hidden=True,reason='Old rule',removed=[]))}}]})
+                    await asyncio.sleep(.01)
+                return httpx.Response(200,json={'choices':[{'finish_reason':'stop','message':{'role':'assistant','content':json.dumps(dict(hidden=False,reason='Old rule',removed=[]))}}]})
         return native.handler(request)
     source=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'Useful text')])) )
     with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,ai_transport=httpx.MockTransport(model)),headers=HEADERS) as client:
         try:
             setup(client)
-            assert started.wait(3)
+            assert started.wait(10)
             client.patch('/api/v3/settings/oko/global',json={'prompt_filters':'Keep the text.','prompt_theses':'New summary rule.'})
             release.set()
-            card=wait_for(client,lambda:next((c for c in read_publications_for_cards(client, '/api/v3/cards') if c['theses']['result']),None))
-            assert not card['filter']['result']['hidden']
-            assert len([c for c in calls if c['operation']=='filter'])==2
-            assert calls[0]['prompt']=='Убери рекламу.'
-            assert all(c['prompt']==('Keep the text.' if c['operation']=='filter' else 'New summary rule.') for c in calls[1:])
-            chosen=stored(root,card['id'])['processing_metadata']['_pass']
-            assert chosen['feed_id']==card['feed_id']
-            assert chosen['settings']['values']['prompt_filters']=='Keep the text.'
-            assert chosen['settings']['values']['prompt_theses']=='New summary rule.'
+            card=wait_for(client,lambda:next((c for c in read_publications_for_cards(client,'/api/v3/cards') if c['theses']['result']),None))
+            assert card['filter']['result']['reason']=='Old rule'
+            assert [c['prompt'] for c in calls if c['operation']=='filter']==['Убери рекламу.']
+            assert [c['prompt'] for c in calls if c['operation']=='theses']==['New summary rule.']
+            accepted=stored(root,card['id'])['processing_metadata']
+            assert accepted['filter']['prompt']=='Убери рекламу.'
+            assert accepted['summary']['prompt']=='New summary rule.'
         finally:
             release.set()
 
@@ -487,7 +485,8 @@ def test_codex_future_choices_preserve_results_and_explicit_regeneration_uses_ne
         assert client.post('/api/v3/materials/'+item+'/regenerate').status_code==200
         wait_for(client,lambda:stored(root,item)['processing_metadata'].get('summary',{}).get('model')=='synthetic-next')
         metadata=stored(root,item)['processing_metadata']['summary']
-        assert metadata['fast'] is True and metadata['reasoning_effort']=='high'
+        assert metadata['parameters']=={'fast':True,'reasoning_effort':'high'}
+        assert 'fast' not in metadata and 'reasoning_effort' not in metadata
         assert len(model.inputs)==count+1
 
 
@@ -524,3 +523,303 @@ def test_folder_completion_includes_hidden_publications(tmp_path):
         assert preview['cards_count'] == preview['publications_count'] == 3
         assert client.post('/api/v3/folders/fixture/completion', json={'token': preview['token']}).status_code == 200
         assert read_publications_for_cards(client, '/api/v3/cards?show_hidden=true') == []
+
+
+def test_clearing_filter_prompt_keeps_accepted_filter_and_theses(tmp_path):
+    root=publication_root(tmp_path)
+    calls=[]
+    source=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'Открылась выставка. Реклама: купите курс.')])))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,ai_transport=coordinated_transport(calls)),headers=HEADERS) as client:
+        setup(client)
+        card=wait_for(client,lambda:next((c for c in read_publications_for_cards(client,'/api/v3/cards') if c['theses']['result']),None))
+        item=card['id']
+        before=client.get('/api/v3/publication/'+item).json()
+        count=len(calls)
+        assert client.patch('/api/v3/settings/oko/global',json={'prompt_filters':''}).status_code==200
+        after=client.get('/api/v3/publication/'+item).json()
+        assert after['filter']['result']==before['filter']['result']
+        assert after['theses']['result']==before['theses']['result']
+        assert len(calls)==count
+
+
+def test_processing_metadata_records_actual_prompts_without_competing_signatures(tmp_path):
+    root=publication_root(tmp_path)
+    calls=[]
+    source=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'Useful text')])))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,ai_transport=coordinated_transport(calls)),headers=HEADERS) as client:
+        setup(client)
+        card=wait_for(client,lambda:next((c for c in read_publications_for_cards(client,'/api/v3/cards') if c['theses']['result']),None))
+        metadata=stored(root,card['id'])['processing_metadata']
+        for stage,operation in [('filter','filter'),('summary','theses')]:
+            accepted=metadata[stage]
+            request=next(call for call in calls if call['operation']==operation)
+            assert accepted['prompt']==request['prompt']
+            assert accepted['processor']=='llamacpp' and accepted['model']=='local:latest'
+            assert accepted['parameters'] and accepted['completed_at'] and accepted['input_hash']
+            import hashlib
+            expected=hashlib.sha256(json.dumps(request['sources'],sort_keys=True,ensure_ascii=False).encode('utf-8')).hexdigest()
+            assert accepted['input_hash']==expected
+            with database(root) as db:
+                snapshot=db.execute("SELECT input_snapshot FROM jobs WHERE item=%s AND kind=%s",(card['id'],operation)).fetchone()[0]
+            assert snapshot['input_hash']==expected and 'signature' not in snapshot
+            assert 'signature' not in accepted and 'settings_hash' not in accepted
+        assert '_pass' not in metadata
+
+
+def test_revoking_public_ai_does_not_cancel_running_local_filter(tmp_path):
+    import asyncio
+    import threading
+    root=publication_root(tmp_path)
+    entered,release=threading.Event(),threading.Event()
+    calls=[]
+    native=coordinated_transport(calls)
+    async def model(request):
+        if request.url.path=='/v1/chat/completions':
+            entered.set()
+            while not release.is_set():await asyncio.sleep(.01)
+        return native.handler(request)
+    source=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'Local text')])))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,ai_transport=httpx.MockTransport(model)),headers=HEADERS) as client:
+        try:
+            configure_fast_web(client)
+            client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
+            feed=client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'}).json()['feed_id']
+            card=wait_for(client,lambda:next((c for c in read_publications_for_cards(client,'/api/v3/cards') if c['availability']=='available'),None))
+            client.patch('/api/v3/feeds/'+feed,json={'public_ai':True})
+            client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':True})
+            client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','prompt_filters':'Filter','theses':False})
+            assert entered.wait(10), {'status':client.get('/api/v3/status/details').json(),'diagnostics':client.get('/api/v3/diagnostics').json()}
+            client.patch('/api/v3/feeds/'+feed,json={'public_ai':False})
+            release.set()
+            result=wait_for(client,lambda:(v if (v:=client.get('/api/v3/publication/'+card['id']).json())['filter']['result'] else None))
+            assert result['filter']['result'] is not None
+            assert len([call for call in calls if call['operation']=='filter'])==1
+        finally:
+            release.set()
+
+
+def test_manual_filter_rebuild_keeps_theses_until_explicit_summary_rebuild(tmp_path):
+    root=publication_root(tmp_path)
+    calls=[]
+    native=model_transport([])
+    def model(request):
+        if request.url.path!='/v1/chat/completions':return native.handler(request)
+        task=json.loads(json.loads(request.content)['messages'][1]['content'])
+        calls.append(task)
+        if task['operation']=='filter':
+            result={'hidden':False,'reason':'Rule','removed':['Ad text.'] if task['prompt']=='Remove ads' else []}
+        else:
+            first=task['sources'][0]
+            result={'points':[{'text':first['text'],'sources':[{'id':first['id'],'url':first['url']}]}]}
+        return httpx.Response(200,json={'choices':[{'finish_reason':'stop','message':{'role':'assistant','content':json.dumps(result)}}]})
+    source=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'Useful text. Ad text.')])))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,ai_transport=httpx.MockTransport(model)),headers=HEADERS) as client:
+        configure_fast_web(client)
+        client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':True})
+        client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':'Remove ads'})
+        presence(client,'reader')
+        client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'})
+        card=wait_for(client,lambda:next((c for c in read_publications_for_cards(client,'/api/v3/cards') if c['theses']['result']),None))
+        item=card['id']
+        old=client.get('/api/v3/publication/'+item).json()['theses']['result']
+        assert old['points']==['Useful text. ']
+        client.patch('/api/v3/settings/oko/global',json={'prompt_filters':'Keep all'})
+        assert client.post('/api/v3/materials/'+item+'/filter/retry').status_code==200
+        wait_for(client,lambda:stored(root,item)['processing_metadata'].get('filter',{}).get('prompt')=='Keep all')
+        assert client.get('/api/v3/publication/'+item).json()['theses']['result']==old
+        assert len([c for c in calls if c['operation']=='theses'])==1
+        assert client.post('/api/v3/materials/'+item+'/regenerate').status_code==200
+        updated=wait_for(client,lambda:(r if (r:=client.get('/api/v3/publication/'+item).json()['theses']['result']) and r!=old else None))
+        assert updated['points']==['Useful text. Ad text.']
+        assert len([c for c in calls if c['operation']=='theses'])==2
+
+
+def test_running_filter_rebuild_exposes_attempt_and_previous_result_together(tmp_path):
+    import asyncio
+    import threading
+    root=publication_root(tmp_path)
+    entered,release=threading.Event(),threading.Event()
+    hold=[False]
+    calls=[]
+    native=coordinated_transport(calls)
+    async def model(request):
+        if request.url.path=='/v1/chat/completions' and hold[0]:
+            entered.set()
+            while not release.is_set():await asyncio.sleep(.01)
+        return native.handler(request)
+    source=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'Useful text')])))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,ai_transport=httpx.MockTransport(model)),headers=HEADERS) as client:
+        try:
+            setup(client)
+            card=wait_for(client,lambda:next((c for c in read_publications_for_cards(client,'/api/v3/cards') if c['theses']['result']),None))
+            item=card['id']
+            previous=client.get('/api/v3/publication/'+item).json()['filter']['result']
+            hold[0]=True
+            assert client.post('/api/v3/materials/'+item+'/filter/retry').status_code==200
+            assert entered.wait(10)
+            current=client.get('/api/v3/publication/'+item).json()
+            assert current['filter']['state']=='processing'
+            assert current['filter']['result']==previous
+            assert any(j['operation']=='filter' and j['status']=='running' for j in current['jobs'])
+        finally:
+            release.set()
+
+
+def test_failed_filter_rebuild_keeps_previous_result_and_shows_error(tmp_path):
+    root=publication_root(tmp_path)
+    fail=[False]
+    native=coordinated_transport([])
+    def model(request):
+        if fail[0] and request.url.path=='/v1/chat/completions':return httpx.Response(503)
+        return native.handler(request)
+    source=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'Useful text')])))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,ai_transport=httpx.MockTransport(model)),headers=HEADERS) as client:
+        setup(client)
+        card=wait_for(client,lambda:next((c for c in read_publications_for_cards(client,'/api/v3/cards') if c['theses']['result']),None))
+        item=card['id']
+        previous=client.get('/api/v3/publication/'+item).json()['filter']['result']
+        fail[0]=True
+        assert client.post('/api/v3/materials/'+item+'/filter/retry').status_code==200
+        result=wait_for(client,lambda:(v if (v:=client.get('/api/v3/publication/'+item).json())['filter']['state']=='error' else None))
+        assert result['filter']['result']==previous and result['filter']['error']
+
+
+def test_retrying_filter_does_not_cancel_running_summary(tmp_path):
+    import asyncio
+    import threading
+    root=publication_root(tmp_path)
+    entered,release=threading.Event(),threading.Event()
+    calls=[]
+    native=coordinated_transport(calls)
+    async def model(request):
+        if request.url.path=='/v1/chat/completions':
+            task=json.loads(json.loads(request.content)['messages'][1]['content'])
+            if task['operation']=='theses':
+                entered.set()
+                while not release.is_set():await asyncio.sleep(.01)
+        return native.handler(request)
+    source=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'Useful text')])))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,ai_transport=httpx.MockTransport(model)),headers=HEADERS) as client:
+        try:
+            setup(client)
+            assert entered.wait(10)
+            item=read_publications_for_cards(client,'/api/v3/cards')[0]['id']
+            assert client.post('/api/v3/materials/'+item+'/filter/retry').status_code==200
+            current=client.get('/api/v3/publication/'+item).json()
+            assert any(j['operation']=='theses' and j['status']=='running' for j in current['jobs'])
+            release.set()
+            result=wait_for(client,lambda:(v if (v:=client.get('/api/v3/publication/'+item).json())['theses']['result'] else None))
+            assert result['theses']['result']['points']==['Useful text']
+            assert len([c for c in calls if c['operation']=='theses'])==1
+        finally:
+            release.set()
+
+
+def test_public_ai_revoked_during_unverified_loopback_check_blocks_transfer(tmp_path):
+    import asyncio
+    import threading
+    root=publication_root(tmp_path)
+    entered,release=threading.Event(),threading.Event()
+    transfers=[]
+    async def model(request):
+        if request.url.path=='/v1/models':
+            return httpx.Response(200,json={'data':[{'id':'local:latest','owned_by':'proxy','meta':{'size':100}}]})
+        if request.url.path=='/props':
+            entered.set()
+            while not release.is_set():await asyncio.sleep(.01)
+            return httpx.Response(200,json={'model_path':'/remote','build_info':'proxy'})
+        transfers.append(request.url.path)
+        return httpx.Response(500)
+    source=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'Private source')])))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,ai_transport=httpx.MockTransport(model)),headers=HEADERS) as client:
+        try:
+            configure_fast_web(client)
+            client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
+            feed=client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'}).json()['feed_id']
+            wait_for(client,lambda:read_publications_for_cards(client,'/api/v3/cards'))
+            client.patch('/api/v3/feeds/'+feed,json={'public_ai':True})
+            client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://127.0.0.1:9931','model':'local:latest','local_execution':True})
+            client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','prompt_filters':'Filter','theses':False})
+            assert entered.wait(10)
+            client.patch('/api/v3/feeds/'+feed,json={'public_ai':False})
+            release.set()
+            wait_for(client,lambda:any(w.get('reason')=='public_ai_not_allowed' for w in client.get('/api/v3/status/details').json()['work']))
+            assert transfers==[]
+        finally:
+            release.set()
+
+
+def test_revoking_public_ai_interrupts_running_remote_filter_and_rejects_late_result(tmp_path):
+    import asyncio
+    import threading
+    root=publication_root(tmp_path)
+    entered,cancelled,release=threading.Event(),threading.Event(),threading.Event()
+    calls=[]
+    native=coordinated_transport(calls)
+    async def model(request):
+        if request.url.path=='/v1/chat/completions':
+            entered.set()
+            while not release.is_set():
+                try:await asyncio.sleep(.01)
+                except asyncio.CancelledError:cancelled.set()
+        return native.handler(request)
+    source=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'Private text')])))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,ai_transport=httpx.MockTransport(model)),headers=HEADERS) as client:
+        try:
+            configure_fast_web(client)
+            client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
+            feed=client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'}).json()['feed_id']
+            card=wait_for(client,lambda:next((c for c in read_publications_for_cards(client,'/api/v3/cards') if c['availability']=='available'),None))
+            client.patch('/api/v3/feeds/'+feed,json={'public_ai':True})
+            client.put('/api/v3/processors/llamacpp',json={'endpoint':'https://remote.test','model':'local:latest','local_execution':False})
+            client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','prompt_filters':'Filter','theses':False})
+            assert entered.wait(10)
+            client.patch('/api/v3/feeds/'+feed,json={'public_ai':False})
+            assert cancelled.wait(10)
+            release.set()
+            wait_for(client,lambda:any(j['operation']=='filter' and j['status']!='running' for j in client.get('/api/v3/publication/'+card['id']).json()['jobs']))
+            assert client.get('/api/v3/publication/'+card['id']).json()['filter']['result'] is None
+        finally:
+            release.set()
+
+
+def test_public_permission_granted_during_check_then_revoked_during_transfer(tmp_path):
+    import asyncio
+    import threading
+    root=publication_root(tmp_path)
+    checking,finish_check,sending,cancelled,release=[threading.Event() for _ in range(5)]
+    native=coordinated_transport([])
+    async def model(request):
+        if request.url.path=='/v1/models':
+            return httpx.Response(200,json={'data':[{'id':'local:latest','owned_by':'proxy','meta':{'size':100}}]})
+        if request.url.path=='/props':
+            checking.set()
+            while not finish_check.is_set():await asyncio.sleep(.01)
+            return httpx.Response(200,json={'model_path':'/remote','build_info':'proxy'})
+        if request.url.path=='/v1/chat/completions':
+            sending.set()
+            while not release.is_set():
+                try:await asyncio.sleep(.01)
+                except asyncio.CancelledError:cancelled.set()
+        return native.handler(request)
+    source=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'Private input')])))
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,ai_transport=httpx.MockTransport(model)),headers=HEADERS) as client:
+        try:
+            configure_fast_web(client)
+            client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
+            feed=client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'}).json()['feed_id']
+            card=wait_for(client,lambda:next((c for c in read_publications_for_cards(client,'/api/v3/cards') if c['availability']=='available'),None))
+            client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://127.0.0.1:9931','model':'local:latest','local_execution':True})
+            client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','prompt_filters':'Filter','theses':False})
+            assert checking.wait(10)
+            client.patch('/api/v3/feeds/'+feed,json={'public_ai':True})
+            finish_check.set()
+            assert sending.wait(10)
+            client.patch('/api/v3/feeds/'+feed,json={'public_ai':False})
+            assert cancelled.wait(10)
+            release.set()
+            wait_for(client,lambda:any(j['operation']=='filter' and j['status']!='running' for j in client.get('/api/v3/publication/'+card['id']).json()['jobs']))
+            assert client.get('/api/v3/publication/'+card['id']).json()['filter']['result'] is None
+        finally:
+            finish_check.set()
+            release.set()

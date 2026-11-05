@@ -11,7 +11,7 @@ from typing import Any
 from oko.domain.reader import WorkSummary
 from oko.storage.problems import CommandRecord
 from oko.storage.reader_facts import ReaderFacts
-from oko.processing.llamacpp import ProcessorConfig
+from oko.processing.config import ProcessorConfig
 from oko.storage.composition import Navigation, ReadingComposition
 from oko.storage.subscriptions import SubscriptionRepository
 from oko.storage.publications import Publications
@@ -182,10 +182,6 @@ class ReadingQueries:
     @repository_access
     def filter(self, identity: str) -> dict[str, Any]:
         return self._filters().read(identity)
-
-    @repository_access
-    def theses_signature(self, identity: str) -> str | None:
-        return self._processing().theses.signature(identity)
 
     @repository_access
     def media_loading(self, identity: str) -> bool:

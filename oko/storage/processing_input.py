@@ -44,7 +44,7 @@ def _reading_content(store: 'Store', item: str) -> dict[str, Any]:
 def selected_content(store: 'Store', item: str, kind: str) -> dict[str, Any]:
     selected=content(store,item)
     row=store.db.execute('SELECT filtered_content FROM publications WHERE id = %s',(item,)).fetchone()
-    if kind=='theses' and row and row[0]!='{}' and 'youtube' not in selected.get('extra',{}) and store.filters.read(item)['status']=='done':
+    if kind=='theses' and row and row[0]!='{}' and store.filters.read(item)['status']=='done':
         selected=json.loads(row[0])
     return selected
 
@@ -95,9 +95,10 @@ def can_start(store: 'Store', item: str, feed: str) -> bool:
     processor = rules['values']['processor']
     if processor == 'codex':
         return bool(rules['public_ai'] and store.codex_config())
+    from oko.processing.config import loopback
     config = store.processor_config()
     return bool(config and processor in ('llamacpp','llamacpp:'+config.model)
-                and (config.local_execution or rules['public_ai']))
+                and (config.local_execution and loopback(config.endpoint) or rules['public_ai']))
 
 
 @reading_value
@@ -127,12 +128,10 @@ def stage_enabled(store: 'Store', item: str, kind: str) -> bool:
 
 
 def settings(store: 'Store', item: str) -> dict[str, Any]:
-    row=material_read.item(store.db,item)
-    selected=json.loads(row['processing_metadata']).get('_pass',{}).get('settings') if row else None
-    return selected if selected is not None else live_settings(store,item)
+    return live_settings(store,item)
 
 
-def signature(store: 'Store', item: str, kind: str) -> str | None:
+def input_hash(store: 'Store', item: str, kind: str) -> str | None:
     row=material_read.item(store.db,item)
     if not row or row['viewed'] or row['feed_id'] is None or row['status']=='pending_collection' or 'blocks' not in row['content']:
         return None
@@ -148,37 +147,16 @@ def signature(store: 'Store', item: str, kind: str) -> str | None:
         return None
     if awaiting_input(store,item,selected_content) or awaiting_linked_input(store,item,selected_content):
         return None
-    if youtube:
-        from oko.storage.files import file_digest
-        path=youtube_media.subtitle_path(store,youtube_media.subtitle_id(selected_content))
-        selected=[dict(captions=youtube_media.subtitle_state(store,selected_content,item),
-                       digest=file_digest(path) if path else None)]
-    else:
-        selected=blocks(selected_content)
     if kind=='theses':
-        metadata=json.loads(row['processing_metadata'])
-        unselected=not metadata.get('_pass',{}).get('feed_id')
-        first_without_filter=unselected and feed!=row['feed_id'] and not (values['filter_enabled'] and values['prompt_filters'].strip())
-        filtered=({'status':'off','hidden':False} if first_without_filter else store.filters.read(item))
+        filtered=store.filters.read(item)
         if filtered['status'] not in ('off','done') or filtered['hidden']:
             return None
-        if filtered['status']=='done' and row['platform']!='youtube':
-            selected=blocks(json.loads(row['filtered_content']))
-    config=store.processor_config() if values['processor'].startswith('llamacpp') else None
-    processor=dict(endpoint=config.endpoint,local_execution=config.local_execution) if config else None
-    relevant=dict(prompt=values['prompt_filters' if kind=='filter' else 'prompt_theses'],processor=values['processor'],public_ai=rules['public_ai'],local=processor)
-    return digest([None if youtube else row['title'],selected,relevant])
+    return stage_input_hash(store,item,kind)
 
 
-def snapshot(store: 'Store', item: str) -> None:
-    row=expect_row(store.db.execute('SELECT processing_metadata FROM publications WHERE id = %s',(item,)).fetchone())
-    metadata=json.loads(row[0])
-    rules=live_settings(store,item)
-    current_revision=revision(store,item)
-    if metadata.get('_pass',{}).get('settings')!=rules or metadata.get('_pass',{}).get('revision')!=current_revision:
-        metadata['_pass']=dict(feed_id=rules['feed_id'],settings=deepcopy(rules),revision=current_revision)
-        with store.db:
-            store.db.execute('UPDATE publications SET processing_metadata = %s WHERE id = %s',(json.dumps(metadata,ensure_ascii=False),item))
+def stage_input_hash(store: 'Store', item: str, kind: str) -> str:
+    """SHA-256 of canonical UTF-8 JSON: ordered sources with their model-visible facts."""
+    return digest([source.model_dump(mode='json') for source in sources(store,item,kind)])
 
 
 def request_settings(store: 'Store', item: str) -> tuple[dict[str, Any], bool]:
@@ -206,34 +184,21 @@ def filtered(content: dict[str, Any], item: str, result: dict[str, Any]) -> dict
     return output
 
 
-def input_hash(store: 'Store', item: str) -> str:
+def source_revision_hash(store: 'Store', item: str) -> str:
+    """Fingerprint the source facts, independently of processing settings."""
+    root=material_read.item(store.db,item)
+    if root is None:
+        return digest(None)
     selected=_reading_content(store,item)
-    youtube=selected.get('extra',{}).get('youtube')
-    row=material_read.item(store.db,item)
-    rules = deepcopy(live_settings(store, item))
-    if youtube is not None:
-        from oko.storage.files import file_digest
-        path=youtube_media.subtitle_path(store,youtube_media.subtitle_id(selected))
-        source: list[Any]=[youtube_media.subtitle_state(store,selected,item),file_digest(path) if path else None]
-    else:
-        source=blocks(selected)
-    prefix = [row['title'] if row and youtube is None else None,source]
-    current = digest([*prefix, rules])
-    # Old revisions included the theses switch. Preserve their revision when
-    # that switch alone changes, without accepting changes to any other input.
-    metadata = json.loads(row['processing_metadata']) if row else {}
-    previous = metadata.get('_revision_input')
-    if isinstance(rules['values'].get('theses'), bool):
-        rules['values']['theses'] = not rules['values']['theses']
-        if previous == digest([*prefix, rules]):
-            return str(previous)
-    return current
+    sources=[root,*publication_links.children(store,item)]
+    identities=[dict(id=row['id'],url=row['url'],title=row['title'],published_at=row['published_at']) for row in sources]
+    return digest(dict(sources=identities,blocks=blocks(selected)))
 
 
 def revision(store: 'Store', item: str) -> str:
     row=material_read.item(store.db,item)
     metadata=json.loads(row['processing_metadata']) if row else {}
-    current=input_hash(store,item)
+    current=source_revision_hash(store,item)
     if metadata.get('_revision_input')!=current:
         return digest(['unreconciled',metadata.get('_revision'),current])
     return str(metadata.get('_revision',''))

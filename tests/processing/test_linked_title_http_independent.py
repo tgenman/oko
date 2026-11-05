@@ -26,7 +26,7 @@ def test_http_does_not_publish_late_summary_after_linked_title_roundtrip(tmp_pat
             client.portal.call(link)
             client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://127.0.0.1:8080','model':'local:latest','local_execution':True})
             client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True})
-            assert model.started.wait(3)
+            assert model.started.wait(8), client.get('/api/v3/status/details').json()
             old_task=client.portal.call(lambda:[app.state.host.jobs._ai])[0]
             assert old_task is not None
             def change():

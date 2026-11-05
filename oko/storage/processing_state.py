@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from oko.storage import processing_input as publication_input
 from oko.storage.publication_owners import owner_expr
 from oko.processing.contracts import ProcessingRequest, FilterResult, Theses
-from oko.processing.llamacpp import ProcessorConfig
+from oko.processing.config import ProcessorConfig
 from oko.processing.execution import CodexSettings
 if TYPE_CHECKING:
     from oko.storage.store import Store
@@ -23,7 +23,7 @@ class ProcessingRepository:
         parameters: tuple[str | int, ...] = (item,)
         rows=self.store.db.execute(query,parameters).fetchall()
         operation=self.store.filters if kind=='filter' else self.store.processing.theses
-        return [(row[0],operation.signature(row[0])) for row in rows]
+        return [(row[0],operation.input_hash(row[0])) for row in rows]
 
     def prepare(self, item: str, kind: Kind) -> ProcessingPreparation:
         row=self.store.db.execute("SELECT i.* FROM publications i WHERE i.id = %s AND i.viewed = 0",(item,)).fetchone()
@@ -37,27 +37,35 @@ class ProcessingRepository:
             filtered=self.store.filters.read(item)
             if filtered['hidden']:return ProcessingPreparation('disabled',reason='filter_out')
             if filtered['status'] not in ('off','done'):return ProcessingPreparation('waiting',reason='filter_pending')
-        publication_input.snapshot(self.store,item)
         operation=self.store.filters if kind=='filter' else self.store.processing.theses
         prepared=operation.request(item)
         if prepared is None:return ProcessingPreparation('waiting',reason='input_not_reconciled')
-        request,signature,public_ai=prepared
-        value=ProcessingInput(item,kind,signature,request,public_ai,
-            not any(source.text.strip() or source.reply_preview and source.reply_preview.text.strip() for source in request.sources))
+        request,input_hash,public_ai=prepared
+        from oko.processing.config import loopback
+        config=self.store.processor_config() if request.processor.startswith('llamacpp') else None
+        value=ProcessingInput(item,kind,input_hash,request,public_ai,
+            not any(source.text.strip() or source.reply_preview and source.reply_preview.text.strip() for source in request.sources),
+            config,request.processor=='codex' or config is None or not config.local_execution or not loopback(config.endpoint))
         return ProcessingPreparation('no_input' if value.no_input else 'model',value)
 
     def current(self, value: ProcessingInput) -> bool:
         operation=self.store.filters if value.kind=='filter' else self.store.processing.theses
-        # The Job owner checks generation before acceptance; signature is scoped
+        # The Job owner checks generation before acceptance; input_hash is scoped
         # to this stage so unrelated settings do not invalidate an active call.
-        return value.signature==operation.signature(value.item)
+        row=self.store.db.execute('SELECT viewed FROM publications WHERE id=%s',(value.item,)).fetchone()
+        if row is None or row['viewed']:
+            return False
+        try:
+            return tuple(publication_input.sources(self.store,value.item,value.kind))==tuple(value.request.sources) and (not value.public_processor or not value.public_ai or publication_input.live_settings(self.store,value.item)['public_ai'])
+        except (LookupError,ValueError):
+            return False
 
     def apply(self, value: ProcessingInput, result: FilterResult | Theses | None, origin: dict[str,Any] | None) -> None:
         if value.no_input:
-            self.store.publications.complete_empty(value.item,value.kind,value.signature)
+            self.store.publications.complete_empty(value.item,value.kind,value.input_hash)
         else:
             assert result is not None
-            self.store.publications.accept_result(value.item,value.kind,value.signature,result.model_dump(),origin)
+            self.store.publications.accept_result(value.item,value.kind,value.input_hash,result.model_dump(),origin,prompt=value.request.prompt)
 
     def satisfied(self, item: str, kind: Kind) -> bool:
         return self.store.filters.read(item)['status']=='done' if kind=='filter' else self.store.processing.theses.read(item) is not None
@@ -78,6 +86,9 @@ class ProcessingRepository:
 
     def reconcile(self) -> None:
         self.store.processing.sync()
+
+    def public_allowed(self, item: str) -> bool:
+        return bool(publication_input.live_settings(self.store,item)['public_ai'])
 
     def feed(self, item: str) -> str:
         return publication_input.processing_feed(self.store, item)

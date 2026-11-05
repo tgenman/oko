@@ -5,7 +5,7 @@ from oko.storage.job_types import Job
 from oko.storage.transaction import transaction
 from tests.support.worker_library import worker_library,workers,pass_worker
 
-def test_cancelled_theses_can_be_reenabled_without_signature_change(tmp_path,postgres_url):
+def test_cancelled_theses_stay_cancelled_when_settings_change(tmp_path,postgres_url):
     store,item,execution,tasks=worker_library(tmp_path,database_url=postgres_url)
     try:
         with transaction(store.db):
@@ -19,5 +19,6 @@ def test_cancelled_theses_can_be_reenabled_without_signature_change(tmp_path,pos
         with transaction(store.db):service.update_settings('oko','global',Overrides(theses=False,prompt_filters=''))
         with transaction(store.db):service.update_settings('oko','global',Overrides(theses=True,prompt_filters=''))
         status=store.db.execute('SELECT status FROM jobs WHERE id=%s',(row['id'],)).fetchone()[0]
-        assert status in ('pending','done'),status
+        assert status=='cancelled'
+        assert store.processing.theses.read(item) is not None
     finally:store.db.close()

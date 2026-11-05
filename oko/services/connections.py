@@ -4,7 +4,7 @@ from contextlib import AbstractContextManager
 from typing import Any, Protocol
 
 from oko.processing.execution import CodexSettings
-from oko.processing.llamacpp import ProcessorConfig
+from oko.processing.config import ProcessorConfig
 from oko.services.access import repository_access
 from oko.subscriptions.history import InitialHistory
 

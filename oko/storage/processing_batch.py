@@ -48,29 +48,37 @@ def _stage(store: 'Store', batch: list[str], kind: Kind, *, preserve_cancelled: 
             if not row or row['viewed'] or row['platform'] is None or row['feed_id'] is None or 'blocks' not in row['content']:
                 continue
             operation = store.filters if kind=='filter' else store.processing.theses
-            signature = operation.signature(item)
+            input_hash = operation.input_hash(item)
             revision = repository.revision(item)
             jobs = material_read.jobs(store.db,item)
             job = jobs.get(kind)
             snapshot = job['input_snapshot'] if job else None
-            previous = snapshot.get('signature') if isinstance(snapshot,dict) else None
-            enabled = processing_input.stage_enabled(store,item,kind) if signature is not None else False
-            if preserve_cancelled and job and job['status']=='cancelled' and (previous is None or previous==signature):
+            previous = snapshot.get('input_hash') if isinstance(snapshot,dict) else None
+            if job and job['status']=='running' and job['payload'].get('input_revision')==revision:
                 continue
-            if job and job['status']=='done' and previous is not None and previous==signature:
+            if job and job['status']=='done' and repository.satisfied(item,kind):
                 continue
-            if previous is not None and previous==signature and job and (job['status']=='running' or job['payload'].get('input_revision')==revision):
+            enabled = processing_input.stage_enabled(store,item,kind) if input_hash is not None else False
+            if preserve_cancelled and job and job['status']=='cancelled' and (previous is None or previous==input_hash):
+                continue
+            if job and job['status']=='done' and previous is not None and previous==input_hash:
+                continue
+            if previous is not None and previous==input_hash and job and job['payload'].get('input_revision')==revision:
                 if job['status']=='blocked' and enabled:
                     if job['payload'].get('preclaim_blocked') and not processing_input.can_start(
                             store,item,processing_input.processing_feed(store,item,kind)):
                         continue
                     unblock.append(item)
+                elif job['status']=='pending' and enabled and (
+                    job['reason_code']=='ai-permission' and processing_input.live_settings(store,item)['public_ai']
+                    or job['reason_code'] in ('ai-permission','processor-config') and processing_input.can_start(store,item,processing_input.processing_feed(store,item,kind))):
+                    unblock.append(item)
                 elif job['status']=='pending' and not enabled:
                     block.append(item)
                 continue
-            if signature is None and previous is None and (job is None or job['status']=='cancelled'):
+            if input_hash is None and previous is None and (job is None or job['status']=='cancelled'):
                 continue
-            if signature is None:
+            if input_hash is None:
                 filtering = jobs.get('filter')
                 if kind=='theses' and job and job['status']=='blocked' and processing_input.stage_enabled(store,item,'theses') and filtering and filtering['status'] in ('pending','running'):
                     continue
@@ -78,7 +86,7 @@ def _stage(store: 'Store', batch: list[str], kind: Kind, *, preserve_cancelled: 
             else:
                 satisfied = repository.satisfied(item,kind)
                 status = 'done' if satisfied else 'pending' if enabled else 'blocked'
-                upsert.append((item,status,json.dumps(dict(input_revision=revision)),json.dumps(dict(signature=signature))))
+                upsert.append((item,status,json.dumps(dict(input_revision=revision)),json.dumps(dict(input_hash=input_hash))))
     changed=set(unblock)|set(block)|set(cancel)|{row[0] for row in upsert}
     from oko.storage.collection_diagnostics import CollectionDiagnostics
     from oko.storage.publication_links import capture_processing_problems,capture_source_groups
@@ -87,9 +95,10 @@ def _stage(store: 'Store', batch: list[str], kind: Kind, *, preserve_cancelled: 
     if changed:capture_source_groups(store,effects,changed,kinds=(kind,))
     if unblock:
         job_write(store.db, """UPDATE jobs SET status='pending',
-            reason_code=CASE WHEN payload::jsonb->>'preclaim_blocked'='true' THEN NULL ELSE reason_code END,
-            reason_message=CASE WHEN payload::jsonb->>'preclaim_blocked'='true' THEN NULL ELSE reason_message END,
-            payload=(payload-'preclaim_blocked') WHERE kind=%s AND item=ANY(%s) AND status='blocked'""", (kind,unblock))
+            reason_code=CASE WHEN reason_code IN ('ai-permission','processor-config') OR payload::jsonb->>'preclaim_blocked'='true' THEN NULL ELSE reason_code END,
+            reason_message=CASE WHEN reason_code IN ('ai-permission','processor-config') OR payload::jsonb->>'preclaim_blocked'='true' THEN NULL ELSE reason_message END,
+            next=CASE WHEN reason_code IN ('ai-permission','processor-config') AND wait_scope IS NULL THEN 0 ELSE next END,
+            payload=(payload-'preclaim_blocked') WHERE kind=%s AND item=ANY(%s) AND status IN ('blocked','pending')""", (kind,unblock))
     if block:
         job_write(store.db,"UPDATE jobs SET status='blocked' WHERE kind=%s AND item=ANY(%s) AND status='pending'", (kind,block))
     if cancel:

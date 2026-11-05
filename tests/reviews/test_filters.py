@@ -65,6 +65,7 @@ def test_unknown_filter_fragment_is_error_and_forbidden_ai_sends_nothing(tmp_pat
         assert material['filter']['result'] is None and material['text']
         assert len(read_publications_for_cards(client, '/api/v3/cards')) == 3
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'https://remote.example.org', 'model': 'local:latest', 'local_execution': True})
+        assert client.post('/api/v3/materials/'+item+'/filter/retry').status_code==200
         material = wait_for(client, lambda: (m if 'Запрещена публичная' in ((m := client.get('/api/v3/publication/' + item).json())['filter']['error'] or '') else None))
         assert material['filter']['state'] == 'error'
         assert not any(r.url.host == 'remote.example.org' and r.url.path == '/v1/chat/completions' for r in calls)
@@ -129,8 +130,9 @@ def test_codex_filters_require_permission_and_use_filter_schema(tmp_path):
         setup_filters(client)
         client.patch('/api/v3/settings/oko/global', json={'processor': 'codex'})
         item = read_publications_for_cards(client, '/api/v3/cards')[0]['id']
+        assert client.post('/api/v3/materials/'+item+'/filter/retry').status_code==200
         wait_for(client, lambda: 'Запрещена публичная' in (client.get('/api/v3/publication/' + item).json()['filter']['error'] or ''))
         assert service.inputs == []
         client.patch('/api/v3/feeds/fixture', json={'public_ai': True})
-        wait_for(client, lambda: len(read_publications_for_cards(client, '/api/v3/cards')) == 0)
-        assert len(service.inputs) == 3
+        wait_for(client, lambda: (result:=client.get('/api/v3/publication/'+item).json()['filter']['result']) and result['hidden'])
+        assert len(service.inputs) == 1
