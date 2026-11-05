@@ -74,7 +74,7 @@ def slow_reconciliation(dsn):
         # Recovery must reconcile it even when model work is disabled.
         db.execute("UPDATE publications SET status='pending_filtering' WHERE TRUE")
         db.execute('''CREATE FUNCTION slow_recovery() RETURNS trigger LANGUAGE plpgsql AS $$
-            BEGIN PERFORM pg_sleep(0.2); RETURN NEW; END $$''')
+            BEGIN PERFORM pg_sleep(0.02); RETURN NEW; END $$''')
         db.execute('CREATE TRIGGER slow_recovery BEFORE UPDATE OF status ON publications FOR EACH ROW EXECUTE FUNCTION slow_recovery()')
 
 
@@ -87,6 +87,8 @@ def test_reader_opens_reads_and_stops_while_database_reconciliation_is_slow(post
     process = start(root, credential)
     try:
         with closing(ready(root, process)) as client:
+            with psycopg.connect(postgres_url, autocommit=True) as db:
+                assert db.execute("SELECT count(*) FROM publications WHERE status='pending_filtering'").fetchone()[0] > 0
             for _ in range(4):
                 started = time.monotonic()
                 assert client.get('/api/v3/cards').status_code == 200
@@ -109,6 +111,8 @@ def test_settings_and_viewed_during_recovery_survive_an_early_stop_and_restart(p
     process = start(root, credential)
     try:
         with closing(ready(root, process)) as client:
+            with psycopg.connect(postgres_url, autocommit=True) as db:
+                assert db.execute("SELECT count(*) FROM publications WHERE status='pending_filtering'").fetchone()[0] > 0
             started = time.monotonic()
             assert client.patch('/api/v3/settings/oko/global', json={'prompt_filters':'Keep useful text'}).status_code == 200
             assert client.get('/api/v3/settings/oko/global').json()['effective']['prompt_filters']['value'] == 'Keep useful text'
