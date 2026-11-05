@@ -52,6 +52,9 @@ def saved_library(root:Path, per_feed:int) -> dict[str,object]:
         store.configure_processor(ProcessorConfig(endpoint='http://localhost:9931',model='local:latest',local_execution=True))
         store.subscriptions.update_settings('oko','global',Overrides(theses=False))
         store.settings_changed()
+        with transaction(store.db):
+            for row in rows:
+                store.publications.reconcile(row[0])
         store.processing.sync()
         store.set_work_enabled(False)
         count=store.db.execute("SELECT count(*) FROM publications WHERE content <> '{}'::jsonb AND viewed=0").fetchone()[0]
