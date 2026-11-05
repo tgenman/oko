@@ -474,19 +474,18 @@ class JobRepository:
                 if changed_discover and changed_discover['reason_code']=='processor-config':self.store.problems.finish_processor_change([changed_discover['id']],None,self.store.wall_clock())
             source_rows: list[Any]=[]
             from oko.storage.fetch_job_problems import previous_candidates as managed_candidates
-            for row in self.store.db.execute("SELECT i . id , i . members , i . source_deleted , j . id AS job_id, j . reason_message , j . reason_code, j . status FROM publications i JOIN jobs j ON j . item = i . id AND j . kind = 'fetch' WHERE i.feed_id = %s AND i . viewed = 0 AND j . status != 'running'", (feed,)).fetchall():
-                if row['status']=='unavailable':
+            for row in self.store.db.execute("SELECT i . id , COALESCE(i.content #> '{extra,telegram,members}','[]'::jsonb)::text AS members , j . id AS job_id, j . reason_message , j . reason_code, j . status FROM publications i JOIN jobs j ON j . item = i . id AND j . kind = 'fetch' WHERE i.feed_id = %s AND i . viewed = 0 AND j . status != 'running'", (feed,)).fetchall():
+                if row['status']=='unavailable' or row['status']=='done' and row['reason_message'] is None and row['reason_code'] is None:
                     continue
                 material = self.store.material(row['id'])
-                unavailable = row['source_deleted']
                 manifest=SourceManifest.model_validate_json(json.dumps(self.store.original(row['id'])[0]['source_manifest'])) if material and material.get('complete') and self.store.original(row['id'])[0].get('source_manifest') else None
-                if material and not row['reason_message'] and not unavailable and (material.get('full',False) or expected_incomplete(manifest)) and not self.store._needs_collection(row['id']):
+                if material and not row['reason_message'] and (material.get('full',False) or expected_incomplete(manifest)) and not self.store._needs_collection(row['id']):
                     continue
                 if row['members'] != '[]' and material and material.get('full',False):
                     continue
-                if row['reason_message'] or unavailable or not material or not material.get('full',False):
+                if row['reason_message'] or not material or not material.get('full',False):
                     prior=managed_candidates(self.store,row['job_id'],self.store.wall_clock()) if row['reason_message'] is not None or row['reason_code'] is not None else []
-                    changed_fetch=job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , manual_once = CASE WHEN ( status = 'done' AND reason_message IS NOT NULL ) OR EXISTS ( SELECT 1 FROM publications i WHERE i.id=jobs.item AND i.source_deleted ) THEN true ELSE manual_once END , status = 'pending' , reason_code = NULL , reason_message = NULL , next = CASE WHEN reason_code LIKE '%%FloodWaitError' OR reason_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'fetch' AND item = %s AND CASE WHEN reason_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING id,processor_visible,OLD.reason_code AS previous_code", (self.store.wall_clock(),self.store.wall_clock(),row['id'])).fetchone()
+                    changed_fetch=job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , manual_once = CASE WHEN ( status = 'done' AND reason_message IS NOT NULL ) THEN true ELSE manual_once END , status = 'pending' , reason_code = NULL , reason_message = NULL , next = CASE WHEN reason_code LIKE '%%FloodWaitError' OR reason_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'fetch' AND item = %s AND CASE WHEN reason_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING id,processor_visible,OLD.reason_code AS previous_code", (self.store.wall_clock(),self.store.wall_clock(),row['id'])).fetchone()
                     if changed_fetch and (changed_fetch['processor_visible'] or changed_fetch['previous_code']=='processor-config'):
                         self.store.problems.finish_processor_change([changed_fetch['id']],None,self.store.wall_clock())
                     if prior:self.store.problems.sync_fetch(row['job_id'],prior,self.store.wall_clock())
@@ -507,8 +506,9 @@ class JobRepository:
             self.retry_linked(item)
         with self.store.db:
             self.retry_media(item,revalidate_ready=False)
-            self.enqueue_fetch(item)
-            self.store.db.execute("UPDATE jobs SET manual_once = true WHERE kind = 'fetch' AND item = %s",(item,))
+            if self.store.db.execute("SELECT 1 FROM publications WHERE id=%s AND status='pending_collection'",(item,)).fetchone():
+                self.enqueue_fetch(item)
+                self.store.db.execute("UPDATE jobs SET manual_once = true WHERE kind = 'fetch' AND item = %s",(item,))
         return True
 
 
@@ -763,23 +763,24 @@ class JobRepository:
                 source_groups.sync_changed_rows(self.store,list(changed_source),self.store.wall_clock())
                 self.store.incomplete_draft.mark_materials([row['id'] for row in rows])
                 self.store.incomplete_draft.mark_jobs([('download_media',row['item']) for row in changed_source])
-                for row in rows:
-                    if row['status']=='pending_download':
-                        self.enqueue_fetch(row['id'])
                 if affected:self.store.problems.finish_processor_change(affected,previous,self.store.wall_clock())
             return
         # This runs in the reader loop. Admission needs only the saved caption
         # state, not a reader material with filters, theses and provenance.
-        rows = self.store.db.execute("SELECT items.id , items.platform , items.content FROM publications items WHERE items.feed_id = %s AND items.viewed = 0 AND items.content <> '{}'::jsonb AND items.status <> 'pending_collection' AND NOT EXISTS ( SELECT 1 FROM jobs WHERE kind = 'fetch' AND item = items . id AND status IN ( 'pending' , 'running' ) )", (feed,)).fetchall()
+        rows = self.store.db.execute("SELECT items.id , items.platform , items.content FROM publications items WHERE items.feed_id = %s AND items.viewed = 0 AND items.content ? 'blocks' AND NOT EXISTS ( SELECT 1 FROM jobs WHERE kind = 'fetch' AND item = items . id AND status IN ( 'pending' , 'running' ) )", (feed,)).fetchall()
         for row in rows:
-            try:
-                extra=saved_content(row['content']).get('extra',{})
-            except (OSError, ValueError):
-                record_caught('store.prepare_youtube')
+            content=saved_content(row['content'],mutable=True)
+            subtitles=youtube_media.subtitle_id(content)
+            if subtitles is None:
                 continue
-            from oko.storage.publication_document import caption_state
-            if caption_state(extra.get('youtube', {}), extra.get('_reader', {})) == 'not_requested':
-                self.retry_material(row['id'])
+            if youtube_media.subtitle_state(self.store,content,row['id']) == 'not_requested':
+                with self.store.db:
+                    job_write(self.store.db, """INSERT INTO jobs(kind,item,status,queued_wall)
+                        VALUES ('download_media',%s,'pending',extract(epoch FROM clock_timestamp()))
+                        ON CONFLICT(kind,item) DO UPDATE SET status='pending',generation=jobs.generation+1,
+                          next=CASE WHEN jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.next ELSE 0 END
+                        WHERE jobs.status='cancelled'""",(subtitles,self.store.wall_clock()))
+                    self.store.processing.reconcile_accepted_item(row['id'])
 
 
     @contextmanager
@@ -900,25 +901,15 @@ class JobRepository:
         from oko.storage import publication_links
         for item,preserve in effects.parent_notifications.items():
             publication_links.notify_parents(self.store,item,preserve_cancelled=preserve)
-        for item in sorted(effects.processing_items):
-            self.store.processing.reconcile_accepted_item(item)
-        if effects.sync_processing:
-            self.store.processing.sync()
-        for item in sorted(effects.refresh_status):
-            self.store.publications.status(item)
         previous_deletions: dict[str, tuple[int,list[dict[str,Any]]]] = {}
         captured_fetch_items={row['item'] for row in db.execute("SELECT item FROM jobs WHERE kind='fetch' AND id=ANY(%s)",(list(diagnostics.fetch_problems_before),))} if diagnostics.fetch_problems_before else set()
         captured_source_fetch_items={row['item'] for row in db.execute("SELECT item FROM jobs WHERE kind='fetch' AND id=ANY(%s)",(list(diagnostics.source_groups_before),))} if diagnostics.source_groups_before else set()
         affected = sorted(set(effects.fetch) | set(diagnostics.delete_problem_ids_before))
-        processor_items=sorted(set(affected) | set(effects.refresh_links) | set(effects.media) | set(effects.revalidate))
+        processor_items=sorted(set(affected) | set(effects.media))
         if processor_items:
             from oko.storage.transaction import begin_write
             begin_write(db)
             self.store.incomplete_draft.mark_materials(processor_items)
-            for start in range(0,len(effects.revalidate),400):
-                ids=sorted(effects.revalidate)[start:start+400]
-                owners=[row['publication_id'] for row in db.execute('SELECT publication_id FROM media_files WHERE id=ANY(%s)',(ids,))]
-                self.store.incomplete_draft.mark_materials(owners)
         processor_jobs=sorted(set(self.store.problems.processor_jobs_for_materials(processor_items)) | set(self.processor_cleanup_jobs()))
         processor_previous=self.store.problems.processor_history_before_batch(processor_jobs,self.store.wall_clock())
         for start in range(0,len(affected),400):
@@ -928,6 +919,11 @@ class JobRepository:
                               self.store.problems.deletion_candidates(row['id'],self.store.wall_clock()))
                 if candidates:
                     previous_deletions[row['item']] = (row['id'],candidates)
+        for item in effects.invalidated_fetch:
+            running=db.execute("SELECT id,generation FROM jobs WHERE kind='fetch' AND item=%s AND status='running'",(item,)).fetchone()
+            if running:
+                self.cancel(Job(running['id'],'fetch',item,running['generation']))
+                if item in effects.fetch:effects.fetch[item]=True
         for item,changed in effects.fetch.items():
             cancelled = job_write(db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 , payload = (payload - 'cleanup_feed') WHERE kind = 'delete' AND item = %s",(item,)).rowcount
             if cancelled and item in previous_deletions:
@@ -940,10 +936,13 @@ class JobRepository:
         for item in sorted(set(previous_deletions) - set(effects.fetch)):
             deletion_job_id,previous = previous_deletions[item]
             self.store.problems.sync_deletion(deletion_job_id,previous,self.store.wall_clock())
-        for item in effects.refresh_links:
-            job_write(db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , next = 0 , generation = generation + 1 WHERE kind = 'fetch' AND item = %s AND status = 'done' AND reason_message IS NULL",(item,))
         for item in effects.media:self.schedule_media(item,skip_problem_jobs=set(diagnostics.media_problems_before),skip_source_jobs=set(diagnostics.source_groups_before),sync_processor=False)
-        for identity,manual in effects.revalidate.items():self.revalidate_media(identity,manual=manual,sync_processor=False)
+        for item in sorted(effects.processing_items):
+            self.store.processing.reconcile_accepted_item(item)
+        if effects.sync_processing:
+            self.store.processing.sync()
+        for item in sorted(effects.refresh_status):
+            self.store.publications.status(item)
         self.reconcile_cleanup(sync_processor=False,skip_source_jobs=set(diagnostics.source_groups_before),skip_media_jobs=set(diagnostics.media_problems_before))
         for job_id,previous in diagnostics.fetch_problems_before.items():
             self.store.problems.sync_fetch(job_id,previous,self.store.wall_clock())
@@ -1122,7 +1121,11 @@ class JobRepository:
             if changed:source_rows.append(changed)
             if previous:self.store.problems.sync_media_problem(row['id'],previous,self.store.wall_clock())
         media_targets=[]
-        for row in db.execute("SELECT m.id,j.id AS job_id,j.reason_message,j.reason_code FROM media_files m JOIN publications p ON p.id=m.publication_id LEFT JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=%s AND m.status='pending_download' AND (m.resource_key<>'youtube:subtitles' OR p.content #>> '{extra,youtube,captions}' IS DISTINCT FROM 'not_requested')", (item,)).fetchall():
+        owner=db.execute(f"SELECT {owner_expr('p')} AS feed_id FROM publications p WHERE p.id=%s",(item,)).fetchone()
+        captions_allowed=bool(owner and owner['feed_id'] and self.store.subscriptions.youtube_theses(owner['feed_id']))
+        for row in db.execute("SELECT m.id,m.resource_key,j.id AS job_id,j.reason_message,j.reason_code FROM media_files m LEFT JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=%s AND m.status='pending_download'", (item,)).fetchall():
+            if row['resource_key']=='youtube:subtitles' and not captions_allowed:
+                continue
             media_targets.append(row['id'])
             from oko.storage.media_job_problems import previous_candidates as media_candidates
             previous=media_candidates(self.store,row['job_id'],self.store.wall_clock()) if row['job_id'] is not None and row['job_id'] not in excluded and (row['reason_message'] is not None or row['reason_code'] is not None) else []
@@ -1147,6 +1150,19 @@ class JobRepository:
         previous=store.problems.prepare_processor_change(affected,store.wall_clock())
         owner=store.db.execute(f"SELECT i.platform, {owner_expr('i')} AS feed_id FROM publications i WHERE i.id = %s",(item,)).fetchone()
         captions_allowed=not owner or owner['platform']!='youtube' or store.subscriptions.youtube_theses(owner['feed_id'])
+        from oko.storage.media_paths import existing_file
+        for file in store.media.publication_rows(item):
+            if file['status']!='ready' or existing_file(store.root,file['storage_key']) is not None:
+                continue
+            store.db.execute("UPDATE media_files SET status='pending_download',storage_key=NULL WHERE id=%s AND status='ready'",(file['id'],))
+            job_write(store.db,"""INSERT INTO jobs(kind,item,status,queued_wall) VALUES ('download_media',%s,'pending',extract(epoch FROM clock_timestamp()))
+                ON CONFLICT(kind,item) DO UPDATE SET status='pending',generation=jobs.generation+1,
+                  queued_wall=excluded.queued_wall,
+                  next=CASE WHEN jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.next ELSE 0 END,
+                  retry_at=CASE WHEN jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.retry_at ELSE NULL END,
+                  reason_code=CASE WHEN jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.reason_code ELSE NULL END,
+                  reason_message=CASE WHEN jobs.wait_scope IS NOT NULL AND jobs.retry_at>%s THEN jobs.reason_message ELSE NULL END""",
+                (file['id'],store.wall_clock(),store.wall_clock(),store.wall_clock(),store.wall_clock()))
         rows = store.db.execute("SELECT j . * , m . resource_key , m . status AS media_status FROM jobs j JOIN media_files m ON m . id = j . item WHERE m . publication_id = %s AND j . kind = 'download_media' AND ( j . status IN ( 'failed' , 'unavailable' , 'pending' ) OR j . status = 'done' AND m . status = 'unavailable' )", (item,)).fetchall()
         for row in rows:
             if row['media_status']=='ready' and not revalidate_ready or row['resource_key']=='youtube:subtitles' and not captions_allowed:
@@ -1160,32 +1176,8 @@ class JobRepository:
             store.db.execute("UPDATE media_files SET status = 'pending_download' WHERE id = %s AND status != 'ready'", (row['item'],))
             if previous_media:store.problems.sync_media_problem(row['id'],previous_media,store.wall_clock())
 
-        youtube_row=store.db.execute("SELECT content FROM publications WHERE id = %s AND platform = 'youtube'",(item,)).fetchone()
-        if youtube_row and captions_allowed:
-            content=saved_content(youtube_row['content'],mutable=True)
-            subtitles=youtube_media.subtitle_id(content)
-            if subtitles and content['extra']['youtube'].get('captions')!='not_requested':
-                retried=any(row['item']==subtitles and row['media_status']!='ready' for row in rows)
-                if retried:
-                    content['extra']['youtube']['captions']='pending'
-                    content['extra']['_reader'].pop('captions', None)
-                    store.db.execute('UPDATE publications SET content = %s WHERE id = %s',(json.dumps(stored_content(content),ensure_ascii=False),item))
-                    store.processing.reconcile_accepted_item(item)
-                resource=store.db.execute('SELECT status FROM media_files WHERE id = %s',(subtitles,)).fetchone()
-                if resource and resource['status']=='unavailable':
-                    store.db.execute("UPDATE media_files SET status = 'pending_download' WHERE id = %s",(subtitles,))
-                    content['extra']['youtube']['captions']='pending'
-                    content['extra']['_reader'].pop('captions', None)
-                    store.db.execute('UPDATE publications SET content = %s WHERE id = %s',(json.dumps(stored_content(content),ensure_ascii=False),item))
-                    from oko.storage.incomplete_index import save_class
-                    save_class(store.db,item,content)
-                    changed_source=job_write(store.db, "INSERT INTO jobs ( kind , item , queued_wall ) VALUES ( 'download_media' , %s , extract(epoch FROM clock_timestamp()) ) ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , generation = jobs . generation + 1 , next = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . next ELSE 0 END , retry_at = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . retry_at ELSE NULL END WHERE jobs . status != 'running' AND CASE WHEN jobs.reason_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING id,OLD.reason_code AS previous_code",(subtitles,store.wall_clock(),store.wall_clock())).fetchone()
-                    if changed_source:source_rows.append(changed_source)
-                    store.processing.reconcile_accepted_item(item)
-
-        if revalidate_ready:
-            for resource in store.db.execute("SELECT id FROM media_files WHERE publication_id = %s AND status = 'ready'",(item,)).fetchall():
-                self.revalidate_media(resource['id'])
+        if rows:
+            store.processing.reconcile_accepted_item(item)
         if source_rows:source_groups.sync_changed_rows(store,source_rows,store.wall_clock())
         if affected:store.problems.finish_processor_change(affected,previous,store.wall_clock())
         if store.db.in_transaction:
@@ -1289,10 +1281,11 @@ class JobRepository:
 
 
     def retry_linked(self, item: str) -> None:
-        for row in self.store.db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id = %s',(item,)).fetchall():
-            self.enqueue_fetch(row[0])
-            self.store.db.execute("UPDATE jobs SET manual_once = true WHERE kind = 'fetch' AND item = %s",(row[0],))
-            self.retry_media(row[0],revalidate_ready=False)
+        for row in self.store.db.execute('SELECT p.id,p.status FROM publication_links l JOIN publications p ON p.id=l.target_publication_id WHERE l.source_publication_id=%s',(item,)).fetchall():
+            if row['status']=='pending_collection':
+                self.enqueue_fetch(row['id'])
+                self.store.db.execute("UPDATE jobs SET manual_once = true WHERE kind = 'fetch' AND item = %s",(row['id'],))
+            self.retry_media(row['id'],revalidate_ready=False)
 
     def cancel_history(self, feed: str) -> None:
         from oko.storage import memberships,source_groups

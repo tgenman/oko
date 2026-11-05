@@ -4,11 +4,11 @@ This foundation is adopted by bindings/history in #18–20. Source keeps discove
 """
 from dataclasses import dataclass
 import json
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 
-from oko.collection.contracts import Publication, Source, SourceError, ExternalMedia
+from oko.collection.contracts import SourceError, ExternalMedia
 
 Adapter = Literal['web']
 Lane = Literal['common']
@@ -16,7 +16,6 @@ Lane = Literal['common']
 
 @dataclass(frozen=True)
 class TelegramBinding:
-    source: Source
     cursor_key: str
     lane: Lane
 
@@ -35,9 +34,17 @@ class ExpectedMedia:
 
 
 @dataclass(frozen=True)
-class TelegramPublication:
-    publication: Publication
+class TelegramPost:
+    id: str
+    url: str
+    published: float | None
+    members: tuple[int, ...]
+    title: str
     text: str
+    description: str = ''
+    reply_preview: dict[str, Any] | None = None
+    restricted: bool = False
+    malformed: bool = False
     media: tuple[ExpectedMedia, ...] = ()
 
 
@@ -52,7 +59,7 @@ class TelegramSourceInfo:
 @dataclass(frozen=True)
 class TelegramPage:
     source: TelegramSourceInfo
-    publications: tuple[TelegramPublication, ...]
+    publications: tuple[TelegramPost, ...]
     position: dict[str, JsonValue]
     more: bool
     # None means the adapter has not established an archive boundary yet.

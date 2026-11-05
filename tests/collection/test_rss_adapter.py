@@ -108,27 +108,31 @@ def test_rss_enclosures_are_individual_media_and_are_downloaded_only_on_request(
     value,=page.publications
     media,=value.media
     assert media.locator=='https://rss.example/file.pdf' and media.mime_type=='application/pdf' and media.size_bytes==3
+    assert media.publication_url==value.metadata.reference.url
     assert value.content['blocks'][-1]['role']=='attachment'
     assert all('/file.pdf' not in url for url in calls)
+    before=list(calls)
     output=BytesIO()
     actual=asyncio.run(adapter.download_media(value.metadata.reference,media,output))
     assert actual.size_bytes==3 and output.getvalue()==b'pdf'
+    assert calls==before+['https://rss.example/file.pdf']
 
 
-def test_rss_source_bridge_keeps_adapter_keys_and_ready_content_across_pages():
-    from oko.collection.rss_source import RSSAdapterSource
+def test_rss_worker_keeps_adapter_keys_and_ready_content_across_pages():
+    from oko.workers.feed_discovery import discover_rss
     transport=httpx.MockTransport(lambda _:httpx.Response(200,text='<rss><channel><title>News</title><item><guid>2</guid><link>https://web.example/2</link><description>Second</description></item><item><guid>1</guid><link>https://web.example/1</link><description>First</description></item></channel></rss>'))
-    source=RSSAdapterSource('https://rss.example/feed',1,transport)
-    source.initial_history={'mode':'count','count':2}
-    boundary=asyncio.run(source.discover(None))
+    adapter=RSSAdapter(transport)
+    url='https://rss.example/feed'
+    selection={'mode':'count','count':2}
+    boundary=asyncio.run(discover_rss(adapter,url,selection,None))
     assert boundary.publications==() and boundary.continuation is not None
-    page=asyncio.run(source.discover(boundary.cursor))
-    assert [p.teaser.adapter_content.content['blocks'][0]['text'] for p in page.publications]==['First','Second']
-    assert all(p.adapter_reference.key.platform==Platform.rss for p in page.publications)
-    assert all(p.teaser.adapter_content.needs_fetch is False for p in page.publications)
+    page=asyncio.run(discover_rss(adapter,url,selection,boundary.cursor))
+    assert [p.content['blocks'][0]['text'] for p in page.publications]==['First','Second']
+    assert all(p.metadata.reference.key.platform==Platform.rss for p in page.publications)
+    assert all(p.needs_fetch is False for p in page.publications)
     assert page.continuation is None and page.observation.description is None
-    replay=asyncio.run(source.discover(page.cursor))
-    assert [p.adapter_reference for p in replay.publications]==[p.adapter_reference for p in page.publications]
+    replay=asyncio.run(discover_rss(adapter,url,selection,page.cursor))
+    assert [p.metadata.reference for p in replay.publications]==[p.metadata.reference for p in page.publications]
 
 
 def test_malformed_record_keeps_its_key_and_does_not_drop_healthy_peers():
@@ -162,31 +166,53 @@ def test_latest_rss_metadata_does_not_fetch_history_until_the_offset_needs_it():
     feed=asyncio.run(adapter.resolve_feed('https://rss.example/feed'))
     page=asyncio.run(adapter.discover(feed.reference,feed.latest_cursor,1))
     assert len(page.publications)==1 and calls==['/feed']
-    cursor=asyncio.run(adapter.cursor_before(feed.reference,feed.latest_cursor,10))
-    partial=asyncio.run(adapter.discover(feed.reference,cursor,10))
-    assert len(partial.publications)==2
-    assert any(issue.code=='rss-history-request-failed' for issue in partial.issues)
+    with pytest.raises(AdapterException) as caught:
+        asyncio.run(adapter.cursor_before(feed.reference,feed.latest_cursor,10))
+    assert caught.value.issue.kind==AdapterErrorKind.temporary
     assert calls[-1]=='/archive'
 
 
+def test_failed_rss_history_page_is_retried_without_advancing_cursor():
+    from oko.workers.feed_discovery import discover_rss
+    from oko.collection.contracts import SourceError
+    import pytest
+    failures=[True]
+    def respond(request):
+        if request.url.path=='/archive' and failures[0]:
+            return httpx.Response(503)
+        entry='<item><guid>old</guid><description>Old</description></item>' if request.url.path=='/archive' else '<item><guid>new</guid><description>New</description></item><atom:link rel="next" href="/archive"/>'
+        return httpx.Response(200,text='<rss xmlns:atom="http://www.w3.org/2005/Atom"><channel>'+entry+'</channel></rss>')
+    adapter=RSSAdapter(httpx.MockTransport(respond))
+    url='https://rss.example/feed'
+    selection={'mode':'count','count':2,'run':'first'}
+    boundary=asyncio.run(discover_rss(adapter,url,selection,None))
+    with pytest.raises(SourceError):
+        asyncio.run(discover_rss(adapter,url,selection,boundary.cursor))
+    failures[0]=False
+    result=asyncio.run(discover_rss(adapter,url,selection,boundary.cursor))
+    assert {value.content['blocks'][0]['text'] for value in result.publications}=={'New','Old'}
+    assert json.loads(result.cursor)['scan_complete'] is True
+
+
 def test_new_rss_history_run_freezes_its_count_and_resolves_an_archive_offset():
-    from oko.collection.rss_source import RSSAdapterSource
+    from oko.workers.feed_discovery import discover_rss
     def respond(request):
         text=('<item><guid>one</guid><description>One</description></item>' if request.url.path=='/archive' else
               '<item><guid>two</guid><description>Two</description></item><atom:link rel="next" href="/archive"/>')
         return httpx.Response(200,text='<rss xmlns:atom="http://www.w3.org/2005/Atom"><channel>'+text+'</channel></rss>')
-    source=RSSAdapterSource('https://rss.example/feed',1,httpx.MockTransport(respond))
-    source.initial_history={'mode':'count','count':1,'run':'first'}
-    boundary=asyncio.run(source.discover(None))
-    first=asyncio.run(source.discover(boundary.cursor))
-    assert [p.teaser.adapter_content.content['blocks'][0]['text'] for p in first.publications]==['Two']
-    source.initial_history={'mode':'count','count':2,'run':'second'}
-    boundary=asyncio.run(source.discover(first.cursor))
+    adapter=RSSAdapter(httpx.MockTransport(respond))
+    url='https://rss.example/feed'
+    selection={'mode':'count','count':1,'run':'first'}
+    boundary=asyncio.run(discover_rss(adapter,url,selection,None))
+    first=asyncio.run(discover_rss(adapter,url,selection,boundary.cursor))
+    assert [p.content['blocks'][0]['text'] for p in first.publications]==['Two']
+    selection={'mode':'count','count':2,'run':'second'}
+    boundary=asyncio.run(discover_rss(adapter,url,selection,first.cursor))
     assert boundary.publications==() and boundary.continuation is not None
     # The already admitted pass keeps its selection even if live settings move.
-    source.initial_history={'mode':'count','count':1,'run':'second'}
-    second=asyncio.run(source.discover(boundary.cursor))
-    assert [p.teaser.adapter_content.content['blocks'][0]['text'] for p in second.publications]==['One','Two']
+    selection={'mode':'count','count':1,'run':'second'}
+    second=asyncio.run(discover_rss(adapter,url,selection,boundary.cursor))
+    assert [p.content['blocks'][0]['text'] for p in second.publications]==['One','Two']
 
 
 def test_invalid_rss_permalink_keeps_a_known_guid_and_healthy_records():

@@ -1,4 +1,4 @@
-from oko.collection.adapters import PublicationAdapter
+from oko.collection.adapters import PublicationAdapter, PublicationContent
 from dataclasses import dataclass
 from copy import deepcopy
 from typing import Any, Protocol, Literal, TYPE_CHECKING
@@ -11,16 +11,6 @@ if TYPE_CHECKING:
     from oko.collection.adapters import PublicationContent, ExternalReference, ExternalKey, AdapterIssue
 
 
-@dataclass(frozen=True)
-class Publication:
-    id: str
-    url: str
-    published: float
-    teaser: 'Material | None' = None
-    members: tuple[int, ...] = ()
-    published_known: bool = True
-    observed_only: bool = False
-    adapter_reference: 'ExternalReference | None' = None
 
 
 class ExternalMedia(BaseModel):
@@ -69,17 +59,6 @@ class ReplyPreview(BaseModel):
     source_url: str | None = None
 
 
-@dataclass(frozen=True)
-class Material:
-    title: str
-    full: bool = True
-    reason: str = ''
-    members: tuple[int, ...] = ()
-    captions: str | None = None
-    collection_error: 'SourceError | None' = None
-    description: str = ''
-    source_manifest: SourceManifest | None = None
-    adapter_content: 'PublicationContent | None' = None
 
 
 @dataclass(frozen=True)
@@ -119,7 +98,7 @@ class SourceObservation:
 
 @dataclass(frozen=True)
 class DiscoveryResult:
-    publications: tuple[Publication, ...]
+    publications: tuple[PublicationContent, ...]
     cursor: str
     observation: SourceObservation = SourceObservation()
     continuation: float | None = None
@@ -138,23 +117,6 @@ class CaptionsClient(Protocol):
 
 
 
-@dataclass(frozen=True)
-class FetchResult:
-    material: Material
-    observation: SourceObservation = SourceObservation()
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, 'material', deepcopy(self.material))
-
-
-class Source(Protocol):
-    @property
-    def changes(self) -> str | None: ...
-
-    async def discover(self, cursor: str | None) -> DiscoveryResult: ...
-    async def fetch(self, publication: Publication) -> FetchResult: ...
-
-    def publication_adapter(self) -> PublicationAdapter: ...
 
 
 class SourceError(Exception):
@@ -187,9 +149,9 @@ class SourceDeferred(SourceError):
     scope: str
 
 
-class SourceDeleted(SourceError):
+class SourceUnavailable(SourceError):
     def __init__(self) -> None:
-        super().__init__('Публикация удалена или недоступна в источнике')
+        super().__init__('Публикация недоступна в источнике')
 
 
 class SourceSkipped(SourceError):

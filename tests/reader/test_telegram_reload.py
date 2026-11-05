@@ -35,18 +35,7 @@ def test_web_full_copy_is_not_polled_and_terminal_reload_keeps_old_media(tmp_pat
         wait_for(client, lambda: client.get('/api/v3/collection-status/'+feed).json()['source']['state'] == 'complete')
         assert downloads == ['Original']
         client.post('/api/v3/materials/'+item+'/retry')
-        deadline = time.monotonic()+4
-        while len(downloads)<2 and time.monotonic()<deadline:
-            time.sleep(.02)
-        assert downloads == ['Original','Edited']
-        deadline = time.monotonic()+3
-        while not client.get('/api/v3/status/details').json()['problems']['current'] and time.monotonic()<deadline:
-            time.sleep(.02)
-        assert client.get('/api/v3/status/details').json()['problems']['current']
-        kept = client.get('/api/v3/publication/'+item).json()
-        assert kept['text'] == 'Edited'
-        assert kept['revision_id'] != old['revision_id']
-        assert client.get([a for a in kept['media'] if a['url'] is not None][0]['url']).content == b'old-image'
-        client.post('/api/v3/collect', json={'scope':'feed','feed_id':feed})
-        wait_for(client, lambda: not any(op['kind']=='discover' for op in client.get('/api/v3/collection-status/'+feed).json()['operations']))
-        assert downloads == ['Original','Edited']
+        kept=client.get('/api/v3/publication/'+item).json()
+        assert kept['text']=='Original' and kept['revision_id']==old['revision_id']
+        assert client.get([a for a in kept['media'] if a['url'] is not None][0]['url']).content==b'old-image'
+        assert downloads==['Original']

@@ -8,9 +8,9 @@ from collections.abc import Awaitable, Callable
 import secrets
 from typing import Any, Literal
 import httpx
-from oko.collection.rss import RSSSource, feed_title, normalized
+from oko.collection.rss import RSSHTTP, feed_title, normalized
 from oko.collection.contracts import SourceError
-from oko.collection.contracts import Source
+from oko.collection.sources import FeedRuntime
 from oko.processing.llamacpp import LlamaCpp, ProcessorConfig
 from oko.processing.contracts import ProcessingError
 from oko.processing.execution import CodexSettings
@@ -42,7 +42,7 @@ class StatusSnapshot:
 
 
 class ReaderApplication:
-    def __init__(self, execution: Execution, jobs: JobControl, *, clock: Callable[[], float], wall_clock: Callable[[], float], sources: dict[str, Source], bindings: dict[str, TelegramBinding], sync_sources: Callable[[], None], interval_changed: Callable[[float], None], source_description: Callable[[str], str | None], rss_transport: httpx.AsyncBaseTransport | None, ai_transport: httpx.AsyncBaseTransport | None, telegram_http: TelegramHTTP, codex: CodexClient, stop: Callable[[], Awaitable[None]], admission_changed: Callable[[], Awaitable[None]], set_power: Callable[[bool], Awaitable[None]]) -> None:
+    def __init__(self, execution: Execution, jobs: JobControl, *, clock: Callable[[], float], wall_clock: Callable[[], float], sources: dict[str, FeedRuntime], bindings: dict[str, TelegramBinding], sync_sources: Callable[[], None], interval_changed: Callable[[float], None], source_description: Callable[[str], str | None], rss_transport: httpx.AsyncBaseTransport | None, ai_transport: httpx.AsyncBaseTransport | None, telegram_http: TelegramHTTP, codex: CodexClient, stop: Callable[[], Awaitable[None]], admission_changed: Callable[[], Awaitable[None]], set_power: Callable[[bool], Awaitable[None]]) -> None:
         self.execution, self.jobs = execution, jobs
         self.subscriptions = subscription_service(execution.require_store)
         self.queries = reader_queries(execution.require_store)
@@ -435,7 +435,7 @@ class ReaderApplication:
                 raise ActionError('invalid', error.label if isinstance(error, SourceError) else str(error)) from error
             async def download_title() -> str:
                 async with asyncio.timeout(25):
-                    raw, _, _ = await RSSSource(url, 1, self._rss_transport).download(url)
+                    raw, _, _ = await RSSHTTP(self._rss_transport).download(url)
                     return feed_title(raw)
             pending = check.start(download_title()) if not existing else None
         try:

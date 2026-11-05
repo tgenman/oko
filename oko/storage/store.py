@@ -1,7 +1,6 @@
 from oko.storage.publication_owners import owned_ids, owner_expr
 from oko.storage.database import expect_row, Connection, Row, INTEGRITY_ERRORS
-from oko.collection.external_media import saved_external, expected_incomplete
-from oko.collection.adapters import ExternalKey, ExternalReference, Platform
+from oko.collection.external_media import saved_external
 from oko.collection.telegram.reading import saved_preview
 from oko.storage.collection_status import CollectionStatus
 from oko.storage import material_read, collection_jobs, publication_links, youtube_media
@@ -28,7 +27,7 @@ from oko.storage.youtube import YouTubeAccess
 from oko.storage.composition import FolderContents, ReadingComposition
 from oko.storage.filter_results import FilterResults
 from oko.storage.processing_coordination import ProcessingState
-from oko.collection.contracts import SourceError, Material, Publication, SourceManifest
+from oko.collection.contracts import SourceError
 from oko.storage.subscriptions import SubscriptionRepository
 from oko.storage.job_writes import execute as job_write
 from oko.storage.transaction import begin_write, transaction
@@ -176,7 +175,7 @@ class Store:
             from oko.storage.collected_publication import CollectedPublicationRepository
             effects = CollectionEffectCapture(self)
             self.discovery = DiscoveryRepository(db=self.db, publications=self.publications, subscriptions=self.subscriptions,
-                versions=self.read_versions, effects=effects, needs_collection=self._needs_collection,
+                versions=self.read_versions, effects=effects,
                 original=self.original, clock=self.wall_clock, fault=self.fault)
             self.collected_publication = CollectedPublicationRepository(db=self.db, root=self.root,
                 publications=self.publications, media=self.media, capture=effects,
@@ -286,22 +285,9 @@ class Store:
                             ('telegram-http:'+group, json.dumps(state)))
 
     @reading_snapshot()
-    def _needs_collection(self, item: str, observed: Material | None = None) -> bool:
-        material = self.material(item)
-        if not material or not material.get('complete',True):
-            return True
-        header, _ = self.original(item) if material and not material.get('full',False) else ({}, '')
-        linked_partial = expected_incomplete(SourceManifest.model_validate_json(json.dumps(header['source_manifest']))) if header.get('source_manifest') else False
-        if material.get('full',False):
-            return bool(observed and observed.source_manifest and observed.source_manifest.post_web_unavailable and not material.get('post_web_unavailable'))
-        if not observed or not observed.source_manifest:
-            return False
-        header, _ = self.original(item)
-        if not header.get('source_manifest'):
-            return True
-        previous = SourceManifest.model_validate_json(json.dumps(header['source_manifest']))
-        current = observed.source_manifest
-        return previous.post_web_unavailable!=current.post_web_unavailable or (not current.post_web_unavailable and previous.post!=current.post) or {r.key:r.external for r in previous.resources if r.status=='external'}!={r.key:r.external for r in current.resources if r.status=='external'}
+    def _needs_collection(self, item: str) -> bool:
+        material=self.material(item)
+        return not material or not material.get('complete',True)
 
     def _has_unviewed(self, item: str) -> bool:
         return self.db.execute('SELECT 1 FROM publications WHERE id = %s AND viewed = 0',(item,)).fetchone() is not None
@@ -344,22 +330,9 @@ class Store:
             (feeds,)).fetchone())[0])
 
 
-    def publication(self, item: str) -> Publication | None:
-        row = self.db.execute('SELECT * FROM publications WHERE id = %s AND viewed = 0', (item,)).fetchone()
-        if row:
-            header, text = self.publications.original(item) if row['content'] else ({},'')
-            reference=ExternalReference(ExternalKey(Platform(row['platform']),row['external_id']),row['url'])
-            teaser = Material(header.get('title',''),header.get('full',False),header.get('reason',''),
-                members=tuple(json.loads(row['members'])),description=header.get('description',''),
-                source_manifest=SourceManifest.model_validate_json(json.dumps(header['source_manifest'])) if header.get('source_manifest') else None) if row['content'] else None
-            return Publication(row['external_id'],row['url'],row['published_at'] or 0.,teaser,tuple(json.loads(row['members'])),row['published_at'] is not None,adapter_reference=reference)
-        return None
-
-    def collection_history(self, item: str, material: Material) -> None:
-        if not material.collection_error or not self.subscriptions.history.member(item):
-            self.subscriptions.history.saved(item,material.full)
-        if not material.collection_error:
-            self.publications.set_source_deleted([item], False)
+    def collection_history(self, item: str, full: bool, error: bool) -> None:
+        if not error or not self.subscriptions.history.member(item):
+            self.subscriptions.history.saved(item,full)
 
 
     def folder_contents(self, folder: str) -> FolderContents:
@@ -394,7 +367,7 @@ class Store:
                 batch = members[start:start+400]
                 marks = ','.join('%s' for _ in batch)
                 rows.update({row['id']: row for row in self.db.execute(
-                    f'SELECT i.id , i.members , {owner_expr("i")} AS feed_id FROM publications i WHERE i.id IN ( {marks} )', batch)})
+                    f"SELECT i.id , COALESCE(i.content #> '{{extra,telegram,members}}','[]'::jsonb)::text AS members , {owner_expr('i')} AS feed_id FROM publications i WHERE i.id IN ( {marks} )", batch)})
                 for row in self.db.execute(f'SELECT i.id AS publication_id, i.feed_id FROM publications i WHERE i.viewed=0 AND i.feed_id IS NOT NULL AND i.id IN ( {marks} )', batch):
                     memberships.setdefault(row['publication_id'], []).append(row['feed_id'])
             if len(rows) != len(members):
@@ -471,7 +444,6 @@ class Store:
             publication_links.capture_root_deletion_problems(self,effects,set(items))
             for item in items:
                 self.filters.forget(item)
-                self.publications.set_source_deleted([item], False)
                 if self.publications.owns(item):
                     self.publications.forget(item,effects=effects)
                 self.jobs.forget_input('theses', [item])
@@ -496,7 +468,7 @@ class Store:
             if 'youtube' in saved_content(own['content']).get('extra',{}):
                 projected=youtube_media.add_input(self,saved_content(own['content'],mutable=True))
                 text='\n\n'.join(block['text'] for block in projected['blocks'] if block['type']=='text' and block.get('role')=='body')
-                if projected['extra']['youtube'].get('captions')=='error' and header.get('captions')=='available':
+                if youtube_media.subtitle_state(self,projected,item)=='error' and header.get('captions')=='available':
                     header={**header,'captions':'error','full':False,'reason':'Локальный файл субтитров недоступен; повторите загрузку'}
             header=publication_links.project_header(self,item,header)
             article_text=publication_links.text(self,item)
@@ -532,7 +504,7 @@ class Store:
                 attachment['name'], attachment['kind'], attachment['mime']
             json.loads(row['media_ids'])
             for child in publication_links.children(self, item):
-                if child['content']:
+                if 'blocks' in child['content']:
                     json.loads(child['media_ids'])
             filtered = self.filters.read(item)
             theses = self.processing.theses.read(item)
@@ -548,7 +520,7 @@ class Store:
         """Saved publication facts without reader-specific text projections."""
         item = row['id']
         settings = self.subscriptions.effective('feed', row['feed_id'], details=False)
-        available=bool(row['content'])
+        available='blocks' in row['content']
         base = dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published_at'] or 0.,
                     published_known=row['published_at'] is not None,
                     members=json.loads(row['members']), complete=available,
@@ -562,11 +534,10 @@ class Store:
             if content is None:
                 return None
             header, text, filtered, theses, linked = content
-            base.update(changed=bool(header.get('changed')), source_deleted=self.publications.source_deleted(item),
-                filter=filtered, title=header['title'], theses=theses,
+            base.update(filter=filtered, title=header['title'], theses=theses,
                 provenance=self.processing.theses.provenance(item), ai=self.processing.theses.status(item),
                 version=self.content_version(item), loading=bool(fetch and (fetch['status']=='running' or fetch['status']=='pending' and fetch['next']<=reader_now(self.clock()))),
-                full=header.get('full', True) and (not header.get('members') or set(header['members']) == set(base['members'])),
+                full=header.get('full', True),
                 reason=header.get('reason', ''), captions=header.get('captions'),
                 attachments=[dict(url=header.get('_media_urls',{}).get(a['name'],f"/api/v3/materials/{item}/media/{a.get('media_id',a['name'])}"), kind=a['kind'], mime=a['mime']) for a in header.get('attachments', [])],
                 images=[])
@@ -668,14 +639,9 @@ class Store:
     def content_version(self, item: str) -> str:
         def input_value(row: Any) -> list[Any]:
             content=saved_content(row['content'])
-            youtube=content.get('extra',{}).get('youtube',{})
-            return [row['title'],publication_input.blocks(content),json.loads(row['media_ids']),youtube.get('captions_digest')]
+            from oko.storage.files import file_digest
+            path=youtube_media.subtitle_path(self,youtube_media.subtitle_id(content)) if 'youtube' in content.get('extra',{}) else None
+            return [row['title'],publication_input.blocks(content),json.loads(row['media_ids']),file_digest(path) if path else None]
         own=material_read.item(self.db,item)
         return publication_input.digest([input_value(own) if own else None,
-            [(row['id'],input_value(row)) for row in publication_links.children(self,item) if row['content']]])
-
-
-    def mark_source_removed(self, item: str) -> None:
-        membership_graph.lock_graph(self.db)
-        self.publications.set_source_deleted([item], True)
-        publication_links.notify_parents(self,item)
+            [(row['id'],input_value(row)) for row in publication_links.children(self,item) if 'blocks' in row['content']]])

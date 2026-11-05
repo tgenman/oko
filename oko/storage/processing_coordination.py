@@ -163,12 +163,12 @@ class ProcessingState:
                     affected=self.store.problems.processor_jobs_for_materials([item])
                     previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
                     self.store.db.execute("UPDATE media_files SET status='pending_download',storage_key=NULL WHERE id=%s", (identity,))
-                    content['extra']['youtube']['captions'] = 'pending'
-                    content['extra']['_reader'].pop('captions', None)
                     self.store.db.execute('UPDATE publications SET content=%s WHERE id=%s', (json.dumps(stored_content(content),ensure_ascii=False),item))
                     from oko.storage.incomplete_index import save_class
                     save_class(self.store.db,item,content)
-                    job_write(self.store.db, "UPDATE jobs SET status='cancelled' WHERE kind='download_media' AND item=%s AND status IN ('failed','unavailable')", (identity,))
+                    job_write(self.store.db, """INSERT INTO jobs(kind,item,status) VALUES ('download_media',%s,'pending')
+                        ON CONFLICT(kind,item) DO UPDATE SET status='pending',generation=jobs.generation+1
+                        WHERE jobs.status IN ('done','cancelled','failed','unavailable')""",(identity,))
                     self.store.jobs.schedule_media(item,sync_processor=False)
                     if affected:self.store.problems.finish_processor_change(affected,previous,self.store.wall_clock())
                     publication_links.notify_parents(self.store,item)

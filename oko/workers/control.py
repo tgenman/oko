@@ -4,7 +4,6 @@ import asyncio
 from dataclasses import dataclass
 from collections.abc import Callable
 from typing import Any, Literal, TYPE_CHECKING
-from oko.collection.contracts import Source
 from oko.storage.store import Store
 from oko.storage.job_types import Job
 from oko.diagnostics import Journal, record_caught
@@ -25,8 +24,8 @@ class _CollectionAttempt:
 
 
 class JobControl:
-    def __init__(self, execution: Execution, sources: dict[str, Source], clock: Callable[[], float]) -> None:
-        self.execution, self._sources, self._clock = execution, sources, clock
+    def __init__(self, execution: Execution, clock: Callable[[], float]) -> None:
+        self.execution, self._clock = execution, clock
         self._collection_active: dict[int, _CollectionAttempt] = {}
         self._ai: asyncio.Task[None] | None = None
         self._lanes: dict[str, asyncio.Task[None]] = {}

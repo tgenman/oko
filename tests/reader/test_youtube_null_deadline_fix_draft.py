@@ -15,8 +15,8 @@ def test_null_next_at_real_caption_attempt_defers_without_network(tmp_path,postg
     try:
         with transaction(store.db):
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
-            raw=json.dumps({'blocks':[],'extra':{'_reader':{'full':False}}})
-            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,content) VALUES ('p','youtube','p',0,%s)",(raw,))
+            raw=json.dumps({'blocks':[],'extra':{}})
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,content,status) VALUES ('p','youtube','p',0,%s,'pending_collection')",(raw,))
             store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','youtube:subtitles','x','file','pending_download')")
             jid=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('download_media','m','running',1) RETURNING id").fetchone()[0]

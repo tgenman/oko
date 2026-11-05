@@ -93,8 +93,6 @@ paths:
                 completeness:
                   state: complete
                 loading: false
-                changed: false
-                source_deleted: false
                 linked_content: null
                 reply_preview: null
                 post_web_unavailable: false
@@ -8312,7 +8310,6 @@ paths:
                   source_url: https://example.test/post/1
                   preview_url: null
                   loading: false
-                  changed: false
                   hidden: false
                   post_web_unavailable: false
                   external_attachment_kinds: []
@@ -12276,6 +12273,7 @@ components:
         properties:
           type: {const: media}
           role: {type: string, enum: [image, cover, video, audio, attachment, subtitles]}
+          presentation: {type: string, enum: [circle]}
           media_id: {$ref: '#/components/schemas/MaterialId'}
           source_url:
             anyOf:
@@ -12620,10 +12618,6 @@ components:
           - type: 'null'
         loading:
           type: boolean
-        changed:
-          type: boolean
-        source_deleted:
-          type: boolean
         linked_content:
           anyOf:
           - $ref: '#/components/schemas/LinkedContent'
@@ -12665,8 +12659,6 @@ components:
       - revision_id
       - completeness
       - loading
-      - changed
-      - source_deleted
       - linked_content
       - reply_preview
       - post_web_unavailable
@@ -12724,8 +12716,6 @@ components:
         completeness:
           state: complete
         loading: false
-        changed: false
-        source_deleted: false
         linked_content: null
         reply_preview: null
         post_web_unavailable: false
@@ -20592,8 +20582,6 @@ components:
           - type: 'null'
         loading:
           type: boolean
-        changed:
-          type: boolean
         hidden:
           type: boolean
         post_web_unavailable:
@@ -20620,7 +20608,6 @@ components:
       - source_url
       - preview_url
       - loading
-      - changed
       - hidden
       - post_web_unavailable
       - external_attachment_kinds
@@ -20632,7 +20619,6 @@ components:
         source_url: https://example.test/post/1
         preview_url: null
         loading: false
-        changed: false
         hidden: false
         post_web_unavailable: false
         external_attachment_kinds: []
@@ -20664,7 +20650,6 @@ components:
           source_url: https://example.test/post/1
           preview_url: null
           loading: false
-          changed: false
           hidden: false
           post_web_unavailable: false
           external_attachment_kinds: []
@@ -20728,10 +20713,6 @@ components:
           $ref: '#/components/schemas/ContentCompleteness'
         loading:
           type: boolean
-        source_deleted:
-          type: boolean
-        changed:
-          type: boolean
         description:
           type: string
           description: Source description stored separately from publication text.
@@ -20743,8 +20724,6 @@ components:
       - version
       - completeness
       - loading
-      - source_deleted
-      - changed
       - description
       additionalProperties: false
       examples:
@@ -20756,8 +20735,6 @@ components:
         completeness:
           state: complete
         loading: false
-        source_deleted: false
-        changed: false
         description: example
     CollectionRequestFailure:
       type: object

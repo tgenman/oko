@@ -243,12 +243,12 @@ function material(id: string, extra: Partial<FixtureMaterial> & {folder_id?:stri
     status:overrides.filter.state==='processing'?'running':overrides.filter.state==='ready'?'done':overrides.filter.state==='error'?'failed':'pending',
     reason_code:null,reason_message:overrides.filter.error,retry_at:null}]:[];
   const row:CardListItem={id,title,feed_id:feed,published_at:published,source_url:url,preview_url:null,
-    loading:false,changed:false,hidden:false,post_web_unavailable:false,external_attachment_kinds:[],...cardOverrides};
+    loading:false,hidden:false,post_web_unavailable:false,external_attachment_kinds:[],...cardOverrides};
   const value:FixtureMaterial={id,title,feed_id:feed,published_at:published,source_url:url,
     platform:'rss',external_id:id,status:'ready',discovered_at:new Date(100000).toISOString(),media_ids:[],
     content:{blocks},filtered_content:filtered,summarized_content:summarized,processing_metadata:summaryMetadata,linked_publications:[],jobs:[...filterJobs,...summaryJobs],
     source:{kind:'rss',feed_id:feed,source_url:url},availability:'available',
-    text:'Текст '+id,description:'',revision_id:'1',completeness:{state:'complete'},loading:false,changed:false,source_deleted:false,
+    text:'Текст '+id,description:'',revision_id:'1',completeness:{state:'complete'},loading:false,
     linked_content:null,reply_preview:null,post_web_unavailable:false,external_attachments:[],media:[],
     filter:{state:'disabled',result:null,error:null},theses:{state:'disabled',result:null,error:null},...overrides};
   fixtureMetadata.set(value,{folder_id,feed_title,card:row});

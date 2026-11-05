@@ -11,8 +11,8 @@ def test_pause_reservation_stable_through_deadline_tick_and_restart(tmp_path,pos
     try:
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
-            content=json.dumps({'blocks':[],'extra':{'_reader':{'full':False,'reason':'partial'},'youtube':{'captions':'pending'}}})
-            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,content) VALUES ('p','youtube','p',0,%s)",(content,))
+            content=json.dumps({'blocks':[],'extra':{'youtube':{'captions':'pending'}}})
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,content,status) VALUES ('p','youtube','p',0,%s,'pending_collection')",(content,))
             store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
             store.db.execute("UPDATE youtube_access SET blocked_until=200 WHERE id=1")
             save_keys(store.db,['p'])
@@ -42,8 +42,8 @@ def test_feed_removal_after_deadline_does_not_restore_forgotten_material(tmp_pat
     try:
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
-            raw=json.dumps({'blocks':[],'extra':{'_reader':{'full':False}}})
-            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,content,discovered_at) VALUES ('p','youtube','p',0,%s,1)",(raw,))
+            raw=json.dumps({'blocks':[],'extra':{}})
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,content,discovered_at,status) VALUES ('p','youtube','p',0,%s,1,'pending_collection')",(raw,))
             store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
             save_keys(store.db,['p'])
         store.youtube.blocked(100,900);clock[0]=1001

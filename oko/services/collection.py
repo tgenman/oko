@@ -3,7 +3,8 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from typing import Any, Protocol
 
-from oko.collection.contracts import Material, Publication, SourceError
+from oko.collection.contracts import SourceError
+from oko.collection.adapters import ExternalReference, PublicationContent
 from oko.domain.collection import CollectionEffects
 from oko.storage.collection_state import SourceConfiguration
 from oko.services.access import repository_access
@@ -12,14 +13,13 @@ from oko.services.access import repository_access
 class PublicationFacts(Protocol):
     def unviewed(self, item: str) -> bool: ...
     def feedless(self, item: str) -> bool: ...
-    def publication(self, item: str) -> Publication | None: ...
+    def reference(self, item: str) -> ExternalReference | None: ...
     def feed(self, item: str) -> str: ...
-    def source_removed(self, item: str) -> None: ...
     def viewed(self, item: str) -> None: ...
 
 
 class CollectedPublications(Protocol):
-    def accept(self, item: str, material: Material, *, manual: bool = False) -> tuple[SourceError | None, CollectionEffects]: ...
+    def accept_content(self, item: str, value: PublicationContent) -> tuple[SourceError | None, CollectionEffects]: ...
 
 
 class SourceFacts(Protocol):
@@ -47,8 +47,8 @@ class CollectionService:
         self._access, self._publications, self._sources, self._collected = access, publications, sources, collected
 
     @repository_access
-    def collected(self, item: str, material: Material, *, manual: bool) -> tuple[SourceError | None, CollectionEffects]:
-        return self._collected().accept(item, material, manual=manual)
+    def collected_content(self, item: str, value: PublicationContent) -> tuple[SourceError | None, CollectionEffects]:
+        return self._collected().accept_content(item,value)
 
     @repository_access
     def revision(self, item: str) -> str:
@@ -63,16 +63,12 @@ class CollectionService:
         return self._publications().feedless(item)
 
     @repository_access
-    def publication(self, item: str) -> Publication | None:
-        return self._publications().publication(item)
+    def reference(self, item: str) -> ExternalReference | None:
+        return self._publications().reference(item)
 
     @repository_access
     def feed(self, item: str) -> str:
         return self._publications().feed(item)
-
-    @repository_access
-    def source_removed(self, item: str) -> None:
-        self._publications().source_removed(item)
 
     @repository_access
     def feed_status(self, /, feed: str, **state: Any) -> None:

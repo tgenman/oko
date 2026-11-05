@@ -2,8 +2,8 @@
 from datetime import datetime,timezone
 from typing import BinaryIO
 from oko.collection.adapters import ExternalKey,ExternalReference,Platform,PublicationAdapter,PublicationContent,PublicationMetadata,MediaReference
-from oko.collection.contracts import Publication, DiscoveryResult, FetchResult
-from oko.collection.rss_source import material
+from oko.collection.contracts import DiscoveryResult
+from tests.support.legacy_source import Material, Publication, FetchResult
 
 
 def reference(identity: str) -> ExternalReference:
@@ -36,4 +36,5 @@ class SyntheticSource:
 
     async def fetch(self,publication: Publication) -> FetchResult:
         assert publication.adapter_reference is not None
-        return FetchResult(material(await self.publication_adapter().fetch(publication.adapter_reference)))
+        value=await self.publication_adapter().fetch(publication.adapter_reference)
+        return FetchResult(Material(value.metadata.title,adapter_content=value))

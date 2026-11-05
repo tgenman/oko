@@ -88,6 +88,18 @@ class CollectionState:
         return store.subscriptions.feed_refresh_minutes()*60
 
     def publication_revision(self, item: str) -> str:
+        """Capture relevant input at admission without storing a duplicate hash."""
         from oko.storage.processing_input import digest
-        row=self.store.db.execute("SELECT i . platform , i . external_id , i . url , i . members , i . feed_id , f . adapter , coalesce ( i.content::jsonb#>>'{extra,_collection_revision}' , i.content::jsonb#>>'{extra,_input_hash}' ) FROM publications i LEFT JOIN feeds f ON f . id = i . feed_id WHERE i . id = %s AND i . viewed = 0".replace('i . feed_id', owner_expr('i')),(item,)).fetchone()
-        return digest(list(row) if row else None)
+        from oko.storage.reading import saved_content
+        row=self.store.db.execute(f"""SELECT i.platform,i.external_id,i.url,
+            COALESCE(i.content #> '{{extra,telegram,members}}','[]'::jsonb)::text AS members,
+            {owner_expr('i')} AS feed_id,f.adapter,i.title,i.content FROM publications i
+            LEFT JOIN feeds f ON f.id={owner_expr('i')} WHERE i.id=%s AND i.viewed=0""",(item,)).fetchone()
+        if row is None:return digest(None)
+        content=saved_content(row['content'])
+        blocks=[]
+        for block in content.get('blocks',[]):
+            if block.get('type')=='media':
+                blocks.append({key:value for key,value in block.items() if key not in ('source_url','publication_url')})
+            else:blocks.append(block)
+        return digest([row['platform'],row['external_id'],row['url'],row['members'],row['feed_id'],row['adapter'],row['title'],blocks])

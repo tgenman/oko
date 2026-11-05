@@ -10,9 +10,12 @@ from typing import Any
 
 import httpx
 
-from oko.collection.sources import Sources
-from oko.collection.contracts import SourceError, SourceDeleted, SourceSkipped, SourceDeferred
-from oko.collection.contracts import Source
+from oko.collection.sources import FeedRuntime, Sources
+from oko.collection.rss_adapter import RSSAdapter
+from oko.collection.telegram.adapter import TelegramWebAdapter
+from oko.collection.youtube.adapter import YouTubeAdapter
+from oko.collection.contracts import SourceError, SourceUnavailable, SourceSkipped, SourceDeferred, SourceObservation
+from oko.collection.adapters import FeedAdapter
 from oko.collection.adapters import AdapterException, AdapterErrorKind, AdapterIssue
 from oko.collection.telegram.http import TelegramHTTP
 from oko.collection.http import SourceHTTP
@@ -50,7 +53,7 @@ class CollectionWorker:
     clean_collection: Callable[[dict[str, Any]], dict[str, Any]]
     _collection_interval: float
 
-    def __init__(self, execution: Execution, source: Source | None, clock: Callable[[],float],
+    def __init__(self, execution: Execution, source: FeedAdapter | None, clock: Callable[[],float],
                  fault: Callable[[str],None], source_feed: str, rss_enabled: bool,
                  rss_transport: httpx.AsyncBaseTransport | None,
                  youtube_captions: CaptionsClient | None, youtube_history: HistoryClient | None,
@@ -79,7 +82,7 @@ class CollectionWorker:
         self._collection = Sources(source, source_feed, rss_enabled, rss_transport,
                                    self._youtube_captions, self._youtube_history, self._telegram_http,self._source_http)
         self._sources = self._collection.sources
-        self.jobs = JobControl(self.execution, self._sources, clock)
+        self.jobs = JobControl(self.execution, clock)
         self._telegram_bindings: dict[str, TelegramBinding] = {}
         self._last_collection = clock()
         self._last_media_cleanup = clock()
@@ -130,7 +133,7 @@ class CollectionWorker:
             source=self._sources.get(feed)
             if source and binding and not setting.deleting:
                 if binding['kind']=='web':
-                    self._telegram_bindings[feed]=TelegramBinding(source,'telegram-web','common')
+                    self._telegram_bindings[feed]=TelegramBinding('telegram-web','common')
         self._source_revision=snapshot.revision
 
     @property
@@ -202,7 +205,7 @@ class CollectionWorker:
                 diagnostic_source.set('Сбор · ' + feed + ' · ' + job.kind)
                 linked=job.kind=='fetch' and self.service.feedless(job.item)
                 source = self._sources.get(feed)
-                publication = self.service.publication(job.item) if job.kind == 'fetch' else None
+                publication = self.service.reference(job.item) if job.kind == 'fetch' else None
                 revision=self.service.revision(job.item) if job.kind=='fetch' else ''
                 binding = self._telegram_bindings.get(feed)
                 namespace = binding.cursor_key if binding else ''
@@ -217,7 +220,22 @@ class CollectionWorker:
 
             if job.kind == 'discover':
                 assert source is not None
-                outcome = await source.discover(cursor)
+                from oko.workers.feed_discovery import discover_rss,discover_telegram,discover_youtube
+                if isinstance(source,FeedRuntime) and isinstance(source.adapter,RSSAdapter):
+                    outcome=await discover_rss(source.adapter,source.settings.url,source.settings.initial_history or {},cursor)
+                elif isinstance(source,FeedRuntime) and isinstance(source.adapter,TelegramWebAdapter):
+                    assert source.settings.telegram and source.settings.telegram.username
+                    outcome=await discover_telegram(source.adapter,source.settings.telegram.username,source.settings.initial_history or {},cursor)
+                elif isinstance(source,FeedRuntime) and isinstance(source.adapter,YouTubeAdapter):
+                    outcome=await discover_youtube(source.adapter,source.settings.url,source.settings.initial_history or {},cursor)
+                elif source.kind=='injected':
+                    from oko.collection.adapters import ExternalKey,ExternalReference,Platform
+                    from oko.collection.contracts import DiscoveryResult
+                    reference=ExternalReference(ExternalKey(Platform.other_web,source.settings.url),source.settings.url)
+                    page=await source.adapter.discover(reference,cursor or '',50)
+                    outcome=DiscoveryResult(page.publications,page.next_cursor,continuation=0 if page.has_more else None)
+                else:
+                    raise ValueError('Feed adapter unavailable')
                 async with self.execution._actions:
                     if self.execution._store is current and self._live() and current.jobs.valid(job):
                         collection_error = outcome.retry_error
@@ -239,13 +257,16 @@ class CollectionWorker:
                                 current.jobs.checkpoint('collection_after_continuation')
                             self.service.feed_status(feed, error=None, gap=outcome.observation.gap, changes=outcome.observation.changes)
             elif publication:
-                if linked:
-                    fetched=await self._collection.article_source().fetch(publication)
-                else:
-                    assert source is not None
-                    fetched=await source.fetch(publication)
-                material = fetched.material
-                collection_error = material.collection_error
+                adapter=self._collection.article_adapter() if linked else self._collection.publication_adapter(feed)
+                if adapter is None:
+                    raise SourceError('Адаптер публикации недоступен',retryable=False)
+                try:
+                    value=await adapter.fetch(publication)
+                except AdapterException as error:
+                    from oko.collection.adapter_errors import source_error
+                    raise source_error(error) from error
+                observation=SourceObservation(changes=self._collection.description(feed))
+                collection_error=None
                 async with self.execution._actions:
                     if self.execution._store is current and self._live() and current.jobs.valid(job):
                         with current.jobs.transaction(self._live):
@@ -253,10 +274,10 @@ class CollectionWorker:
                             if not self.service.current(job.item,revision):
                                 current.jobs.cancel(job)
                                 return
-                            if fetched.observation.identity:
-                                self.service.refresh_identity(feed, fetched.observation.identity.as_info())
+                            if observation.identity:
+                                self.service.refresh_identity(feed, observation.identity.as_info())
                             current.jobs.begin_collection(job)
-                            collection_error,effects=self.service.collected(job.item,material,manual=current.jobs.manual(job))
+                            collection_error,effects=self.service.collected_content(job.item,value)
                             current.jobs.apply_collection(effects,job=job)
                             current.jobs.checkpoint('collection_after_result')
                             if collection_error:
@@ -265,7 +286,7 @@ class CollectionWorker:
                                 current.jobs.finish(job)
                             current.jobs.checkpoint('collection_after_finish')
                             self._finish_collection(job, current, collection_error)
-                            self.service.feed_status(feed, error=None, gap=fetched.observation.gap, changes=fetched.observation.changes)
+                            self.service.feed_status(feed, error=None, gap=observation.gap, changes=observation.changes)
         except CaptionsDeferred:
             async with self.execution._actions:
                 if current and self.execution._store is current and not self.stopped:
@@ -287,10 +308,9 @@ class CollectionWorker:
                             current.jobs.reconcile_cleanup()
                             self._finish_collection(job,current)
                         return
-                    if isinstance(error, SourceDeleted) and job.kind == 'fetch':
+                    if isinstance(error, SourceUnavailable) and job.kind == 'fetch':
                         collection_error = None
                         with current.jobs.transaction(self._live):
-                            self.service.source_removed(job.item)
                             current.jobs.retry(job,self._clock(),error.label,terminal=True,
                                 issue=error.adapter_issue or AdapterIssue('source-unavailable',error.label,AdapterErrorKind.unavailable))
                             current.jobs.notify_publication_parents(job.item)
@@ -348,6 +368,8 @@ class CollectionWorker:
                         current.jobs.finish(job,reason_code='subtitles_absent',reason_message=issue.message)
                         if replacement and replacement[1]!=job.item:
                             current.jobs.retarget_completed_media(job,replacement[1],replacement[0])
+                        if replacement:
+                            current.processing.reconcile_accepted_item(replacement[0])
                     else:
                         current.jobs.finish(job)
                 current.jobs.reconcile_cleanup()
@@ -383,7 +405,7 @@ class CollectionWorker:
                 from oko.observability import event
                 event('job_started', job_id=job.id, kind=job.kind)
             caption_attempt=CaptionAttempt(self,current,job) if download.media.key=='youtube:subtitles' else None
-            adapter = self._collection.article_source().adapter if self.service.feedless(download.publication_id) else self._collection.publication_adapter(feed,captions=caption_attempt)
+            adapter = self._collection.article_adapter() if self.service.feedless(download.publication_id) else self._collection.publication_adapter(feed,captions=caption_attempt)
         try:
             if adapter is None:
                 raise ValueError('Publication adapter unavailable')
@@ -403,6 +425,8 @@ class CollectionWorker:
                         current.jobs.finish(job)
                         if staged[0]!=job.item:
                             current.jobs.retarget_completed_media(job,staged[0],download.publication_id)
+                        if download.media.key=='youtube:subtitles':
+                            current.processing.reconcile_accepted_item(download.publication_id)
                         if caption_attempt and caption_attempt.attempted:
                             self.service.caption_completed()
                         self._finish_collection(job,current)

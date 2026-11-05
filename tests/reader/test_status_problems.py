@@ -1,4 +1,5 @@
-from oko.collection.contracts import DiscoveryResult, FetchResult
+from oko.collection.contracts import DiscoveryResult
+from tests.support.legacy_source import FetchResult
 from tests.support.presence import presence
 from fastapi.testclient import TestClient
 
@@ -6,7 +7,8 @@ from tests.support.app import create_app
 from tests.support.codex import CodexService, configure_codex
 from tests.support.reader import HEADERS
 from tests.support.reader import wait_for
-from oko.collection.contracts import Publication, SourceError
+from oko.collection.contracts import SourceError
+from tests.support.legacy_source import Publication
 from tests.support.synthetic_material import material as Material
 
 

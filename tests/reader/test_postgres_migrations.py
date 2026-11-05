@@ -554,7 +554,7 @@ def test_publication_feed_migration_preserves_owners_and_feedless_articles(conne
 
 def test_publication_content_migrates_to_jsonb_without_changing_content(connections):
     from oko.storage.postgres_schema import MIGRATIONS
-    document = {'blocks': [{'type':'text','role':'body','text':'Hello'}], 'extra': {'telegram': {'members':['123']}}}
+    document = {'blocks': [{'type':'text','role':'body','text':'Hello'}], 'extra': {'example': {'values':['123']}}}
     with connections() as db:
         migrate(db, MIGRATIONS[:101])
         db.execute("INSERT INTO publications(id,platform,external_id,content) VALUES ('post','rss','post',%s)", (json.dumps(document),))
@@ -584,7 +584,7 @@ def test_legacy_content_keeps_existing_title_quote_and_description(connections):
         assert rows['missing'][0] == ''
         assert rows['missing'][1]['blocks'] == [missing['blocks'][0], {'type':'quote','text':'Recovered quote','author':'B','source_url':'https://example.test/quote'}, {'type':'text','role':'description','text':'Recovered description'}]
         for _, content in rows.values():
-            assert not {'title','reply_preview','description'} & content['extra']['_reader'].keys()
+            assert '_reader' not in content['extra']
 
 
 def test_legacy_release_keeps_original_title_and_quote_before_old_migrations(connections):
@@ -781,7 +781,7 @@ def test_job_reason_migration_preserves_error_and_subtitle_absence(connections):
         db.execute("INSERT INTO publications(id,platform,external_id,content) VALUES ('video','youtube','video',%s::jsonb)",(json.dumps({'extra':{'youtube':{'captions':'unavailable'}}}),))
         db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status,reason) VALUES ('sub','video','youtube:subtitles','','subtitles','unavailable','No subtitles')")
         db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('download_media','sub','done',NULL,NULL),('fetch','video','pending','Network failed','network'),('filter','video','failed','','')")
-        migrate(db, MIGRATIONS)
+        migrate(db, MIGRATIONS[:105])
         assert db.execute("SELECT reason_code,reason_message FROM jobs WHERE kind='fetch' AND item='video'").fetchone() == ('network','Network failed')
         assert db.execute("SELECT reason_code,reason_message FROM jobs WHERE kind='filter' AND item='video'").fetchone() == ('','')
         assert db.execute("SELECT reason_code,reason_message FROM jobs WHERE kind='download_media' AND item='sub'").fetchone() == ('subtitles_absent','No subtitles')
@@ -794,7 +794,7 @@ def test_migration_retains_absent_subtitles_when_old_job_was_cleaned(connections
         migrate(db, MIGRATIONS[:104])
         db.execute("INSERT INTO publications(id,platform,external_id,content) VALUES ('video','youtube','video',%s::jsonb)",(json.dumps({'extra':{'youtube':{'captions':'unavailable'}}}),))
         db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status,reason) VALUES ('sub','video','youtube:subtitles','','subtitles','unavailable','No subtitles')")
-        migrate(db, MIGRATIONS)
+        migrate(db, MIGRATIONS[:105])
         assert db.execute("SELECT status,reason_code,reason_message FROM jobs WHERE kind='download_media' AND item='sub'").fetchone() == ('done','subtitles_absent','No subtitles')
 
 
@@ -852,7 +852,7 @@ def test_migration_marks_never_requested_subtitles_pending_without_job(connectio
         migrate(db, MIGRATIONS[:104])
         db.execute("INSERT INTO publications(id,platform,external_id,content) VALUES ('video','youtube','video',%s::jsonb)",(json.dumps({'extra':{'youtube':{'captions':'not_requested'}}}),))
         db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status,reason) VALUES ('sub','video','youtube:subtitles','','subtitles','unavailable','Субтитры не запрошены')")
-        migrate(db, MIGRATIONS)
+        migrate(db, MIGRATIONS[:105])
         assert db.execute("SELECT status FROM media_files WHERE id='sub'").fetchone() == ('pending_download',)
         assert db.execute("SELECT id FROM jobs WHERE kind='download_media' AND item='sub'").fetchone() is None
 
@@ -866,7 +866,7 @@ def test_migration_clears_stale_subtitle_absence_when_retry_is_active(connection
         db.execute("INSERT INTO publications(id,platform,external_id,content) VALUES ('video','youtube','video',%s::jsonb)",(json.dumps({'extra':{'youtube':{'captions':caption}}}),))
         db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status,reason) VALUES ('sub','video','youtube:subtitles','','subtitles','pending_download','')")
         db.execute("INSERT INTO jobs(kind,item,status) VALUES ('download_media','sub',%s)",(job_status,))
-        migrate(db,MIGRATIONS)
+        migrate(db,MIGRATIONS[:105])
         assert db.execute("SELECT content #>> '{extra,youtube,captions}' FROM publications WHERE id='video'").fetchone()==('pending',)
 
 
@@ -877,7 +877,7 @@ def test_migration_restores_confirmed_subtitle_absence_from_job(connections):
         db.execute("INSERT INTO publications(id,platform,external_id,content) VALUES ('video','youtube','video',%s::jsonb)",(json.dumps({'extra':{'youtube':{'captions':'error'}}}),))
         db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status,reason) VALUES ('sub','video','youtube:subtitles','','subtitles','unavailable','')")
         db.execute("INSERT INTO jobs(kind,item,status,problem_code) VALUES ('download_media','sub','done','subtitles_absent')")
-        migrate(db,MIGRATIONS)
+        migrate(db,MIGRATIONS[:105])
         assert db.execute("SELECT content #>> '{extra,youtube,captions}' FROM publications WHERE id='video'").fetchone()==('unavailable',)
 
 
@@ -1018,7 +1018,7 @@ def test_migration_removes_content_completeness_after_preserving_job_reason(conn
         saved=db.execute("SELECT content FROM publications WHERE id='p'").fetchone()[0]
         assert saved['blocks']==content['blocks']
         assert '_collection_reason' not in saved['extra']
-        assert 'full' not in saved['extra']['_reader'] and 'reason' not in saved['extra']['_reader']
+        assert '_reader' not in saved['extra']
         assert db.execute("SELECT status,reason_code,reason_message FROM jobs WHERE kind='fetch' AND item='p'").fetchone()==('unavailable','source-unavailable','Access restricted')
 
 

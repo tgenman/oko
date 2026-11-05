@@ -61,7 +61,7 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
                              (ref.key.platform.value,ref.key.external_id)).fetchone()
         if row is None:
             identity=str(uuid4())
-            store.db.execute("INSERT INTO publications ( id , url , members , platform , external_id , discovered_at ) VALUES ( %s , %s , '[]' , %s , %s , %s )",
+            store.db.execute("INSERT INTO publications ( id , url , platform , external_id , discovered_at ) VALUES ( %s , %s , %s , %s , %s )",
                 (identity,ref.url,ref.key.platform.value,ref.key.external_id,store.wall_clock()))
             status_changed(store.db)
             effects.fetch[identity]=False
@@ -87,8 +87,6 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
             if row['viewed'] and row['reader_feed_id'] is None:
                 store.set_processor_viewed([identity],False)
                 effects.fetch[identity]=True
-            elif owner['platform']=='rss':
-                effects.refresh_links.add(identity)
         targets.append(identity)
     store.db.execute('DELETE FROM publication_links WHERE source_publication_id = %s',(item,))
     store.db.executemany('INSERT INTO publication_links VALUES ( %s , %s ) ON CONFLICT DO NOTHING',[(item,target) for target in targets])
@@ -106,7 +104,7 @@ def feedless(store: 'Store', item: str) -> bool:
 def text(store: 'Store', item: str) -> str:
     sections=[]
     for row in children(store,item):
-        if not row['content']:
+        if 'blocks' not in row['content']:
             continue
         content=saved_content(row['content'])
         body='\n\n'.join(block['text'] for block in content.get('blocks',[]) if block['type'] in ('text','quote') and block.get('text'))
@@ -281,7 +279,6 @@ def prune(store: 'Store', candidates: set[str], *, effects: CollectionDiagnostic
     for start in range(0, len(items), 400):
         batch = items[start:start+400]
         marks = ','.join('%s' for _ in batch)
-        store.publications.set_source_deleted(batch, False)
         store.jobs.forget_input('filter', batch)
         store.jobs.forget_input('theses', batch)
         store.set_processor_viewed(batch,True)
@@ -292,11 +289,10 @@ def project_header(store: 'Store', item: str, header: dict[str,Any]) -> dict[str
     result=deepcopy(header)
     reasons=[result['reason']] if result.get('reason') else []
     for row in children(store,item):
-        if not row['content']:
+        if 'blocks' not in row['content']:
             reasons.append('Связанная статья недоступна: '+row['fetch_error'] if row['fetch_error'] else 'Связанная статья ещё не загружена')
             continue
         article,_=store.publications.original(row['id'])
-        result['changed']=bool(result.get('changed') or article.get('changed'))
         result['full']=bool(result.get('full',True) and article.get('full',True))
         if article.get('reason'):
             reasons.append(article['reason'])
@@ -313,7 +309,7 @@ def reading(store: 'Store', item: str, post: str) -> dict[str,Any] | None:
         if row['platform']!='telegraph':
             continue
         content=saved_content(row['content'])
-        header,_=store.publications.original(row['id']) if row['content'] else ({},'')
+        header,_=store.publications.original(row['id']) if 'blocks' in row['content'] else ({},'')
         body='\n\n'.join(block.get('text','') for block in content.get('blocks',[]) if block['type'] in ('text','quote'))
         articles.append(dict(source_url=row['url'],title=row['title'] or 'Telegraph',text=body,
             error=row['fetch_error'] or header.get('reason') or None,

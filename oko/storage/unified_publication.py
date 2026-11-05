@@ -47,12 +47,14 @@ def project(db: Database, root: Path, item: str, now: float, wall: float) -> dic
         identity=owner['id']
         blocks=documents[identity].get('blocks',[])
         roles={block.get('media_id'):block.get('role','attachment') for block in blocks if block.get('type')=='media'}
+        circles={block.get('media_id') for block in blocks if block.get('type')=='media' and block.get('presentation')=='circle'}
         for file in inputs.media.get(identity,[]):
             role=roles.get(file['id'],'attachment')
             url=('/api/v3/materials/'+identity+'/media/'+file['id']
                  if file['status']=='ready' and existing_file(root,file['storage_key']) is not None else None)
             mime=file['mime_type'] or ''
             kind={'image':'image','cover':'image','video':'video','audio':'audio','circle':'circle'}.get(role)
+            if role=='video' and file['id'] in circles:kind='circle'
             if kind is None:
                 kind=next((name for name in ('image','video','audio') if mime.startswith(name+'/')),'file')
             display_role='image' if role=='image' else 'attachment'

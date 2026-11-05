@@ -79,8 +79,7 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
                     images=material.images if isinstance(material.images, list) else [],
                     attachments=[attachment.model_dump(mode='json') for attachment in material.attachments] if isinstance(material.attachments, list) else [],
                     completeness=completeness(material.full, material.reason, material.external_only, material.post_web_unavailable).model_dump(mode='json'),
-                    loading=material.loading is True, changed=material.changed is True,
-                    source_deleted=material.source_deleted is True, revision_id=material.version)
+                    loading=material.loading is True, revision_id=material.version)
             unified=current.unified_publication(item)
         original=content.get('text','')
         filtered=value['filter']
@@ -92,7 +91,6 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
             source_url=value['source_url'],text=original,source=value['source'],availability=value['availability'],
             description=content.get('description',''),revision_id=content.get('revision_id'),
             completeness=content.get('completeness'),loading=content.get('loading',False),
-            changed=content.get('changed',False),source_deleted=content.get('source_deleted',False),
             linked_content=content.get('linked_content'),reply_preview=content.get('reply_preview'),
             post_web_unavailable=content.get('post_web_unavailable',False),external_attachments=content.get('external_attachments',[]),
             filter=dict(state=filtered['state'],result=dict(**f,text=content.get('display_text',original)) if f else None,error=filtered['error']),

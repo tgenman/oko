@@ -14,7 +14,7 @@ import webbrowser
 
 import uvicorn
 from oko.reader.app import create_app
-from oko.collection.contracts import Source
+from oko.collection.adapters import FeedAdapter
 
 
 def existing(root: Path, browser: bool, *, api_only: bool = False, persistent: bool = False) -> None:
@@ -45,7 +45,7 @@ def existing(root: Path, browser: bool, *, api_only: bool = False, persistent: b
     raise SystemExit('Экземпляр Око занят или останавливается. Повторите запуск через несколько секунд.')
 
 
-def run(*, fault: Callable[[str], None] = lambda _: None, source: Source | None = None) -> None:
+def run(*, fault: Callable[[str], None] = lambda _: None, source: FeedAdapter | None = None) -> None:
     parser = argparse.ArgumentParser(description='Око — локальный читатель')
     parser.add_argument('--data', type=Path, default=Path('data'))
     parser.add_argument('--database-url-file', type=Path, required=True, help='Закрытый файл подключения PostgreSQL; схема устанавливается отдельной командой миграции')

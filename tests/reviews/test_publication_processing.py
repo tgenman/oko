@@ -158,9 +158,9 @@ def test_confirmed_empty_input_completes_without_model(tmp_path):
         assert calls==[]
         text[0]='Text appeared'
         client.post('/api/v3/materials/'+item+'/retry')
-        wait_for(client,lambda:r and r['points'] if (r:=client.get('/api/v3/publication/'+item).json()['theses']['result']) is not None else None)
-        assert {call['operation'] for call in calls}=={'filter','theses'}
-        assert all(call['sources'][0]['text']=='Text appeared' for call in calls)
+        assert client.get('/api/v3/publication/'+item).json()['theses']['result']['points']==[]
+        assert stored(root,item)['processing_metadata']==accepted
+        assert calls==[]
 
 
 def test_unavailable_input_waits_without_model_and_processes_when_retrieved(tmp_path):
@@ -429,9 +429,9 @@ def test_failed_regeneration_retains_only_current_results_across_restart(tmp_pat
         assert stored(root,item)['summarized_content']==accepted['summarized_content']
         text[0]='Changed text'
         client.post('/api/v3/materials/'+item+'/retry')
-        wait_for(client,lambda:client.get('/api/v3/publication/'+item).json()['text']=='Changed text')
-        assert stored(root,item)['summarized_content']=={}
-        assert client.get('/api/v3/publication/'+item).json()['theses']['result'] is None
+        assert client.get('/api/v3/publication/'+item).json()['text']=='Original text'
+        assert stored(root,item)['summarized_content']==accepted['summarized_content']
+        assert client.get('/api/v3/publication/'+item).json()['theses']['result']==card['theses']['result']
 
 
 def test_disabling_stages_preserves_results_and_reenable_reuses_them(tmp_path):
@@ -495,7 +495,8 @@ def test_persisted_empty_job_completes_without_a_model_after_restart(tmp_path):
     from tests.support.storage import database
     root=publication_root(tmp_path)
     calls=[]
-    source=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'')])))
+    photo='<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/image.jpg\')"></a>'
+    source=httpx.MockTransport(lambda request:httpx.Response(200,content=b'photo',headers={'content-type':'image/jpeg'}) if request.url.host=='cdn.example' else httpx.Response(200,text=page([(11,photo)])))
     options=dict(token='test',api_only=True,rss_transport=source,ai_transport=coordinated_transport(calls))
     with TestClient(create_app(root,**options),headers=HEADERS) as client:
         setup(client)

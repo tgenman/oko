@@ -11,7 +11,8 @@ from tests.support.presence import presence
 from tests.support.reader import wait_for
 from tests.support.source import Image, SyntheticMaterial
 from tests.support.v3 import TestClient
-from oko.collection.contracts import DiscoveryResult, FetchResult, Publication
+from oko.collection.contracts import DiscoveryResult
+from tests.support.legacy_source import FetchResult, Publication
 
 
 def test_postgres_runs_all_workers_http_media_and_restart(tmp_path):

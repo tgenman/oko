@@ -180,10 +180,6 @@ class ReadingQueries:
         return self._facts.unified_publication(identity)
 
     @repository_access
-    def source_deleted(self, identity: str) -> bool:
-        return self._publications().source_deleted(identity)
-
-    @repository_access
     def filter(self, identity: str) -> dict[str, Any]:
         return self._filters().read(identity)
 

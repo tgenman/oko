@@ -181,7 +181,7 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
                         projected=wire.CardListItem.model_validate(dict(
                             id=item,feed_id=card_data['feed_id'],title='Публикация недоступна',
                             published_at=date,source_url=source,preview_url=None,loading=False,
-                            changed=False,hidden=bool(card_data['hidden']),post_web_unavailable=False,
+                            hidden=bool(card_data['hidden']),post_web_unavailable=False,
                             external_attachment_kinds=[]))
                     items.append(projected.model_dump(mode='json'))
             return JSONResponse(wire.CardPage.model_validate(dict(items=items,total=total,next_cursor=identities[limit] if len(identities)>limit else None)).model_dump(mode='json'),headers=headers)

@@ -1415,7 +1415,6 @@ class AuthorizationErrors(
 
 class CardListItem(WireModel):
     model_config = ConfigDict(extra="forbid")
-    changed: StrictBool
     external_attachment_kinds: list[
         Literal["audio", "video", "image", "document", "unsupported"]
     ]
@@ -2151,6 +2150,7 @@ class PublicationBlock3(WireModel):
     caption: StrictStr | None | MISSING = MISSING
     language: StrictStr | None | MISSING = MISSING
     media_id: MaterialId
+    presentation: Literal["circle"] | MISSING = MISSING
     publication_url: SourceUrl | None
     role: Literal["image", "cover", "video", "audio", "attachment", "subtitles"]
     source_url: SourceUrl | None
@@ -2298,7 +2298,6 @@ class QuotaWindow(WireModel):
 class ReadingTextContent(WireModel):
     model_config = ConfigDict(extra="forbid")
     availability: Literal["available"]
-    changed: StrictBool
     completeness: ContentCompleteness
     description: StrictStr = Field(
         ..., description="Source description stored separately from publication text."
@@ -2314,7 +2313,6 @@ class ReadingTextContent(WireModel):
     )
     reply_preview: ReplyPreview | None
     revision_id: RevisionId
-    source_deleted: StrictBool
     text: StrictStr = Field(
         ...,
         description="Original stored publication text. Filtering is delivered separately for this source revision.",
@@ -3536,7 +3534,6 @@ class HistoryConflictErrorDetails(WireModel):
 class PublicationResponse(WireModel):
     model_config = ConfigDict(extra="forbid")
     availability: Literal["available", "pending"]
-    changed: StrictBool
     completeness: ContentCompleteness | None
     content: PublicationDocument
     description: StrictStr
@@ -3562,7 +3559,6 @@ class PublicationResponse(WireModel):
     reply_preview: ReplyPreview | None
     revision_id: RevisionId | None
     source: SourceReference
-    source_deleted: StrictBool
     source_url: SourceUrl
     status: Literal[
         "pending_collection",

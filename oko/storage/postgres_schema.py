@@ -114,4 +114,10 @@ MIGRATIONS = (
     Migration(106, 'remove-publication-complete', (Path(__file__).parent / 'postgres' / '106-remove-publication-complete.sql').read_text()),
     Migration(107, 'remove-publication-incomplete-projection', (Path(__file__).parent / 'postgres' / '107-remove-publication-incomplete-projection.sql').read_text()),
     Migration(108, 'media-source-url', (Path(__file__).parent / 'postgres' / '108-media-source-url.sql').read_text()),
+    Migration(109, 'remove-source-deleted', (Path(__file__).parent / 'postgres' / '109-remove-source-deleted.sql').read_text()),
+    Migration(110, 'telegram-members', (Path(__file__).parent / 'postgres' / '110-telegram-members.sql').read_text()),
+    Migration(111, 'remove-collection-tracking', (Path(__file__).parent / 'postgres' / '111-remove-collection-tracking.sql').read_text()),
+    Migration(112, 'remove-preview-copies', (Path(__file__).parent / 'postgres' / '112-remove-preview-copies.sql').read_text()),
+    Migration(113, 'remove-reader', (Path(__file__).parent / 'postgres' / '113-remove-reader.sql').read_text()),
+    Migration(114, 'remove-caption-copies', (Path(__file__).parent / 'postgres' / '114-remove-caption-copies.sql').read_text()),
 )

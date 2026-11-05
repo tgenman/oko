@@ -18,8 +18,9 @@ def test_external_audio_is_saved_without_errors_and_is_typed_for_reader(tmp_path
         cards = settled(client)
         content = client.get('/api/v3/publication/'+cards[0]['id']).json()
         assert client.get('/api/v3/status/details').json()['problems']['count'] == 0
-        assert content['completeness']['reason'] == 'external_attachment'
-        assert content['external_attachments'] == [dict(kind='audio', title='A recorded lesson', author='Fixture author', size_label=None, duration=None, poster_url=None, source_url='https://t.me/fixture/11', reason='public_preview_unavailable', restriction=None)]
+        media=next(block for block in content['content']['blocks'] if block['type']=='external_media')
+        assert media['kind']=='audio' and media['title']=='A recorded lesson' and media['author']=='Fixture author'
+        assert media['url']=='https://t.me/fixture/11' and media['reason']=='public_preview_unavailable'
         assert cards[0]['external_attachment_kinds'] == ['audio']
 
 
@@ -68,10 +69,14 @@ def test_lost_local_file_does_not_turn_into_a_normal_external_notice(tmp_path):
         local_file.unlink()
         restricted[0]=True
         client.post(url+'/retry');settled(client)
-        assert client.get('/api/v3/status/details').json()['problems']['count']>0
+        from tests.support.reader import wait_for
+        recovered=wait_for(client,lambda:(value if (value:=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()) and any(media['id']==media_id and media['url'] for media in value['media']) else None))
+        media=next(media for media in recovered['media'] if media['id']==media_id)
+        assert client.get(media['url']).content==b'local-video'
+        assert client.get('/api/v3/status/details').json()['problems']['count']==0
         with database(tmp_path) as db:
             row=db.execute("SELECT status,reason_message FROM jobs WHERE kind='download_media' AND item=%s",(media_id,)).fetchone()
-            assert row and tuple(row)==('unavailable','Локальный файл вложения недоступен')
+            assert row and tuple(row)==('done',None)
 
 
 def test_external_document_metadata_text_and_restart(tmp_path):
@@ -92,17 +97,16 @@ def test_external_document_metadata_text_and_restart(tmp_path):
         content=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()
         assert content['text']=='Own caption'
         assert card['external_attachment_kinds']==['document']
-        media=content['external_attachments'][0]
+        media=next(block for block in content['content']['blocks'] if block['type']=='external_media')
         assert media['title']=='Бесы.txt' and media['size_label']=='36.2 KB'
-        assert media['author'] is None and media['source_url']=='https://t.me/fixture/13'
-        assert content['completeness']['reason']=='external_attachment'
+        assert media.get('author') is None and media['url']=='https://t.me/fixture/13'
         empty=next(c for c in cards if c['title']=='Файл доступен в Telegram')
         empty_content=client.get('/api/v3/publication/'+empty['id']).json()
         assert empty_content['text']==''
-        assert empty_content['external_attachments'][0]['size_label'] is None
+        assert next(block for block in empty_content['content']['blocks'] if block['type']=='external_media').get('size_label') is None
         assert client.get('/api/v3/status/details').json()['problems']['count']==0
         assert all('/s/' in request for request in requests)
     with TestClient(create_app(tmp_path,**options),headers=headers) as client:
         configure_fast_web(client)
-        assert client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['external_attachments'][0]==media
+        assert next(block for block in client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['content']['blocks'] if block['type']=='external_media')==media
         assert client.get('/api/v3/status/details').json()['problems']['count']==0

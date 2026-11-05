@@ -34,7 +34,8 @@ def test_refresh_preserves_successfully_collected_copy_without_recollecting(tmp_
     import time
     from collections import Counter
     from tests.support.synthetic_source import SyntheticSource
-    from oko.collection.contracts import DiscoveryResult, Publication, FetchResult, SourceDeleted, SourceError
+    from oko.collection.contracts import DiscoveryResult, SourceUnavailable, SourceError
+    from tests.support.legacy_source import Publication, FetchResult
     from tests.support.synthetic_material import material as Material
     class Source(SyntheticSource):
         def __init__(self):
@@ -48,8 +49,8 @@ def test_refresh_preserves_successfully_collected_copy_without_recollecting(tmp_
             if publication.id=='2' and self.calls['2']>2:
                 raise SourceError('Still unavailable',delay=.03)
             if publication.id=='2' and self.calls['2']>1:
-                raise SourceDeleted()
-            return FetchResult(Material('Item '+publication.id,'Saved copy',full=False,reason='Incomplete source'))
+                raise SourceUnavailable()
+            return FetchResult(Material('Item '+publication.id,'Saved copy'))
     source=Source()
     with TestClient(create_app(tmp_path,token='test',api_only=True,source=source),headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
@@ -99,7 +100,8 @@ def test_refresh_retries_failed_theses_but_keeps_ready_results(tmp_path):
 
 def test_refresh_keeps_forced_source_wait_but_advances_ordinary_retries(tmp_path):
     from tests.support.synthetic_source import SyntheticSource
-    from oko.collection.contracts import DiscoveryResult, Publication, SourceError
+    from oko.collection.contracts import DiscoveryResult, SourceError
+    from tests.support.legacy_source import Publication
     from tests.support.reader import Clock
     from collections import Counter
     class Source(SyntheticSource):

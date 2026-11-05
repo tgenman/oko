@@ -1,5 +1,6 @@
 """RSS records are publications; an article URL is a direct linked publication."""
 from datetime import datetime, timezone
+from dataclasses import replace
 import json
 from typing import Any, BinaryIO
 
@@ -65,13 +66,7 @@ class RSSAdapter:
                 if len(visited) >= 1000:
                     issues.append(AdapterIssue('rss-page-limit', 'Достигнут предел 1000 страниц RSS', AdapterErrorKind.notice))
                     break
-                try:
-                    raw, base = await self._read(current)
-                except AdapterException as error:
-                    if not visited:
-                        raise
-                    issues.append(AdapterIssue('rss-history-request-failed',error.issue.message,AdapterErrorKind.notice))
-                    break
+                raw, base = await self._read(current)
                 if not visited:
                     first = raw
                     self.descriptions[url]=feed_description(raw)
@@ -79,11 +74,11 @@ class RSSAdapter:
                 visited.add(base)
                 diagnostics: list[str] = []
                 for entry in entries(raw, base, strict=True, diagnostics=diagnostics):
-                    prior = batch.get(entry.publication.id)
+                    prior = batch.get(entry.id)
                     if prior is not None and prior != entry:
                         raise SourceError('Разные записи RSS имеют один внешний ID',
                             code='rss-identity-conflict', retryable=False)
-                    batch[entry.publication.id] = entry
+                    batch[entry.id] = entry
                 issues.extend(AdapterIssue(code, 'Запись RSS без внешнего ключа пропущена' if code=='rss-missing-key' else 'Неверная ссылка RSS; анонс сохранён', AdapterErrorKind.notice)
                               for code in diagnostics)
                 if not archives or wanted is not None and wanted <= batch.keys():
@@ -106,8 +101,8 @@ class RSSAdapter:
                 pending=following+pending
                 pending.extend(target for target in links['prev-archive'] if target not in visited and target not in pending)
             values=list(batch.values())
-            dates=[entry.publication.published for entry in values]
-            if any(not entry.publication.published_known for entry in values) or dates!=sorted(dates,reverse=True):
+            dates=[entry.published for entry in values]
+            if any(not entry.published_known for entry in values) or dates!=sorted(dates,reverse=True):
                 from oko.collection.rss_history import ORDER_WARNING
                 issues.append(AdapterIssue('rss-order-uncertain',ORDER_WARNING,AdapterErrorKind.notice))
             return first, values, issues
@@ -135,7 +130,7 @@ class RSSAdapter:
 
     @staticmethod
     def _parsed_value(feed: str, entry: Entry) -> PublicationContent:
-        pub = entry.publication
+        pub = entry
         # A record without a permalink opens its real feed; this is not an article link.
         metadata=RSSAdapter._metadata(feed,entry)
         content = _Content(pub.url or feed)
@@ -144,6 +139,7 @@ class RSSAdapter:
             content.walk(child)
         content.flush()
         for media in entry.media:
+            media=replace(media,publication_url=metadata.reference.url)
             content.media.append(media)
             kind = (media.mime_type or '').split('/', 1)[0]
             content.blocks.append(dict(type='media', ref={'$media': media.key},
@@ -154,7 +150,7 @@ class RSSAdapter:
 
     @staticmethod
     def _metadata(feed: str, entry: Entry) -> PublicationMetadata:
-        pub=entry.publication
+        pub=entry
         return PublicationMetadata(publication_reference(feed,pub.id,pub.url),
             entry.title,datetime.fromtimestamp(pub.published,timezone.utc) if pub.published_known else None)
 
@@ -172,7 +168,7 @@ class RSSAdapter:
             self._windows[url]=(batch,issues)
             return FeedMetadata(ExternalReference(ExternalKey(Platform.rss, url), url),
                 feed_title(raw), feed_description(raw) or '',
-                _encode({'feed': url, 'keys': [e.publication.id for e in reversed(batch)],
+                _encode({'feed': url, 'keys': [e.id for e in reversed(batch)],
                          'position': max(0, len(batch)-1), 'done': False}))
         except SourceError as error:
             raise failure(error, scope='rss:'+url) from error
@@ -184,7 +180,7 @@ class RSSAdapter:
         if not state['keys']:
             _,batch,issues=await self._window(feed.url)
             self._windows[feed.url]=(batch,issues)
-            state['keys']=[entry.publication.id for entry in reversed(batch)]
+            state['keys']=[entry.id for entry in reversed(batch)]
             state['position']=max(0,len(batch)-1)
         if offset > state['position'] and state['keys']:
             position=min(state['position'],len(state['keys'])-1)
@@ -192,11 +188,11 @@ class RSSAdapter:
             _,batch,issues=await self._window(feed.url,before=(anchor,offset-(state['position']-position)))
             self._windows[feed.url]=(batch,issues)
             upper=state['keys'][-1]
-            upper_entry=next((entry for entry in batch if entry.publication.id==upper),None)
-            if upper_entry and upper_entry.publication.published_known:
-                batch=[entry for entry in batch if entry.publication.id in state['keys'] or not entry.publication.published_known or entry.publication.published<=upper_entry.publication.published]
+            upper_entry=next((entry for entry in batch if entry.id==upper),None)
+            if upper_entry and upper_entry.published_known:
+                batch=[entry for entry in batch if entry.id in state['keys'] or not entry.published_known or entry.published<=upper_entry.published]
                 self._windows[feed.url]=(batch,issues)
-            keys=[entry.publication.id for entry in reversed(batch)]
+            keys=[entry.id for entry in reversed(batch)]
             if anchor in keys and upper in keys:
                 state['position']=keys.index(anchor)+(state['position']-position)
                 state['keys']=keys[:keys.index(upper)+1]
@@ -210,13 +206,13 @@ class RSSAdapter:
             raise ValueError('limit must be positive')
         wanted=set(state['keys'][state['position']:state['position']+limit])
         cached=self._windows.get(feed.url)
-        if not state['done'] and cached is not None and wanted <= {entry.publication.id for entry in cached[0]}:
+        if not state['done'] and cached is not None and wanted <= {entry.id for entry in cached[0]}:
             entries_,previous_issues=cached
             issues=list(previous_issues)
         else:
             _,entries_,issues=await self._window(feed.url,archives=not state['done'],wanted=wanted if not state['done'] else None)
             self._windows[feed.url]=(entries_,issues)
-        batch = {e.publication.id: e for e in entries_}
+        batch = {e.id: e for e in entries_}
         if state['done']:
             state = {'feed': feed.url, 'keys': list(reversed(batch)), 'position': 0, 'done': False}
         keys = state['keys'][state['position']:state['position']+limit]
@@ -250,7 +246,7 @@ class RSSAdapter:
             raise AdapterException(AdapterIssue('invalid-reference', 'Недопустимый внешний ключ RSS',
                 AdapterErrorKind.permanent, publication)) from error
         _, batch, _ = await self._window(feed,wanted={identity})
-        match = next((e for e in batch if e.publication.id == identity), None)
+        match = next((e for e in batch if e.id == identity), None)
         if match is None:
             raise AdapterException(AdapterIssue('rss-entry-unavailable', 'Запись отсутствует в доступном RSS',
                 AdapterErrorKind.unavailable, publication))
@@ -258,14 +254,7 @@ class RSSAdapter:
 
     async def download_media(self, publication: ExternalReference, media: MediaReference,
                              output: BinaryIO) -> MediaReference:
-        value = await self.fetch(publication)
-        current = next((item for item in value.media if item.key == media.key), None)
-        if current is None or current.locator != media.locator:
-            raise AdapterException(AdapterIssue('media-changed', 'Описание вложения изменилось',
-                AdapterErrorKind.media_changed, publication, media.key))
         try:
-            attachment = any(block.get('ref') == {'$media': media.key} and block.get('role') == 'attachment'
-                             for block in value.content['blocks'])
-            return await self.downloader.write_media(current,output,allow_empty=attachment)
+            return await self.downloader.write_media(media,output,allow_empty=media.key.startswith('rss:enclosure:'))
         except SourceError as error:
             raise failure(error, publication, media.key, scope='rss:'+publication.key.external_id) from error
