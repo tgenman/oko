@@ -12,7 +12,7 @@ test('latest publication keeps accepted theses after failed regeneration and hid
  await r.api('settings/oko/global','PATCH',{processor:'llamacpp',theses:true,prompt_filters:'Убери рекламу.',telegram_http_rps:10});
  await r.openReader();
  await r.api('telegram/connect','POST',{source_locator:'@lateststate',folder:'Inbox',initial_history:{mode:'count',count:'1'}});
- await expect.poll(async()=>{const cards=(await r.api('cards')).items;return cards.length===1&&(await r.api(`publication/${cards[0].id}`)).theses.result!==null;},{timeout:15000}).toBe(true);
+ await expect.poll(async()=>{const cards=(await r.api('cards')).items;return cards.length===1&&(await r.api(`publication/${cards[0].id}`)).summarized_content.points!==undefined;},{timeout:15000}).toBe(true);
  await r.page.locator('[data-card]').click();
  await expect(r.page.locator('#filter-status')).toContainText('Реклама');
  await expect(r.page.getByRole('button',{name:'Restore Item',exact:true})).toBeHidden();
@@ -20,7 +20,7 @@ test('latest publication keeps accepted theses after failed regeneration and hid
  const summary=r.page.locator('#theses');await expect(summary).toContainText('Просмотрено удаляет текст.');const accepted=await summary.textContent();
  await r.setProcessingState('error');
  await r.page.getByRole('button',{name:'Regenerate',exact:true}).click();
- await expect.poll(async()=>{const cards=(await r.api('cards')).items;return (await r.api(`publication/${cards[0].id}`)).theses.state;}).toBe('error');
+ await expect.poll(async()=>{const cards=(await r.api('cards')).items;return (await r.api(`publication/${cards[0].id}`)).jobs.find(job=>job.operation==='theses')?.status;}).toBe('pending');
  await expect(summary).toHaveText(accepted!);await summary.scrollIntoViewIfNeeded();
  await r.page.screenshot({path:artifactPath('publication-processing-failed-regeneration.png')});
  await r.page.locator('#settings-open').click();await editSetting(r.page,'prompt_filters');

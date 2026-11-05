@@ -1,4 +1,5 @@
 """Feed completion at HTTP: exact scope, captured members and Telegram rules."""
+from tests.support.publications import filter_state
 from tests.support.cards import read_all_cards
 from fastapi.testclient import TestClient
 import httpx
@@ -12,7 +13,7 @@ from tests.support.sources import LateSource
 def test_feed_completion_includes_hidden_and_preserves_subscription(tmp_path):
     with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=transport([])), headers=HEADERS) as client:
         setup_filters(client)
-        wait_for(client, lambda: len(rows := read_all_cards(client, '/api/v3/cards?show_hidden=true')) == 3 and all(client.get('/api/v3/publication/'+r['id']).json()['filter']['state']=='ready' for r in rows))
+        wait_for(client, lambda: len(rows := read_all_cards(client, '/api/v3/cards?show_hidden=true')) == 3 and all(filter_state(client.get('/api/v3/publication/'+r['id']).json())=='ready' for r in rows))
         assert len(read_all_cards(client, '/api/v3/cards')) == 2
         preview = client.post('/api/v3/feeds/fixture/completion/preview').json()
         assert preview['publications_count'] == 3

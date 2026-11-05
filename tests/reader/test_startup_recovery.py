@@ -70,12 +70,12 @@ def slow_reconciliation(dsn):
     # The external database deliberately makes each material reconciliation slow.
     # This is not a mocked application method: the real CLI and HTTP server run.
     with psycopg.connect(dsn, autocommit=True) as db:
-        # A restored snapshot needs revision reconciliation even when no model
-        # work is enabled; every saved root must receive its missing revision.
-        db.execute("UPDATE publications SET processing_metadata='{}' WHERE TRUE")
+        # A restored snapshot can contain an outdated derived status.
+        # Recovery must reconcile it even when model work is disabled.
+        db.execute("UPDATE publications SET status='pending_filtering' WHERE TRUE")
         db.execute('''CREATE FUNCTION slow_recovery() RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN PERFORM pg_sleep(0.2); RETURN NEW; END $$''')
-        db.execute('CREATE TRIGGER slow_recovery BEFORE UPDATE OF processing_metadata ON publications FOR EACH ROW EXECUTE FUNCTION slow_recovery()')
+        db.execute('CREATE TRIGGER slow_recovery BEFORE UPDATE OF status ON publications FOR EACH ROW EXECUTE FUNCTION slow_recovery()')
 
 
 def test_reader_opens_reads_and_stops_while_database_reconciliation_is_slow(postgres_url, tmp_path):
@@ -137,10 +137,10 @@ def test_background_reconciliation_failure_closes_work_admission_and_can_stop(po
     credential = tmp_path/'database'
     credential.write_text(postgres_url);credential.chmod(0o600)
     with psycopg.connect(postgres_url, autocommit=True) as db:
-        db.execute("UPDATE publications SET processing_metadata='{}' WHERE id=%s", (cards[0]['id'],))
+        db.execute("UPDATE publications SET status='pending_filtering' WHERE id=%s", (cards[0]['id'],))
         db.execute("""CREATE FUNCTION failed_recovery() RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN RAISE EXCEPTION 'synthetic private recovery failure'; END $$""")
-        db.execute('CREATE TRIGGER failed_recovery BEFORE UPDATE OF processing_metadata ON publications FOR EACH ROW EXECUTE FUNCTION failed_recovery()')
+        db.execute('CREATE TRIGGER failed_recovery BEFORE UPDATE OF status ON publications FOR EACH ROW EXECUTE FUNCTION failed_recovery()')
     process = start(root, credential, synthetic=True)
     try:
         deadline = time.monotonic()+10

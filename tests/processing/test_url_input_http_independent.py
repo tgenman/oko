@@ -1,3 +1,4 @@
+from tests.support.publications import summary,reason
 import asyncio,threading
 from fastapi.testclient import TestClient
 import httpx
@@ -43,5 +44,5 @@ def test_http_does_not_publish_late_summary_after_url_roundtrip(tmp_path):
             async def wait_old():await asyncio.shield(old_task)
             client.portal.call(wait_old)
             response=client.get('/api/v3/publication/'+item)
-            assert response.status_code==200 and response.json()['theses']['result'] is None
+            assert response.status_code==200 and summary(response.json()) is None
     finally:model.release_old.set();model.release_new.set()

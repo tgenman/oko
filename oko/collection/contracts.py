@@ -5,7 +5,7 @@ from typing import Any, Protocol, Literal, TYPE_CHECKING
 from collections.abc import Callable
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, JsonValue, Field
+from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from oko.collection.adapters import PublicationContent, ExternalReference, ExternalKey, AdapterIssue
@@ -27,29 +27,8 @@ class ExternalMedia(BaseModel):
     poster_key: str | None = None
 
 
-class ResourceManifest(BaseModel):
-    model_config = ConfigDict(extra='forbid', strict=True, frozen=True)
-    key: str
-    origin: str
-    order: int
-    name: str = Field(pattern=r'^(?:media|image)-[0-9]+\.[a-z0-9]+$')
-    kind: str
-    mime: str
-    status: Literal['missing', 'loaded', 'unsupported', 'external'] = 'missing'
-    reason: str = ''
-    source_url: str | None = None
-    sha256: str | None = None
-    external: ExternalMedia | None = None
 
 
-class SourceManifest(BaseModel):
-    preview_fragment: str | None = None
-    preview_error: str = ''
-    post_web_unavailable: bool = False
-    source_url: str | None = None
-    model_config = ConfigDict(extra='ignore', strict=True, frozen=True)
-    post: dict[str, JsonValue]
-    resources: tuple[ResourceManifest, ...] = ()
 
 
 class ReplyPreview(BaseModel):

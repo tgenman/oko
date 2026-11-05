@@ -108,11 +108,12 @@ def test_rediscovery_does_not_replace_a_collected_telegram_post(tmp_path,monkeyp
         configure_fast_web(client)
         assert client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'}).status_code==200
         item=settled(client,timeout=15)[0]['id']
-        assert 'Saved version' in client.get('/api/v3/publication/'+item).json()['text']
+        from tests.support.publications import body_text
+        assert 'Saved version' in body_text(client.get('/api/v3/publication/'+item).json())
         text[0]='Remote edit'
         assert client.post('/api/v3/collect').status_code==200
         wait_for(client,lambda:client.get('/api/v3/status/details').json()['work']==[{'phase':'idle'}])
-        assert 'Saved version' in client.get('/api/v3/publication/'+item).json()['text']
+        assert 'Saved version' in body_text(client.get('/api/v3/publication/'+item).json())
         assert observed==[]
 
 

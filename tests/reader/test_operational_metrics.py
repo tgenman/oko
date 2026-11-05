@@ -63,7 +63,7 @@ def test_real_collection_attempts_export_timings_without_source_contents(tmp_pat
         deadline=time.monotonic()+5
         while True:
             cards=read_all_cards(client, '/api/v3/cards')
-            if cards and client.get('/api/v3/publication/'+cards[0]['id']).json()['availability']=='available':break
+            if cards and client.get('/api/v3/publication/'+cards[0]['id']).json()['content'].get('blocks') is not None:break
             assert time.monotonic()<deadline
             time.sleep(.02)
         text=client.get('/metrics',headers={'Authorization':'Bearer '+TOKEN}).text

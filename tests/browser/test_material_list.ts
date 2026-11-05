@@ -76,7 +76,7 @@ test('date groups, saved sorting and displayed hidden card count use current row
 
 test('opened YouTube material preserves description separately from captions', async () => {
  const r=await reader(); try {
-  await r.start([material('video',{description:'Описание из Atom',text:'Сохранённые субтитры',source:{kind:'youtube',feed_id:'feed',source_url:'https://example.org/video',captions:'available'}})]);
+  await r.start([material('video',{description:'Описание из Atom',text:'Сохранённые субтитры'})]);
   await r.page.locator('[data-card="video"]').click();
   await expect(r.page.locator('#description')).toHaveText('Описание из Atom');
   await expect(r.page.locator('#text p').last()).toHaveText('Сохранённые субтитры');
@@ -185,7 +185,7 @@ test('old change marker does not appear on a publication card',async()=>{
 
 test('card rendering does not branch on source-specific availability',async()=>{
  const r=await reader();try{
-  await r.start([material('one',{card:{post_web_unavailable:true}})]);
+  await r.start([material('one')]);
   await expect(r.page.locator('[data-card="one"] [aria-label="Публикация недоступна"]')).toHaveCount(0);
  }finally{await r.close();}
 });

@@ -34,7 +34,8 @@ def test_http_does_not_publish_late_summary_after_linked_title_roundtrip(tmp_pat
                 service=collection_service(lambda:store)
                 old=legacy_publication(store,'linked')
                 assert old and old.teaser
-                text=store.original('linked')[1]
+                content=store.db.execute("SELECT content FROM publications WHERE id='linked'").fetchone()[0]
+                text='\n\n'.join(block['text'] for block in content['blocks'] if block['type']=='text' and block['role']=='body')
                 for title in ('New title','Old title'):
                     with transaction(store.db):
                         material=StructuredSource(None).describe(legacy_publication(store,'linked'),Material(title,text))
@@ -46,5 +47,5 @@ def test_http_does_not_publish_late_summary_after_linked_title_roundtrip(tmp_pat
             async def wait_old():await asyncio.shield(old_task)
             client.portal.call(wait_old)
             response=client.get('/api/v3/publication/'+item)
-            assert response.status_code==200 and response.json()['theses']['result'] is None
+            assert response.status_code==200 and response.json()['summarized_content'].get('points') is None
     finally:model.release_old.set();model.release_new.set()

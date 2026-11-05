@@ -1,3 +1,4 @@
+from tests.support.publications import filter_state
 from tests.support.cards import read_all_cards
 from tests.support.presence import presence
 from fastapi.testclient import TestClient
@@ -23,7 +24,7 @@ def test_completion_metadata_includes_hidden_and_survives_restart(tmp_path):
     options = dict(source=FilterSource(), token='test', api_only=True, ai_transport=transport([]))
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         setup_filters(client)
-        cards = wait_for(client, lambda: (rows if len(rows := read_all_cards(client, '/api/v3/cards'))==2 and all(client.get('/api/v3/publication/'+r['id']).json()['filter']['state']=='ready' for r in rows) else None))
+        cards = wait_for(client, lambda: (rows if len(rows := read_all_cards(client, '/api/v3/cards'))==2 and all(filter_state(client.get('/api/v3/publication/'+r['id']).json())=='ready' for r in rows) else None))
         for card in cards:
             assert client.post('/api/v3/materials/'+card['id']+'/viewed').status_code == 200
         nav = client.get('/api/v3/reading-composition').json()

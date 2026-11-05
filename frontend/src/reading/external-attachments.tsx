@@ -1,6 +1,6 @@
-import type {ExternalAttachment} from '../api/generated/types.gen';
+import type {CardListItem} from '../api/generated/types.gen';
 import './external-attachments.css';
-type Kind=ExternalAttachment['kind'];
+type Kind=CardListItem['external_attachment_kinds'][number];
 const labels:Record<Kind,string>={audio:'Аудио доступно у источника',video:'Видео доступно у источника',image:'Фото доступно у источника',document:'Файл доступен у источника',unsupported:'Вложение доступно у источника'};
 export const externalMediaLabel=(kind:Kind)=>labels[kind];
 export function ExternalMediaIcon({kind}:{kind:Kind}){return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{kind==='audio'?<><path d="M9 17V6l11-3v11M9 9l11-3"/><ellipse cx="6" cy="18" rx="3" ry="2.5"/><ellipse cx="17" cy="15" rx="3" ry="2.5"/></>:kind==='video'?<><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/></>:kind==='image'?<><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m3 17 6-6 4 4 3-3 5 5"/></>:<><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8zM14 3v5h5M8 12h8M8 16h6"/></>}</svg>;}

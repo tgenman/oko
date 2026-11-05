@@ -23,6 +23,7 @@ class Inputs:
     jobs: dict[str, dict[str, Row]] = field(default_factory=dict)
     media_jobs: dict[str,list[Row]] = field(default_factory=dict)
     media: dict[str,list[Row]] = field(default_factory=dict)
+    media_owners: dict[str,str] = field(default_factory=dict)
     feeds: dict[str, Row] = field(default_factory=dict)
     settings: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
     state: dict[str, str] = field(default_factory=dict)
@@ -135,6 +136,7 @@ def material_inputs(db: Database, identities: set[str], *, include_subtitles: bo
             value.jobs.setdefault(row['item'],{})[row['kind']]=row
         for row in db.execute("SELECT j.*,m.publication_id AS reader_item FROM jobs j JOIN media_files m ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=ANY(%s)",(batch,)):
             value.media_jobs.setdefault(row['reader_item'],[]).append(row)
+    value.media_owners={row['id']:owner for owner,rows in value.media.items() for row in rows}
     feeds = sorted({r['reader_feed_id'] for r in value.items.values() if r['reader_feed_id'] is not None}
                    | {feed for owners in value.owners.values() for feed in owners})
     for start in range(0, len(feeds), 400):

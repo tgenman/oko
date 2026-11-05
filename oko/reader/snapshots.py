@@ -4,23 +4,13 @@ These describe persisted/domain facts (including historical optional fields),
 not HTTP requests or responses. Only generated v3 models cross the HTTP boundary.
 """
 from __future__ import annotations
-from oko.collection.contracts import ReplyPreview
 from typing import Annotated, Any, Literal
 from pydantic import BeforeValidator, ConfigDict, Field, RootModel, StrictBool, StrictFloat, StrictInt, StrictStr
 from pydantic.experimental.missing_sentinel import MISSING
 from oko.reader.wire import TimestampValue as datetime
 from oko.reader.wire import WireModel, boolean_constant, integer_constant
 
-class AI(WireModel):
-    model_config = ConfigDict(extra='forbid')
-    error: StrictStr | None = Field(..., title='Error')
-    status: Literal['off', 'pending', 'running', 'done', 'cancelled'] = Field(..., title='Status')
 
-class Attachment(WireModel):
-    model_config = ConfigDict(extra='forbid')
-    kind: Literal['image', 'video', 'audio', 'circle', 'file'] = Field(..., title='Kind')
-    mime: StrictStr = Field(..., title='Mime')
-    url: StrictStr = Field(..., title='Url')
 
 class CodexChoice(WireModel):
     model_config = ConfigDict(extra='forbid')
@@ -28,12 +18,6 @@ class CodexChoice(WireModel):
     model: StrictStr = Field(..., max_length=200, min_length=1, pattern='^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$', title='Model')
     reasoning_effort: StrictStr = Field(..., max_length=30, min_length=1, pattern='^[a-z_]+$', title='Reasoning Effort')
 
-class CodexProvenance(WireModel):
-    model_config = ConfigDict(extra='forbid')
-    fast: StrictBool = Field(..., title='Fast')
-    model: StrictStr = Field(..., title='Model')
-    processor: Literal['codex'] = Field(..., title='Processor')
-    reasoning_effort: StrictStr = Field(..., title='Reasoning Effort')
 
 class CodexSettings(WireModel):
     model_config = ConfigDict(extra='forbid')
@@ -106,13 +90,6 @@ class EffectiveValues(WireModel):
     prompt_theses: PromptTheses
     theses: Theses
 
-class Filter(WireModel):
-    model_config = ConfigDict(extra='forbid')
-    error: StrictStr | None | MISSING = Field(default=MISSING, title='Error')
-    hidden: StrictBool = Field(..., title='Hidden')
-    reason: StrictStr = Field(..., title='Reason')
-    removed: list[StrictStr] = Field(..., title='Removed')
-    status: Literal['off', 'pending', 'running', 'done', 'cancelled'] = Field(..., title='Status')
 
 class Folder(WireModel):
     model_config = ConfigDict(extra='forbid')
@@ -154,10 +131,6 @@ class InitialHistoryStatus(WireModel):
     waiting: StrictBool | MISSING = Field(default=MISSING, title='Waiting')
     warnings: list[StrictStr] | MISSING = Field(default=MISSING, title='Warnings')
 
-class LocalProvenance(WireModel):
-    model_config = ConfigDict(extra='forbid', regex_engine='python-re')
-    model: StrictStr | None = Field(..., title='Model')
-    processor: StrictStr = Field(..., pattern='^(?!codex$).+', title='Processor')
 
 
 class ProblemObject(WireModel):
@@ -177,10 +150,6 @@ class QuotaWindow(WireModel):
     resets_at: StrictFloat | None
     used_percent: StrictFloat
 
-class Reference(WireModel):
-    model_config = ConfigDict(extra='forbid')
-    id: StrictStr = Field(..., title='Id')
-    url: StrictStr = Field(..., title='Url')
 
 class SettingOverrides(WireModel):
     feed_refresh_minutes: StrictInt | MISSING = MISSING
@@ -200,33 +169,11 @@ class SourceStatus(WireModel):
     gap: StrictStr | None | MISSING = Field(default=MISSING, title='Gap')
     title: StrictStr = Field(..., title='Title')
 
-class UnknownProvenance(WireModel):
-    model_config = ConfigDict(extra='forbid')
-    model: None = Field(..., title='Model')
-
-class ExternalAttachment(WireModel):
-    kind: Literal["audio", "video", "image", "document", "unsupported"]
-    source_url: str
-    reason: Literal["public_preview_unavailable"]
-    restriction: Literal["size_limit"] | None = None
-    title: str | None = None
-    size_label: str | None = None
-    author: str | None = None
-    duration: str | None = None
-    poster_url: str | None = None
 
 
-class LinkedArticle(WireModel):
-    source_url: str
-    title: str
-    text: str
-    error: str | None
-    media_urls: list[str]
 
 
-class LinkedContent(WireModel):
-    post_text: str
-    articles: list[LinkedArticle]
+
 
 
 
@@ -285,10 +232,6 @@ class History(WireModel):
     waiting: StrictBool | MISSING = Field(default=MISSING, title='Waiting')
     warnings: list[StrictStr] | MISSING = Field(default=MISSING, title='Warnings')
 
-class Point(WireModel):
-    model_config = ConfigDict(extra='forbid')
-    sources: list[Reference] = Field(..., title='Sources')
-    text: StrictStr = Field(..., title='Text')
 
 class Problem(WireModel):
     model_config = ConfigDict(extra='ignore')
@@ -346,9 +289,6 @@ class SubscriptionFeed(WireModel):
     title: StrictStr = Field(..., title='Title')
     transport: Literal['rss', 'telegram', 'youtube'] | None | MISSING = Field(default=MISSING, title='Transport')
 
-class Summary(WireModel):
-    model_config = ConfigDict(extra='forbid')
-    points: list[Point] = Field(..., title='Points')
 
 class EffectiveSettings(WireModel):
     model_config = ConfigDict(extra='forbid')
@@ -387,39 +327,6 @@ class FeedVerification(WireModel):
     title: StrictStr
     url: StrictStr
     verification: StrictStr
-
-class Material(WireModel):
-    linked_content: LinkedContent | None = None
-    external_attachments: list[ExternalAttachment] = Field(default_factory=list)
-    external_only: bool = False
-    post_web_unavailable: bool = False
-    reply_preview: ReplyPreview | None = None
-    model_config = ConfigDict(extra='forbid')
-    ai: AI | None | MISSING = MISSING
-    attachments: list[Attachment] | MISSING = Field(default=MISSING, title='Attachments')
-    captions: Literal['available', 'not_requested', 'pending', 'running', 'unavailable', 'error'] | None | MISSING = Field(default=MISSING, title='Captions')
-    complete: StrictBool = Field(..., title='Complete')
-    description: StrictStr | MISSING = Field(default=MISSING, title='Description')
-    display_text: StrictStr | MISSING = Field(default=MISSING, title='Display Text')
-    feed_id: StrictStr = Field(..., title='Feed Id')
-    filter: Filter | MISSING = MISSING
-    folder_id: StrictStr | MISSING = Field(default=MISSING, title='Folder Id')
-    full: StrictBool | MISSING = Field(default=MISSING, title='Full')
-    id: StrictStr = Field(..., title='Id')
-    images: list[StrictStr] | MISSING = Field(default=MISSING, title='Images')
-    importance: Literal['normal', 'elevated', 'high'] | MISSING = Field(default=MISSING, title='Importance')
-    loading: StrictBool | MISSING = Field(default=MISSING, title='Loading')
-    members: list[StrictInt] | MISSING = Field(default=MISSING, title='Members')
-    originals: StrictBool | MISSING = Field(default=MISSING, title='Originals')
-    provenance: UnknownProvenance | CodexProvenance | LocalProvenance | None | MISSING = Field(default=MISSING, title='Provenance')
-    published: StrictFloat = Field(..., title='Published')
-    published_known: StrictBool | MISSING = Field(default=MISSING, title='Published Known')
-    reason: StrictStr | MISSING = Field(default=MISSING, title='Reason')
-    text: StrictStr = Field(..., title='Text')
-    theses: Summary | None | MISSING = MISSING
-    title: StrictStr = Field(..., title='Title')
-    url: StrictStr = Field(..., title='Url')
-    version: StrictStr | MISSING = Field(default=MISSING, title='Version')
 
 class Navigation(WireModel):
     model_config = ConfigDict(extra='forbid')

@@ -78,9 +78,6 @@ class ReadingComposition:
     def feed_contents(self, feed: str) -> FolderContents:
         return self._contents(feed, 'feed')
 
-    @reading_snapshot()
-    def material(self, identity: str) -> dict[str, Any] | None:
-        return self._store.material(identity)
 
     def members(self, identity: str) -> list[str]:
         return [identity]

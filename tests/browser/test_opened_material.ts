@@ -240,7 +240,7 @@ test('new text waits for a button, keeps its paragraph and never mixes summaries
     await r.page.locator('#text [data-reading-paragraph]').nth(25).evaluate(node=>node.scrollIntoView({block:'start'}));
     const before=await r.page.locator('#text [data-reading-paragraph]').nth(25).boundingBox();
     const freshText='Новый первый абзац\n\n'.repeat(8)+text;
-    const fresh={...old,text:freshText,content:{blocks:[{type:'text' as const,role:'body' as const,text:freshText}]},summarized_content:{points:[{text:'Новые тезисы',source_publication_ids:[]}]},revision_id:'new',theses:{state:'ready' as const,error:null,result:{points:['Новые тезисы'],references:[[]],provenance:{kind:'unknown' as const,reason:'not_recorded' as const}}}};
+    const fresh={...old,content:{blocks:[{type:'text' as const,role:'body' as const,text:freshText}]},summarized_content:{points:[{text:'Новые тезисы',source_publication_ids:[]}]}};
     await r.page.evaluate(fresh=>readerTransport.replies.set('/api/v3/publication/A',{body:fresh}),fresh);
     await expect(r.page.locator('#material-update-button')).toBeVisible();
     await expect(r.page.locator('#text')).toHaveText(text);
@@ -249,7 +249,7 @@ test('new text waits for a button, keeps its paragraph and never mixes summaries
     // Click without scrolling the article to the update banner.
     await r.page.screenshot({path:artifactPath('version-available.png')});
     await r.page.locator('#material-update-button').click();
-    await expect(r.page.locator('#text')).toHaveText(fresh.text);
+    await expect(r.page.locator('#text')).toHaveText(freshText);
     await expect(r.page.locator('#theses')).toHaveText('Новые тезисы');
     expect(Math.abs((await r.page.locator('#text [data-reading-paragraph]').nth(33).boundingBox())!.y-before!.y)).toBeLessThan(2);
     await r.page.screenshot({path:artifactPath('version-switched.png')});
@@ -288,7 +288,7 @@ test('storage replacement rejects old media replies and stages the replacement b
     await r.page.locator('[data-card="A"]').click();await expect(r.page.locator('#text')).toHaveText('Текст A');await r.page.waitForFunction(url=>readerTransport.pending.has(url),url);
     await r.page.evaluate(()=>{
       readerTransport.held.set('test-storage-reset',true);
-      readerTransport.replies.set('/api/v3/publication/A',{body:{...readerTransport.replies.get('/api/v3/publication/A')!.body!,text:'Другой экземпляр',content:{blocks:[{type:'text',role:'body',text:'Другой экземпляр'}]},revision_id:'old'}});
+      readerTransport.replies.set('/api/v3/publication/A',{body:{...readerTransport.replies.get('/api/v3/publication/A')!.body!,content:{blocks:[{type:'text',role:'body',text:'Другой экземпляр'}]}}});
     });
     // Wait for the request after reset: the already in-flight pre-reset poll
     // can discover the new text before the injected reset is accepted.

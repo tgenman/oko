@@ -28,10 +28,11 @@ def test_http_rejects_late_summary_after_text_roundtrip(tmp_path):
             item=active_job.item
             def change():
                 store=app.state.host.require_store()
-                header,original=store.original(item)
+                row=store.db.execute('SELECT title,content FROM publications WHERE id=%s',(item,)).fetchone()
+                original='\n\n'.join(block['text'] for block in row['content']['blocks'] if block['type']=='text' and block['role']=='body')
                 for text in ('Changed input',original):
                     with transaction(store.db):
-                        material=StructuredSource(None).describe(legacy_publication(store,item),synthetic_material(header['title'],text))
+                        material=StructuredSource(None).describe(legacy_publication(store,item),synthetic_material(row['title'],text))
                         job=running_collection_job(store,'fetch',item)
                         _,effects=collection_service(lambda:store).collected_content(item,material.adapter_content)
                         apply_simulated_collection(store,effects,job=job)
@@ -41,7 +42,7 @@ def test_http_rejects_late_summary_after_text_roundtrip(tmp_path):
                 assert model.old_done.wait(10)
                 async def wait_old():await asyncio.shield(old_task)
                 client.portal.call(wait_old)
-                assert client.get('/api/v3/publication/'+item).json()['theses']['result'] is None
+                assert client.get('/api/v3/publication/'+item).json()['summarized_content'].get('points') is None
             finally:
                 model.release_old.set()
                 model.release_new.set()

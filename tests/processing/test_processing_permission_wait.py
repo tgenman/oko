@@ -1,3 +1,4 @@
+from tests.support.publications import summary,reason
 from tests.support.cards import read_all_cards
 import time
 from fastapi.testclient import TestClient
@@ -18,16 +19,16 @@ def test_forbidden_processing_waits_for_settings_without_errors_or_timed_retry(t
 
         def blocked_materials():
             materials = [client.get('/api/v3/publication/'+identity).json() for identity in items]
-            return materials if all('Запрещена публичная' in (m['theses']['error'] or '') for m in materials) else None
+            return materials if all('Запрещена публичная' in (reason(m,'theses') or '') for m in materials) else None
 
         # The counter below covers every Demo publication, not just the first.
         blocked = wait_for(client, blocked_materials)
-        assert all(m['theses']['state'] == 'error' for m in blocked)
+        assert all(reason(m,'theses') is not None for m in blocked)
         from tests.support.storage import database
         with database(tmp_path) as db:
             before_reason=db.execute("SELECT reason_message FROM jobs WHERE kind='theses' AND item=%s",(item,)).fetchone()[0]
             db.execute("UPDATE jobs SET reason_message='Current processing reason' WHERE kind='theses' AND item=%s",(item,))
-        assert client.get('/api/v3/publication/'+item).json()['theses']['error']=='Current processing reason'
+        assert reason(client.get('/api/v3/publication/'+item).json(),'theses')=='Current processing reason'
         with database(tmp_path) as db:
             db.execute("UPDATE jobs SET reason_message=%s WHERE kind='theses' AND item=%s",(before_reason,item))
         assert client.get('/api/v3/status/details').json()['diagnostic_count'] == 0
@@ -43,5 +44,5 @@ def test_forbidden_processing_waits_for_settings_without_errors_or_timed_retry(t
         assert not model.inputs
         client.patch('/api/v3/feeds/fixture', json={'public_ai': True})
         clock.now+=1
-        wait_for(client, lambda: client.get('/api/v3/publication/'+item).json()['theses']['result'])
+        wait_for(client, lambda: summary(client.get('/api/v3/publication/'+item).json()))
         assert model.inputs

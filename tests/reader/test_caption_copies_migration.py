@@ -17,10 +17,10 @@ from oko.storage.postgres_schema import MIGRATIONS
 def test_caption_copy_removed_after_represented(postgres_database_url,caption,media_status,job_status,reason,key):
     with psycopg.connect(postgres_database_url,autocommit=True) as db:
         migrate(db,MIGRATIONS[:113])
-        content={'blocks':[{'type':'media','role':'subtitles','media_id':'m'}],
+        content={'blocks':[{'type':'media','role':'subtitles','media_id':'m','source_url':None,'publication_url':None}],
                  'extra':{'youtube':{'captions':caption,'video':'preserved'}}}
         if caption=='available':content['extra']['youtube']['captions_digest']='a'*64
-        db.execute("INSERT INTO publications(id,platform,external_id,content) VALUES ('p','youtube','p',%s::jsonb)",(json.dumps(content),))
+        db.execute("INSERT INTO publications(id,platform,external_id,content,media_ids) VALUES ('p','youtube','p',%s::jsonb,'[\"m\"]')",(json.dumps(content),))
         db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status,storage_key) VALUES ('m','p','youtube:subtitles','youtube:p:subtitles','captions',%s,%s)",(media_status,key))
         if job_status:
             db.execute("INSERT INTO jobs(kind,item,status,reason_code) VALUES ('download_media','m',%s,%s)",(job_status,reason))

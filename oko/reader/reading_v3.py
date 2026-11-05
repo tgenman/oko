@@ -28,18 +28,6 @@ def card_source_url(value: object) -> object:
     return wire.SourceUrl(value).root
 
 
-def completeness(full: bool, reason: str, external_only: bool = False, post_web_unavailable: bool = False) -> wire.ContentCompleteness:
-    return wire.ContentCompleteness(wire.CompleteContent(state='complete') if full else wire.IncompleteContent(state='incomplete', reason='post_web_unavailable' if post_web_unavailable and (not reason or reason=='Публикация недоступна для веб-просмотра') else 'external_attachment' if external_only else 'source_incomplete', message=reason))
-
-
-def provenance(value: facts.UnknownProvenance | facts.CodexProvenance | facts.LocalProvenance | None) -> wire.Provenance:
-    if isinstance(value, facts.CodexProvenance):
-        return wire.Provenance(wire.CodexResultProvenance(kind='codex', model=value.model, reasoning_effort=value.reasoning_effort, fast=value.fast))
-    if isinstance(value, facts.LocalProvenance) and value.processor == 'llamacpp':
-        return wire.Provenance(wire.LocalResultProvenance(kind='local', processor_id='llamacpp', model=wire.LocalModel(wire.KnownLocalModel(state='known', name=value.model) if value.model else wire.UnknownLocalModel(state='unknown'))))
-    return wire.Provenance(wire.UnknownResultProvenance(kind='unknown', reason='not_recorded'))
-
-
 def missing(resource: wire.AffectedResource) -> ApiError:
     return ApiError(404, wire.ErrorEnvelope(wire.ResourceNotFoundError(code='resource_not_found', message='Объект недоступен', details=wire.ResourceNotFoundErrorDetails(resource=resource), command_id=None, diagnostic_id=None)))
 
@@ -181,7 +169,7 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
                         projected=wire.CardListItem.model_validate(dict(
                             id=item,feed_id=card_data['feed_id'],title='Публикация недоступна',
                             published_at=date,source_url=source,preview_url=None,loading=False,
-                            hidden=bool(card_data['hidden']),post_web_unavailable=False,
+                            hidden=bool(card_data['hidden']),
                             external_attachment_kinds=[]))
                     items.append(projected.model_dump(mode='json'))
             return JSONResponse(wire.CardPage.model_validate(dict(items=items,total=total,next_cursor=identities[limit] if len(identities)>limit else None)).model_dump(mode='json'),headers=headers)

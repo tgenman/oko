@@ -1,4 +1,5 @@
 """Linked articles remain independent publications at the reader HTTP boundary."""
+from tests.support.publications import body_text,summary,reasons
 from oko.storage.publication_owners import owner_expr
 from tests.support.cards import read_all_cards, read_publications_for_cards
 import httpx
@@ -40,15 +41,15 @@ def test_rss_article_is_fetched_separately_and_does_not_become_a_feed_card(tmp_p
             presence(client,'rss')
             card=wait_cards(client,idle=False)[0]
             initial=client.get('/api/v3/publication/'+card['id']).json()
-            assert initial['text']=='Own excerpt'
+            assert body_text(initial)=='Own excerpt'
             assert started.wait(3)
             release.set()
-            value=wait_for(client,lambda:(value if 'Article body' in (value:=client.get('/api/v3/publication/'+card['id']).json())['text'] else None))
+            value=wait_for(client,lambda:(value if 'Article body' in body_text(value:=client.get('/api/v3/publication/'+card['id']).json()) else None))
             assert media_started.wait(3)
             assert client.get('/api/v3/status').status_code==200
             assert client.get('/api/v3/publication/'+card['id']).status_code==200
-            assert 'Own excerpt' in value['text']
-            assert value['revision_id']!=initial['revision_id']
+            assert 'Own excerpt' in body_text(value)
+            assert value['linked_publications']!=initial['linked_publications']
             assert len(read_all_cards(client, '/api/v3/cards'))==1
             with database(root) as db:
                 linked=db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id = %s',(card['id'],)).fetchone()[0]
@@ -98,14 +99,14 @@ def test_article_arrival_reprocesses_root_and_keeps_actual_source_references(tmp
             import_feed(client)
             presence(client,'rss')
             card=wait_for(client,lambda:next(iter(read_publications_for_cards(client, '/api/v3/cards')),None))
-            assert card['theses']['result'] is None and calls==[]
+            assert summary(card) is None and calls==[]
             release.set()
-            updated=wait_for(client,lambda:(value if (value:=client.get('/api/v3/publication/'+card['id']).json())['theses']['result'] and len(value['theses']['result']['points'])==2 else None))
-            assert updated['theses']['result']['points']==['Own excerpt','Article body']
+            updated=wait_for(client,lambda:(value if summary(value:=client.get('/api/v3/publication/'+card['id']).json()) and len(summary(value)['points'])==2 else None))
+            assert [point['text'] for point in summary(updated)['points']]==['Own excerpt','Article body']
             assert len(calls[-1]['sources'])==2
             article_source=calls[-1]['sources'][1]
             assert article_source['id']!=card['id'] and article_source['url']=='https://web.example/article'
-            assert updated['theses']['result']['references'][1]==[{'material_id':article_source['id'],'source_url':article_source['url']}]
+            assert summary(updated)['points'][1]['source_publication_ids']==[article_source['id']]
         finally:
             release.set()
 
@@ -125,13 +126,13 @@ def test_shared_article_survives_one_root_then_disappears_after_the_last_link(tm
             add_source(client,'https://source.test/'+name,name,'News')
         presence(client,'rss')
         cards=wait_cards(client,2)
-        wait_for(client,lambda:all('Shared article' in client.get('/api/v3/publication/'+card['id']).json()['text'] for card in cards))
+        wait_for(client,lambda:all('Shared article' in body_text(client.get('/api/v3/publication/'+card['id']).json()) for card in cards))
         with database(root) as db:
             articles=db.execute("SELECT id FROM publications WHERE platform='other_web'").fetchall()
             assert len(articles)==1
             article=articles[0][0]
         client.post('/api/v3/materials/'+cards[0]['id']+'/viewed')
-        assert 'Shared article' in client.get('/api/v3/publication/'+cards[1]['id']).json()['text']
+        assert 'Shared article' in body_text(client.get('/api/v3/publication/'+cards[1]['id']).json())
         client.post('/api/v3/materials/'+cards[1]['id']+'/viewed')
         with database(root) as db:
             assert db.execute('SELECT 1 FROM publications WHERE id = %s',(article,)).fetchone() is None
@@ -151,14 +152,14 @@ def test_unavailable_article_keeps_excerpt_and_root_retry_fetches_it_again(tmp_p
         import_feed(client)
         presence(client,'rss')
         card=wait_cards(client)[0]
-        value=wait_for(client,lambda:(value if 'недоступна' in (value:=client.get('/api/v3/publication/'+card['id']).json())['completeness'].get('message','').lower() else None))
-        assert value['text']=='Own excerpt'
+        value=wait_for(client,lambda:(value if bool(reasons(value:=client.get('/api/v3/publication/'+card['id']).json())) else None))
+        assert body_text(value)=='Own excerpt'
         status=client.get('/api/v3/status/details')
         assert status.status_code==200
         assert any(resource=={'kind':'material','material_id':card['id']} for problem in status.json()['problems']['current'] for resource in problem['affected'])
         missing[0]=False
         client.post('/api/v3/materials/'+card['id']+'/retry')
-        wait_for(client,lambda:'Retrieved article' in client.get('/api/v3/publication/'+card['id']).json()['text'])
+        wait_for(client,lambda:'Retrieved article' in body_text(client.get('/api/v3/publication/'+card['id']).json()))
 
 
 def test_late_article_response_is_discarded_after_its_last_root_is_read(tmp_path):

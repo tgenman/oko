@@ -1,3 +1,4 @@
+from tests.support.publications import summary,reason,body_text
 from tests.support.reader import HEADERS
 from tests.support.reader import wait_for
 from tests.support.reader import setup_reader
@@ -21,9 +22,9 @@ def test_local_theses_follow_inherited_prompt_and_delete_with_original(tmp_path:
         assert client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True}).status_code == 200
         assert client.post('/api/v3/processors/llamacpp/check').json()['locality'] == 'local'
         assert client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True, 'prompt_theses': 'Один тезис о просмотре.'}).status_code == 200
-        material = wait_for(client, lambda: (m if (m := client.get('/api/v3/publication/' + item).json())['theses']['result'] else None))
-        assert material['theses']['result']['points'][0] == 'Просмотрено удаляет текст.'
-        assert material['text'].startswith('Это тестовая публикация.')
+        material = wait_for(client, lambda: (m if summary((m := client.get('/api/v3/publication/' + item).json())) else None))
+        assert summary(material)['points'][0]['text'] == 'Просмотрено удаляет текст.'
+        assert body_text(material).startswith('Это тестовая публикация.')
         chat = next(r for r in calls if r.url.path == '/v1/chat/completions')
         payload = json.loads(chat.content)
         assert payload['stream'] is False
@@ -41,11 +42,11 @@ def test_unknown_remote_boundary_never_receives_forbidden_content(tmp_path: Path
         item = setup_reader(client, theses=True)
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'https://models.example.org', 'model': 'local:latest', 'local_execution': True})
         client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
-        m = wait_for(client, lambda: (m if (m := client.get('/api/v3/publication/' + item).json())['theses']['error'] else None))
-        assert 'Запрещена публичная' in m['theses']['error']
+        m = wait_for(client, lambda: (m if reason((m := client.get('/api/v3/publication/' + item).json()),'theses') else None))
+        assert 'Запрещена публичная' in reason(m,'theses')
         assert not any(r.url.path == '/v1/chat/completions' for r in calls)
         client.patch('/api/v3/feeds/fixture', json={'public_ai': True})
-        wait_for(client, lambda: client.get('/api/v3/publication/' + item).json()['theses']['result'])
+        wait_for(client, lambda: summary(client.get('/api/v3/publication/' + item).json()))
         assert any(r.url.path == '/v1/chat/completions' for r in calls)
 
 
@@ -60,8 +61,8 @@ def test_http_success_without_finished_attributed_result_is_not_theses(tmp_path:
         item = setup_reader(client, theses=True)
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
         client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
-        m = wait_for(client, lambda: (m if 'неизвестный источник' in ((m := client.get('/api/v3/publication/' + item).json())['theses']['error'] or '') else None))
-        assert m['theses']['result'] is None
+        m = wait_for(client, lambda: (m if 'неизвестный источник' in (reason((m := client.get('/api/v3/publication/' + item).json()),'theses') or '') else None))
+        assert summary(m) is None
         assert not list(tmp_path.glob('content/*/1/theses.md'))
 
 
@@ -104,11 +105,11 @@ def test_permission_change_invalidates_late_output_and_keeps_one_ai_request(tmp_
             client.patch('/api/v3/settings/oko/global', json={'prompt_theses': 'Новый промпт'})
             time.sleep(.15)
             maximum = held.maximum
-            late = client.get('/api/v3/publication/' + item).json()['theses']['result']
+            late = summary(client.get('/api/v3/publication/' + item).json())
             held.release.set()
             assert maximum == 1
             assert late is None
-            result = wait_for(client, lambda: client.get('/api/v3/publication/' + item).json()['theses']['result'])
+            result = wait_for(client, lambda: summary(client.get('/api/v3/publication/' + item).json()))
             assert result
             requests = [json.loads(r.content) for r in held.requests if r.url.path == '/v1/chat/completions']
             assert any('Новый промпт' in r['messages'][0]['content'] for r in requests)
@@ -151,10 +152,10 @@ def test_model_error_remains_visible_without_leaking_response(tmp_path: Path):
         item = setup_reader(client, theses=True)
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
         client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
-        m = wait_for(client, lambda: (m if (m := client.get('/api/v3/publication/' + item).json())['theses']['error'] else None))
-        assert m['theses']['result'] is None
+        m = wait_for(client, lambda: (m if reason((m := client.get('/api/v3/publication/' + item).json()),'theses') else None))
+        assert summary(m) is None
         assert 'secret prompt' not in json.dumps(client.get('/api/v3/status').json())
-        assert m['theses']['error'] != 'Ошибка подготовки тезисов'
+        assert reason(m,'theses') != 'Ошибка подготовки тезисов'
 
 
 @pytest.mark.parametrize('case', ['unknown', 'unconfirmed', 'router', 'missing'])
@@ -181,7 +182,7 @@ def test_unverified_local_server_never_receives_forbidden_content(tmp_path: Path
         else:
             assert check.json()['locality']=='remote'
         client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
-        wait_for(client, lambda: client.get('/api/v3/publication/' + item).json()['theses']['error'])
+        wait_for(client, lambda: reason(client.get('/api/v3/publication/' + item).json(),'theses'))
         assert not any(r.url.path == '/v1/chat/completions' for r in calls)
 
 
@@ -199,10 +200,10 @@ def test_reader_can_retry_theses_after_model_response_is_fixed(tmp_path: Path):
         item = setup_reader(client, theses=True)
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
         client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
-        wait_for(client, lambda: client.get('/api/v3/publication/' + item).json()['theses']['error'])
+        wait_for(client, lambda: reason(client.get('/api/v3/publication/' + item).json(),'theses'))
         fixed = True
         assert client.post('/api/v3/materials/' + item + '/theses/retry').status_code == 200
-        wait_for(client, lambda: client.get('/api/v3/publication/' + item).json()['theses']['result'])
+        wait_for(client, lambda: summary(client.get('/api/v3/publication/' + item).json()))
         client.post('/api/v3/materials/' + item + '/viewed')
         assert client.post('/api/v3/materials/' + item + '/theses/retry').status_code == 404
 
@@ -221,7 +222,7 @@ def test_local_router_checks_selected_model_before_sending_forbidden_public_inpu
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
         assert client.post('/api/v3/processors/llamacpp/check').json()['locality'] == 'local'
         client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
-        wait_for(client, lambda: client.get('/api/v3/publication/' + item).json()['theses']['result'])
+        wait_for(client, lambda: summary(client.get('/api/v3/publication/' + item).json()))
         assert any(r.url.path == '/v1/chat/completions' for r in calls)
 
 
@@ -236,4 +237,4 @@ def test_theses_disable_reasoning_to_leave_budget_for_finished_json(tmp_path: Pa
         item = setup_reader(client, theses=True)
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True})
         client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'theses': True})
-        wait_for(client, lambda: client.get('/api/v3/publication/' + item).json()['theses']['result'])
+        wait_for(client, lambda: summary(client.get('/api/v3/publication/' + item).json()))

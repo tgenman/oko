@@ -2,7 +2,7 @@
 from copy import deepcopy
 from dataclasses import dataclass
 from oko.collection.adapters import ExternalReference, PublicationContent
-from oko.collection.contracts import SourceError, SourceManifest, SourceObservation
+from oko.collection.contracts import SourceError, SourceObservation
 
 
 @dataclass(frozen=True)
@@ -26,7 +26,6 @@ class Material:
     captions: str | None = None
     collection_error: 'SourceError | None' = None
     description: str = ''
-    source_manifest: SourceManifest | None = None
     adapter_content: 'PublicationContent | None' = None
 
 

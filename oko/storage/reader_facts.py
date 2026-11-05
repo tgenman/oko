@@ -18,13 +18,18 @@ class ReaderFacts:
         from oko.storage.card_read import card
         return card(self.storage(), identity)
 
-    def original(self, identity: str) -> tuple[dict[str, Any], str]:
-        return self.storage().original(identity)
 
     def unified_publication(self, identity: str) -> dict[str, Any]:
         from oko.storage.unified_publication import project
         store=self.storage()
-        return project(store.db,store.root,identity,store.clock(),store.wall_clock())
+        value=project(store.db,store.root,identity,store.clock(),store.wall_clock())
+        files={item['id']:item for item in value['media']}
+        for owner in [{'id':identity,'content':value['content']},*value['linked_publications']]:
+            for block in owner['content'].get('blocks',[]):
+                file=files.get(block.get('media_id')) if block.get('type')=='media' and block.get('role')=='subtitles' else None
+                if file and file['status']=='ready' and file['url'] is None:
+                    store.processing.repair(owner['id'])
+        return value
 
     def content_version(self, identity: str) -> str:
         return self.storage().content_version(identity)
@@ -98,9 +103,6 @@ class ReaderFacts:
     def material_feeds(self, identities: set[str]) -> dict[str, str]:
         return {row['id']: row['feed_id'] for row in self.storage().db.execute(f"SELECT i.id , {owner_expr('i')} AS feed_id FROM publications i WHERE i.id IN ( {','.join(('%s' for _ in identities))} )", tuple(identities))} if identities else {}
 
-    def linked_preview(self, identity: str) -> dict[str, Any] | None:
-        store=self.storage()
-        return publication_links.reading(store,identity,store.publications.original(identity)[1])
 
     def was_viewed(self, identity: str) -> bool:
         return self.storage().db.execute('SELECT 1 FROM publications WHERE id = %s', (identity,)).fetchone() is None

@@ -1,13 +1,10 @@
 from oko.storage.publication_owners import owned_ids, owner_expr
-from oko.storage.database import expect_row, Connection, Row, INTEGRITY_ERRORS
-from oko.collection.external_media import saved_external
-from oko.collection.telegram.reading import saved_preview
+from oko.storage.database import expect_row, Connection, INTEGRITY_ERRORS
 from oko.storage.collection_status import CollectionStatus
 from oko.storage import material_read, collection_jobs, publication_links, youtube_media
 from oko.storage import memberships as membership_graph
 from oko.storage import processing_input as publication_input
-from oko.storage.reading import reading_snapshot, reading_value, retry_time, reader_now, saved_content
-from oko.diagnostics import record_caught
+from oko.storage.reading import reading_snapshot, reading_value, retry_time, saved_content
 import json
 from pathlib import Path
 import shutil
@@ -31,7 +28,6 @@ from oko.collection.contracts import SourceError
 from oko.storage.subscriptions import SubscriptionRepository
 from oko.storage.job_writes import execute as job_write
 from oko.storage.transaction import begin_write, transaction
-from oko.storage.media_paths import existing_file
 from oko.storage.job_repository import JobRepository
 from oko.storage.collection_diagnostics import CollectionDiagnostics
 from oko.subscriptions.history import InitialHistory
@@ -176,7 +172,7 @@ class Store:
             effects = CollectionEffectCapture(self)
             self.discovery = DiscoveryRepository(db=self.db, publications=self.publications, subscriptions=self.subscriptions,
                 versions=self.read_versions, effects=effects,
-                original=self.original, clock=self.wall_clock, fault=self.fault)
+                root=self.root, clock=self.wall_clock, fault=self.fault)
             self.collected_publication = CollectedPublicationRepository(db=self.db, root=self.root,
                 publications=self.publications, media=self.media, capture=effects,
                 collection_history=self.collection_history, fault=self.fault)
@@ -283,11 +279,6 @@ class Store:
         with self.db:
             self.db.execute('INSERT INTO state VALUES ( %s , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value',
                             ('telegram-http:'+group, json.dumps(state)))
-
-    @reading_snapshot()
-    def _needs_collection(self, item: str) -> bool:
-        material=self.material(item)
-        return not material or not material.get('complete',True)
 
     def _has_unviewed(self, item: str) -> bool:
         return self.db.execute('SELECT 1 FROM publications WHERE id = %s',(item,)).fetchone() is not None
@@ -428,94 +419,9 @@ class Store:
             WHERE kind='delete' AND item=%s""", (feed,item))
 
 
-    @reading_value
-    def original(self, item: str) -> tuple[dict[str, Any], str]:
-        own=material_read.item(self.db,item)
-        header,text=self.publications.original(item)
-        if own:
-            if 'youtube' in saved_content(own['content']).get('extra',{}):
-                projected=youtube_media.add_input(self,saved_content(own['content'],mutable=True))
-                text='\n\n'.join(block['text'] for block in projected['blocks'] if block['type']=='text' and block.get('role')=='body')
-                if youtube_media.subtitle_state(self,projected,item)=='error' and header.get('captions')=='available':
-                    header={**header,'captions':'error','full':False,'reason':'Локальный файл субтитров недоступен; повторите загрузку'}
-            header=publication_links.project_header(self,item,header)
-            article_text=publication_links.text(self,item)
-            if article_text:
-                text='\n\n'.join(part for part in (text,article_text) if part)
-        return header,text
 
-    def material(self, item: str) -> dict[str, Any] | None:
-        from oko.storage import material_read
-        row = material_read.item(self.db,item)
-        material = self.saved_publication(row) if row and row['feed_id'] is not None else None
-        if material and material['complete']:
-            display = material['text']
-            filtered = material['filter']
-            if filtered['status'] == 'done':
-                for fragment in filtered['removed']:
-                    display = display.replace(fragment, '')
-            material['display_text'] = display
-        return material
 
-    def reading_content(self, row: Row) -> tuple[dict[str, Any], str, dict[str, Any], dict[str, Any] | None, dict[str, Any] | None] | None:
-        """Check the saved inputs shared by cards and completion counts.
 
-        This does not build a card, its snippet, media URLs or work status.
-        Broken stored content or active processing output stays in the captured
-        publication set, but cannot contribute a readable card.
-        """
-        item = row['id']
-        try:
-            header, text = self.original(item)
-            header['title']
-            for attachment in header.get('attachments', []):
-                attachment['name'], attachment['kind'], attachment['mime']
-            json.loads(row['media_ids'])
-            for child in publication_links.children(self, item):
-                if 'blocks' in child['content']:
-                    json.loads(child['media_ids'])
-            filtered = self.filters.read(item)
-            theses = self.processing.theses.read(item)
-            linked = saved_preview(header)
-            if row['platform'] == 'telegram':
-                linked = publication_links.reading(self, item, self.publications.original(item)[1]) or linked
-            return header, text, filtered, theses, linked
-        except (OSError, ValueError, KeyError):
-            record_caught('store.material')
-            return None
-
-    def saved_publication(self, row: Row) -> dict[str, Any] | None:
-        """Saved publication facts without reader-specific text projections."""
-        item = row['id']
-        settings = self.subscriptions.effective('feed', row['feed_id'], details=False)
-        available='blocks' in row['content']
-        base = dict(id=item, feed_id=row['feed_id'], url=row['url'], published=row['published_at'] or 0.,
-                    published_known=row['published_at'] is not None,
-                    members=json.loads(row['members']), complete=available,
-                    originals=settings['effective']['originals']['value'])
-        fetch = material_read.jobs(self.db, item).get('fetch')
-        if not available:
-            base.update(title='Материал загружается', loading=bool(fetch and fetch['status'] in ('pending', 'running')))
-            return dict(base, text='')
-        try:
-            content = self.reading_content(row)
-            if content is None:
-                return None
-            header, text, filtered, theses, linked = content
-            base.update(filter=filtered, title=header['title'], theses=theses,
-                provenance=self.processing.theses.provenance(item), ai=self.processing.theses.status(item),
-                version=self.content_version(item), loading=bool(fetch and (fetch['status']=='running' or fetch['status']=='pending' and fetch['next']<=reader_now(self.clock()))),
-                full=header.get('full', True),
-                reason=header.get('reason', ''), captions=header.get('captions'),
-                attachments=[dict(url=header.get('_media_urls',{}).get(a['name'],f"/api/v3/materials/{item}/media/{a.get('media_id',a['name'])}"), kind=a['kind'], mime=a['mime']) for a in header.get('attachments', [])],
-                images=[])
-            base.update(saved_external(header, f'/api/v3/materials/{item}'))
-            base['loading'] = base['loading'] or row['platform'] is not None and self.media.loading(item)
-            base.update(text=text, description=header.get('description', ''), reply_preview=header.get('reply_preview'), linked_content=linked)
-            return base
-        except (OSError, ValueError, KeyError):
-            record_caught('store.material')
-            return None
 
     def work_summary(self, *, include_problems: bool = False) -> list[WorkSummary]:
         condition = "jobs.status IN ('pending','running')"

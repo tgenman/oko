@@ -75,8 +75,16 @@ def eventually(predicate):
     raise AssertionError('Condition did not become true')
 
 
+from tests.support.publications import body_text,loading
+
+
 def materials(client):
     return [client.get('/api/v3/publication/' + row['id']).json() for row in read_all_cards(client, '/api/v3/cards')]
+
+
+def captions_pending(publication):
+    ids={b['media_id'] for b in publication['content'].get('blocks',[]) if b.get('type')=='media' and b.get('role')=='subtitles'}
+    return any(j['operation']=='download_media' and j['object_id'] in ids and j['status'] in ('pending','running','blocked') for j in publication['jobs'])
 
 
 def heartbeat(client):
@@ -98,14 +106,14 @@ def test_block_is_shared_persistent_and_retry_cannot_bypass_it(tmp_path):
             clock.advance(1)  # Common discovery commits its initial cursor before the next portion.
             return False
         eventually(paused)
-        item = eventually(lambda: next((m for m in materials(client) if m['source'].get('captions') == 'pending'), None))
+        item = eventually(lambda: next((m for m in materials(client) if captions_pending(m)), None))
         retry_at = datetime.fromisoformat(client.get('/api/v3/youtube').json()['retry_at'].replace('Z','+00:00')).timestamp()
         assert retry_at == captions.calls[0][1] + 900
         client.post('/api/v3/materials/' + item['id'] + '/retry')
         client.patch('/api/v3/youtube', json={'mode': 'proxy', 'address': 'http://proxy.test:8000', 'password': 'secret'})
         add(client, 'https://rss.test/feed')
         def independent():
-            if any('Независимый текст' in m.get('text','') for m in materials(client)):
+            if any('Независимый текст' in body_text(m) for m in materials(client)):
                 return True
             clock.tick+=1
             return False
@@ -162,10 +170,10 @@ def test_closed_browser_allows_retry_but_viewed_material_does_not_resume(tmp_pat
         assert client.patch('/api/v3/settings/oko/global', json={'feed_refresh_minutes':1440}).status_code == 200
         add(client)
         heartbeat(client)
-        item = eventually(lambda: next((m for m in materials(client) if len(captions.calls)==1 and m['source'].get('captions') == 'pending' and not m['loading']), None))
+        item = eventually(lambda: next((m for m in materials(client) if len(captions.calls)==1 and captions_pending(m) and not loading(m)), None))
         assert close_presence(client, 'reader').status_code == 409
         clock.advance(900)
-        eventually(lambda: len(captions.calls) == 2 and any(m['source'].get('captions') == 'pending' and not m['loading'] for m in materials(client)))
+        eventually(lambda: len(captions.calls) == 2 and any(captions_pending(m) and not loading(m) for m in materials(client)))
         assert client.get('/api/v3/status').json()['work_allowed'] is True
         client.put('/api/v3/power',json={'enabled':False})
         client.post('/api/v3/materials/' + item['id'] + '/viewed')

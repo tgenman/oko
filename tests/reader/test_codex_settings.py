@@ -1,3 +1,4 @@
+from tests.support.publications import summary
 from tests.support.cards import read_all_cards
 from tests.support.presence import presence
 import pytest
@@ -90,7 +91,7 @@ def test_delayed_theses_finish_with_old_choice_after_settings_save(tmp_path):
             assert client.put('/api/v3/processors/codex',json=configuration('test-large','high')).status_code==200
         finally:
             released.set()
-        material = wait_for(client,lambda: (m if (m:=client.get('/api/v3/publication/'+item).json())['theses']['result'] else None))
-        assert material['theses']['result']['provenance']['model']=='test-small'
-        wait_for(client,lambda: all(client.get('/api/v3/publication/'+c['id']).json()['theses']['result'] for c in read_all_cards(client, '/api/v3/cards')))
+        material = wait_for(client,lambda: (m if summary(m:=client.get('/api/v3/publication/'+item).json()) else None))
+        assert material['processing_metadata']['summary']['model']=='test-small'
+        wait_for(client,lambda: all(summary(client.get('/api/v3/publication/'+c['id']).json()) for c in read_all_cards(client, '/api/v3/cards')))
         assert service.inputs[0]=='test-small' and service.inputs[1:]==['test-large','test-large']

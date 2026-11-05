@@ -1,4 +1,5 @@
 """Public web collection through the reader, without any Telegram configuration."""
+from tests.support.publications import body_text,collected,reasons
 from tests.support.telegram import configure_fast_web
 import time
 
@@ -25,8 +26,8 @@ def test_web_connect_collects_text_and_links(tmp_path):
         assert connected.status_code == 200, connected.text
         cards = settled(client)
         material = client.get('/api/v3/publication/'+cards[0]['id']).json()
-        assert material['text'] == 'Hello\nWorld [article](https://example.org/article?a=1&b=2)'
-        assert (material['completeness']['state']=='complete') is True
+        assert body_text(material) == 'Hello\nWorld [article](https://example.org/article?a=1&b=2)'
+        assert collected(material)
         assert all(url.startswith('https://t.me/') for url in requests)
 
 
@@ -43,7 +44,7 @@ def test_web_media_is_downloaded_locally_with_no_reader_credentials(tmp_path):
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         material = client.get('/api/v3/publication/'+settled(client)[0]['id']).json()
-        assert (material['completeness']['state']=='complete') is True
+        assert collected(material)
         assert len([media for media in material['media'] if media['url'] is not None]) == 1
         attachment = [media for media in material['media'] if media['url'] is not None][0]
         assert attachment['kind'] == 'image'
@@ -66,8 +67,8 @@ def test_media_redirect_cannot_reach_a_local_service(tmp_path):
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         material = client.get('/api/v3/publication/'+settled(client)[0]['id']).json()
-        assert (material['completeness']['state']=='complete') is False
-        assert 'Небезопасный адрес' in material['completeness'].get('message','')
+        assert not collected(material)
+        assert any('Небезопасный адрес' in reason for reason in reasons(material))
         assert not [media for media in material['media'] if media['url'] is not None]
         assert '127.0.0.1' not in calls
 
@@ -96,7 +97,7 @@ def test_dns_private_answer_is_rejected_before_connecting(tmp_path,monkeypatch):
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         material = client.get('/api/v3/publication/'+settled(client)[0]['id']).json()
-        assert (material['completeness']['state']=='complete') is False and 'Небезопасный адрес' in material['completeness'].get('message','')
+        assert not collected(material) and any('Небезопасный адрес' in reason for reason in reasons(material))
         assert not connections
 
 
@@ -111,7 +112,7 @@ def test_malformed_web_record_does_not_discard_valid_neighbor_and_is_diagnosed(t
         result = client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
         assert result.status_code == 200, result.text
         card = settled(client)[0]
-        assert client.get('/api/v3/publication/'+card['id']).json()['text'] == 'Valid text'
+        assert body_text(client.get('/api/v3/publication/'+card['id']).json()) == 'Valid text'
         state = client.get('/api/v3/status/details').json()
         assert any(history['history']['progress']['warnings'] for history in state['initial_histories'])
 

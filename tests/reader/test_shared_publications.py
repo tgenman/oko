@@ -73,7 +73,7 @@ def test_other_feed_permission_does_not_override_owning_feed(shared):
     client.patch('/api/v3/feeds/'+other,json={'public_ai':False})
     client.patch('/api/v3/feeds/'+owner,json={'public_ai':True})
     client.patch('/api/v3/settings/feed/'+owner,json={'theses':True})
-    wait_for(client,lambda:client.get('/api/v3/publication/'+item).json()['theses']['result'])
+    wait_for(client,lambda:client.get('/api/v3/publication/'+item).json()['summarized_content'].get('points'))
     assert len([request for request in models if request.url.path=='/v1/chat/completions'])==1
 
 

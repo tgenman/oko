@@ -57,8 +57,13 @@ def add_input(store: 'Store', content: dict[str,Any]) -> dict[str,Any]:
     identity=subtitle_id(content)
     if identity is None:
         return content
-    row=store.db.execute('SELECT publication_id FROM media_files WHERE id=%s',(identity,)).fetchone()
-    state=subtitle_state(store,content,row[0]) if row else 'not_requested'
+    from oko.storage.material_read import current
+    inputs=current(store.db)
+    owner=inputs.media_owners.get(identity) if inputs is not None else None
+    if owner is None:
+        row=store.db.execute('SELECT publication_id FROM media_files WHERE id=%s',(identity,)).fetchone()
+        owner=row[0] if row else None
+    state=subtitle_state(store,content,owner) if owner else 'not_requested'
     path=subtitle_path(store,identity) if state in ('available','error') else None
     if path:
         try:

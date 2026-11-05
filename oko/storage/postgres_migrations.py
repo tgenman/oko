@@ -86,7 +86,7 @@ def migrate(db: psycopg.Connection[Any], migrations: Sequence[Migration]) -> Non
             pending_preludes = [migration for migration in migrations[installed:]
                                 if migration.prelude_sql and installed < migration.prelude_before]
             for migration in migrations[installed:]:
-                for later in pending_preludes:
+                for later in reversed(pending_preludes):
                     if migration.version == max(later.prelude_start, installed + 1):
                         db.execute(later.prelude_sql, prepare=False)
                 if (migration.version, migration.name) == (10, 'feed-details'):

@@ -293,36 +293,3 @@ def prune(store: 'Store', candidates: set[str], *, effects: CollectionDiagnostic
         store.db.execute('DELETE FROM publications WHERE id=ANY(%s)',(batch,))
     if processor_jobs:
         store.problems.finish_processor_change(processor_jobs,processor_previous,store.wall_clock(),removed_outcome='irrelevant')
-
-
-def project_header(store: 'Store', item: str, header: dict[str,Any]) -> dict[str,Any]:
-    from copy import deepcopy
-    result=deepcopy(header)
-    reasons=[result['reason']] if result.get('reason') else []
-    for row in children(store,item):
-        if 'blocks' not in row['content']:
-            reasons.append('Связанная статья недоступна: '+row['fetch_error'] if row['fetch_error'] else 'Связанная статья ещё не загружена')
-            continue
-        article,_=store.publications.original(row['id'])
-        result['full']=bool(result.get('full',True) and article.get('full',True))
-        if article.get('reason'):
-            reasons.append(article['reason'])
-        result.setdefault('attachments',[]).extend(article.get('attachments',[]))
-        result.setdefault('_media_urls',{}).update(article.get('_media_urls',{}))
-    result['reason']='; '.join(dict.fromkeys(reasons))
-    result['full']=result.get('full',True) and not reasons
-    return result
-
-
-def reading(store: 'Store', item: str, post: str) -> dict[str,Any] | None:
-    articles=[]
-    for row in children(store,item):
-        if row['platform']!='telegraph':
-            continue
-        content=saved_content(row['content'])
-        header,_=store.publications.original(row['id']) if 'blocks' in row['content'] else ({},'')
-        body='\n\n'.join(block.get('text','') for block in content.get('blocks',[]) if block['type'] in ('text','quote'))
-        articles.append(dict(source_url=row['url'],title=row['title'] or 'Telegraph',text=body,
-            error=row['fetch_error'] or header.get('reason') or None,
-            media_urls=list(header.get('_media_urls',{}).values())))
-    return dict(post_text=post,articles=articles) if articles else None

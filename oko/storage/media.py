@@ -64,68 +64,7 @@ class MediaFiles:
             values.append(value)
         return values
 
-    def project_completeness(self, content: dict[str, Any], media: list[dict[str, Any]], *, collection_reason: str = '') -> bool:
-        header=content.setdefault('extra',{}).setdefault('_reader',{})
-        base=collection_reason
-        subtitles={block.get('media_id') for block in content.get('blocks',[]) if block.get('type')=='media' and block.get('role')=='subtitles'}
-        def waiting_reason(row: dict[str,Any]) -> str:
-            if row['reason']:
-                return str(row['reason'])
-            if row['id'] in subtitles and (row.get('reader_job_id') is None or row.get('reader_job_status')=='cancelled'):
-                return 'Субтитры не запрошены'
-            if row['status']=='unavailable':
-                return 'Вложение недоступно'
-            if 'reader_job_id' not in row:
-                return 'Вложение ожидает загрузки'
-            if row['reader_job_id'] is None:
-                return 'Вложение не запрошено'
-            if row.get('reader_job_status')=='running':
-                return 'Вложение загружается'
-            return 'Вложение ожидает загрузки'
-        waiting=[waiting_reason(row) for row in media
-                 if row['status']!='ready' or not row.get('storage_key') or existing_file(self.store.root,row['storage_key']) is None]
-        resources=header.get('source_manifest',{}).get('resources',[])
-        resource_reasons=[r['reason'] for r in resources if r.get('reason') and (r.get('status')=='unsupported' or r['reason'].startswith('Внешнее встраивание'))]
-        embed_reasons=['External embed not saved locally' for block in content.get('blocks',[]) if block.get('type')=='external_media' and block.get('kind')=='web']
-        header['reason']='; '.join(dict.fromkeys(([base] if base else [])+waiting+resource_reasons+embed_reasons))
-        external=any(block.get('type')=='external_media' and block.get('reason')=='public_preview_unavailable' for block in content.get('blocks',[]))
-        full=not header['reason'] and not external and not any(r.get('external') for r in resources) and not header.get('source_manifest',{}).get('post_web_unavailable')
-        header['full']=full
-        return full
 
-    def project_header(self, content: dict[str, Any], media: list[dict[str, Any]], *, collection_reason: str = '') -> bool:
-        header = content.setdefault('extra',{}).setdefault('_reader',{})
-        resources = header.get('source_manifest', {}).get('resources', [])
-        by_key = {row['resource_key']: row for row in media}
-        previous_attachments = {value['name']:value for value in header.get('attachments', [])}
-        roles = {b['media_id']: b['role'] for b in content['blocks'] if b['type']=='media'}
-        order = {identity:index for index,identity in enumerate(roles)}
-        media = [dict(row, status='pending_download') if row['status']=='ready' and not existing_file(self.store.root, row['storage_key']) else row for row in media]
-        media = sorted(media,key=lambda row:order.get(row['id'],len(order)))
-        header['attachments'] = []
-        for resource in resources:
-            row = by_key.get(resource['key'])
-            if row is None:
-                continue
-            ready = row['status']=='ready'
-            resource['name'] = self.projection_name(row)
-            resource.update(status='loaded' if ready else 'missing' if row['status']=='pending_download' else 'unsupported',
-                reason=row['reason'] or ('Вложение загружается' if row['status']=='pending_download' else ''))
-            if ready:
-                resource['external']=None
-                resource['reason']=''
-                path = existing_file(self.store.root,row['storage_key'])
-                if path is not None:
-                    resource['sha256'] = files.file_digest(path)
-        header['_media_urls'] = {}
-        for row in media:
-            if row['status']=='ready':
-                role = roles.get(row['id'], 'attachment')
-                kind = previous_attachments.get(row['name'], {}).get('kind') or {'attachment':'file','subtitles':'file','cover':'image'}.get(role,role)
-                name = self.projection_name(row)
-                header['attachments'].append(dict(name=name,media_id=row['id'],kind=kind,mime=row['mime_type'] or 'application/octet-stream'))
-                header['_media_urls'][name] = self.url(row['publication_id'],row['id'])
-        return self.project_completeness(content,media,collection_reason=collection_reason)
 
     @staticmethod
     def url(item: str, media: str) -> str:
@@ -234,7 +173,6 @@ class MediaFiles:
             for block in content['blocks']:
                 if block.get('media_id')==media_id:
                     block['media_id']=identity
-        media_complete=self.project_header(content, media)
         with store.db:
             memberships.lock_graph(store.db)
             problem_jobs: list[int]=[]
@@ -259,7 +197,8 @@ class MediaFiles:
             store.db.execute('UPDATE publications SET content = %s , media_ids = %s WHERE id = %s', (json.dumps(stored_content(content),ensure_ascii=False),json.dumps([value['id'] for value in media]),download.publication_id))
             from oko.storage.incomplete_index import save_class
             save_class(store.db,download.publication_id,content)
-            store.subscriptions.history.saved(download.publication_id, media_complete and row['status']!='pending_collection')
+            from oko.storage.history_publication import loaded as history_loaded
+            store.subscriptions.history.saved(download.publication_id,history_loaded(store.db,store.root,download.publication_id))
             if subtitles:
                 store.processing.reconcile_accepted_item(download.publication_id)
             publication_links.notify_parents(store,download.publication_id)
@@ -323,7 +262,6 @@ class MediaFiles:
             for block in content['blocks']:
                 if block.get('media_id')==media_id:
                     block['media_id']=identity
-        self.project_header(content,media)
         with store.db:
             memberships.lock_graph(store.db)
             job=store.db.execute("SELECT id,processor_visible,reason_code FROM jobs WHERE kind='download_media' AND item=%s",(media_id,)).fetchone()
@@ -370,7 +308,6 @@ class MediaFiles:
                 for value in media:
                     if value['id']==media_id:
                         value.update(reason=issue.message,status='ready' if keep_file else 'unavailable' if status=='unavailable' or changed else 'pending_download')
-                self.project_header(content,media)
         with store.db:
             memberships.lock_graph(store.db)
             if content is not None:

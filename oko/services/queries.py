@@ -88,9 +88,6 @@ class ReadingQueries:
     def material_feeds(self, identities: set[str]) -> dict[str, str]:
         return self._facts.material_feeds(identities)
 
-    @repository_access
-    def linked_preview(self, identity: str) -> dict[str, Any] | None:
-        return self._facts.linked_preview(identity)
 
     @repository_access
     def was_viewed(self, identity: str) -> bool:
@@ -163,17 +160,8 @@ class ReadingQueries:
     def card(self, identity: str) -> dict[str, Any] | None:
         return self._facts.card(identity)
 
-    @repository_access
-    def material(self, identity: str) -> dict[str, Any] | None:
-        return self._reading().material(identity)
 
-    @repository_access
-    def provenance(self, identity: str, kind: str) -> dict[str, Any] | None:
-        return self._publications().provenance(identity, kind)
 
-    @repository_access
-    def original(self, identity: str) -> tuple[dict[str, Any], str]:
-        return self._facts.original(identity)
 
     @repository_access
     def unified_publication(self, identity: str) -> dict[str, Any]:
@@ -219,10 +207,6 @@ class ReadingQueries:
     def wall_clock(self) -> float:
         return self._facts.wall_clock()
 
-    @repository_access
-    def theses_parts(self, identity: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
-        theses = self._processing().theses
-        return theses.read(identity), theses.provenance(identity), theses.status(identity)
 
     @property
     @repository_access

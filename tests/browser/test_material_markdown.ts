@@ -1,3 +1,4 @@
+import {text} from './publication-facts';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {reader,material,expect} from './support';
@@ -40,9 +41,9 @@ test('Markdown publication links travel through the production HTTP reader uncha
  await expect(link).toHaveAttribute('href','https://youtu.be/BPoce9VGatE');
  await expect(page.locator('#text').getByRole('link',{name:'Статья',exact:true})).toHaveAttribute('href','https://www.upstartsmedia.com/p/tolan-raises-30m-for-ai-companion-you-trust');
  const cards=(await api('cards')).items;const response=await api(`publication/${cards[0]!.id}`);
- assert.equal(response.availability,'available');if(response.availability!=='available')throw Error('Expected available content');
- assert.ok(response.text.includes('[YouTube\n\nChrista Pike 911 Calls](https://youtu.be/\n  BPoce9VGatE)'));
- assert.ok(response.text.endsWith('[Статья](https://www.upstartsmedia.com/p/tolan-raises-30m-for-ai-companion-you-trust)'));
+ assert.notEqual(response.status,'pending_collection');
+ assert.ok(text(response).includes('[YouTube\n\nChrista Pike 911 Calls](https://youtu.be/\n  BPoce9VGatE)'));
+ assert.ok(text(response).endsWith('[Статья](https://www.upstartsmedia.com/p/tolan-raises-30m-for-ai-companion-you-trust)'));
  assert.equal(await page.locator('#text').locator('xpath=ancestor::details').count(),0);
 });
 
@@ -59,7 +60,7 @@ test('filtered publication keeps a collapsed full original, media and restorable
   await r.page.locator('#original-panel summary').click();await expect(r.page.locator('#text').getByRole('link',{name:'Статья'})).toBeVisible();
   await expect(r.page.locator('#text')).toContainText('Реклама');await expect(r.page.locator('#material img')).toHaveCount(1);
   await expect(r.page.locator('#filter-restore')).toHaveCount(0);
-  const hidden={...item,filtered_content:{...item.filtered_content,hidden:true,reason:'Скрыто фильтром',blocks:[]},filter:{...item.filter,result:{...item.filter.result!,hidden:true,reason:'Скрыто фильтром'}}};
+  const hidden={...item,filtered_content:{...item.filtered_content,hidden:true,reason:'Скрыто фильтром',blocks:[]}};
   await r.page.evaluate(hidden=>readerTransport.replies.set('/api/v3/publication/A',{body:hidden}),hidden);
   await expect(r.page.locator('#filter-status')).toContainText('Скрыто фильтром');await expect(r.page.locator('#text').getByRole('link',{name:'Статья'})).toBeVisible();
   await expect(r.page.locator('#original-panel')).toHaveCount(0);

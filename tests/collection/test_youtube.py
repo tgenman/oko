@@ -1,3 +1,4 @@
+from tests.support.publications import captions_state, subtitle_text, loading, reasons
 from tests.support.cards import read_all_cards
 from tests.support.presence import presence, close_presence
 from tests.support.reader import wait_for
@@ -43,8 +44,8 @@ class YouTubeTranscriptApi:
         # Default theses already requests captions. Changing importance here
         # can cancel the job started by the v3 connection and defer its retry.
         presence(client, 'reader')
-        material = wait(client, lambda m: m['source'].get('captions') == 'available')
-        assert material['text'] == 'Текст через настоящий worker.'
+        material = wait(client, lambda m: captions_state(m) == 'available')
+        assert subtitle_text(client,material) == 'Текст через настоящий worker.'
         client.post('/api/v3/materials/' + material['id'] + '/viewed')
         assert read_all_cards(client, '/api/v3/cards') == []
 
@@ -89,15 +90,15 @@ def test_saved_captions_are_reused_during_collection_and_after_restart(tmp_path)
         feed = subscribe(client)
         client.patch('/api/v3/feeds/' + feed, json={'importance': 'high'})
         presence(client, 'reader')
-        material = wait(client, lambda m: m['source'].get('captions') == 'available' and not m['loading'])
-        item, text = material['id'], material['text']
+        material = wait(client, lambda m: captions_state(m) == 'available' and not loading(m))
+        item, text = material['id'], subtitle_text(client,material)
         assert captions.calls == [VIDEO]
         # Ordinary source refresh keeps saved captions; explicit Reload Publication
         # separately revalidates media, including subtitles (youtube-publications.md).
         before = len(downloads)
         assert client.post('/api/v3/collect').status_code == 200
-        material = wait(client, lambda m: len(downloads) > before and not m['loading'])
-        assert material['source']['captions'] == 'available' and material['text'] == text
+        material = wait(client, lambda m: len(downloads) > before and not loading(m))
+        assert captions_state(material) == 'available' and subtitle_text(client,material) == text
         assert captions.calls == [VIDEO]
         client.patch('/api/v3/settings/feed/' + feed, json={'theses': False})
         client.patch('/api/v3/settings/feed/' + feed, json={'theses': True})
@@ -106,8 +107,8 @@ def test_saved_captions_are_reused_during_collection_and_after_restart(tmp_path)
         presence(client, 'reader')
         before = len(downloads)
         assert client.post('/api/v3/collect').status_code == 200
-        material = wait(client, lambda m: len(downloads) > before and not m['loading'])
-        assert material['source']['captions'] == 'available' and material['text'] == text
+        material = wait(client, lambda m: len(downloads) > before and not loading(m))
+        assert captions_state(material) == 'available' and subtitle_text(client,material) == text
         assert captions.calls == [VIDEO]
 
 
@@ -119,13 +120,13 @@ def test_retry_preserves_saved_captions_after_source_interval(tmp_path):
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
         presence(client, 'reader')
         subscribe(client)
-        material = wait(client, lambda m: m['source'].get('captions') == 'available' and not m['loading'])
+        material = wait(client, lambda m: captions_state(m) == 'available' and not loading(m))
         assert captions.calls == [VIDEO]
         assert client.post('/api/v3/materials/' + material['id'] + '/retry').status_code == 200
         shift[0] += 60
-        wait(client,lambda m:not m['loading'])
+        wait(client,lambda m:not loading(m))
         updated=client.get('/api/v3/publication/'+material['id']).json()
-        assert updated['text'] == material['text']
+        assert subtitle_text(client,updated) == subtitle_text(client,material)
         assert captions.calls == [VIDEO]
 
 def test_normal_feed_waits_for_mode_and_missing_captions_never_reach_ai(tmp_path):
@@ -145,9 +146,9 @@ def test_normal_feed_waits_for_mode_and_missing_captions_never_reach_ai(tmp_path
         feed = subscribe(client)
         client.patch('/api/v3/settings/feed/' + feed, json={'theses': False})
         presence(client, 'reader')
-        material = wait(client, lambda m: m['source'].get('captions') == 'not_requested')
+        material = wait(client, lambda m: captions_state(m) == 'not_requested')
         assert not captions.calls and not ai
-        assert material['completeness']['message']=='Субтитры не запрошены'
+        assert captions_state(material)=='not_requested'
         from tests.support.storage import database_url
         import psycopg
         with psycopg.connect(database_url(tmp_path)) as db:
@@ -155,9 +156,9 @@ def test_normal_feed_waits_for_mode_and_missing_captions_never_reach_ai(tmp_path
         assert state == ('pending_download',None)
         client.patch('/api/v3/settings/feed/' + feed, json={'theses': True, 'processor': 'llamacpp'})
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
-        material = wait(client, lambda m: m['source'].get('captions') == 'unavailable' and m['theses']['state']=='ready')
-        assert material['completeness'].get('message','') == 'Субтитры недоступны' and material['text'] == ''
-        assert material['theses']['result']['points']==[] and not ai
+        material = wait(client, lambda m: captions_state(m) == 'unavailable' and m['summarized_content'].get('points') is not None)
+        assert any('Субтитры недоступны' in reason for reason in reasons(material)) and subtitle_text(client,material) == ''
+        assert material['summarized_content']['points']==[] and not ai
         with psycopg.connect(database_url(tmp_path)) as db:
             reason = db.execute("SELECT j.reason_code, j.reason_message FROM jobs j JOIN media_files m ON m.id=j.item WHERE j.kind='download_media' AND m.publication_id=%s AND m.resource_key='youtube:subtitles'", (material['id'],)).fetchone()
         assert reason == ('subtitles_absent', 'Субтитры недоступны')
@@ -166,7 +167,7 @@ def test_normal_feed_waits_for_mode_and_missing_captions_never_reach_ai(tmp_path
         assert not any(op['state'] == 'error' for op in client.get('/api/v3/collection-status/' + feed).json()['operations'])
         with psycopg.connect(database_url(tmp_path),autocommit=True) as db:
             db.execute("UPDATE jobs SET reason_message='Confirmed no captions' WHERE kind='download_media' AND item=(SELECT id FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles')",(material['id'],))
-        assert client.get('/api/v3/publication/'+material['id']).json()['completeness']['message']=='Confirmed no captions'
+        assert 'Confirmed no captions' in reasons(client.get('/api/v3/publication/'+material['id']).json())
         with psycopg.connect(database_url(tmp_path),autocommit=True) as db:
             db.execute("UPDATE jobs SET wait_scope='youtube:captions',retry_at=%s,next=%s WHERE kind='download_media' AND item=(SELECT id FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles')",(wall[0]+100,tick[0]+100,material['id']))
         captions.outcome = 'error'
@@ -175,28 +176,28 @@ def test_normal_feed_waits_for_mode_and_missing_captions_never_reach_ai(tmp_path
         with psycopg.connect(database_url(tmp_path)) as db:
             pending=db.execute("SELECT m.status,j.status,p.content #>> '{extra,youtube,captions}' FROM media_files m JOIN jobs j ON j.item=m.id AND j.kind='download_media' JOIN publications p ON p.id=m.publication_id WHERE m.publication_id=%s AND m.resource_key='youtube:subtitles'",(material['id'],)).fetchone()
         assert pending==('pending_download','pending',None)
-        assert client.get('/api/v3/publication/'+material['id']).json()['source'].get('captions') == 'pending'
+        assert captions_state(client.get('/api/v3/publication/'+material['id']).json()) == 'pending'
         with psycopg.connect(database_url(tmp_path),autocommit=True) as db:
             db.execute("UPDATE jobs SET status='running' WHERE kind='download_media' AND item=(SELECT id FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles')",(material['id'],))
-        assert client.get('/api/v3/publication/'+material['id']).json()['source'].get('captions') == 'running'
+        assert captions_state(client.get('/api/v3/publication/'+material['id']).json()) == 'running'
         with psycopg.connect(database_url(tmp_path),autocommit=True) as db:
             db.execute("UPDATE jobs SET status='failed',reason_code='network',reason_message='Network error' WHERE kind='download_media' AND item=(SELECT id FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles')",(material['id'],))
-        assert client.get('/api/v3/publication/'+material['id']).json()['source'].get('captions') == 'error'
+        assert captions_state(client.get('/api/v3/publication/'+material['id']).json()) == 'error'
         with psycopg.connect(database_url(tmp_path),autocommit=True) as db:
             db.execute("UPDATE jobs SET status='pending',reason_code=NULL,reason_message=NULL WHERE kind='download_media' AND item=(SELECT id FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles')",(material['id'],))
         wall[0] += 110
         tick[0] += 110
-        material = wait(client, lambda m: m['source'].get('captions') == 'pending' and 'Ограничение' in m['completeness'].get('message',''))
-        assert 'Ограничение' in material['completeness'].get('message','') and not ai
+        material = wait(client, lambda m: captions_state(m) == 'pending' and any('Ограничение' in reason for reason in reasons(m)))
+        assert any('Ограничение' in reason for reason in reasons(material)) and not ai
         captions.outcome = 'ok'
         # Advance both admission clocks; never wait for real rate-limit time.
         wall[0] += 10
         tick[0] += 10
         client.post('/api/v3/materials/' + material['id'] + '/retry')
-        wait(client,lambda m:m['source'].get('captions')=='available')
+        wait(client,lambda m:captions_state(m)=='available')
         tick[0]+=1
-        material = wait(client, lambda m: m['theses']['result'])
-        assert material['text'] == 'Проверенные субтитры.'
+        material = wait(client, lambda m: m['summarized_content'].get('points'))
+        assert subtitle_text(client,material) == 'Проверенные субтитры.'
 
 
 def test_high_imported_youtube_gets_captions_theses_and_deletes_everything(tmp_path):
@@ -209,8 +210,8 @@ def test_high_imported_youtube_gets_captions_theses_and_deletes_everything(tmp_p
         feed = subscribe(client)
         client.patch('/api/v3/feeds/' + feed, json={'importance': 'high'})
         presence(client, 'reader')
-        material = wait(client, lambda m: m['theses']['result'])
-        assert material['text'] == 'Модель принимает только текст. Источники сохраняются точно.'
+        material = wait(client, lambda m: m['summarized_content'].get('points'))
+        assert subtitle_text(client,material) == 'Модель принимает только текст. Источники сохраняются точно.'
         assert material['source_url'] == f'https://www.youtube.com/watch?v={VIDEO}'
         assert captions.calls == [VIDEO]
 
@@ -240,15 +241,15 @@ def test_codex_permission_and_ready_captions_survive_restart(tmp_path):
         client.patch('/api/v3/feeds/'+feed,json={'public_ai':False,'importance':'high'})
         client.patch('/api/v3/settings/oko/global',json={'theses':True})
         presence(client, 'reader')
-        material = wait(client, lambda m: m['theses']['error'])
-        assert 'Запрещена публичная' in material['theses']['error']
+        material = wait(client, lambda m: reasons(m,'theses'))
+        assert any('Запрещена публичная' in reason for reason in reasons(material,'theses'))
         assert not codex.inputs
         client.patch('/api/v3/feeds/' + feed, json={'public_ai': True})
-        material = wait(client, lambda m: m['theses']['result'])
+        material = wait(client, lambda m: m['summarized_content'].get('points'))
         item = material['id']
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
         presence(client, 'reader')
-        material = wait(client, lambda m: m['theses']['result'])
+        material = wait(client, lambda m: m['summarized_content'].get('points'))
         assert material['id'] == item and captions.calls == [VIDEO]
         assert len(codex.inputs) == 1
 
@@ -364,7 +365,7 @@ class YouTubeTranscriptApi:
         presence(client, 'reader')
         feed = subscribe(client)
         presence(client, 'reader')
-        wait(client, lambda m: m['source'].get('captions') == 'pending' and bool(m['completeness'].get('message')), keep_alive=True)
+        wait(client, lambda m: captions_state(m) == 'pending' and bool(reasons(m)), keep_alive=True)
         groups = client.get('/api/v3/diagnostics').json()['groups']
         matching = [g for g in groups if 'SDK failed' in g['message']]
         assert len(matching) == 1 and matching[0]['count'] == 1
@@ -385,7 +386,7 @@ def test_youtube_added_through_checked_url_uses_existing_collector(tmp_path):
         feed = added.json()
         assert feed['kind'] == feed['transport'] == 'youtube'
         client.patch('/api/v3/feeds/' + feed['id'], json={'importance': 'high'})
-        material = wait(client, lambda m: m['source'].get('captions') == 'available')
+        material = wait(client, lambda m: captions_state(m) == 'available')
         assert material['source_url'] == f'https://www.youtube.com/watch?v={VIDEO}'
         assert captions.calls == [VIDEO]
 
@@ -425,7 +426,7 @@ class YouTubeTranscriptApi:
         presence(client, 'reader')
         subscribe(client)
         if not skipped:
-            wait(client, lambda m: m['source'].get('captions') == 'pending' and bool(m['completeness'].get('message')),keep_alive=True)
+            wait(client, lambda m: captions_state(m) == 'pending' and bool(reasons(m)),keep_alive=True)
             assert any(g['error_type'] == 'VideoUnplayable' for g in client.get('/api/v3/diagnostics').json()['groups'])
             return
         for _ in range(200):
@@ -469,17 +470,17 @@ def test_confirmed_absent_captions_survive_restart_without_retry(tmp_path):
     with TestClient(create_app(tmp_path, **kwargs),headers=HEADERS) as client:
         presence(client,'reader')
         subscribe(client)
-        material=wait(client,lambda value:value['source'].get('captions')=='unavailable')
+        material=wait(client,lambda value:captions_state(value)=='unavailable')
         item=material['id']
         with psycopg.connect(database_url(tmp_path)) as db:
             assert db.execute("SELECT j.status,j.reason_code FROM jobs j JOIN media_files m ON m.id=j.item WHERE j.kind='download_media' AND m.publication_id=%s AND m.resource_key='youtube:subtitles'",(item,)).fetchone()==('done','subtitles_absent')
         with psycopg.connect(database_url(tmp_path),autocommit=True) as db:
             db.execute("UPDATE jobs SET reason_message=NULL WHERE kind='download_media' AND item=(SELECT id FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles')",(item,))
-        assert client.get('/api/v3/publication/'+item).json()['completeness']['message']=='Субтитры недоступны'
+        assert any(job['reason_code']=='subtitles_absent' and job['reason_message'] is None for job in client.get('/api/v3/publication/'+item).json()['jobs'])
     with TestClient(create_app(tmp_path, **kwargs),headers=HEADERS) as client:
         presence(client,'reader')
-        material=wait(client,lambda value:value['id']==item and value['source'].get('captions')=='unavailable')
-        assert material['completeness']['message']=='Субтитры недоступны'
+        material=wait(client,lambda value:value['id']==item and captions_state(value)=='unavailable')
+        assert any(job['reason_code']=='subtitles_absent' and job['reason_message'] is None for job in material['jobs'])
         assert captions.calls==[VIDEO]
 
 
@@ -498,14 +499,14 @@ def test_retry_keeps_saved_captions_and_download_job(tmp_path):
     with TestClient(create_app(tmp_path,**kwargs),headers=HEADERS) as client:
         presence(client,'reader')
         subscribe(client)
-        material=wait(client,lambda m:m['source'].get('captions')=='available' and not m['loading'])
+        material=wait(client,lambda m:captions_state(m)=='available' and not loading(m))
         with psycopg.connect(database_url(tmp_path)) as db:
             first=db.execute("SELECT j.id,m.id FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=%s AND m.resource_key='youtube:subtitles'",(material['id'],)).fetchone()
         assert first is not None
         assert client.post('/api/v3/materials/'+material['id']+'/retry').status_code==200
         shift[0]+=60
-        wait(client,lambda m:not m['loading'])
-        assert client.get('/api/v3/publication/'+material['id']).json()['text']=='First captions'
+        wait(client,lambda m:not loading(m))
+        assert subtitle_text(client,client.get('/api/v3/publication/'+material['id']).json())=='First captions'
         assert captions.calls==[VIDEO]
         with psycopg.connect(database_url(tmp_path)) as db:
             second=db.execute("SELECT j.id,m.id,j.status FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=%s AND m.resource_key='youtube:subtitles'",(material['id'],)).fetchone()
@@ -527,14 +528,14 @@ def test_retry_does_not_recheck_saved_subtitles(tmp_path):
     with TestClient(create_app(tmp_path,**kwargs),headers=HEADERS) as client:
         presence(client,'reader')
         subscribe(client)
-        material=wait(client,lambda m:m['source'].get('captions')=='available' and not m['loading'])
+        material=wait(client,lambda m:captions_state(m)=='available' and not loading(m))
         with psycopg.connect(database_url(tmp_path)) as db:
             first=db.execute("SELECT j.id FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=%s AND m.resource_key='youtube:subtitles'",(material['id'],)).fetchone()
         assert first is not None
         assert client.post('/api/v3/materials/'+material['id']+'/retry').status_code==200
         shift[0]+=60
-        wait(client,lambda m:not m['loading'])
-        assert client.get('/api/v3/publication/'+material['id']).json()['text']=='Previously saved captions'
+        wait(client,lambda m:not loading(m))
+        assert subtitle_text(client,client.get('/api/v3/publication/'+material['id']).json())=='Previously saved captions'
         assert captions.calls==[VIDEO]
         with psycopg.connect(database_url(tmp_path)) as db:
             second=db.execute("SELECT j.id,j.status,j.reason_code FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=%s AND m.resource_key='youtube:subtitles'",(material['id'],)).fetchone()

@@ -482,7 +482,7 @@ def test_retired_demo_is_readable_through_http_after_migration(postgres_database
         material = client.get('/api/v3/publication/p')
         assert material.status_code == 200, material.text
         assert material.json()['title'] == 'Saved'
-        assert material.json()['source']['kind'] == 'unresolved'
+        assert 'source' not in material.json()
         assert 'Saved text' in material.text
 
 
@@ -885,7 +885,7 @@ def test_migration_keeps_media_reason_when_legacy_job_is_missing(connections):
     from oko.storage.postgres_schema import MIGRATIONS
     with connections() as db:
         migrate(db, MIGRATIONS[:104])
-        db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','other_web','article')")
+        db.execute("INSERT INTO publications(id,platform,external_id,media_ids) VALUES ('article','other_web','article','[\"file\"]')")
         db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status,reason) VALUES ('file','article','image:1','','image','unavailable','Access restricted')")
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT status,reason_message FROM jobs WHERE kind='download_media' AND item='file'").fetchone() == ('unavailable','Access restricted')
@@ -895,7 +895,7 @@ def test_migration_fills_missing_job_reason_from_legacy_media(connections):
     from oko.storage.postgres_schema import MIGRATIONS
     with connections() as db:
         migrate(db, MIGRATIONS[:104])
-        db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','other_web','article')")
+        db.execute("INSERT INTO publications(id,platform,external_id,media_ids) VALUES ('article','other_web','article','[\"file\"]')")
         db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status,reason) VALUES ('file','article','image:1','','image','unavailable','Access restricted')")
         db.execute("INSERT INTO jobs(kind,item,status) VALUES ('download_media','file','unavailable')")
         migrate(db, MIGRATIONS)
@@ -919,7 +919,7 @@ def test_migration_restores_completed_job_for_saved_media(connections):
     from oko.storage.postgres_schema import MIGRATIONS
     with connections() as db:
         migrate(db, MIGRATIONS[:104])
-        db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','other_web','article')")
+        db.execute("INSERT INTO publications(id,platform,external_id,media_ids) VALUES ('article','other_web','article','[\"file\"]')")
         db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status,storage_key) VALUES ('file','article','image:1','','image','ready','media/article/file')")
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT status,reason_code,reason_message FROM jobs WHERE kind='download_media' AND item='file'").fetchone()==('done',None,None)
@@ -940,7 +940,7 @@ def test_migration_moves_pending_media_reason_and_removes_media_column(connectio
     from oko.storage.postgres_schema import MIGRATIONS
     with connections() as db:
         migrate(db, MIGRATIONS[:104])
-        db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','other_web','article')")
+        db.execute("INSERT INTO publications(id,platform,external_id,media_ids) VALUES ('article','other_web','article','[\"file\"]')")
         db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status,reason) VALUES ('file','article','image:1','','image','pending_download','Temporary failure')")
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT status,reason_message FROM jobs WHERE kind='download_media' AND item='file'").fetchone()==('pending','Temporary failure')
@@ -1091,7 +1091,7 @@ def test_migrated_media_reason_is_recovered_in_diagnostics(tmp_path,postgres_dat
     with psycopg.connect(postgres_database_url,autocommit=True) as db:
         migrate(db,MIGRATIONS[:104])
         db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','Feed','default','rss','rss','connected',ARRAY[]::text[])")
-        db.execute("INSERT INTO publications(id,platform,external_id,feed_id) VALUES ('p','rss','p','f')")
+        db.execute("INSERT INTO publications(id,platform,external_id,feed_id,media_ids) VALUES ('p','rss','p','f','[\"m\"]')")
         db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status,reason) VALUES ('m','p','image','','image','unavailable','Access restricted')")
         db.execute("INSERT INTO state(key,value) VALUES ('media-null-problems-recovered-v1','true'),('media-problems-recovered-v2','true') ON CONFLICT(key) DO UPDATE SET value='true'")
         migrate(db,MIGRATIONS)
@@ -1191,3 +1191,126 @@ def test_viewed_cleanup_migration_stops_for_unknown_state(connections):
         with pytest.raises(psycopg.errors.RaiseException,match='Ambiguous viewed state'):
             migrate(db,MIGRATIONS)
         assert db.execute("SELECT 1 FROM publications WHERE id='unknown'").fetchone()==(1,)
+
+
+def test_final_publication_audit_preserves_consistent_content(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db,MIGRATIONS[:118])
+        content={'blocks':[{'type':'media','role':'image','media_id':'m','source_url':'https://cdn.test/image','publication_url':'https://source.test/p'}], 'extra':{'telegram':{'members':[1]}}}
+        db.execute("INSERT INTO publications(id,platform,external_id,content,media_ids) VALUES ('p','telegram','p',%s::jsonb,'[\"m\"]')",(json.dumps(content),))
+        db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,source_url,name,status) VALUES ('m','p','photo','opaque','https://cdn.test/image','photo','pending_download')")
+        migrate(db,MIGRATIONS)
+        assert db.execute("SELECT content FROM publications WHERE id='p'").fetchone()[0]==content
+        assert db.execute("SELECT source_url FROM media_files WHERE id='m'").fetchone()[0]=='https://cdn.test/image'
+
+
+@pytest.mark.parametrize('conflict', ['legacy_extra','media_link','missing_link'])
+def test_final_publication_audit_rejects_ambiguous_data_without_changes(connections,conflict):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db,MIGRATIONS[:118])
+        content={'blocks':[], 'extra':{'_reader':{'title':'unsaved'}}} if conflict=='legacy_extra' else {'blocks':[{'type':'media','role':'image','media_id':'m','source_url':'https://other.test/image','publication_url':None}]}
+        if conflict=='missing_link':
+            content['blocks'][0].pop('publication_url')
+            content['blocks'][0]['source_url']='https://cdn.test/image'
+        db.execute("INSERT INTO publications(id,platform,external_id,content) VALUES ('p','rss','p',%s::jsonb)",(json.dumps(content),))
+        if conflict!='legacy_extra':
+            db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,source_url,name,status) VALUES ('m','p','photo','opaque','https://cdn.test/image','photo','pending_download')")
+            db.execute("UPDATE publications SET media_ids='[\"m\"]' WHERE id='p'")
+        with pytest.raises(psycopg.errors.RaiseException,match='publication'):
+            migrate(db,MIGRATIONS)
+        assert db.execute("SELECT content FROM publications WHERE id='p'").fetchone()[0]==content
+        assert db.execute('SELECT max(version) FROM oko_schema_migrations').fetchone()[0]==118
+
+
+def test_final_audit_removes_only_duplicate_processing_extras(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db,MIGRATIONS[:118])
+        content={'blocks':[{'type':'text','role':'body','text':'source'}],'extra':{'telegram':{'members':[1]}}}
+        filtered={'blocks':[{'type':'text','role':'body','text':'filtered'}],'hidden':False,'reason':'','removed':[], 'extra':content['extra']}
+        summary={'points':[{'text':'result','source_publication_ids':['p']}],'extra':{}}
+        metadata={'summary':{'input_hash':'keep','prompt':'actual'}}
+        db.execute("INSERT INTO publications(id,platform,external_id,content,filtered_content,summarized_content,processing_metadata) VALUES ('p','telegram','p',%s::jsonb,%s,%s,%s)",(json.dumps(content),json.dumps(filtered),json.dumps(summary),json.dumps(metadata)))
+        migrate(db,MIGRATIONS)
+        row=db.execute("SELECT content,filtered_content::jsonb,summarized_content::jsonb,processing_metadata::jsonb FROM publications WHERE id='p'").fetchone()
+        assert row==(content,{k:v for k,v in filtered.items() if k!='extra'},{k:v for k,v in summary.items() if k!='extra'},metadata)
+
+
+def test_final_audit_rejects_conflicting_processing_extra(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db,MIGRATIONS[:118])
+        content={'blocks':[],'extra':{'telegram':{'members':[1]}}}
+        filtered={'blocks':[],'extra':{'telegram':{'members':[2]}}}
+        db.execute("INSERT INTO publications(id,platform,external_id,content,filtered_content) VALUES ('p','telegram','p',%s::jsonb,%s)",(json.dumps(content),json.dumps(filtered)))
+        with pytest.raises(psycopg.errors.RaiseException,match='processing data'):
+            migrate(db,MIGRATIONS)
+        assert db.execute("SELECT content,filtered_content::jsonb FROM publications WHERE id='p'").fetchone()==(content,filtered)
+
+
+def test_processing_revision_moves_out_of_publication_without_losing_provenance(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db,MIGRATIONS[:119])
+        metadata={'_revision':'00000000-0000-4000-8000-000000000001','_revision_input':'a'*64,
+                  'summary':{'input_hash':'accepted','prompt':'actual','model':'model'}}
+        db.execute("INSERT INTO publications(id,platform,external_id,processing_metadata) VALUES ('p','rss','p',%s)",(json.dumps(metadata),))
+        db.execute("INSERT INTO jobs(kind,item,status,payload) VALUES ('theses','p','done',%s::jsonb)",
+                   (json.dumps({'input_revision':metadata['_revision'],'preserved_source_revision':'b'*64}),))
+        migrate(db,MIGRATIONS)
+        assert db.execute("SELECT processing_metadata::jsonb FROM publications WHERE id='p'").fetchone()[0]=={'summary':metadata['summary']}
+        assert db.execute("SELECT payload FROM jobs WHERE item='p' AND kind='theses'").fetchone()[0]=={'preserved_source_revision':'b'*64}
+
+
+@pytest.mark.parametrize('invalid',[{'_revision':'not-a-uuid'},{'_revision_input':int('1'*64)}])
+def test_invalid_processing_revision_stops_without_dropping_metadata(connections,invalid):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db,MIGRATIONS[:119])
+        metadata={**invalid,'summary':{'prompt':'keep'}}
+        db.execute("INSERT INTO publications(id,platform,external_id,processing_metadata) VALUES ('p','rss','p',%s)",(json.dumps(metadata),))
+        with pytest.raises(psycopg.errors.RaiseException,match='Invalid processing revision'):
+            migrate(db,MIGRATIONS)
+        assert db.execute("SELECT processing_metadata::jsonb FROM publications WHERE id='p'").fetchone()[0]==metadata
+        assert db.execute('SELECT max(version) FROM oko_schema_migrations').fetchone()[0]==119
+
+
+def test_historical_filter_extra_is_compared_before_reader_removal(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db,MIGRATIONS[:102])
+        extra={'_reader':{'title':'old title'},'telegram':{'members':[]}}
+        content={'blocks':[{'type':'text','role':'body','text':'original'}],'extra':extra}
+        filtered={'blocks':[{'type':'text','role':'body','text':'filtered'}],'extra':extra}
+        db.execute("INSERT INTO publications(id,platform,external_id,content,filtered_content) VALUES ('historical','telegram','historical',%s::jsonb,%s)",(json.dumps(content),json.dumps(filtered)))
+        migrate(db,MIGRATIONS)
+        saved=db.execute("SELECT filtered_content::jsonb FROM publications WHERE id='historical'").fetchone()[0]
+        assert saved=={'blocks':filtered['blocks']}
+
+
+def test_historical_filter_extra_conflict_is_not_discarded(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db,MIGRATIONS[:102])
+        content={'blocks':[],'extra':{'_reader':{'title':'original'}}}
+        filtered={'blocks':[],'extra':{'_reader':{'title':'different'}}}
+        db.execute("INSERT INTO publications(id,platform,external_id,content,filtered_content) VALUES ('historical','telegram','historical',%s::jsonb,%s)",(json.dumps(content),json.dumps(filtered)))
+        with pytest.raises(psycopg.errors.RaiseException,match='Conflicting publication processing data'):
+            migrate(db,MIGRATIONS)
+        verify(db,MIGRATIONS[:102])
+        assert db.execute("SELECT content,filtered_content::jsonb FROM publications WHERE id='historical'").fetchone()==(content,filtered)
+
+
+def test_older_filter_copy_precedes_reader_prelude(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db,MIGRATIONS[:95])
+        extra={'_reader':{'title':'old title'}}
+        content={'blocks':[{'type':'text','role':'body','text':'original'}],'extra':extra}
+        filtered={'blocks':[{'type':'text','role':'body','text':'filtered'}],'extra':extra}
+        db.execute("INSERT INTO publications(id,platform,external_id,published_known,discovered_at,content,filtered_content) VALUES ('historical','telegram','historical',0,1,%s,%s)",(json.dumps(content),json.dumps(filtered)))
+        migrate(db,MIGRATIONS)
+        saved=db.execute("SELECT filtered_content::jsonb FROM publications WHERE id='historical'").fetchone()[0]
+        assert saved=={'blocks':filtered['blocks']}

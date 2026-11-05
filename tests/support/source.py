@@ -2,6 +2,7 @@ from __future__ import annotations
 from tests.support.collection_acceptance import save
 """Synthetic provider for behavioural scenarios, using the current adapter contract."""
 from dataclasses import dataclass,replace
+from copy import deepcopy
 from tests.support.synthetic_material import SyntheticMaterial
 from datetime import datetime,timezone
 import hashlib
@@ -52,9 +53,8 @@ class StructuredSource:
         reference=self.reference(publication)
         text='\n\n'.join(b.get('text','') for b in (material.adapter_content.content.get('blocks',[]) if material.adapter_content else []) if b.get('type')=='text' and b.get('role')=='body')
         blocks: list[dict[str,JsonValue]]=[dict(type='text',role='body',text=text)]
-        reply = material.source_manifest.post.get('reply_preview') if material.source_manifest else None
-        if isinstance(reply, dict):
-            blocks.append(dict(type='quote', **reply))
+        if material.adapter_content:
+            blocks.extend(deepcopy(block) for block in material.adapter_content.content.get('blocks',[]) if block.get('type')=='quote')
         refs=[]
         attachments: list[Image | Attachment]=[*material.images,*material.attachments] if isinstance(material,SyntheticMaterial) else []
         for attachment in attachments:

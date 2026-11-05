@@ -106,10 +106,10 @@ class ProcessingState:
                 if processor_affected:
                     self.store.problems.finish_processor_change(processor_affected,processor_previous,self.store.wall_clock())
                 self.store.db.execute("""UPDATE publications SET filtered_content='{}',summarized_content='{}',
-                    processing_metadata=(processing_metadata::jsonb-'filter'-'summary'-'_pass'-'_revision'-'_revision_input')::text,
+                    processing_metadata=(processing_metadata::jsonb-'filter'-'summary')::text,
                     status='ready' WHERE id=ANY(%s)
                     AND (filtered_content IS DISTINCT FROM '{}' OR summarized_content IS DISTINCT FROM '{}'
-                         OR processing_metadata::jsonb ?| ARRAY['filter','summary','_pass','_revision','_revision_input']
+                         OR processing_metadata::jsonb ?| ARRAY['filter','summary']
                          OR status IS DISTINCT FROM 'ready')""", (feedless,))
                 self.store.incomplete_draft.mark_materials(feedless)
                 for job_id,candidates in stage_previous.items():

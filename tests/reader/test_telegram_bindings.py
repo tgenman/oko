@@ -21,7 +21,8 @@ def test_web_binding_needs_no_account_and_duplicates_are_normalized(tmp_path):
         assert response.json()['access'] == {'kind':'web', 'username':'telegram', 'preview_url':'https://t.me/s/telegram'}
         card = settled(client)[0]
         material = client.get('/api/v3/publication/' + card['id']).json()
-        assert material['source']['message_ids'] == ['392']
+        assert material['content']['extra']['telegram']['members'] == [392]
+        assert 'source' not in material
         collected_calls = len(calls)
         assert collected_calls >= 1
         assert client.post('/api/v3/telegram/connect', json={'source_locator':'@TELEGRAM', 'folder':'Other'}).status_code == 409

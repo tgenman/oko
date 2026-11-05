@@ -434,7 +434,7 @@ class CollectionWorker:
                 for replacement,(_,_,old_revision) in zip(replacements[1:],snapshots[1:],strict=True):
                     if old_revision is not None and self.service.revision(replacement.identity)!=old_revision:
                         raise AdapterException(AdapterIssue('rebuild-stale','Связанная публикация изменилась во время пересборки',AdapterErrorKind.temporary))
-                repository=RebuildRepository(db=current.db,publications=current.publications,media=current.media,
+                repository=RebuildRepository(db=current.db,publications=current.publications,
                     capture=CollectionEffectCapture(current),clock=current.wall_clock,fault=current.fault)
                 with current.jobs.transaction(self._live):
                     if not admitted():return

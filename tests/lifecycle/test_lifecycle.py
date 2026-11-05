@@ -51,6 +51,6 @@ def test_processing_completes_without_browser_after_restart(tmp_path):
         assert client.patch('/api/v3/settings/oko/global', json={'processor':'llamacpp','theses':True,'prompt_filters':''}).status_code == 200
     with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test-token', ai_transport=model_transport(calls)), headers=HEADERS) as client:
         cards = wait_for(client, lambda: read_all_cards(client, '/api/v3/cards'))
-        wait_for(client, lambda: client.get('/api/v3/publication/'+cards[0]['id']).json().get('theses',{}).get('result'))
+        wait_for(client, lambda: client.get('/api/v3/publication/'+cards[0]['id']).json()['summarized_content'].get('points'))
         assert calls
         assert client.get('/api/v3/status').json()['active_client_sessions'] == 0

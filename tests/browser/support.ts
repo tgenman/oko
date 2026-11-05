@@ -219,16 +219,23 @@ function card(value: FixtureMaterial): CardListItem {
   if(!metadata)throw new Error('Publication fixture has no explicitly prepared card');
   return structuredClone(metadata.card);
 }
-function material(id: string, extra: Partial<FixtureMaterial> & {folder_id?:string;feed_title?:string;card?:Partial<CardListItem>} = {}): FixtureMaterial {
-  const {folder_id='f',feed_title,card:cardOverrides,...overrides}=extra;
+type Provenance={kind:'unknown';reason:'not_recorded'}|{kind:'codex';model:string;reasoning_effort:string;fast:boolean}|{kind:'local';processor_id:'llamacpp';model:{state:'known';name:string}|{state:'unknown'}};
+type PublicationReference={material_id:string;source_url:string};
+type FixtureInput = Partial<FixtureMaterial> & {folder_id?:string;feed_title?:string;card?:Partial<CardListItem>;description?:string;
+  reply_preview?:{author:string|null;text:string;source_url:string|null}|null;text?:string;revision_id?:string|null;
+  availability?:'available'|'pending';loading?:boolean;completeness?:{state:string;reason?:string;message?:string}|null;
+  filter?:{state:'disabled'|'pending'|'processing'|'ready'|'error';error:string|null;result:{hidden:boolean;reason:string;text:string;removed:string[];provenance:Provenance}|null};
+  theses?:{state:'disabled'|'pending'|'processing'|'ready'|'error';error:string|null;result:{points:string[];references:PublicationReference[][];provenance:Provenance}|null}};
+function material(id: string, extra: FixtureInput = {}): FixtureMaterial {
+  const {folder_id='f',feed_title,card:cardOverrides,description,reply_preview,text,revision_id,availability,loading,completeness,filter,theses,...overrides}=extra;
   const feed=overrides.feed_id||'feed',url=overrides.source_url||'https://example.org/'+id;
   const title=overrides.title||id,published=overrides.published_at===undefined?new Date(100000).toISOString():overrides.published_at;
   const blocks:PublicationBlock[]=[];
-  if(overrides.reply_preview)blocks.push({type:'quote',...overrides.reply_preview});
-  if(overrides.description)blocks.push({type:'text',role:'description',text:overrides.description});
-  if(overrides.text!=='' )blocks.push({type:'text',role:'body',text:overrides.text??'Текст '+id});
-  const legacySummary=overrides.theses?.result;
-  const legacyFilter=overrides.filter?.result;
+  if(reply_preview)blocks.push({type:'quote',...reply_preview});
+  if(description)blocks.push({type:'text',role:'description',text:description});
+  if(text!=='' )blocks.push({type:'text',role:'body',text:text??'Текст '+id});
+  const legacySummary=theses?.result;
+  const legacyFilter=filter?.result;
   const filtered=legacyFilter?{hidden:legacyFilter.hidden,reason:legacyFilter.reason,
     removed:legacyFilter.removed.map((text,index)=>({publication_id:id,block_index:index,text})),
     blocks:legacyFilter.hidden?[]:[{type:'text' as const,role:'body' as const,text:legacyFilter.text}]}:{};
@@ -236,21 +243,18 @@ function material(id: string, extra: Partial<FixtureMaterial> & {folder_id?:stri
   const origin=legacySummary?.provenance;
   const summaryMetadata=origin?.kind==='codex'?{summary:{processor:'codex',model:origin.model,parameters:{reasoning_effort:origin.reasoning_effort,fast:origin.fast}}}:
     origin?.kind==='local'?{summary:{processor:origin.processor_id,model:origin.model.state==='known'?origin.model.name:null}}:{};
-  const summaryJobs:FixtureMaterial['jobs']=overrides.theses&&overrides.theses.state!=='disabled'?[{operation:'theses',object_id:id,
-    status:overrides.theses.state==='processing'?'running':overrides.theses.state==='ready'?'done':overrides.theses.state==='error'?'failed':'pending',
-    reason_code:null,reason_message:overrides.theses.error,retry_at:null}]:[];
-  const filterJobs:FixtureMaterial['jobs']=overrides.filter&&overrides.filter.state!=='disabled'?[{operation:'filter',object_id:id,
-    status:overrides.filter.state==='processing'?'running':overrides.filter.state==='ready'?'done':overrides.filter.state==='error'?'failed':'pending',
-    reason_code:null,reason_message:overrides.filter.error,retry_at:null}]:[];
+  const summaryJobs:FixtureMaterial['jobs']=theses&&theses.state!=='disabled'?[{operation:'theses',object_id:id,
+    status:theses.state==='processing'?'running':theses.state==='ready'?'done':theses.state==='error'?'failed':'pending',
+    reason_code:null,reason_message:theses.error,retry_at:null}]:[];
+  const filterJobs:FixtureMaterial['jobs']=filter&&filter.state!=='disabled'?[{operation:'filter',object_id:id,
+    status:filter.state==='processing'?'running':filter.state==='ready'?'done':filter.state==='error'?'failed':'pending',
+    reason_code:null,reason_message:filter.error,retry_at:null}]:[];
   const row:CardListItem={id,title,feed_id:feed,published_at:published,source_url:url,preview_url:null,
-    loading:false,hidden:false,post_web_unavailable:false,external_attachment_kinds:[],...cardOverrides};
+    loading:false,hidden:false,external_attachment_kinds:[],...cardOverrides};
   const value:FixtureMaterial={id,title,feed_id:feed,published_at:published,source_url:url,
-    platform:'rss',external_id:id,status:'ready',discovered_at:new Date(100000).toISOString(),media_ids:[],
+    platform:'rss',external_id:id,status:availability==='pending'?'pending_collection':'ready',discovered_at:new Date(100000).toISOString(),media_ids:[],
     content:{blocks},filtered_content:filtered,summarized_content:summarized,processing_metadata:summaryMetadata,linked_publications:[],jobs:[...filterJobs,...summaryJobs],
-    source:{kind:'rss',feed_id:feed,source_url:url},availability:'available',
-    text:'Текст '+id,description:'',revision_id:'1',completeness:{state:'complete'},loading:false,
-    linked_content:null,reply_preview:null,post_web_unavailable:false,external_attachments:[],media:[],
-    filter:{state:'disabled',result:null,error:null},theses:{state:'disabled',result:null,error:null},...overrides};
+    media:[],...overrides};
   fixtureMetadata.set(value,{folder_id,feed_title,card:row});
   return value;
 }

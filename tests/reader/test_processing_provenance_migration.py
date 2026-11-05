@@ -78,6 +78,6 @@ def test_migrated_done_job_can_be_explicitly_retried_after_restart(tmp_path,post
             assert JobRepository(store).retry_processing('p','theses')
         status,generation,snapshot=store.db.execute("SELECT status,generation,input_snapshot FROM jobs WHERE item='p' AND kind='theses'").fetchone()[:]
         assert status=='pending' and generation>4 and snapshot['input_hash']
-        assert json.loads(store.db.execute("SELECT summarized_content FROM publications WHERE id='p'").fetchone()[0])==result
+        assert json.loads(store.db.execute("SELECT summarized_content FROM publications WHERE id='p'").fetchone()[0])=={'points':result['points']}
     finally:
         store.db.close()
