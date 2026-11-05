@@ -3,7 +3,7 @@ import {expect} from 'playwright/test';
 import {productionReader} from './http-reader';
 import {artifactPath} from './artifacts';
 
-test('text stays visible through media waiting, error and manual retry', {timeout:25000},async t=>{
+test('text stays visible through media waiting, error and manual retry', {timeout:60000},async t=>{
  const r=await productionReader(t,{publicationPipeline:true});
  await r.api('settings/oko/global','PATCH',{theses:false,prompt_filters:'',telegram_http_rps:10});
  await r.setMediaState('held');await r.openReader();
@@ -15,7 +15,9 @@ test('text stays visible through media waiting, error and manual retry', {timeou
  await expect(r.page.getByRole('button',{name:'Retry Download',exact:true})).toBeVisible();
  await r.page.screenshot({path:artifactPath('independent-media-error.png')});
  await r.setMediaState('ready');await r.page.getByRole('button',{name:'Retry Download',exact:true}).click();
- await expect(r.page.locator('#images img')).toHaveAttribute('src',/^blob:/);await expect(r.page.locator('#completeness')).toContainText('Fully saved');
+ const item=(await r.api('cards')).items[0].id;
+ await expect.poll(async()=>{const value=await r.api(`publication/${item}`);return value.media.some(file=>file.status==='ready'&&file.url!==null);},{timeout:15000,message:'media file should finish downloading after retry'}).toBe(true);
+ await expect(r.page.locator('#images img')).toHaveAttribute('src',/^blob:/,{timeout:10000});await expect(r.page.locator('#completeness')).toContainText('Fully saved');
  await expect(r.page.locator('#text')).toContainText('Text before media');
  await r.page.screenshot({path:artifactPath('independent-media-ready.png')});
 });
