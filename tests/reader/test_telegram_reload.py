@@ -46,7 +46,7 @@ def test_web_full_copy_is_not_polled_and_terminal_reload_keeps_old_media(tmp_pat
         kept = client.get('/api/v3/publication/'+item).json()
         assert kept['text'] == 'Edited'
         assert kept['revision_id'] != old['revision_id']
-        assert client.get([a for a in kept['media'] if a['role']=='attachment'][0]['url']).content == b'old-image'
+        assert client.get([a for a in kept['media'] if a['url'] is not None][0]['url']).content == b'old-image'
         client.post('/api/v3/collect', json={'scope':'feed','feed_id':feed})
         wait_for(client, lambda: not any(op['kind']=='discover' for op in client.get('/api/v3/collection-status/'+feed).json()['operations']))
         assert downloads == ['Original','Edited']

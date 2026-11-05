@@ -50,6 +50,8 @@ class MediaReference:
     mime_type: str | None = None
     size_bytes: int | None = None
     resource_identity: str | None = None
+    source_url: str | None = None
+    publication_url: str | None = None
 
 
 class AdapterErrorKind(str, Enum):

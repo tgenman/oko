@@ -58,8 +58,8 @@ def test_rss_article_is_fetched_separately_and_does_not_become_a_feed_card(tmp_p
                 assert not db.execute('SELECT 1 FROM publications WHERE feed_id IS NOT NULL AND id = %s',(linked,)).fetchone()
                 assert db.execute('SELECT COUNT(*) FROM publications').fetchone()[0]==2
             media_release.set()
-            complete=wait_for(client,lambda:(m if (m := client.get('/api/v3/publication/'+card['id']).json()) and any(media['role'] == 'attachment' for media in m['media']) else None))
-            url=[media for media in complete['media'] if media['role'] == 'attachment'][0]['url']
+            complete=wait_for(client,lambda:(m if (m := client.get('/api/v3/publication/'+card['id']).json()) and any(media['url'] is not None for media in m['media']) else None))
+            url=[media for media in complete['media'] if media['url'] is not None][0]['url']
             assert url.startswith('/api/v3/materials/'+linked+'/media/')
             assert client.get(url).content==b'article-image'
         finally:

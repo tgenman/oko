@@ -182,7 +182,7 @@ def entries(raw: bytes, base: str, *, strict: bool = False, diagnostics: list[st
                     continue
                 length = child.get('length', '')
                 size = int(length) if length.isascii() and length.isdecimal() else None
-                media.append(MediaReference('rss:enclosure:'+str(len(media)), locator, '', child.get('type'), size))
+                media.append(MediaReference('rss:enclosure:'+str(len(media)), locator, '', child.get('type'), size, source_url=locator))
         result.append(Entry(Publication(identity, url, stamp, published_known=known), value('title') or ('' if strict else 'Без заголовка'),
                             markup('description') or markup('summary') or markup('encoded') or markup('content')
                             or next((''.join(c.itertext()).strip() for c in node.iter()

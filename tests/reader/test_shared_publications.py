@@ -54,7 +54,7 @@ def test_same_video_conflict_is_reported_without_moving_the_publication(shared):
 def test_deleting_owner_does_not_transfer_publication_to_conflicting_feed(shared):
     client,feeds,_,_=shared
     item=read_all_cards(client,'/api/v3/cards')[0]['id']
-    original=wait_for(client,lambda:(m if (m:=client.get('/api/v3/publication/'+item).json()) and any(media['role']=='attachment' for media in m['media']) else None))
+    original=wait_for(client,lambda:(m if (m:=client.get('/api/v3/publication/'+item).json()) and any(media['url'] is not None for media in m['media']) else None))
     owner=original['feed_id']
     other=next(feed['id'] for feed in feeds if feed['id']!=owner)
     assert client.delete('/api/v3/feeds/'+owner).status_code==200

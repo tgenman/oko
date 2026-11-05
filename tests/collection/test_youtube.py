@@ -214,7 +214,7 @@ def test_high_imported_youtube_gets_captions_theses_and_deletes_everything(tmp_p
 
         chat = next(r for r in ai if r.url.path == '/v1/chat/completions')
         assert 'Сохрани границы.' in json.loads(chat.content)['messages'][0]['content']
-        image = next(media['url'] for media in [media for media in material['media'] if media['role'] == 'attachment'] if media['kind']=='image')
+        image = next(media['url'] for media in [media for media in material['media'] if media['url'] is not None] if media['kind']=='image')
         assert client.get(image).content == PNG
         assert client.post('/api/v3/materials/' + material['id'] + '/viewed').status_code == 200
         assert client.get(image).status_code == 404
@@ -293,8 +293,8 @@ def test_late_captions_cannot_publish_after_reader_action(tmp_path, action):
             subscribe(client)
             assert captions.started.wait(3)
             item = read_all_cards(client, '/api/v3/cards')[0]['id']
-            material = wait_for(client, lambda: value if (value := client.get('/api/v3/publication/' + item).json()) and any(media['role'] == 'attachment' for media in value['media']) else None)
-            assert client.get([media for media in material['media'] if media['role'] == 'attachment'][0]['url']).content == PNG
+            material = wait_for(client, lambda: value if (value := client.get('/api/v3/publication/' + item).json()) and any(media['url'] is not None for media in value['media']) else None)
+            assert client.get([media for media in material['media'] if media['url'] is not None][0]['url']).content == PNG
             before_files = media_files()
             assert PNG in before_files.values()
             with psycopg.connect(database_url(tmp_path), autocommit=True) as db:

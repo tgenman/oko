@@ -71,6 +71,19 @@ def test_album_counts_once_and_media_streams_to_caller_owned_output():
     asyncio.run(scenario())
 
 
+def test_album_media_preserves_the_url_of_its_own_message():
+    from oko.collection.telegram.adapter import TelegramWebAdapter
+    photos=''.join(f'<a class="grouped_media_wrap" href="https://t.me/fixture/{i}?single"><span class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/{i}.jpg\')"></span></a>' for i in (5,6))
+    async def scenario():
+        adapter=TelegramWebAdapter(httpx.MockTransport(lambda request:httpx.Response(200,text=page([(5,'Album'+photos)]))))
+        feed=await adapter.resolve_feed('https://t.me/s/fixture')
+        found=await adapter.discover(feed.reference,feed.latest_cursor,10)
+        assert [(m.source_url,m.publication_url) for m in found.publications[0].media]==[
+            ('https://cdn.example/5.jpg','https://t.me/fixture/5'),
+            ('https://cdn.example/6.jpg','https://t.me/fixture/6')]
+    asyncio.run(scenario())
+
+
 def test_failed_page_can_retry_same_window_without_admitting_new_posts():
     from oko.collection.adapters import AdapterException, AdapterErrorKind
     from oko.collection.telegram.adapter import TelegramWebAdapter

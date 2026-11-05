@@ -14,7 +14,7 @@ test('synthetic reader surfaces screenshots and geometry',async()=>{
     material('video',{title:'Видео с недоступными субтитрами',source:{kind:'youtube',feed_id:'feed',source_url:'https://example.org/video',captions:'unavailable'},completeness:{state:'incomplete',reason:'source_incomplete',message:'YouTube ограничил получение субтитров'},description:'Описание видео\n\n'+('Текст и длинная ссылка https://example.org/'+'example/'.repeat(12)+'\n').repeat(3),text:''}),
     material('theses',{theses:{state:'ready',error:null,result:{points:['Основной тезис синтетического материала'],references:[[{material_id:'plain',source_url:'https://example.org/plain'}]],provenance:{kind:'codex',model:'synthetic',reasoning_effort:'high',fast:false}}}}),
     material('hidden',{card:{hidden:true},filter:{state:'ready',error:null,result:{hidden:true,reason:'Синтетический фильтр',removed:[],text:'Текст hidden',provenance:{kind:'unknown',reason:'not_recorded'}}}}),
-    material('media',{card:{preview_url:'/api/v3/materials/media/media/image'},media:[{kind:'image',role:'image',url:'/api/v3/materials/media/media/image',mime:null}]}),
+    material('media',{card:{preview_url:'/api/v3/materials/media/media/image'},media:[{id:'image',name:'image',size_bytes:null,source_url:null,status:'ready',reason_code:null,reason_message:null,kind:'image',role:'image',url:'/api/v3/materials/media/media/image',mime:null}]}),
     material('pending'),material('failed')
    ]);
    await r.page.evaluate(()=>{

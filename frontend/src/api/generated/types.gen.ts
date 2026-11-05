@@ -1888,6 +1888,65 @@ export type Provenance = ({
     kind: 'local';
 } & LocalResultProvenance);
 
+export type PublicationBlock = {
+    role: 'body' | 'description';
+    text: string;
+    type: 'text';
+    [key: string]: unknown;
+} | {
+    author: string | null;
+    source_url: SourceUrl | null;
+    text: string;
+    type: 'quote';
+    [key: string]: unknown;
+} | {
+    caption?: string | null;
+    language?: string | null;
+    media_id: MaterialId;
+    publication_url: SourceUrl | null;
+    role: 'image' | 'cover' | 'video' | 'audio' | 'attachment' | 'subtitles';
+    source_url: SourceUrl | null;
+    type: 'media';
+    [key: string]: unknown;
+} | {
+    publication_id: MaterialId;
+    source_url: SourceUrl;
+    type: 'publication';
+    [key: string]: unknown;
+} | {
+    author?: string | null;
+    duration?: string | null;
+    kind: 'image' | 'video' | 'audio' | 'document' | 'unsupported' | 'web';
+    poster_media_id?: MaterialId | null;
+    reason?: string | null;
+    restriction?: string | null;
+    size_label?: string | null;
+    title?: string | null;
+    type: 'external_media';
+    url: SourceUrl;
+    [key: string]: unknown;
+};
+
+export type PublicationDocument = {
+    blocks?: Array<PublicationBlock>;
+    extra?: {
+        [key: string]: unknown;
+    };
+};
+
+export type PublicationFilteredContent = {
+    blocks?: Array<PublicationBlock>;
+    hidden?: boolean;
+    reason?: string;
+    removed?: Array<{
+        block_index: number;
+        publication_id: MaterialId;
+        text: string;
+        [key: string]: unknown;
+    }>;
+    [key: string]: unknown;
+};
+
 export type PublicationReference = {
     material_id: MaterialId;
     source_url: SourceUrl;
@@ -1897,8 +1956,11 @@ export type PublicationResponse = {
     availability: 'available' | 'pending';
     changed: boolean;
     completeness: ContentCompleteness | null;
+    content: PublicationDocument;
     description: string;
+    discovered_at: Timestamp;
     external_attachments: Array<ExternalAttachment>;
+    external_id: string;
     feed_id: FeedId;
     filter: {
         error: string | null;
@@ -1911,22 +1973,52 @@ export type PublicationResponse = {
         } | null;
         state: 'disabled' | 'pending' | 'processing' | 'ready' | 'error';
     };
+    filtered_content: PublicationFilteredContent;
     id: MaterialId;
+    jobs: Array<{
+        object_id: string;
+        operation: string;
+        reason_code: string | null;
+        reason_message: string | null;
+        retry_at: Timestamp | null;
+        status: 'blocked' | 'pending' | 'running' | 'done' | 'failed' | 'unavailable' | 'cancelled';
+    }>;
     linked_content: LinkedContent | null;
+    linked_publications: Array<{
+        content: PublicationDocument;
+        id: MaterialId;
+        source_url: SourceUrl;
+        status: 'pending_collection' | 'pending_filtering' | 'filter_out' | 'pending_summary' | 'ready';
+        title: string;
+    }>;
     loading: boolean;
     media: Array<{
+        id: MaterialId;
         kind: 'image' | 'video' | 'audio' | 'circle' | 'file';
         mime: string | null;
+        name: string;
+        reason_code: string | null;
+        reason_message: string | null;
         role: 'image' | 'attachment';
-        url: MediaUrl;
+        size_bytes: number | null;
+        source_url: SourceUrl | null;
+        status: 'pending_download' | 'ready' | 'unavailable';
+        url: MediaUrl | null;
     }>;
+    media_ids: Array<MaterialId>;
+    platform: 'telegram' | 'youtube' | 'telegraph' | 'instagram' | 'twitter' | 'other_web' | 'rss';
     post_web_unavailable: boolean;
+    processing_metadata: {
+        [key: string]: unknown;
+    };
     published_at: Timestamp | null;
     reply_preview: ReplyPreview | null;
     revision_id: RevisionId | null;
     source: SourceReference;
     source_deleted: boolean;
     source_url: SourceUrl;
+    status: 'pending_collection' | 'pending_filtering' | 'filter_out' | 'pending_summary' | 'ready';
+    summarized_content: PublicationSummary;
     text: string;
     theses: {
         error: string | null;
@@ -1938,6 +2030,18 @@ export type PublicationResponse = {
         state: 'disabled' | 'pending' | 'processing' | 'ready' | 'error';
     };
     title: string;
+};
+
+export type PublicationSummary = {
+    extra?: {
+        [key: string]: unknown;
+    };
+    points?: Array<{
+        source_publication_ids: Array<MaterialId>;
+        text: string;
+        [key: string]: unknown;
+    }>;
+    [key: string]: unknown;
 };
 
 export type PublicationTheses = {

@@ -22,7 +22,7 @@ def test_hidden_fallback_is_ignored_but_active_restriction_is_not(tmp_path, acti
         content = client.get('/api/v3/publication/' + identity).json()
         assert content['completeness']['state'] == ('incomplete' if active else 'complete')
         assert 'Available text 🔵' in content['text'] and '[Source](https://example.test/source)' in content['text']
-        assert content['external_attachments'] == [] and [media for media in content['media'] if media['role']=='attachment'] == []
+        assert content['external_attachments'] == [] and [media for media in content['media'] if media['url'] is not None] == []
         assert content['post_web_unavailable'] is False
         state = client.get('/api/v3/collection-status/' + added['feed_id']).json()['source']
         assert state['state'] == ('error' if active else 'complete')

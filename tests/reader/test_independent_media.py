@@ -38,7 +38,7 @@ def test_edited_text_is_readable_while_new_photo_download_is_held(tmp_path):
             client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
             item = settled(client)[0]['id']
             old = client.get('/api/v3/publication/'+item).json()
-            assert client.get([media for media in old['media'] if media['role'] == 'attachment'][0]['url']).content == b'old-photo'
+            assert client.get([media for media in old['media'] if media['url'] is not None][0]['url']).content == b'old-photo'
             with database(root) as db:
                 previous=db.execute("SELECT j.id,m.storage_key FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=%s AND m.status='ready'",(item,)).fetchone()
                 assert previous
@@ -47,15 +47,16 @@ def test_edited_text_is_readable_while_new_photo_download_is_held(tmp_path):
             client.post('/api/v3/materials/'+item+'/retry')
             assert started.wait(3)
             updated = wait_for(client, lambda: (m if (m := client.get('/api/v3/publication/'+item).json())['text']=='Edited text' else None))
-            assert [media for media in updated['media'] if media['role'] == 'attachment'] == []
+            assert any(media['status']=='pending_download' and media['url'] is None for media in updated['media'])
+            assert [media for media in updated['media'] if media['url'] is not None] == []
             assert updated['completeness']['state'] == 'incomplete'
             assert 'Вложение загружается' in updated['completeness']['message']
             release.set()
-            complete = wait_for(client, lambda: (m if (m := client.get('/api/v3/publication/'+item).json()) and any(media['role'] == 'attachment' for media in m['media']) else None))
-            assert client.get([media for media in complete['media'] if media['role'] == 'attachment'][0]['url']).content == b'new-photo'
+            complete = wait_for(client, lambda: (m if (m := client.get('/api/v3/publication/'+item).json()) and any(media['url'] is not None for media in m['media']) else None))
+            assert client.get([media for media in complete['media'] if media['url'] is not None][0]['url']).content == b'new-photo'
             assert complete['completeness']['state'] == 'complete'
-            assert [media for media in complete['media'] if media['role'] == 'attachment'][0]['url'] != [media for media in old['media'] if media['role'] == 'attachment'][0]['url']
-            assert client.get([media for media in old['media'] if media['role'] == 'attachment'][0]['url']).status_code == 404
+            assert [media for media in complete['media'] if media['url'] is not None][0]['url'] != [media for media in old['media'] if media['url'] is not None][0]['url']
+            assert client.get([media for media in old['media'] if media['url'] is not None][0]['url']).status_code == 404
             assert 'previous_versions' not in complete
             with database(root) as db:
                 assert db.execute('SELECT id FROM jobs WHERE id=%s',(previous_job,)).fetchone() is not None
@@ -123,7 +124,7 @@ def test_one_file_failure_keeps_other_files_and_backoff_survives_restart(tmp_pat
         client.patch('/api/v3/settings/oko/global', json={'retry_initial_seconds':60, 'retry_max_seconds':240})
         client.post('/api/v3/telegram/connect', json=dict(source_locator='@fixture', folder='Inbox'))
         item = wait_for(client, lambda: (cards[0]['id'] if (cards := read_all_cards(client, '/api/v3/cards')) else None))
-        failed = wait_for(client, lambda: (m if (m := client.get('/api/v3/publication/'+item).json()) and sum(media['role'] == 'attachment' for media in m['media'])==1 and 'Не удалось загрузить вложение' in m['completeness'].get('message','') else None))
+        failed = wait_for(client, lambda: (m if (m := client.get('/api/v3/publication/'+item).json()) and sum(media['url'] is not None for media in m['media'])==1 and 'Не удалось загрузить вложение' in m['completeness'].get('message','') else None))
         assert failed['text']=='Readable text'
         from tests.support.storage import database
         with database(root) as db:
@@ -159,7 +160,7 @@ def test_one_file_failure_keeps_other_files_and_backoff_survives_restart(tmp_pat
         assert calls['bad']==2
         offset[0] += 60
         loaded = wait_for(client, lambda: (m if (m := client.get('/api/v3/publication/'+item).json())['completeness']['state']=='complete' else None))
-        assert len([media for media in loaded['media'] if media['role'] == 'attachment'])==2
+        assert len([media for media in loaded['media'] if media['url'] is not None])==2
         assert calls == {'bad':3, 'good':1}
 
 
@@ -186,11 +187,11 @@ def test_permanent_file_failure_waits_for_manual_retry(tmp_path):
         assert any({'kind':'material','material_id':item} in problem['affected'] for problem in problems)
         available[0]=True
         offset[0]+=600
-        assert [media for media in client.get('/api/v3/publication/'+item).json()['media'] if media['role'] == 'attachment']==[]
+        assert [media for media in client.get('/api/v3/publication/'+item).json()['media'] if media['url'] is not None]==[]
         assert len(calls)==1
         client.post('/api/v3/materials/'+item+'/retry')
-        ready = wait_for(client,lambda:(m if (m := client.get('/api/v3/publication/'+item).json()) and any(media['role'] == 'attachment' for media in m['media']) else None))
-        assert client.get([media for media in ready['media'] if media['role'] == 'attachment'][0]['url']).content==b'manually-retried'
+        ready = wait_for(client,lambda:(m if (m := client.get('/api/v3/publication/'+item).json()) and any(media['url'] is not None for media in m['media']) else None))
+        assert client.get([media for media in ready['media'] if media['url'] is not None][0]['url']).content==b'manually-retried'
         assert len(calls)==2
 
 
@@ -271,5 +272,5 @@ def test_process_death_at_media_acceptance_never_exposes_uncommitted_bytes(tmp_p
         assert client.get(url).status_code==(200 if committed else 404)
         if not committed:
             client.post('/api/v3/materials/'+item+'/retry')
-        ready=wait_for(client,lambda:(m if (m := client.get('/api/v3/publication/'+item).json()) and any(media['role'] == 'attachment' for media in m['media']) else None))
-        assert client.get([media for media in ready['media'] if media['role'] == 'attachment'][0]['url']).content==b'process-media'
+        ready=wait_for(client,lambda:(m if (m := client.get('/api/v3/publication/'+item).json()) and any(media['url'] is not None for media in m['media']) else None))
+        assert client.get([media for media in ready['media'] if media['url'] is not None][0]['url']).content==b'process-media'

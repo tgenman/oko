@@ -79,7 +79,7 @@ test('opened YouTube material preserves description separately from captions', a
   await r.start([material('video',{description:'Описание из Atom',text:'Сохранённые субтитры',source:{kind:'youtube',feed_id:'feed',source_url:'https://example.org/video',captions:'available'}})]);
   await r.page.locator('[data-card="video"]').click();
   await expect(r.page.locator('#description')).toHaveText('Описание из Atom');
-  await expect(r.page.locator('#text')).toHaveText('Сохранённые субтитры');
+  await expect(r.page.locator('#text p').last()).toHaveText('Сохранённые субтитры');
   expect(r.errors).toEqual([]);
  } finally {await r.close();}
 });

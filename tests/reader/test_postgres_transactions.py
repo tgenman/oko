@@ -111,14 +111,14 @@ def test_reader_http_collection_media_settings_viewed_and_restart(postgres_url, 
         assert client.put('/api/v3/power', json={'enabled': True}).status_code == 200
         card = wait_cards(client)[0]
         item = card['id']
-        material = wait_for(client, lambda: (value if (value := client.get('/api/v3/publication/' + item).json()) and any(media['role'] == 'attachment' for media in value['media']) else None))
+        material = wait_for(client, lambda: (value if (value := client.get('/api/v3/publication/' + item).json()) and any(media['url'] is not None for media in value['media']) else None))
         assert 'Collected text' in material['text']
         frame = client.get('/api/v3/navigation')
         assert frame.status_code == 200, frame.text
         storage_id = frame.headers['X-Oko-Storage-Id']
         assert frame.json()['total'] == 1
         assert client.get('/api/v3/cards').json()['items'][0]['id'] == item
-        media = [media for media in material['media'] if media['role'] == 'attachment'][0]['url']
+        media = [media for media in material['media'] if media['url'] is not None][0]['url']
         assert client.get(media).content == PNG
         previous = requests.count('/feed')
         assert client.post('/api/v3/collect').status_code == 200

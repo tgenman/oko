@@ -46,6 +46,19 @@ paths:
                 feed_id: example
                 published_at: null
                 source_url: https://example.test/post/1
+                platform: rss
+                external_id: external-example
+                status: ready
+                discovered_at: '2026-10-15T10:00:00Z'
+                media_ids: []
+                content:
+                  blocks:
+                  - {type: text, role: body, text: Original}
+                filtered_content: {}
+                summarized_content: {}
+                processing_metadata: {}
+                linked_publications: []
+                jobs: []
                 text: Original
                 filter:
                   state: ready
@@ -12239,6 +12252,131 @@ components:
         details: null
         diagnostic_id: null
         command_id: null
+    PublicationBlock:
+      oneOf:
+      - type: object
+        properties:
+          type: {const: text}
+          role: {type: string, enum: [body, description]}
+          text: {type: string}
+        required: [type, role, text]
+        additionalProperties: true
+      - type: object
+        properties:
+          type: {const: quote}
+          text: {type: string}
+          author: {type: [string, 'null']}
+          source_url:
+            anyOf:
+            - $ref: '#/components/schemas/SourceUrl'
+            - type: 'null'
+        required: [type, text, author, source_url]
+        additionalProperties: true
+      - type: object
+        properties:
+          type: {const: media}
+          role: {type: string, enum: [image, cover, video, audio, attachment, subtitles]}
+          media_id: {$ref: '#/components/schemas/MaterialId'}
+          source_url:
+            anyOf:
+            - $ref: '#/components/schemas/SourceUrl'
+            - type: 'null'
+          publication_url:
+            anyOf:
+            - $ref: '#/components/schemas/SourceUrl'
+            - type: 'null'
+          caption: {type: [string, 'null']}
+          language: {type: [string, 'null']}
+        required: [type, role, media_id, source_url, publication_url]
+        additionalProperties: true
+      - type: object
+        properties:
+          type: {const: publication}
+          publication_id: {$ref: '#/components/schemas/MaterialId'}
+          source_url: {$ref: '#/components/schemas/SourceUrl'}
+        required: [type, publication_id, source_url]
+        additionalProperties: true
+      - type: object
+        properties:
+          type: {const: external_media}
+          kind: {type: string, enum: [image, video, audio, document, unsupported, web]}
+          url: {$ref: '#/components/schemas/SourceUrl'}
+          reason: {type: [string, 'null']}
+          restriction: {type: [string, 'null']}
+          title: {type: [string, 'null']}
+          author: {type: [string, 'null']}
+          duration: {type: [string, 'null']}
+          size_label: {type: [string, 'null']}
+          poster_media_id:
+            anyOf:
+            - $ref: '#/components/schemas/MaterialId'
+            - type: 'null'
+        required: [type, kind, url]
+        additionalProperties: true
+      examples:
+      - {type: text, role: body, text: Example}
+    PublicationDocument:
+      type: object
+      properties:
+        blocks:
+          type: array
+          items: {$ref: '#/components/schemas/PublicationBlock'}
+        extra:
+          type: object
+          additionalProperties: true
+      additionalProperties: false
+      examples:
+      - blocks:
+        - {type: text, role: body, text: Example}
+    PublicationFilteredContent:
+      type: object
+      properties:
+        blocks:
+          type: array
+          items: {$ref: '#/components/schemas/PublicationBlock'}
+        hidden: {type: boolean}
+        reason: {type: string}
+        removed:
+          type: array
+          items:
+            type: object
+            properties:
+              publication_id: {$ref: '#/components/schemas/MaterialId'}
+              block_index: {type: integer, minimum: 0}
+              text: {type: string}
+            required: [publication_id, block_index, text]
+            additionalProperties: true
+      additionalProperties: true
+      examples:
+      - {}
+      - blocks:
+        - {type: text, role: body, text: Filtered}
+        hidden: false
+        reason: ''
+        removed: []
+    PublicationSummary:
+      type: object
+      properties:
+        points:
+          type: array
+          items:
+            type: object
+            properties:
+              text: {type: string}
+              source_publication_ids:
+                type: array
+                items: {$ref: '#/components/schemas/MaterialId'}
+            required: [text, source_publication_ids]
+            additionalProperties: true
+        extra:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+      examples:
+      - {}
+      - points:
+        - {text: Summary, source_publication_ids: [example]}
+        extra: {}
     PublicationResponse:
       type: object
       additionalProperties: false
@@ -12255,6 +12393,69 @@ components:
           - type: 'null'
         source_url:
           $ref: '#/components/schemas/SourceUrl'
+        platform:
+          type: string
+          enum: [telegram, youtube, telegraph, instagram, twitter, other_web, rss]
+        external_id:
+          type: string
+        status:
+          type: string
+          enum: [pending_collection, pending_filtering, filter_out, pending_summary, ready]
+        discovered_at:
+          $ref: '#/components/schemas/Timestamp'
+        media_ids:
+          type: array
+          items:
+            $ref: '#/components/schemas/MaterialId'
+        content:
+          $ref: '#/components/schemas/PublicationDocument'
+        filtered_content:
+          $ref: '#/components/schemas/PublicationFilteredContent'
+        summarized_content:
+          $ref: '#/components/schemas/PublicationSummary'
+        processing_metadata:
+          type: object
+          additionalProperties: true
+        linked_publications:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              id:
+                $ref: '#/components/schemas/MaterialId'
+              title:
+                type: string
+              source_url:
+                $ref: '#/components/schemas/SourceUrl'
+              content:
+                $ref: '#/components/schemas/PublicationDocument'
+              status:
+                type: string
+                enum: [pending_collection, pending_filtering, filter_out, pending_summary, ready]
+            required: [id, title, source_url, content, status]
+        jobs:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              operation:
+                type: string
+              object_id:
+                type: string
+              status:
+                type: string
+                enum: [blocked, pending, running, done, failed, unavailable, cancelled]
+              reason_code:
+                type: [string, 'null']
+              reason_message:
+                type: [string, 'null']
+              retry_at:
+                anyOf:
+                - $ref: '#/components/schemas/Timestamp'
+                - type: 'null'
+            required: [operation, object_id, status, reason_code, reason_message, retry_at]
         text:
           type: string
         filter:
@@ -12358,7 +12559,27 @@ components:
                 - circle
                 - file
               url:
-                $ref: '#/components/schemas/MediaUrl'
+                anyOf:
+                - $ref: '#/components/schemas/MediaUrl'
+                - type: 'null'
+              id:
+                $ref: '#/components/schemas/MaterialId'
+              name:
+                type: string
+              size_bytes:
+                type: [integer, 'null']
+                minimum: 0
+              source_url:
+                anyOf:
+                - $ref: '#/components/schemas/SourceUrl'
+                - type: 'null'
+              status:
+                type: string
+                enum: [pending_download, ready, unavailable]
+              reason_code:
+                type: [string, 'null']
+              reason_message:
+                type: [string, 'null']
               mime:
                 anyOf:
                 - type: string
@@ -12373,6 +12594,13 @@ components:
             - url
             - mime
             - role
+            - id
+            - name
+            - size_bytes
+            - source_url
+            - status
+            - reason_code
+            - reason_message
         source:
           $ref: '#/components/schemas/SourceReference'
         availability:
@@ -12416,6 +12644,17 @@ components:
       - feed_id
       - published_at
       - source_url
+      - platform
+      - external_id
+      - status
+      - discovered_at
+      - media_ids
+      - content
+      - filtered_content
+      - summarized_content
+      - processing_metadata
+      - linked_publications
+      - jobs
       - text
       - filter
       - theses
@@ -12438,6 +12677,19 @@ components:
         feed_id: example
         published_at: null
         source_url: https://example.test/post/1
+        platform: rss
+        external_id: external-example
+        status: ready
+        discovered_at: '2026-10-15T10:00:00Z'
+        media_ids: []
+        content:
+          blocks:
+          - {type: text, role: body, text: Original}
+        filtered_content: {}
+        summarized_content: {}
+        processing_metadata: {}
+        linked_publications: []
+        jobs: []
         text: Original
         filter:
           state: ready

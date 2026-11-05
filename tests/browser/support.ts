@@ -1,6 +1,6 @@
 import {installReadingFixtures} from './reading-fixtures';
 import type {FixtureMaterial, ReplyMap} from './fixture-types.ts';
-import type {CardListItem} from '../../frontend/src/api/generated/types.gen';
+import type {CardListItem,PublicationBlock} from '../../frontend/src/api/generated/types.gen';
 import {productionReader} from './http-reader.ts';
 import {expect} from 'playwright/test';
 import {contractFor, validate} from './contracts.ts';
@@ -223,9 +223,30 @@ function material(id: string, extra: Partial<FixtureMaterial> & {folder_id?:stri
   const {folder_id='f',feed_title,card:cardOverrides,...overrides}=extra;
   const feed=overrides.feed_id||'feed',url=overrides.source_url||'https://example.org/'+id;
   const title=overrides.title||id,published=overrides.published_at===undefined?new Date(100000).toISOString():overrides.published_at;
+  const blocks:PublicationBlock[]=[];
+  if(overrides.reply_preview)blocks.push({type:'quote',...overrides.reply_preview});
+  if(overrides.description)blocks.push({type:'text',role:'description',text:overrides.description});
+  if(overrides.text!=='' )blocks.push({type:'text',role:'body',text:overrides.text??'Текст '+id});
+  const legacySummary=overrides.theses?.result;
+  const legacyFilter=overrides.filter?.result;
+  const filtered=legacyFilter?{hidden:legacyFilter.hidden,reason:legacyFilter.reason,
+    removed:legacyFilter.removed.map((text,index)=>({publication_id:id,block_index:index,text})),
+    blocks:legacyFilter.hidden?[]:[{type:'text' as const,role:'body' as const,text:legacyFilter.text}]}:{};
+  const summarized=legacySummary?{points:legacySummary.points.map((text,index)=>({text,source_publication_ids:(legacySummary.references[index]||[]).map(ref=>ref.material_id)}))}:{};
+  const origin=legacySummary?.provenance;
+  const summaryMetadata=origin?.kind==='codex'?{summary:{processor:'codex',model:origin.model,parameters:{reasoning_effort:origin.reasoning_effort,fast:origin.fast}}}:
+    origin?.kind==='local'?{summary:{processor:origin.processor_id,model:origin.model.state==='known'?origin.model.name:null}}:{};
+  const summaryJobs:FixtureMaterial['jobs']=overrides.theses&&overrides.theses.state!=='disabled'?[{operation:'theses',object_id:id,
+    status:overrides.theses.state==='processing'?'running':overrides.theses.state==='ready'?'done':overrides.theses.state==='error'?'failed':'pending',
+    reason_code:null,reason_message:overrides.theses.error,retry_at:null}]:[];
+  const filterJobs:FixtureMaterial['jobs']=overrides.filter&&overrides.filter.state!=='disabled'?[{operation:'filter',object_id:id,
+    status:overrides.filter.state==='processing'?'running':overrides.filter.state==='ready'?'done':overrides.filter.state==='error'?'failed':'pending',
+    reason_code:null,reason_message:overrides.filter.error,retry_at:null}]:[];
   const row:CardListItem={id,title,feed_id:feed,published_at:published,source_url:url,preview_url:null,
     loading:false,changed:false,hidden:false,post_web_unavailable:false,external_attachment_kinds:[],...cardOverrides};
   const value:FixtureMaterial={id,title,feed_id:feed,published_at:published,source_url:url,
+    platform:'rss',external_id:id,status:'ready',discovered_at:new Date(100000).toISOString(),media_ids:[],
+    content:{blocks},filtered_content:filtered,summarized_content:summarized,processing_metadata:summaryMetadata,linked_publications:[],jobs:[...filterJobs,...summaryJobs],
     source:{kind:'rss',feed_id:feed,source_url:url},availability:'available',
     text:'Текст '+id,description:'',revision_id:'1',completeness:{state:'complete'},loading:false,changed:false,source_deleted:false,
     linked_content:null,reply_preview:null,post_web_unavailable:false,external_attachments:[],media:[],

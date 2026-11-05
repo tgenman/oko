@@ -33,10 +33,10 @@ for(const initial of ['ready','error'] as const) test(`common YouTube publicatio
  await expect(r.page.locator('#text')).toContainText('Raw YouTube captions.');
  await expect.poll(async()=>Boolean((await r.api(`publication/${card.id}`)).theses.result?.points.length)).toBe(true);
  const material=await r.api(`publication/${card.id}`);
- expect(material.media.some(a=>a.role==='attachment'&&a.kind==='image')).toBe(false);
+ expect(material.media.some(a=>a.role==='attachment'&&a.kind==='image'&&a.status==='pending_download'&&a.url===null)).toBe(true);
  await r.page.screenshot({path:artifactPath(`youtube-${initial}-captions-before-cover.png`)});
  await r.setMediaState('ready');
- await expect.poll(async()=>{const m=await r.api(`publication/${card.id}`);return m.media.some(a=>a.role==='attachment'&&a.kind==='image');}).toBe(true);
+ await expect.poll(async()=>{const m=await r.api(`publication/${card.id}`);return m.media.some(a=>a.role==='attachment'&&a.kind==='image'&&a.status==='ready'&&a.url!==null);}).toBe(true);
  await expect(r.page.locator('#images img')).toHaveAttribute('src',/^blob:/);
  await expect(r.page.locator('#text')).toContainText('Raw YouTube captions.');
  await expect(r.page.locator('#theses li')).toHaveCount(1);

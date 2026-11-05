@@ -88,7 +88,8 @@ class MediaFiles:
         resource_reasons=[r['reason'] for r in resources if r.get('reason') and (r.get('status')=='unsupported' or r['reason'].startswith('Внешнее встраивание'))]
         embed_reasons=['External embed not saved locally' for block in content.get('blocks',[]) if block.get('type')=='external_media' and block.get('kind')=='web']
         header['reason']='; '.join(dict.fromkeys(([base] if base else [])+waiting+resource_reasons+embed_reasons))
-        full=not header['reason'] and not any(r.get('external') for r in resources) and not header.get('source_manifest',{}).get('post_web_unavailable')
+        external=any(block.get('type')=='external_media' and block.get('reason')=='public_preview_unavailable' for block in content.get('blocks',[]))
+        full=not header['reason'] and not external and not any(r.get('external') for r in resources) and not header.get('source_manifest',{}).get('post_web_unavailable')
         header['full']=full
         return full
 
@@ -167,7 +168,7 @@ class MediaFiles:
         final = store.root/'media'/row['publication_id']/str(uuid4())
         self.active_paths.update((temporary, final))
         return MediaDownload(row['publication_id'], ExternalReference(ExternalKey(Platform(row['platform']), row['external_id']), row['url']),
-            MediaReference(row['resource_key'], row['source_locator'], row['name'], row['mime_type'], row['size_bytes'], row['resource_identity']), temporary, final)
+            MediaReference(row['resource_key'], row['source_locator'], row['name'], row['mime_type'], row['size_bytes'], row['resource_identity'],source_url=row['source_url']), temporary, final)
 
     def current(self, identity: str, download: MediaDownload, problem_jobs: list[int] | None = None) -> bool:
         problem_column="" if problem_jobs is None else ", (SELECT j.id FROM jobs j WHERE j.kind='download_media' AND j.item=m.id AND j.status='running' AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL)) AS problem_job"
@@ -214,6 +215,7 @@ class MediaFiles:
         previous=store.db.execute('SELECT * FROM media_files WHERE id = %s',(media_id,)).fetchone()
         if not self.current(media_id,download):
             raise ValueError('Media owner changed')
+        assert previous is not None
         row = store.db.execute('SELECT content,status FROM publications WHERE id = %s AND viewed = 0', (download.publication_id,)).fetchone()
         if row is None:
             raise ValueError('Media owner changed')
@@ -222,8 +224,12 @@ class MediaFiles:
         for value in media:
             if value['id']==media_id:
                 value.update(id=identity,status='ready',reason='',name=actual.name,storage_key=str(saved.relative_to(store.root)),size_bytes=size,
-                             source_locator=actual.locator,mime_type=actual.mime_type)
+                             source_locator=actual.locator,source_url=actual.source_url if actual.source_url is not None else value['source_url'],mime_type=actual.mime_type)
         subtitles=youtube_media.subtitle_id(content)==media_id
+        for block in content.get('blocks',[]):
+            if block.get('type')=='media' and block.get('media_id')==media_id:
+                block['source_url']=actual.source_url if actual.source_url is not None else previous['source_url']
+                if actual.publication_url is not None:block['publication_url']=actual.publication_url
         if identity!=media_id:
             if previous and previous['status']=='ready':
                 content['extra']['_reader']['changed']=True
@@ -254,8 +260,8 @@ class MediaFiles:
                 job=store.db.execute("SELECT id FROM jobs WHERE kind='download_media' AND item=%s AND processor_visible",(media_id,)).fetchone()
                 if job:
                     store.problems.capture_processor_history(job['id'],store.wall_clock())
-            store.db.execute("UPDATE media_files SET id = %s , status = 'ready' , storage_key = %s , size_bytes = %s , source_locator = %s , mime_type = %s , name = %s WHERE id = %s",
-                (identity,str(saved.relative_to(store.root)),size,actual.locator,actual.mime_type,actual.name,media_id))
+            store.db.execute("UPDATE media_files SET id = %s , status = 'ready' , storage_key = %s , size_bytes = %s , source_locator = %s , source_url = %s , mime_type = %s , name = %s WHERE id = %s",
+                (identity,str(saved.relative_to(store.root)),size,actual.locator,actual.source_url if actual.source_url is not None else previous['source_url'],actual.mime_type,actual.name,media_id))
             store.db.execute('UPDATE publications SET content = %s , media_ids = %s WHERE id = %s', (json.dumps(stored_content(content),ensure_ascii=False),json.dumps([value['id'] for value in media]),download.publication_id))
             from oko.storage.incomplete_index import save_class
             save_class(store.db,download.publication_id,content)

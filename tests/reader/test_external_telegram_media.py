@@ -34,13 +34,13 @@ def test_local_video_copy_wins_over_later_web_restriction(tmp_path):
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         card=settled(client)[0];url='/api/v3/materials/'+card['id']
-        first=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json();video=next(a for a in [media for media in first['media'] if media['role']=='attachment'] if a['kind']=='video')
+        first=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json();video=next(a for a in [media for media in first['media'] if media['url'] is not None] if a['kind']=='video')
         assert client.get(video['url']).content==b'local-video'
         restricted[0]=True
         client.post(url+'/retry');settled(client,timeout=15)
         second=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()
         assert second['external_attachments']==[]
-        assert client.get(next(a['url'] for a in [media for media in second['media'] if media['role']=='attachment'] if a['kind']=='video')).content==b'local-video'
+        assert client.get(next(a['url'] for a in [media for media in second['media'] if media['url'] is not None] if a['kind']=='video')).content==b'local-video'
         problems=client.get('/api/v3/status/details').json()['problems']
         assert problems['count']==0,problems
 
@@ -58,7 +58,7 @@ def test_lost_local_file_does_not_turn_into_a_normal_external_notice(tmp_path):
         configure_fast_web(client)
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         url='/api/v3/materials/'+settled(client)[0]['id']
-        attachment=[media for media in client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['media'] if media['role'] == 'attachment'][0]
+        attachment=[media for media in client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['media'] if media['url'] is not None][0]
         from tests.support.storage import database
         media_id=attachment['url'].rsplit('/',1)[-1]
         with database(tmp_path) as db:

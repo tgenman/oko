@@ -21,6 +21,11 @@ class ReaderFacts:
     def original(self, identity: str) -> tuple[dict[str, Any], str]:
         return self.storage().original(identity)
 
+    def unified_publication(self, identity: str) -> dict[str, Any]:
+        from oko.storage.unified_publication import project
+        store=self.storage()
+        return project(store.db,store.root,identity,store.clock(),store.wall_clock())
+
     def content_version(self, identity: str) -> str:
         return self.storage().content_version(identity)
 

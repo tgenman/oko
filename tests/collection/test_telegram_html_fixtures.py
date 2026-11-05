@@ -74,5 +74,6 @@ def test_collection_facts_do_not_duplicate_adapter_manifest():
     assert result.source_manifest is not None
     assert result.adapter_content is not None
     assert result.adapter_content.content['blocks']==before['blocks']
-    assert all(key not in result.adapter_content.content['extra']['telegram'] for key in ('manifest','members','description'))
+    assert all(key not in result.adapter_content.content['extra']['telegram'] for key in ('manifest','description'))
+    assert result.adapter_content.content['extra']['telegram']['members']==before['extra']['telegram']['members']
     assert described.content==before

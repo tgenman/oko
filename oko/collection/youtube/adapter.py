@@ -81,13 +81,14 @@ class YouTubeAdapter:
         ref=video_reference(video)
         entry=self.latest.get(video)
         stamp=entry.publication.published if entry and entry.publication.published_known else None
-        cover=MediaReference('youtube:cover','https://i.ytimg.com/vi/'+video+'/hqdefault.jpg','',mime_type='image/jpeg')
+        cover_url='https://i.ytimg.com/vi/'+video+'/hqdefault.jpg'
+        cover=MediaReference('youtube:cover',cover_url,'',mime_type='image/jpeg',source_url=cover_url)
         subtitles=MediaReference('youtube:subtitles','youtube:'+video+':subtitles','',mime_type='text/plain')
         extra: dict[str,Any]=dict(captions='pending')
         description=RSSSource.excerpt(entry.excerpt) if entry else None
         return PublicationContent(PublicationMetadata(ref,entry.title if entry else '',
             datetime.fromtimestamp(stamp,timezone.utc) if stamp is not None else None),
-            dict(blocks=[dict(type='external_media',kind='youtube',url=ref.url),
+            dict(blocks=[dict(type='external_media',kind='video',url=ref.url),
                          dict(type='media',role='cover',ref={'$media':cover.key}),
                          dict(type='media',role='subtitles',ref={'$media':subtitles.key})] + ([dict(type='text',role='description',text=description)] if description is not None else []),
                  extra=dict(youtube=extra)),(cover,subtitles))
