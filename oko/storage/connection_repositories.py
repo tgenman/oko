@@ -2,7 +2,7 @@
 from typing import TYPE_CHECKING, Any
 
 from oko.processing.execution import CodexSettings
-from oko.processing.llamacpp import ProcessorConfig
+from oko.processing.config import ProcessorConfig
 from oko.subscriptions.history import InitialHistory
 
 if TYPE_CHECKING:

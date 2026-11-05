@@ -93,7 +93,7 @@ def test_confirmed_missing_captions_complete_without_model_but_error_does_not(tm
                     assert row[0]=='pending_collection' and 'summary' not in json.loads(row[1])
 
 
-def test_youtube_summary_uses_raw_captions_after_filtering(tmp_path):
+def test_youtube_summary_uses_filtered_captions(tmp_path):
     root=publication_root(tmp_path)
     calls=[]
     class Captions:
@@ -108,7 +108,7 @@ def test_youtube_summary_uses_raw_captions_after_filtering(tmp_path):
         task=json.loads(json.loads(request.content)['messages'][1]['content'])
         calls.append(task)
         if task['operation']=='filter':
-            result={'hidden':False,'removed':['Ad text.'],'reason':'Advertising'}
+            result={'hidden':False,'removed':['Ad text.'] if task['prompt']=='Remove advertising' else [],'reason':'Advertising'}
             return httpx.Response(200,json={'choices':[{'finish_reason':'stop','message':{'role':'assistant','content':json.dumps(result)}}]})
         return native.handler(request)
     with TestClient(create_app(root,token='test',api_only=True,rss_enabled=True,
@@ -121,7 +121,7 @@ def test_youtube_summary_uses_raw_captions_after_filtering(tmp_path):
         card=wait_for(client,lambda:next((card for card in read_all_cards(client, '/api/v3/cards') if client.get('/api/v3/publication/'+card['id']).json()['theses']['result']),None))
         assert any(call['operation']=='filter' for call in calls)
         summary=next(call for call in calls if call['operation']=='theses')
-        assert summary['sources'][0]['text']=='Useful words. Ad text.'
+        assert summary['sources'][0]['text']=='Useful words. '
         from tests.support.storage import database
         from oko.storage.processing_input import digest
         with database(root) as db:
@@ -133,10 +133,18 @@ def test_youtube_summary_uses_raw_captions_after_filtering(tmp_path):
                 assert 'captions' not in youtube and 'captions_digest' not in youtube
             index=next(i for i,b in enumerate(blocks) if b.get('role')=='subtitles')
             media=blocks[index]['media_id']
-        assert metadata['summary']['input_hash']==digest([dict(type='text',role='body',text='Useful words. Ad text.',source_media_id=media,source_block_index=index)])
+        assert metadata['summary']['input_hash']==digest(summary['sources'])
         material=client.get('/api/v3/publication/'+card['id']).json()
         assert material['text']=='Useful words. Ad text.'
         assert material['filter']['result']['text']=='Useful words. '
+        old_summary=material['theses']['result']
+        client.patch('/api/v3/settings/oko/global',json={'prompt_filters':'Keep all'})
+        assert client.post('/api/v3/materials/'+card['id']+'/filter/retry').status_code==200
+        wait_for(client,lambda:client.get('/api/v3/publication/'+card['id']).json()['processing_metadata'].get('filter',{}).get('prompt')=='Keep all')
+        assert client.get('/api/v3/publication/'+card['id']).json()['theses']['result']==old_summary
+        assert client.post('/api/v3/materials/'+card['id']+'/regenerate').status_code==200
+        wait_for(client,lambda:len([call for call in calls if call['operation']=='theses'])==2)
+        assert [call for call in calls if call['operation']=='theses'][-1]['sources'][0]['text']=='Useful words. Ad text.'
 
 
 def test_youtube_rediscovery_keeps_saved_title_media_and_processing(tmp_path):

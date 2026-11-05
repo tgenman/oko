@@ -204,10 +204,10 @@ def test_high_imported_youtube_gets_captions_theses_and_deletes_everything(tmp_p
     kwargs = dict(token='test', rss_enabled=True, rss_transport=transport(downloads),
                   youtube_captions=captions, ai_transport=model_transport(ai))
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
-        feed = subscribe(client)
-        client.patch('/api/v3/feeds/' + feed, json={'importance': 'high'})
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080', 'model': 'local:latest', 'local_execution': True})
         client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'prompt_theses': 'Сохрани границы.'})
+        feed = subscribe(client)
+        client.patch('/api/v3/feeds/' + feed, json={'importance': 'high'})
         presence(client, 'reader')
         material = wait(client, lambda m: m['theses']['result'])
         assert material['text'] == 'Модель принимает только текст. Источники сохраняются точно.'

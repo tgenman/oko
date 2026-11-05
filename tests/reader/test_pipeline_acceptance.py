@@ -19,7 +19,7 @@ def test_postgres_runs_all_workers_http_media_and_restart(tmp_path):
     source=tmp_path/'previous'
     store,item,execution,tasks=worker_library(source)
     asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
-    context=saved(store,item)['processing_metadata']['_pass']
+    context=saved(store,item)['processing_metadata']['filter']
     with store.db:store.db.execute("UPDATE feeds SET cursor='{\"synthetic_cursor\":null}' WHERE id='fixture'")
     store.db.close()
     target=source
@@ -48,7 +48,8 @@ def test_postgres_runs_all_workers_http_media_and_restart(tmp_path):
         assert client.get([media for media in material['media'] if media['url'] is not None][0]['url']).content==b'synthetic-image'
         assert client.get('/api/v3/status').status_code==200
     with database(target) as db:
-        assert json.loads(db.execute('SELECT processing_metadata FROM publications WHERE id=%s',(item,)).fetchone()[0])['_pass']==context
+        metadata=json.loads(db.execute('SELECT processing_metadata FROM publications WHERE id=%s',(item,)).fetchone()[0])
+        assert metadata['filter']==context and '_pass' not in metadata
         assert db.execute("SELECT count(*) FROM jobs WHERE kind='filter' AND status='done'").fetchone()[0]==2
         assert db.execute("SELECT count(*) FROM jobs WHERE kind='theses' AND status='done'").fetchone()[0]==2
         assert db.execute("SELECT count(*) FROM jobs WHERE kind='download_media' AND status='done'").fetchone()[0]==1

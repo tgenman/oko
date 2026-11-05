@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, FastAPI, Request
 from pydantic import ValidationError
 
 from oko.processing.execution import CodexSettings
-from oko.processing.llamacpp import ProcessorConfig
+from oko.processing.config import ProcessorConfig
 from oko.reader.generated import models as wire
 from oko.reader import snapshots as facts
 from oko.reader import projection_v3 as project

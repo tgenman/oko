@@ -11,7 +11,8 @@ import httpx
 from oko.collection.rss import RSSHTTP, feed_title, normalized
 from oko.collection.contracts import SourceError
 from oko.collection.sources import FeedRuntime
-from oko.processing.llamacpp import LlamaCpp, ProcessorConfig
+from oko.processing.llamacpp import LlamaCpp
+from oko.processing.config import ProcessorConfig
 from oko.processing.contracts import ProcessingError
 from oko.processing.execution import CodexSettings
 from oko.processing.codex import Codex, CodexClient, status as codex_status
@@ -395,6 +396,8 @@ class ReaderApplication:
                 raise ActionError('invalid', str(error)) from None
             if changed:
                 await self.jobs.cancel({identity}, invalidate=False)
+            else:
+                await self.jobs.cancel_stale_ai()
             if 'transport' in body.model_fields_set:
                 self._sync_sources()
             return result
@@ -569,8 +572,7 @@ class ReaderApplication:
             with transaction(self.require_store().db):
                 if not self.jobs.retry_filter(item):
                     raise ActionError('missing', 'Фильтрация не включена')
-                self.jobs.invalidate()
-            await self.jobs.cancel(invalidate=False)
+            await self.jobs.cancel_stale_ai()
 
 
     def processing_wait(self, item: str, kind: Literal['filter', 'theses']) -> 'ProcessingWait | None':

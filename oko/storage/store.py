@@ -35,7 +35,7 @@ from oko.storage.media_paths import existing_file
 from oko.storage.job_repository import JobRepository
 from oko.storage.collection_diagnostics import CollectionDiagnostics
 from oko.subscriptions.history import InitialHistory
-from oko.processing.llamacpp import ProcessorConfig
+from oko.processing.config import ProcessorConfig
 from oko.processing.execution import CodexSettings
 
 
@@ -408,16 +408,6 @@ class Store:
             membership_graph.lock_graph(self.db)
             binding = self.subscriptions.telegram.binding(feed)
             effects = CollectionDiagnostics()
-            selected = [r[0] for r in self.db.execute("""SELECT i.id FROM publications i
-                WHERE i.feed_id=%s AND i.processing_metadata::jsonb->'_pass'->>'feed_id'=%s""", (feed,feed))]
-            if selected:
-                publication_links.capture_processing_problems(self,effects,set(selected))
-                affected=[row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE item=ANY(%s) AND kind IN ('filter','theses') AND status!='done' AND (processor_visible OR reason_code='processor-config')",(selected,))]
-                previous=self.problems.prepare_processor_change(affected,self.wall_clock())
-                job_write(self.db, """UPDATE jobs SET status='cancelled',generation=generation+1,input_snapshot=NULL
-                    WHERE item=ANY(%s) AND kind IN ('filter','theses') AND status!='done'""", (selected,))
-                if affected:self.problems.finish_processor_change(affected,previous,self.wall_clock(),removed_outcome='irrelevant')
-                self.db.execute("UPDATE publications SET processing_metadata=(processing_metadata::jsonb-'_pass')::text WHERE id=ANY(%s)", (selected,))
             if self.db.execute("UPDATE feeds SET connection = 'deleting' WHERE id = %s AND connection IS DISTINCT FROM 'deleting'", (feed,)).rowcount:
                 source_changed(self.db)
             for row in self.db.execute("SELECT id FROM jobs WHERE kind='discover' AND (item=%s OR feed_id=%s) AND (reason_message IS NOT NULL OR reason_code IS NOT NULL)",(feed,feed)):
@@ -432,7 +422,7 @@ class Store:
                 UNION SELECT j.item FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m JOIN jobs j ON md5(j.item)=md5(m.id) AND j.item=m.id AND j.kind='fetch' AND j.fetch_youtube_sensitive
                 WHERE m.feed_id=%s AND TRUE""",(feed,feed))}
             if timed_fetch_items:publication_links.capture_fetch_problems(self,effects,timed_fetch_items)
-            self.incomplete_draft.mark_materials(sorted(set(shared) | set(selected)))
+            self.incomplete_draft.mark_materials(sorted(set(shared)))
             publication_links.capture_root_deletion_problems(self,effects,set(shared))
             removed = membership_graph.remove(self.db,feed=feed)
             self.read_versions.memberships_changed(removed)

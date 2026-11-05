@@ -15,21 +15,20 @@ class FilterResults:
         self.store=store
 
     @reading_value
-    def signature(self,item: str) -> str | None:
-        return publication_input.signature(self.store,item,'filter')
+    def input_hash(self,item: str) -> str | None:
+        return publication_input.input_hash(self.store,item,'filter')
 
 
     @reading_value
     def read(self,item: str) -> dict[str,Any]:
-        signature=self.signature(item)
-        if not signature:
-            return dict(status='off',hidden=False,reason='',removed=[])
         row=material_read.item(self.store.db,item)
         metadata=json.loads(row['processing_metadata']).get('filter',{}) if row else {}
-        if row is not None and metadata.get('signature')==signature and not metadata.get('source_url_stale') and not metadata.get('source_title_stale'):
+        if row is not None and metadata and row['filtered_content']!='{}' and not metadata.get('source_url_stale') and not metadata.get('source_title_stale'):
             result=json.loads(row['filtered_content'])
             return dict(status='done',hidden=result.get('hidden',False),
                         reason=result['reason'],removed=[part['text'] for part in result['removed']],error=None)
+        if not self.input_hash(item):
+            return dict(status='off',hidden=False,reason='',removed=[])
         job=material_read.jobs(self.store.db,item).get('filter')
         enabled = publication_input.stage_enabled(self.store, item, 'filter')
         if not enabled and (not job or job['status'] != 'running'):
@@ -38,14 +37,14 @@ class FilterResults:
                     hidden=False,reason='',removed=[])
 
     def request(self,item: str) -> tuple[ProcessingRequest,str,bool] | None:
-        signature=self.signature(item)
-        row=self.store.db.execute("SELECT input_snapshot->>'signature' FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()
-        if not signature or not row or row[0]!=signature:
+        input_hash=self.input_hash(item)
+        row=self.store.db.execute("SELECT input_snapshot->>'input_hash' FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()
+        if not input_hash or not row or row[0]!=input_hash:
             return None
         values,public_ai=publication_input.request_settings(self.store,item)
         request=ProcessingRequest(operation='filter',sources=publication_input.sources(self.store,item,'filter'),
             prompt=values['prompt_filters']['value'],processor=values['processor']['value'],generation=0)
-        return request,signature,public_ai
+        return request,input_hash,public_ai
 
 
     def forget(self,item: str) -> None:

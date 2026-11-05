@@ -89,13 +89,14 @@ def test_new_input_rejects_old_success_and_old_error_without_harming_replacement
 def test_claim_and_saved_context_are_one_transaction_and_survive_restart(tmp_path):
     store,item,execution,tasks=worker_library(tmp_path)
     asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
-    context=saved(store,item)['processing_metadata']['_pass']
-    assert context['feed_id']=='fixture' and context['revision']
+    context=store.db.execute("SELECT input_snapshot FROM jobs WHERE item=%s AND kind='filter'",(item,)).fetchone()[0]
+    assert context['feed_id']=='fixture' and context['input_hash']
     store.db.close()
     reopened=Store(tmp_path,lambda _:None)
     execution._store=reopened
     asyncio.run(pass_worker(workers(execution,tasks)[1],tasks))
-    assert saved(reopened,item)['processing_metadata']['_pass']==context
+    assert reopened.db.execute("SELECT input_snapshot FROM jobs WHERE item=%s AND kind='filter'",(item,)).fetchone()[0]==context
+    assert '_pass' not in saved(reopened,item)['processing_metadata']
     assert saved(reopened,item)['summarized_content']['points']
     reopened.db.close()
 
@@ -109,15 +110,15 @@ def test_other_feed_settings_do_not_change_publication_processing_after_restart(
             store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=False,theses=True,prompt_theses='Other feed rules'))
             store.processing.reconcile_accepted_item(item)
         asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
-        assert saved(store,item)['processing_metadata']['_pass']['feed_id'] == 'fixture'
+        assert store.db.execute("SELECT input_snapshot->>'feed_id' FROM jobs WHERE item=%s AND kind='filter'",(item,)).fetchone()[0]=='fixture'
         store.db.close()
         store = Store(tmp_path,lambda _:None)
         execution._store=store
         asyncio.run(pass_worker(workers(execution,tasks)[1],tasks))
         result = saved(store,item)
         assert result['summarized_content']['points']
-        assert result['processing_metadata']['_pass']['feed_id'] == 'fixture'
-        assert result['processing_metadata']['_pass']['settings']['values']['prompt_theses'] != 'Other feed rules'
+        assert result['processing_metadata']['summary']['prompt'] != 'Other feed rules'
+        assert '_pass' not in result['processing_metadata']
     finally:
         store.db.close()
 
@@ -136,8 +137,8 @@ def test_competing_workers_commit_one_shared_processing_context(tmp_path):
             await asyncio.gather(filter_worker.tick(),summary_worker.tick())
             if tasks._ai:
                 await tasks._ai
-            chosen = saved(store,item)['processing_metadata']['_pass']['feed_id']
-            assert chosen == 'fixture'
+            assert '_pass' not in saved(store,item)['processing_metadata']
+            chosen='fixture'
             assert len([call for call in calls if call.url.path=='/v1/chat/completions']) == 1
             completed = store.db.execute("SELECT kind,input_snapshot->>'feed_id' AS feed FROM jobs WHERE item=%s AND kind IN ('filter','theses') AND status='done'", (item,)).fetchall()
             assert len(completed)==1 and completed[0]['feed']==chosen
@@ -167,7 +168,7 @@ def test_late_result_from_deleted_selected_feed_is_rejected(tmp_path):
             worker = workers(execution,tasks,httpx.MockTransport(model))[0]
             await worker.tick()
             await asyncio.wait_for(entered.wait(),2)
-            assert saved(store,item)['processing_metadata']['_pass']['feed_id'] == second
+            assert store.db.execute("SELECT input_snapshot->>'feed_id' FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()[0]==second
             with transaction(store.db):
                 store.remove_feed(second)
                 store.jobs.remove_feed(second,{item})
@@ -175,7 +176,7 @@ def test_late_result_from_deleted_selected_feed_is_rejected(tmp_path):
             await tasks._ai
             result = saved(store,item)
             assert result['filtered_content'] == {}
-            assert result['processing_metadata'].get('_pass',{}).get('feed_id') != second
+            assert '_pass' not in result['processing_metadata']
         finally:
             store.db.close()
     asyncio.run(scenario())
@@ -274,18 +275,18 @@ def test_linked_source_privacy_change_reconciles_parent_job_atomically(tmp_path)
             memberships.add(store.db,other,'linked',newly_created=True)
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES (%s,'linked')", (item,))
             store.processing.reconcile_accepted_item(item)
-        before = store.db.execute("SELECT generation,input_snapshot->>'signature' FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()[:]
+        before = store.db.execute("SELECT generation,input_snapshot->>'input_hash' FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()[:]
         store.processing.background = True
         def change():
             store.subscriptions.update_feed(other,FeedPatch(public_ai=False))
             store.settings_changed('feed',other)
-            after = store.db.execute("SELECT generation,input_snapshot->>'signature' FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()
-            assert after[0] > before[0] and after[1] != before[1]
+            after = store.db.execute("SELECT generation,input_snapshot->>'input_hash' FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()
+            assert tuple(after)==before
         with pytest.raises(ValueError, match='rollback'):
             with transaction(store.db):
                 change()
                 raise ValueError('rollback')
-        assert store.db.execute("SELECT generation,input_snapshot->>'signature' FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()[:] == before
+        assert store.db.execute("SELECT generation,input_snapshot->>'input_hash' FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()[:] == before
         with transaction(store.db):
             change()
     finally:

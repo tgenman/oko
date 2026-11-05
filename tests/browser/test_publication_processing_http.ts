@@ -23,5 +23,11 @@ test('latest publication keeps accepted theses after failed regeneration and hid
  await expect.poll(async()=>{const cards=(await r.api('cards')).items;return (await r.api(`publication/${cards[0].id}`)).theses.state;}).toBe('error');
  await expect(summary).toHaveText(accepted!);await summary.scrollIntoViewIfNeeded();
  await r.page.screenshot({path:artifactPath('publication-processing-failed-regeneration.png')});
- // Settings changes and manual rebuild are covered by tickets #215 and #216.
+ await r.page.locator('#settings-open').click();await editSetting(r.page,'prompt_filters');
+ await r.page.locator('#setting-prompt_filters').fill('');await r.page.getByRole('button',{name:'Save',exact:true}).click();
+ await expect(r.page.locator('#settings-message')).toHaveText('Setting saved');
+ await r.page.locator('#settings-close').click();
+ await expect(summary).toHaveText(accepted!);
+ await expect(r.page.locator('#filter-status')).toContainText('Реклама');
+ await r.page.screenshot({path:artifactPath('publication-processing-settings-retained.png')});
 });

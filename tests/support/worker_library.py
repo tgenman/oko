@@ -4,7 +4,7 @@ from tests.support.storage import Store, ensure_fixture
 from tests.support.legacy_source import Publication
 from tests.support.synthetic_material import material as Material
 from oko.subscriptions.subscriptions import Overrides
-from oko.processing.llamacpp import ProcessorConfig
+from oko.processing.config import ProcessorConfig
 from oko.execution import Execution
 from oko.workers.control import JobControl
 from oko.workers.processing import FilterWorker,SummaryWorker

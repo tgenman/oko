@@ -120,4 +120,5 @@ MIGRATIONS = (
     Migration(112, 'remove-preview-copies', (Path(__file__).parent / 'postgres' / '112-remove-preview-copies.sql').read_text()),
     Migration(113, 'remove-reader', (Path(__file__).parent / 'postgres' / '113-remove-reader.sql').read_text()),
     Migration(114, 'remove-caption-copies', (Path(__file__).parent / 'postgres' / '114-remove-caption-copies.sql').read_text()),
+    Migration(115, 'processing-input-and-provenance', (Path(__file__).parent / 'postgres' / '115-processing-input-and-provenance.sql').read_text()),
 )

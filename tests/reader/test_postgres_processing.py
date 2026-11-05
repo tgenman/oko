@@ -168,7 +168,7 @@ def test_disabled_theses_without_result_are_reported_disabled_over_http(postgres
         assert response.json()['theses']['result'] is None
 
 
-def test_http_rule_change_rejects_old_model_response_and_starts_replacement(postgres_url, tmp_path):
+def test_http_rule_change_keeps_started_attempt(postgres_url, tmp_path):
     import threading
     import psycopg
     import httpx
@@ -205,11 +205,11 @@ def test_http_rule_change_rejects_old_model_response_and_starts_replacement(post
             response = client.patch('/api/v3/settings/oko/global',json={'prompt_filters':'New rules'})
             assert response.status_code == 200, response.text
             release.set()
-            wait_for(client,lambda: len(requests)>=2 and client.get('/api/v3/publication/'+item).json()['filter']['state']=='ready')
+            wait_for(client,lambda: client.get('/api/v3/publication/'+item).json()['filter']['state']=='ready')
             with psycopg.connect(postgres_url) as db:
                 filtered = json.loads(db.execute('SELECT filtered_content FROM publications WHERE id=%s',(item,)).fetchone()[0])
-            assert filtered['hidden'] is False
-            assert requests[0]['prompt'] != requests[1]['prompt']
+            assert filtered['hidden'] is True
+            assert len(requests)==1 and requests[0]['prompt']=='Keep useful text'
         finally:
             release.set()
 
@@ -276,7 +276,7 @@ def test_interrupted_attempt_uses_new_model_on_next_attempt(postgres_url, tmp_pa
             assert job is not None
             prepared = worker.service.prepare(item, 'filter')
             assert prepared.input is not None
-            store.jobs.save_execution(job, prepared.input.signature,
+            store.jobs.save_execution(job, prepared.input.input_hash,
                 {'processor':'codex','model':'test-small','reasoning_effort':'low','fast':False})
         store.configure_codex(CodexSettings.model_validate(configuration('test-large', 'high')))
     finally:

@@ -86,7 +86,8 @@ def test_metadata_updates_reuse_caption_theses_across_restart(tmp_path, prompt_f
         assert summary_calls() == 1 and captions.calls == [VIDEO]
         request = next(r for r in calls if r.url.path == '/v1/chat/completions')
         task = json.loads(json.loads(request.content)['messages'][1]['content'])
-        assert task['sources'][0]['text'] == original['text']
+        expected=' Источники сохраняются точно.' if prompt_filters else original['text']
+        assert task['sources'][0]['text'] == expected
 
         for field, value in [('title', 'Updated title'), ('preview', PNG + b'changed')]:
             metadata[field] = value

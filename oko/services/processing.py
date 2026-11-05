@@ -3,7 +3,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from typing import Any, Protocol
 from oko.processing.execution import CodexSettings
-from oko.processing.llamacpp import ProcessorConfig
+from oko.processing.config import ProcessorConfig
 from oko.domain.processing import Kind, ProcessingInput, ProcessingPreparation
 from oko.services.access import repository_access
 from oko.storage.reading import reading_snapshot
@@ -27,6 +27,7 @@ class ProcessingOperations(Protocol):
     def regenerate(self, item: str, kind: Kind) -> bool: ...
     def reconcile(self) -> None: ...
     def feed(self, item: str) -> str: ...
+    def public_allowed(self, item: str) -> bool: ...
 
 
 class ProcessingService:
@@ -38,7 +39,7 @@ class ProcessingService:
     @reading_snapshot()
     def candidates(self, kind: Kind, *, item: str) -> list[tuple[str, str | None, bool, str]]:
         repository=self._repository()
-        return [(identity,signature,repository.satisfied(identity,kind),repository.revision(identity)) for identity,signature in repository.candidates(kind,item=item)]
+        return [(identity,input_hash,repository.satisfied(identity,kind),repository.revision(identity)) for identity,input_hash in repository.candidates(kind,item=item)]
 
     @repository_access
     def prepare(self, item: str, kind: Kind) -> ProcessingPreparation:
@@ -76,6 +77,10 @@ class ProcessingService:
     @repository_access
     def reconcile(self) -> None:
         self._repository().reconcile()
+
+    @repository_access
+    def public_allowed(self, item: str) -> bool:
+        return self._repository().public_allowed(item)
 
     @repository_access
     def feed(self, item: str) -> str:

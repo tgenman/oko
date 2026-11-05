@@ -633,7 +633,7 @@ def test_legacy_title_migration_keeps_parent_processing_and_job_snapshot(connect
         db.execute("INSERT INTO publications(id,platform,external_id,title,published_known,discovered_at,content,processing_metadata) VALUES ('root','rss','root','Root',0,1,'{}',%s),('article','other_web','article','Canonical title',0,1,%s,'{}')", (json.dumps(metadata),json.dumps(document)))
         db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root','article')")
         db.execute("INSERT INTO jobs(kind,item,status,input_snapshot) VALUES ('filter','root','done',%s)", (Jsonb(snapshot),))
-        migrate(db, MIGRATIONS)
+        migrate(db, MIGRATIONS[:103])
         assert json.loads(db.execute("SELECT processing_metadata FROM publications WHERE id='root'").fetchone()[0]) == metadata
         assert db.execute("SELECT input_snapshot FROM jobs WHERE kind='filter' AND item='root'").fetchone()[0] == snapshot
         assert db.execute("SELECT title FROM publications WHERE id='article'").fetchone()[0] == 'Canonical title'

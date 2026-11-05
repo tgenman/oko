@@ -419,19 +419,28 @@ class Publications:
     def provenance(self, item: str, kind: str) -> dict[str,Any] | None:
         row=material_read.item(self.store.db,item)
         metadata=json.loads(row['processing_metadata']).get('filter' if kind=='filter' else 'summary',{}) if row else {}
-        return {key:metadata[key] for key in ('processor','model','reasoning_effort','fast') if key in metadata} or None
+        if metadata.get('processor') is None:
+            return None
+        result={key:metadata[key] for key in ('processor','model','reasoning_effort','fast') if key in metadata}
+        if metadata['processor']=='codex':
+            parameters=metadata.get('parameters') or {}
+            for key in ('reasoning_effort','fast'):
+                if key not in result and key in parameters:result[key]=parameters[key]
+        return result
 
-    def accept_result(self, item: str, kind: str, signature: str, result: dict[str,Any], origin: dict[str,Any] | None) -> None:
+    def accept_result(self, item: str, kind: str, input_hash: str, result: dict[str,Any], origin: dict[str,Any] | None, *, prompt: str | None = None) -> None:
         """Publish a validated result and its provenance in the caller's transaction."""
         row=expect_row(self.store.db.execute('SELECT processing_metadata, title, platform FROM publications WHERE id = %s',(item,)).fetchone())
         content=publication_input.content(self.store,item)
         metadata=json.loads(row[0])
         operation='filter' if kind=='filter' else 'summary'
-        input_content=publication_input.selected_content(self.store,item,kind)
-        metadata[operation]=dict(input_hash=publication_input.digest(publication_input.blocks(input_content or content)),signature=signature,
-            source_title=None if row['platform']=='youtube' else row['title'],
-            settings_hash=publication_input.digest(publication_input.settings(self.store,item)),
-            completed_at=datetime.fromtimestamp(self.store.wall_clock(),timezone.utc).isoformat(),**(origin or {}))
+        if origin and origin.get('processor')=='codex':
+            origin={key:value for key,value in origin.items() if key not in ('reasoning_effort','fast')} | {
+                'parameters':{'reasoning_effort':origin.get('reasoning_effort'),'fast':origin.get('fast')}}
+        metadata[operation]=dict(input_hash=input_hash,input_hash_format='sources-v1',
+            prompt=prompt,source_title=None if row['platform']=='youtube' else row['title'],
+            completed_at=datetime.fromtimestamp(self.store.wall_clock(),timezone.utc).isoformat(),
+            **({'processor':None,'model':None,'parameters':{}} | (origin or {})))
         if kind=='filter':
             filtered=publication_input.filtered(content,item,result)
             self.store.db.execute('UPDATE publications SET filtered_content = %s , status = %s WHERE id = %s',
@@ -441,9 +450,9 @@ class Publications:
             self.store.db.execute("UPDATE publications SET summarized_content = %s , status = 'ready' WHERE id = %s",(json.dumps(summarized,ensure_ascii=False),item))
         self.store.db.execute('UPDATE publications SET processing_metadata = %s WHERE id = %s',(json.dumps(metadata,ensure_ascii=False),item))
 
-    def complete_empty(self, item: str, kind: str, signature: str) -> None:
+    def complete_empty(self, item: str, kind: str, input_hash: str) -> None:
         result=dict(hidden=False,removed=[],reason='Нет текста для обработки') if kind=='filter' else dict(points=[])
-        self.accept_result(item,kind,signature,result,None)
+        self.accept_result(item,kind,input_hash,result,None)
         row=expect_row(self.store.db.execute('SELECT processing_metadata FROM publications WHERE id = %s',(item,)).fetchone())
         metadata=json.loads(row[0])
         metadata['filter' if kind=='filter' else 'summary']['reason']='no_input'
@@ -476,9 +485,9 @@ class Publications:
         jobs={kind:row['status'] for kind,row in material_read.jobs(self.store.db,item).items() if kind in ('filter','theses')}
         if filtered['hidden']:
             status = 'filter_out'
-        elif filtered['status'] not in ('off', 'done') or self.store.filters.signature(item) and jobs.get('filter') in ('pending','running'):
+        elif filtered['status'] not in ('off', 'done') or self.store.filters.input_hash(item) and jobs.get('filter') in ('pending','running'):
             status = 'pending_filtering'
-        elif self.store.processing.theses.signature(item) and (publication_input.stage_enabled(self.store, item, 'theses') or jobs.get('theses') == 'running') and self.store.processing.theses.read(item) is None and json.loads(row['processing_metadata']).get('summary',{}).get('reason')!='no_input':
+        elif self.store.processing.theses.input_hash(item) and (publication_input.stage_enabled(self.store, item, 'theses') or jobs.get('theses') == 'running') and self.store.processing.theses.read(item) is None and json.loads(row['processing_metadata']).get('summary',{}).get('reason')!='no_input':
             status = 'pending_summary'
         else:
             status = 'ready'
@@ -490,7 +499,7 @@ class Publications:
             row = material_read.item(self.store.db,item)
             if row is None or row['platform'] is None:
                 return False
-            current = publication_input.input_hash(self.store,item) if row['feed_id'] is not None and not row['viewed'] else None
+            current = publication_input.source_revision_hash(self.store,item) if row['feed_id'] is not None and not row['viewed'] else None
             content = publication_input._reading_content(self.store,item) if 'blocks' in row['content'] else None
             available = bool(row['status']!='pending_collection' and content is not None and not publication_input.awaiting_input(self.store,item,content)
                              and not publication_input.awaiting_linked_input(self.store,item,content))
@@ -502,11 +511,16 @@ class Publications:
         saved_filter = metadata.get('filter',{})
         saved_summary = metadata.get('summary',{})
         prior_source = saved_filter.get('input_hash')
+        source_format=saved_filter.get('input_hash_format')
         if prior_source is None and row['filtered_content']=='{}':
             prior_source = saved_summary.get('input_hash')
+            source_format=saved_summary.get('input_hash_format')
+        if source_hash is not None and source_format=='sources-v1':
+            source_hash=publication_input.stage_input_hash(self.store,item,'filter' if saved_filter else 'theses')
         saved_title = saved_filter.get('source_title', saved_summary.get('source_title'))
         title_changed = row['platform'] != 'youtube' and saved_title is not None and saved_title != row['title']
-        if source_hash is not None and ((prior_source is not None and source_hash != prior_source) or title_changed):
+        stale_source=any(section.get('source_url_stale') or section.get('source_title_stale') for section in (saved_filter,saved_summary))
+        if source_hash is not None and not stale_source and ((prior_source is not None and source_hash != prior_source) or title_changed):
             self.store.db.execute("UPDATE publications SET filtered_content='{}',summarized_content='{}' WHERE id=%s", (item,))
             metadata.pop('filter',None)
             metadata.pop('summary',None)

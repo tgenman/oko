@@ -129,8 +129,8 @@ class ProcessingState:
         from oko.storage.reading import reading_snapshot
         repository = ProcessingRepository(self.store)
         with reading_snapshot():
-            candidates = [(identity, signature, repository.satisfied(identity,'theses'), repository.revision(identity))
-                          for identity,signature in repository.candidates('theses',item=item)]
+            candidates = [(identity, input_hash, repository.satisfied(identity,'theses'), repository.revision(identity))
+                          for identity,input_hash in repository.candidates('theses',item=item)]
         self.store.jobs.reconcile('theses',candidates)
         self.store.publications.status(item)
 
@@ -195,7 +195,7 @@ class ProcessingState:
         self.store.publications.reconcile(item)
         for kind in ('filter','theses'):
             with reading_snapshot():
-                candidates = [(identity, signature, repository.satisfied(identity,kind), repository.revision(identity))
-                              for identity,signature in repository.candidates(kind,item=item)]
+                candidates = [(identity, input_hash, repository.satisfied(identity,kind), repository.revision(identity))
+                              for identity,input_hash in repository.candidates(kind,item=item)]
             self.store.jobs.reconcile(kind,candidates,preserve_cancelled=preserve_cancelled)
         self.store.publications.status(item)

@@ -5,7 +5,7 @@ from typing import Any
 from oko.storage.publication_owners import owned_ids, owner_expr
 from oko.storage.store import Store
 from oko.domain.reader import WorkSummary
-from oko.processing.llamacpp import ProcessorConfig
+from oko.processing.config import ProcessorConfig
 from oko.storage.problems import CommandRecord
 from oko.storage import material_read, publication_links
 from oko.storage.reading import reader_now

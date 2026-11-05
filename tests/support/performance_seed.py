@@ -5,7 +5,7 @@ import argparse
 import json
 
 from tests.support.synthetic_material import material as Material
-from oko.processing.llamacpp import ProcessorConfig
+from oko.processing.config import ProcessorConfig
 from tests.support.storage import Store
 from oko.subscriptions.subscriptions import Overrides
 from tests.support.library_templates import templates
