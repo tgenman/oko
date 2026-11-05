@@ -41,14 +41,14 @@ class AtomHistory:
         self.transport=transport
 
     async def fetch(self, channel: str, count: int, state: dict[str, Any]) -> dict[str, Any]:
-        from oko.collection.rss import RSSSource,entries
-        source=RSSSource('https://www.youtube.com/feeds/videos.xml?channel_id='+channel,0,self.transport)
+        from oko.collection.rss import RSSHTTP,entries
+        source=RSSHTTP(self.transport)
         found={}
         for kind in ('UULF','UULV'):
             raw,url,_=await source.download('https://www.youtube.com/feeds/videos.xml?playlist_id='+kind+channel[2:])
             for entry in entries(raw,url):
-                if entry.publication.id.startswith('yt:video:'):
-                    found[entry.publication.id]=dict(id=entry.publication.id.removeprefix('yt:video:'),title=entry.title)
+                if entry.id.startswith('yt:video:'):
+                    found[entry.id]=dict(id=entry.id.removeprefix('yt:video:'),title=entry.title)
         return dict(entries=list(found.values())[:count],state={},complete=True,error=None,requests=2)
 
 

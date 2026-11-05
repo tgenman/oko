@@ -10,7 +10,7 @@ import httpx
 
 from oko.collection.adapters import AdapterErrorKind,AdapterException,AdapterIssue,ExternalKey,ExternalReference,MediaReference,Platform,PublicationContent,PublicationMetadata
 from oko.collection.adapter_errors import failure
-from oko.collection.contracts import SourceError,SourceDeleted
+from oko.collection.contracts import SourceError,SourceUnavailable
 from oko.collection.rss import normalized
 from oko.collection.telegram.media import Downloader
 
@@ -66,7 +66,7 @@ class _Content:
     def file(self, url: str, role: str, *, name: str = '', mime: str | None = None, caption: str = '') -> None:
         self.flush()
         key='web:'+str(len(self.media))+':'+role
-        self.media.append(MediaReference(key,url,name,mime,source_url=url))
+        self.media.append(MediaReference(key,url,name,mime,source_url=url,publication_url=self.base))
         self.blocks.append(dict(type='media',ref={'$media':key},role=role,caption=caption))
 
     def walk(self, node: Any) -> None:
@@ -92,7 +92,7 @@ class _Content:
             self.flush()
             url=self.address(node.get('src'))
             if url:
-                self.blocks.append(dict(type='external_media',kind='youtube' if urlsplit(url).hostname in ('www.youtube.com','youtube.com','youtu.be') else 'web',url=url))
+                self.blocks.append(dict(type='external_media',kind='video' if urlsplit(url).hostname in ('www.youtube.com','youtube.com','youtu.be') else 'web',url=url))
                 self.blocks.append(dict(type='text',role='body',text='Внешнее встраивание не сохранено локально: '+url))
             return
         if tag=='a':
@@ -165,16 +165,12 @@ class WebAdapter:
                 error.label,error.code='Не удалось загрузить статью','article-unavailable'
             cause=error.__cause__
             if isinstance(cause,httpx.HTTPStatusError) and cause.response.status_code in (404,410):
-                error=SourceDeleted()
+                error=SourceUnavailable()
             raise failure(error,publication,scope='web:'+urlsplit(publication.url).netloc) from error
 
     async def download_media(self, publication: ExternalReference, media: MediaReference, output: BinaryIO) -> MediaReference:
-        current=await self.fetch(publication)
-        actual=next((value for value in current.media if value.key==media.key),None)
-        if actual is None or actual.locator!=media.locator:
-            raise AdapterException(AdapterIssue('media_changed','Ресурс статьи изменился',AdapterErrorKind.media_changed,publication,media.key))
-        attachment=any(block.get('ref')=={'$media':media.key} and block.get('role')=='attachment' for block in current.content['blocks'])
+        attachment=bool(re.fullmatch(r'web:[0-9]+:attachment',media.key))
         try:
-            return await Downloader(self.transport).write_media(actual,output,allow_empty=attachment)
+            return await Downloader(self.transport).write_media(media,output,allow_empty=attachment)
         except SourceError as error:
-            raise failure(error,publication,media.key,'web:media:'+urlsplit(actual.locator).netloc) from error
+            raise failure(error,publication,media.key,'web:media:'+urlsplit(media.locator).netloc) from error

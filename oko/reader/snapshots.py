@@ -398,7 +398,6 @@ class Material(WireModel):
     ai: AI | None | MISSING = MISSING
     attachments: list[Attachment] | MISSING = Field(default=MISSING, title='Attachments')
     captions: Literal['available', 'not_requested', 'pending', 'running', 'unavailable', 'error'] | None | MISSING = Field(default=MISSING, title='Captions')
-    changed: StrictBool | MISSING = Field(default=MISSING, title='Changed')
     complete: StrictBool = Field(..., title='Complete')
     description: StrictStr | MISSING = Field(default=MISSING, title='Description')
     display_text: StrictStr | MISSING = Field(default=MISSING, title='Display Text')
@@ -416,7 +415,6 @@ class Material(WireModel):
     published: StrictFloat = Field(..., title='Published')
     published_known: StrictBool | MISSING = Field(default=MISSING, title='Published Known')
     reason: StrictStr | MISSING = Field(default=MISSING, title='Reason')
-    source_deleted: StrictBool | MISSING = Field(default=MISSING, title='Source Deleted')
     text: StrictStr = Field(..., title='Text')
     theses: Summary | None | MISSING = MISSING
     title: StrictStr = Field(..., title='Title')

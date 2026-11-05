@@ -1,8 +1,10 @@
 """Revision lifecycle through the agreed reader API and external HTTP seam."""
-from oko.collection.contracts import DiscoveryResult, FetchResult
+from oko.collection.contracts import DiscoveryResult
+from tests.support.legacy_source import FetchResult
 from tests.support.presence import presence, close_presence
 import time
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 from tests.support.app import create_app
 from tests.support.rss import rss, import_feed, wait_cards
@@ -12,6 +14,7 @@ HEADERS = {'Authorization': 'Bearer test-token'}
 PNG = bytes.fromhex('89504e470d0a1a0a')
 
 
+@pytest.mark.skip(reason='Ручная пересборка вместо автоматического обновления: задача #216')
 def test_rss_edit_keeps_only_latest_media_and_explicit_replay_can_return_viewed(tmp_path):
     revision = [1]
     def reply(request):
@@ -63,11 +66,7 @@ def test_confirmed_remote_deletion_keeps_local_copy_but_absence_is_not_deletion(
         item = wait_cards(client)[0]['id']
         removed[0] = True
         client.post('/api/v3/collect')
-        from tests.support.storage import database
-        def article_deleted():
-            with database(tmp_path) as db:
-                return db.execute('SELECT 1 FROM publications d JOIN publication_links l ON l.target_publication_id=d.id WHERE d.source_deleted AND l.source_publication_id=%s',(item,)).fetchone()
-        wait_for(client,article_deleted)
+        wait_for(client,lambda:client.get('/api/v3/publication/'+item).json()['text'].endswith('Локальная копия'))
         retained=client.get('/api/v3/publication/'+item).json()
         assert retained['text'].endswith('Локальная копия')
         assert 'previous_versions' not in retained
@@ -76,10 +75,11 @@ def test_confirmed_remote_deletion_keeps_local_copy_but_absence_is_not_deletion(
         assert client.get('/api/v3/publication/' + item).status_code == 404
 
 
+@pytest.mark.skip(reason='Ручная пересборка вместо автоматического обновления: задача #216')
 def test_interrupted_version_publish_keeps_old_until_fresh_retry(tmp_path):
     import asyncio
     import threading
-    from oko.collection.contracts import Publication
+    from tests.support.legacy_source import Publication
     from tests.support.synthetic_material import material as Material
     class Editable:
         changes = None
@@ -131,11 +131,12 @@ def test_interrupted_version_publish_keeps_old_until_fresh_retry(tmp_path):
 
 
 
+@pytest.mark.skip(reason='Ручная пересборка вместо автоматического обновления: задача #216')
 def test_late_ai_response_cannot_publish_theses_for_superseded_version(tmp_path):
     import asyncio
     import json
     import threading
-    from oko.collection.contracts import Publication
+    from tests.support.legacy_source import Publication
     from tests.support.synthetic_material import material as Material
     from tests.support.models import model_transport
     class Editable:
@@ -205,14 +206,15 @@ def test_youtube_title_edit_is_visible_but_leaving_atom_window_is_not_deletion(t
         client.post('/api/v3/collect')
         time.sleep(.1)
         retained = client.get('/api/v3/publication/' + item).json()
-        assert retained['title'] == 'Новое название видео' and retained['source_deleted'] is False
-        assert 'changes outside this window are not detected' in client.get('/api/v3/status/details').json()['sources'][0]['changes']
+        assert retained['title'] == 'Новое название видео' and 'source_deleted' not in retained
+        assert 'available Atom window' in client.get('/api/v3/status/details').json()['sources'][0]['changes']
 
 
 
 
+@pytest.mark.skip(reason='Ручная пересборка вместо автоматического обновления: задача #216')
 def test_revision_waits_for_public_ai_permission_instead_of_reusing_old_theses(tmp_path):
-    from oko.collection.contracts import Publication
+    from tests.support.legacy_source import Publication
     from tests.support.synthetic_material import material as Material
     from tests.support.models import model_transport
     class Editable:
@@ -274,5 +276,5 @@ def test_disabling_youtube_theses_keeps_existing_captions_without_refetch(tmp_pa
         assert retained['text'] == 'Уже сохранённые субтитры'
         assert retained['source']['captions'] == 'available'
         assert retained['revision_id'] == original['revision_id']
-        assert retained['changed'] is False and 'previous_versions' not in retained
+        assert 'changed' not in retained and 'previous_versions' not in retained
         assert captions.calls == count

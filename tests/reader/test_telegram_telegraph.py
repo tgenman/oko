@@ -47,7 +47,7 @@ def test_direct_articles_are_complete_local_and_unique_without_recursive_crawlin
         assert len([media for media in material['media'] if media['url'] is not None]) == 1
         assert client.get([media for media in material['media'] if media['url'] is not None][0]['url']).content == b'article-photo'
         assert not any('example.org' in url for url in calls)
-        assert sum('/getPage/One?' in url for url in calls) == 2  # Metadata, then media locator validation.
+        assert sum('/getPage/One?' in url for url in calls) == 1  # Saved source URL is sufficient for media download.
         assert sum('/getPage/Two?' in url for url in calls) == 1
         from tests.support.storage import database
         with database(tmp_path) as db:
@@ -114,7 +114,7 @@ def test_article_completion_and_retry_keep_previous_copy_without_false_edit(tmp_
         client.post('/api/v3/materials/'+identity+'/retry')
         settled(client)
         changed = client.get('/api/v3/publication/'+identity).json()
-        assert 'Version two' in changed['text'] and 'previous_versions' not in changed
+        assert 'Version one' in changed['text'] and 'previous_versions' not in changed
 
 
 def test_late_article_after_feed_deletion_cannot_download_media_or_publish(tmp_path):

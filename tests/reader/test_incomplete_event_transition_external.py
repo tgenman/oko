@@ -8,8 +8,8 @@ from oko.storage.transaction import transaction
 def seed(store,status):
     with store.db:
         store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
-        content=json.dumps({'extra':{'_reader':{'full':False,'reason':'partial'}}})
-        store.db.execute("INSERT INTO publications(id,platform,external_id,url,published_at,viewed,content) VALUES ('p','rss','p','https://p.test',1,0,%s)",(content,))
+        content=json.dumps({'blocks':[{'type':'text','role':'body','text':'partial'}],'extra':{'_reader':{'full':False,'reason':'partial'}}})
+        store.db.execute("INSERT INTO publications(id,platform,external_id,url,published_at,viewed,content,status) VALUES ('p','other_web','https://p.test','https://p.test',1,0,%s,'pending_collection')",(content,))
         store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
         job=store.db.execute("INSERT INTO jobs(kind,item,status,reason_message,reason_code,generation) VALUES ('fetch','p',%s,NULL,NULL,1) RETURNING id",(status,)).fetchone()[0]
         from oko.storage.incomplete_group_draft import save_keys
@@ -54,7 +54,7 @@ def test_claim_incomplete_event_rolls_back_and_clears_ephemeral_state(tmp_path,p
 
 
 def test_content_becoming_full_finishes_incomplete_before_status_get(tmp_path,postgres_url):
-    from oko.collection.contracts import Publication
+    from tests.support.legacy_source import Publication
     from tests.support.synthetic_material import material as Material
     from tests.support.source import StructuredSource
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
@@ -65,7 +65,7 @@ def test_content_becoming_full_finishes_incomplete_before_status_get(tmp_path,po
         material=StructuredSource(None).describe(publication,Material('Full','Complete',full=True))
         with transaction(store.db):
             job_for_collection=running_collection_job(store,'fetch','p')
-            _,effects=store.collected_publication.accept('p',material);apply_simulated_collection(store,effects,job=job_for_collection)
+            _,effects=store.collected_publication.accept_content('p',material.adapter_content);apply_simulated_collection(store,effects,job=job_for_collection)
         assert tuple(store.db.execute('SELECT outcome,finished IS NOT NULL FROM reader_problems WHERE id=%s',(old,)).fetchone())==('resolved',True)
     finally:store.db.close()
 
@@ -78,7 +78,7 @@ def test_legacy_full_flag_does_not_create_problem_for_ready_publication(tmp_path
         with transaction(store.db):
             raw=store.db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()[0]
             content=raw if isinstance(raw,dict) else json.loads(raw)
-            content['extra']['_reader']['full']=False
+            content['extra'].setdefault('_reader',{})['full']=False
             content['extra']['_reader']['reason']='stale legacy value'
             store.db.execute("UPDATE publications SET status='ready',content=%s WHERE id=%s",(json.dumps(content),item))
             save_class(store.db,item,content)
@@ -123,7 +123,7 @@ def test_status_change_recomputes_incomplete_diagnostic_without_content_rewrite(
 
 def test_restart_recovers_pending_problem_from_status_not_legacy_flags(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    seed(store,'done')
+    seed(store,'failed')
     with store.db:
         raw=store.db.execute("SELECT content FROM publications WHERE id='p'").fetchone()[0]
         content=raw if isinstance(raw,dict) else json.loads(raw)

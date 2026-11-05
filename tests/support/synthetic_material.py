@@ -1,7 +1,7 @@
 """Compact synthetic source data; text exists only in test fixtures."""
 from dataclasses import dataclass
 from typing import Any
-from oko.collection.contracts import Material
+from tests.support.legacy_source import Material
 from oko.collection.adapters import ExternalKey, ExternalReference, Platform, PublicationContent, PublicationMetadata
 
 

@@ -13,7 +13,7 @@ import uuid
 from anyio import EndOfStream, WouldBlock
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from oko.collection.contracts import SourceDeleted
+from oko.collection.contracts import SourceUnavailable
 
 
 class BrowserError(BaseModel):
@@ -160,7 +160,7 @@ class Journal:
         self.flush()
 
     def capture(self, error: BaseException, source: str) -> str | None:
-        if isinstance(error, (asyncio.CancelledError, SourceDeleted)) or getattr(error, 'diagnostic_skip', False):
+        if isinstance(error, (asyncio.CancelledError, SourceUnavailable)) or getattr(error, 'diagnostic_skip', False):
             return None
         chain: list[BaseException] = []
         current: BaseException | None = error
@@ -209,7 +209,7 @@ capture_scope: ContextVar[str] = ContextVar('oko_debug_scope', default='')
 
 def record_caught(source: str) -> None:
     journal, error = active_journal.get(), sys.exception()
-    if error is not None and not isinstance(error, (SourceDeleted, asyncio.CancelledError)):
+    if error is not None and not isinstance(error, (SourceUnavailable, asyncio.CancelledError)):
         # Partial adapters deliberately catch errors. Retain their original
         # exception for the owning collection attempt as well as the journal.
         from oko.collection.request_observation import active_capture

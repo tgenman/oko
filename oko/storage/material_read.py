@@ -43,7 +43,7 @@ def current(db: Database) -> Inputs | None:
     return value if value is not None and value.db is db else None
 
 
-_ITEM = f"SELECT i.*, {owner_expr('i')} AS reader_feed_id, CASE WHEN i.status='filter_out' THEN 1 ELSE 0 END AS reader_hidden FROM publications i"
+_ITEM = f"SELECT i.*, COALESCE(i.content #> '{{extra,telegram,members}}','[]'::jsonb)::text AS members, {owner_expr('i')} AS reader_feed_id, CASE WHEN i.status='filter_out' THEN 1 ELSE 0 END AS reader_hidden FROM publications i"
 _FEED_COLUMNS = ','.join('f.' + name for name in READER_FEED_COLUMNS)
 _FEED = 'SELECT ' + _FEED_COLUMNS + ', b.binding AS reader_binding,b.binding_raw AS reader_binding_raw FROM feeds f LEFT JOIN telegram_bindings b ON b.feed = f.id'
 _BATCH_FEED = 'SELECT ' + _FEED_COLUMNS + ''', b.binding AS reader_binding,b.binding_raw AS reader_binding_raw,
@@ -62,7 +62,7 @@ def item(db: Database, identity: str) -> Row | None:
             return value.items[identity]
         if identity in value.related_items:
             return value.related_items[identity]
-    return db.execute(f"SELECT i.*, {owner_expr('i')} AS reader_feed_id FROM publications i WHERE i.id = %s", (identity,)).fetchone()
+    return db.execute(f"SELECT i.*, COALESCE(i.content #> '{{extra,telegram,members}}','[]'::jsonb)::text AS members, {owner_expr('i')} AS reader_feed_id FROM publications i WHERE i.id = %s", (identity,)).fetchone()
 
 
 

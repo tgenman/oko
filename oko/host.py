@@ -7,7 +7,7 @@ import time
 
 import httpx
 
-from oko.collection.contracts import Source
+from oko.collection.adapters import FeedAdapter
 from oko.processing.codex import CodexClient,LocalCodex
 from oko.storage.store import Store
 from oko.collection.contracts import CaptionsClient
@@ -39,7 +39,7 @@ class Host:
             # An unusable SQL connection cannot participate in that cleanup.
             await self.jobs.cancel(invalidate=False)
 
-    def __init__(self, root: Path, source: Source | None, clock: Callable[[], float],
+    def __init__(self, root: Path, source: FeedAdapter | None, clock: Callable[[], float],
                  fault: Callable[[str], None], shutdown: Callable[[], None],
                  admitted: Callable[[], bool], should_stop: Callable[[], bool], source_feed: str, rss_enabled: bool, rss_transport: httpx.AsyncBaseTransport | None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None, youtube_captions: CaptionsClient | None = None, youtube_history: HistoryClient | None = None, wall_clock: Callable[[], float] = time.time, database_url: str | None = None) -> None:
         self._database_url = database_url

@@ -125,9 +125,12 @@ def test_youtube_summary_uses_raw_captions_after_filtering(tmp_path):
         from tests.support.storage import database
         from oko.storage.processing_input import digest
         with database(root) as db:
-            saved=db.execute('SELECT processing_metadata , content FROM publications WHERE id = %s',(card['id'],)).fetchone()
+            saved=db.execute('SELECT processing_metadata , content, filtered_content FROM publications WHERE id = %s',(card['id'],)).fetchone()
             metadata=json.loads(saved[0])
             blocks=saved[1]['blocks']
+            for document in (saved[1],json.loads(saved[2])):
+                youtube=document.get('extra',{}).get('youtube',{})
+                assert 'captions' not in youtube and 'captions_digest' not in youtube
             index=next(i for i,b in enumerate(blocks) if b.get('role')=='subtitles')
             media=blocks[index]['media_id']
         assert metadata['summary']['input_hash']==digest([dict(type='text',role='body',text='Useful words. Ad text.',source_media_id=media,source_block_index=index)])
@@ -136,7 +139,7 @@ def test_youtube_summary_uses_raw_captions_after_filtering(tmp_path):
         assert material['filter']['result']['text']=='Useful words. '
 
 
-def test_youtube_metadata_refresh_keeps_caption_file_and_accepted_processing(tmp_path):
+def test_youtube_rediscovery_keeps_saved_title_media_and_processing(tmp_path):
     root=publication_root(tmp_path)
     phase=[False]
     captions_calls=[]
@@ -162,13 +165,15 @@ def test_youtube_metadata_refresh_keeps_caption_file_and_accepted_processing(tmp
         count=sum(request.url.path=='/v1/chat/completions' for request in models)
         phase[0]=True
         client.post('/api/v3/collect')
-        updated=wait_for(client,lambda:(m if (m:=client.get('/api/v3/publication/'+card['id']).json())['title']=='New title' and not m['loading'] and any(a['kind']=='image' for a in [media for media in m['media'] if media['url'] is not None]) else None))
+        wait_for(client,lambda:client.get('/api/v3/status/details').json()['work']==[{'phase':'idle'}])
+        updated=client.get('/api/v3/publication/'+card['id']).json()
+        assert updated['title']=='Old title'
         assert updated['text']=='Stable original captions.'
         assert updated['theses']['result']==original['theses']['result']
         assert next(a['url'] for a in [media for media in updated['media'] if media['url'] is not None] if a['kind']=='file')==caption_url
         assert captions_calls==[VIDEO] and sum(request.url.path=='/v1/chat/completions' for request in models)==count
         cover=next(a['url'] for a in [media for media in updated['media'] if media['url'] is not None] if a['kind']=='image')
-        assert client.get(cover).content==PNG+b'changed'
+        assert client.get(cover).content==PNG
 
 
 def test_missing_captions_are_downloaded_again_after_reader_detects_loss(tmp_path):
@@ -218,4 +223,4 @@ def test_youtube_description_is_saved_as_common_block(tmp_path):
     with database(root) as db:
         content = db.execute('SELECT content FROM publications WHERE id=%s', (card['id'],)).fetchone()[0]
         assert any(block.get('role') == 'description' and block.get('text') == 'Saved description' for block in content['blocks'])
-        assert 'description' not in content['extra']['_reader']
+        assert '_reader' not in content['extra']

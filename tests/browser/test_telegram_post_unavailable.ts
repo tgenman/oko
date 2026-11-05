@@ -9,10 +9,11 @@ test('whole Telegram post uses link card C separately from audio and large video
  await openReader();
  await api('v3/telegram/connect','POST',{source_locator:'@postunavailable',folder:'News'});
  const post=page.locator('[data-card]').filter({hasText:'Пост доступен только в Telegram'});
- await expect(post.locator('[aria-label="Публикация недоступна"]')).toBeVisible({timeout:15000});
+ await expect(post).toBeVisible({timeout:15000});
  await post.click();
  await expect(page.locator('#title')).toHaveText('Пост доступен только в Telegram');
  await expect(page.locator('#source-unavailable')).toContainText('Публикация недоступна для веб-просмотра');
+ await expect(page.locator('#completeness')).toContainText('Incomplete item');
  await expect(page.locator('#source-unavailable a')).toHaveAttribute('href','https://t.me/postunavailable/13');
  await expect(page.locator('#source-unavailable a')).toHaveText('Open original ↗');
  await page.locator('#source-unavailable a').focus();

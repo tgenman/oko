@@ -1,5 +1,5 @@
 from tests.support.cards import read_publications_for_cards
-from oko.collection.contracts import FetchResult
+from tests.support.legacy_source import FetchResult
 from tests.support.presence import presence, close_presence
 from tests.support.filters import FilterSource, transport, setup_filters
 import json
@@ -7,7 +7,7 @@ from pathlib import Path
 import httpx
 from fastapi.testclient import TestClient
 from tests.support.app import create_app
-from oko.collection.contracts import Material
+from tests.support.legacy_source import Material
 from tests.support.reader import HEADERS, wait_for
 
 

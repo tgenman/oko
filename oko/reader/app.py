@@ -17,7 +17,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import JSONResponse, Response
-from oko.collection.contracts import Source
+from oko.collection.adapters import FeedAdapter
 from oko.processing.codex import CodexClient
 from oko.host import Host
 from oko.application.reader import ReaderApplication
@@ -32,7 +32,7 @@ from oko.collection.youtube.history import HistoryClient
 from oko.diagnostics import Journal, active_journal, diagnostic_source, diagnostic_materials, capture_scope, record_caught
 
 
-def create_app(root: Path, *, source: Source | None = None, token: str | None = None,
+def create_app(root: Path, *, source: FeedAdapter | None = None, token: str | None = None,
                clock: Callable[[], float] = time.monotonic,
                fault: Callable[[str], None] = lambda _: None,
                shutdown: Callable[[], None] = lambda: None,

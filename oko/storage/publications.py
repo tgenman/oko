@@ -9,7 +9,7 @@ from oko.storage.reading import reading_snapshot, saved_content
 from copy import deepcopy
 from datetime import datetime, timezone
 from oko.storage import processing_input as publication_input
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import os
 from pathlib import Path
@@ -17,10 +17,9 @@ import shutil
 from typing import Any, TYPE_CHECKING
 from uuid import uuid4
 
-from oko.collection.contracts import Material, Publication
 from oko.storage.collection_diagnostics import CollectionDiagnostics
 from oko.domain.publication import PublicationIdentityConflict
-from oko.collection.adapters import ExternalReference
+from oko.collection.adapters import ExternalKey, ExternalReference, Platform, PublicationContent
 from oko.collection.telegram.adapter import reference
 from oko.storage import publication_links,material_read,memberships
 from oko.storage.reading import reading_value
@@ -28,6 +27,13 @@ from oko.storage.reader_status import changed as status_changed
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
+
+
+@dataclass
+class PreparedPublication:
+    content: dict[str,Any]
+    media: list[dict[str,Any]]
+    links: tuple[ExternalReference,...]
 
 
 @dataclass
@@ -43,8 +49,7 @@ class DiscoveryProjection:
     source_problem_exists: bool = False
     new_source_jobs: tuple[int,...] = ()
     processing_problem_children: tuple[str,...] = ()
-    fingerprint: str | None = None
-    content: tuple[dict[str, Any], list[dict[str, Any]]] | None = None
+    content: PreparedPublication | None = None
 
 
 class Publications:
@@ -55,33 +60,6 @@ class Publications:
     def owns(self, item: str) -> bool:
         row=material_read.item(self.store.db,item)
         return row is not None and row['platform'] is not None
-
-    @reading_value
-    def source_deleted(self,item: str) -> bool:
-        snapshot=material_read.current(self.store.db)
-        if snapshot:
-            row = snapshot.items.get(item) or snapshot.related_items.get(item)
-            if row is not None:
-                return bool(row['source_deleted'])
-        row = self.store.db.execute('SELECT source_deleted FROM publications WHERE id=%s', (item,)).fetchone()
-        return bool(row and row[0])
-
-    def set_source_deleted(self, identities: list[str], deleted: bool) -> None:
-        """Change source markers and reader freshness in the caller's transaction."""
-        ordered = sorted(set(identities))
-        literal = 'TRUE' if deleted else 'FALSE'
-        for start in range(0, len(ordered), 400):
-            batch = ordered[start:start+400]
-            changed = [row[0] for row in self.store.db.execute(
-                f'UPDATE publications SET source_deleted={literal} WHERE id=ANY(%s) AND source_deleted IS DISTINCT FROM {literal} RETURNING id', (batch,))]
-            if not changed:
-                continue
-            manager=getattr(self.store,'incomplete_draft',None)
-            if manager is not None:manager.mark_materials(changed)
-            if not deleted:
-                from oko.storage.incomplete_index import classify_newly_eligible
-                classify_newly_eligible(self.store.db,changed)
-            status_changed(self.store.db)
 
     def feed(self, feed: str) -> bool:
         return self.store.db.execute("SELECT 1 FROM feeds WHERE id = %s AND adapter IN ( 'telegram_web_adapter' , 'rss_adapter' , 'youtube_adapter' )", (feed,)).fetchone() is not None
@@ -157,18 +135,17 @@ class Publications:
         source_groups.sync_changed_rows(self.store,list(changed),self.store.wall_clock())
         for row in changed:
             self.store.problems.sync_media_problem(row['id'],previous.get(row['id'],[]),self.store.wall_clock())
-        marked = [row[0] for row in db.execute(f'SELECT p.id FROM ({owned_ids("= %s")}) owner JOIN publications p ON p.id=owner.id WHERE p.source_deleted', (feed,feed))]
-        self.set_source_deleted(marked, False)
         db.execute("UPDATE publications SET status = 'pending_collection' WHERE id IN (SELECT p.id FROM publications p WHERE p.feed_id=%s AND p.viewed=0)",(feed,))
 
-    def plan(self, feed: str, publications: list[Publication]) -> dict[str, DiscoveryProjection]:
+    def plan(self, feed: str, publications: list[PublicationContent]) -> dict[str, DiscoveryProjection]:
         """Prepare cache output before the short page acceptance transaction."""
         plans: dict[str, DiscoveryProjection] = {}
         for publication in publications:
-            ref = publication.adapter_reference
-            if ref is None:
-                raise ValueError('Adapter did not return a publication external key')
-            if publication.id in plans:
+            ref=publication.metadata.reference
+            identity=ref.key.external_id
+            members=tuple(publication.content.get('extra',{}).get('telegram',{}).get('members',()))
+            described=publication if 'blocks' in publication.content else None
+            if identity in plans:
                 continue
             proposed_item=str(uuid4())
             checked = self.store.db.execute("""SELECT id,ARRAY[]::bigint[] AS source_jobs FROM publications
@@ -177,23 +154,21 @@ class Publications:
                 (ref.key.platform.value,ref.key.external_id,proposed_item)).fetchall()
             new_source_jobs=next(row['source_jobs'] for row in checked if row['id'] is None)
             existing=[row for row in checked if row['id'] is not None]
-            if ref.key.platform.value == 'telegram' and publication.members:
+            if ref.key.platform.value == 'telegram' and members:
                 overlap = self.store.db.execute("""SELECT i.id,i.platform,i.external_id FROM publications i
-                    CROSS JOIN LATERAL jsonb_array_elements_text(i.members::jsonb) AS member(value)
+                    CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(i.content #> '{extra,telegram,members}','[]'::jsonb)) AS member(value)
                     WHERE i.feed_id=%s AND i.platform='telegram' AND i.viewed=0 AND i.id<>%s AND member.value=ANY(%s)
-                    ORDER BY i.id LIMIT 1""", (feed,existing[0]['id'] if existing else '',[str(member) for member in publication.members])).fetchone()
+                    ORDER BY i.id LIMIT 1""", (feed,existing[0]['id'] if existing else '',[str(member) for member in members])).fetchone()
                 if overlap:
                     raise PublicationIdentityConflict(publication_id=overlap['id'], old_platform=overlap['platform'],
                         old_external_id=overlap['external_id'], new_platform=ref.key.platform.value,
                         new_external_id=ref.key.external_id)
             if len(existing)>1:
                 raise ValueError('Conflicting publication identity or Telegram album membership')
-            if publication.observed_only and not existing:
-                continue
             item=existing[0]['id'] if existing else proposed_item
             plan=DiscoveryProjection(item)
             if not existing:plan.new_source_jobs=tuple(new_source_jobs)
-            current=self.store.db.execute("""SELECT viewed,members,content,status,
+            current=self.store.db.execute("""SELECT viewed,content,status,
                 EXISTS (SELECT 1 FROM jobs j WHERE j.item=publications.id AND j.reason_code LIKE 'source-%%') OR EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=publications.id AND j.reason_code LIKE 'source-%%') OR EXISTS (SELECT 1 FROM publication_links l JOIN jobs j ON j.item=l.target_publication_id AND j.reason_code LIKE 'source-%%' WHERE l.source_publication_id=publications.id) OR EXISTS (SELECT 1 FROM publication_links l JOIN media_files m ON m.publication_id=l.target_publication_id JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE l.source_publication_id=publications.id AND j.reason_code LIKE 'source-%%') AS source_problem_exists,
                 (SELECT j.id FROM jobs j WHERE j.kind='delete' AND j.item=publications.id AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL)) AS delete_problem_job,
                 (EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=publications.id AND (((m.resource_key='youtube:subtitles' OR j.media_null_owned) AND j.reason_code IS NULL AND j.reason_message IS NOT NULL) OR (j.reason_code IS NOT NULL AND j.reason_code NOT LIKE 'source-%%'))) OR EXISTS (SELECT 1 FROM jobs j WHERE j.kind='download_media' AND j.item=publications.id AND ((j.media_null_owned AND j.reason_code IS NULL AND j.reason_message IS NOT NULL) OR (j.identity_event_owned AND j.reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'))))) AS media_problem_exists,
@@ -224,46 +199,27 @@ class Publications:
                 plan.processing_problem_exists = bool(current['processing_problem_exists'])
                 plan.source_problem_exists = bool(current['source_problem_exists'])
                 plan.processing_problem_children = tuple(current['processing_problem_children'])
-            described=publication.teaser.adapter_content if publication.teaser else None
-            album_changed=bool(current and described and ref.key.platform.value=='telegram'
-                and described.content.get('extra',{}).get('telegram',{}).get('album_id') is not None
-                and set(publication.members)!=set(json.loads(current['members']))
-                and set(json.loads(current['members'])).issubset(publication.members))
             refresh=bool(current and not current['viewed'] and described and
-                (not current['content'] or current['status']=='pending_collection' or ref.key.platform.value in ('rss','youtube') and not described.needs_fetch or album_changed))
-            if publication.teaser and (not existing or refresh):
-                plan.content=self.prepare(item,publication.teaser)
-                plan.fingerprint=publication_input.digest(plan.content[0])
-            plans[publication.id]=plan
+                ('blocks' not in current['content'] or current['status']=='pending_collection'))
+            if described and (not existing or refresh):
+                plan.content=self.prepare_content(item,publication)
+            plans[identity]=plan
         return plans
 
-    def prepare(self, item: str, material: Material) -> tuple[dict[str,Any],list[dict[str,Any]]]:
-        """Convert the common adapter description; media bytes remain independent."""
-        from oko.storage.publication_document import header as reading_header
-        header=reading_header(material)
-        if material.adapter_content and 'blocks' in material.adapter_content.content:
-            return self._prepare_adapter(item,material,header)
-        row=self.store.db.execute('SELECT content FROM publications WHERE id = %s',(item,)).fetchone()
-        if row and bool(row[0]):
-            content=saved_content(row[0],mutable=True)
-            previous_header=content.get('extra', {}).get('_reader', {})
-            previous_quote=previous_header.get('reply_preview')
-            if previous_quote:
-                header['reply_preview']=previous_quote
-            content['extra'].update(_reader=header)
-            if material.adapter_content is None:
-                content['extra']['_links']=[dict(platform=row['platform'],external_id=row['external_id'],url=row['url'])
-                    for row in publication_links.children(self.store,item)]
-            if material.adapter_content:
-                content['extra']['_links']=[dict(platform=ref.key.platform.value,external_id=ref.key.external_id,url=ref.url) for ref in material.adapter_content.linked_publications]
-            media=self.store.media.publication_rows(item)
-            self.store.media.project_header(content,media,collection_reason=material.reason)
-            return content,media
-        raise ValueError('Publication adapter did not return structured content')
+    def prepare_content(self, item: str, value: PublicationContent) -> PreparedPublication:
+        row=self.store.db.execute('SELECT title,content FROM publications WHERE id=%s',(item,)).fetchone()
+        header: dict[str,Any]={'title':value.metadata.title or (row['title'] if row else ''),'attachments':[]}
+        if not any(block.get('type')=='text' and block.get('role')=='description' for block in value.content.get('blocks',[])):
+            previous=saved_content(row['content']) if row else {}
+            descriptions=[deepcopy(block) for block in previous.get('blocks',[]) if block.get('type')=='text' and block.get('role')=='description']
+            if descriptions:
+                copied=deepcopy(value.content)
+                copied.setdefault('blocks',[]).extend(descriptions)
+                value=replace(value,content=copied)
+        return self._prepare_adapter(item,value,header)
 
-    def _prepare_adapter(self, item: str, material: Material, header: dict[str,Any]) -> tuple[dict[str,Any],list[dict[str,Any]]]:
-        value=material.adapter_content
-        assert value is not None
+    def _prepare_adapter(self, item: str, value: PublicationContent, header: dict[str,Any], *,
+                         reason: str = '') -> PreparedPublication:
         content=deepcopy(value.content)
         description=header.pop('description', None)
         if description and not any(block.get('type') == 'text' and block.get('role') == 'description'
@@ -279,19 +235,15 @@ class Publications:
         identities={}
         known={row['resource_key']:row for row in self.store.media.publication_rows(item)}
         youtube=content.get('extra',{}).get('youtube')
-        old_content=self.store.db.execute('SELECT content FROM publications WHERE id = %s',(item,)).fetchone() if youtube is not None else None
-        old_youtube=saved_content(old_content[0]).get('extra',{}).get('youtube',{}) if old_content else {}
         for ref in value.media:
             previous=known.get(ref.key)
             subtitles=youtube is not None and any(block.get('ref')=={'$media':ref.key} and block.get('role')=='subtitles' for block in content['blocks'])
             keep_caption=bool(subtitles and previous and previous['source_locator']==ref.locator and
-                (previous['status']=='ready' and previous['storage_key'] and existing_file(self.store.root,previous['storage_key']) is not None or youtube.get('captions')!='not_requested' and old_youtube.get('captions') in ('unavailable','error')))
+                (previous['status']=='ready' and previous['storage_key'] and existing_file(self.store.root,previous['storage_key']) is not None or
+                 previous.get('reader_job_status') in ('done','failed','unavailable')))
             if keep_caption and previous:
                 identities[ref.key]=previous['id']
                 media.append(previous)
-                youtube['captions']=old_youtube.get('captions','available')
-                if 'captions_digest' in old_youtube:
-                    youtube['captions_digest']=old_youtube['captions_digest']
                 continue
             unchanged=bool(previous and (
                 ref.resource_identity is not None and ref.resource_identity==previous['resource_identity']
@@ -324,14 +276,6 @@ class Publications:
             if block is not None:
                 block.clear()
                 block.update(type='media',role=resource['kind'],ref={'$media':resource['key']})
-        if youtube is not None:
-            if youtube.get('captions')=='not_requested':
-                for block in content['blocks']:
-                    if block.get('role')=='subtitles':
-                        key=block['ref']['$media']
-                        for row in media:
-                            if row['resource_key']==key:
-                                row.update(status='pending_download',reason='')
         for block in content.get('blocks',[]):
             if block['type']=='media':
                 key=block.pop('ref')['$media']
@@ -339,20 +283,18 @@ class Publications:
                 selected=next(row for row in media if row['id']==block['media_id'])
                 reference=next((ref for ref in value.media if ref.key==key),None)
                 block['source_url']=selected.get('source_url')
-                block['publication_url']=(reference.publication_url if reference and reference.publication_url else
-                    None if value.metadata.reference.key.platform.value=='telegram' and len(material.members)>1 else value.metadata.reference.url)
+                block['publication_url']=reference.publication_url if reference else None
             elif block['type']=='external_media' and 'poster_ref' in block:
                 block['poster_media_id']=identities.get(block.pop('poster_ref'))
-        content.setdefault('extra',{}).update(_reader=header,
-            _links=[dict(platform=ref.key.platform.value,external_id=ref.key.external_id,url=ref.url) for ref in value.linked_publications])
-        collection_reason='' if youtube is not None or material.reason.startswith('Вложения ещё не загружены') else material.reason
+        content.setdefault('extra',{}).update(_reader=header)
+        collection_reason='' if youtube is not None or reason.startswith('Вложения ещё не загружены') else reason
         self.store.media.project_header(content,media,collection_reason=collection_reason)
         text='\n\n'.join(block.get('text','') for block in content['blocks'] if block['type']=='text' and block.get('role')=='body')
-        return content,media
+        return PreparedPublication(content,media,value.linked_publications)
 
-    def publish(self, item: str, prepared: tuple[dict[str, Any], list[dict[str, Any]]], fingerprint: str, effects: CollectionDiagnostics) -> None:
+    def publish(self, item: str, prepared: PreparedPublication, effects: CollectionDiagnostics) -> None:
         """Called in the accepting transaction, after durable media preparation."""
-        content, media = prepared
+        content,media=prepared.content,prepared.media
         store = self.store
         old = expect_row(store.db.execute("""SELECT p.content,p.platform,p.title,
             EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=p.id AND j.reason_code LIKE 'source-%%') AS source_media_exists,
@@ -379,37 +321,13 @@ class Publications:
                 effects.media_problems_checked.add(job_id)
                 previous_problems=managed_candidates(store,job_id,store.wall_clock())
                 if previous_problems:effects.media_problems_before[job_id]=previous_problems
-        self.set_source_deleted([item], False)
-        from oko.collection.adapters import ExternalKey,Platform
-        links=content['extra'].pop('_links',[])
-        links_changed=publication_links.sync(store,item,tuple(ExternalReference(ExternalKey(Platform(ref['platform']),ref['external_id']),ref['url']) for ref in links),effects)
+        links_changed=publication_links.sync(store,item,prepared.links,effects)
         content['blocks']=[block for block in content.get('blocks',[]) if block.get('type')!='publication']
         content['blocks'].extend(dict(type='publication',publication_id=row['id'],source_url=row['url'])
                                  for row in publication_links.children(store,item))
         previous = saved_content(old['content'])
         previous_title=previous.get('extra',{}).get('_reader',{}).get('title',old['title'])
         same = not links_changed and publication_input.blocks(previous)==publication_input.blocks(content) and previous_title==content['extra']['_reader']['title']
-        if 'youtube' in content.get('extra',{}):
-            before=previous.get('extra',{}).get('youtube',{})
-            after=content['extra']['youtube']
-            same=not links_changed and all(before.get(key)==after.get(key) for key in ('captions','captions_digest'))
-        old_header=previous.get('extra',{}).get('_reader',{})
-        def embeds(header: dict[str,Any]) -> list[str]:
-            return [r.get('reason','') for r in header.get('source_manifest',{}).get('resources',[])
-                if r.get('reason','').startswith('Внешнее встраивание')]
-        source_changed=bool(previous.get('blocks')) and (
-            embeds(old_header)!=embeds(content['extra']['_reader']) or
-            '\n\n'.join(block['text'] for block in publication_input.blocks(previous))!='\n\n'.join(block['text'] for block in publication_input.blocks(content))
-            or previous_title!=content['extra']['_reader']['title']
-            or bool(old_header.get('attachments')) and
-                [block.get('media_id') for block in previous.get('blocks',[]) if block['type']=='media']!=
-                [block.get('media_id') for block in content.get('blocks',[]) if block['type']=='media'])
-        if content['extra']['_reader'].get('source_manifest',{}).get('preview_fragment') is not None and old_header.get('source_manifest',{}).get('preview_fragment') is None:
-            source_changed=False
-        content['extra']['_reader']['changed']=bool(old_header.get('changed')) or source_changed
-        content['extra']['_collection_revision']=(previous.get('extra',{}).get('_collection_revision')
-            if previous.get('extra',{}).get('_input_hash')==fingerprint else None) or str(uuid4())
-        content['extra']['_input_hash'] = fingerprint
         retained={row['id'] for row in media}
         removed=[row['id'] for row in store.db.execute('SELECT id FROM media_files WHERE publication_id = %s',(item,)) if row['id'] not in retained]
         if removed:
@@ -423,24 +341,13 @@ class Publications:
                 effects.unavailable_media[row['id']]=('media-unavailable',row['reason'])
             store.db.execute('INSERT INTO media_files ( id , publication_id , resource_key , source_locator , source_url , name , mime_type , size_bytes , storage_key , status , resource_identity ) VALUES ( %(id)s , %(publication_id)s , %(resource_key)s , %(source_locator)s , %(source_url)s , %(name)s , %(mime_type)s , %(size_bytes)s , %(storage_key)s , %(status)s , %(resource_identity)s )', row)
         effects.media.add(item)
-        if source_changed and old['platform'] in ('other_web','telegraph'):
-            for row in media:
-                if row['status']=='ready':
-                    effects.revalidate[row['id']]=False
-        for row in media:
-            if row['resource_key']=='youtube:cover' and row['status']=='ready':
-                effects.revalidate[row['id']]=False
         from oko.storage.publication_document import stored_content
         persisted=stored_content(content)
-        persisted['extra']['_reader'].pop('title',None)
         store.db.execute('UPDATE publications SET content = %s , media_ids = %s , title = %s , status = %s WHERE id = %s',
             (json.dumps(persisted, ensure_ascii=False), json.dumps([r['id'] for r in media]),
              content['extra']['_reader']['title'], 'pending_filtering', item))
         if old['title']!=content['extra']['_reader']['title']:
-            before_youtube=previous.get('extra',{}).get('youtube',{})
-            after_youtube=content.get('extra',{}).get('youtube',{})
-            title_only=(not links_changed and publication_input.blocks(previous)==publication_input.blocks(content)
-                and all(before_youtube.get(key)==after_youtube.get(key) for key in ('captions','captions_digest')))
+            title_only=not links_changed and publication_input.blocks(previous)==publication_input.blocks(content)
             if title_only:effects.title_only_changes.add(item)
             effects.source_title_changes[item]=title_only
         from oko.storage.incomplete_index import save_class
@@ -487,11 +394,10 @@ class Publications:
         header['title']=row['title']
         youtube=content.get('extra', {}).get('youtube')
         if isinstance(youtube, dict):
-            from oko.storage.publication_document import caption_state
             subtitle=next((m for m in media_rows if m['resource_key']=='youtube:subtitles'),None)
             if subtitle and subtitle['status']=='pending_download':
                 job_status=subtitle.get('reader_job_status')
-                header['captions']=('not_requested' if subtitle.get('reader_job_id') is None else
+                header['captions']=('not_requested' if subtitle.get('reader_job_id') is None or job_status=='cancelled' else
                                     'running' if job_status=='running' else
                                     'pending' if job_status in ('pending','blocked') else 'error')
             elif subtitle and subtitle['status']=='unavailable':
@@ -499,7 +405,7 @@ class Publications:
             elif subtitle and subtitle['status']=='ready':
                 header['captions']='available'
             else:
-                header['captions']=caption_state(youtube, header)
+                header['captions']='not_requested'
         descriptions=[block['text'] for block in content.get('blocks', []) if block.get('type')=='text' and block.get('role')=='description']
         if descriptions:
             header['description']='\n\n'.join(descriptions)
@@ -556,12 +462,15 @@ class Publications:
     @reading_snapshot()
     def _status_change(self, item: str) -> str | None:
         row = material_read.item(self.store.db,item)
-        if not row or row['platform'] is None or not row['content']:
+        if not row or row['platform'] is None or 'blocks' not in row['content']:
+            return None
+        fetch=material_read.jobs(self.store.db,item).get('fetch')
+        if row['status']=='pending_collection' and fetch and fetch['status'] in ('pending','running','failed','unavailable','blocked'):
             return None
         if row['feed_id'] is None:
             return 'ready' if row['status'] != 'ready' else None
         selected=publication_input.content(self.store,item)
-        if publication_input.awaiting_input(selected) or publication_input.awaiting_linked_input(self.store,item,selected):
+        if publication_input.awaiting_input(self.store,item,selected) or publication_input.awaiting_linked_input(self.store,item,selected):
             return 'pending_collection' if row['status'] != 'pending_collection' else None
         filtered = self.store.filters.read(item)
         jobs={kind:row['status'] for kind,row in material_read.jobs(self.store.db,item).items() if kind in ('filter','theses')}
@@ -582,8 +491,8 @@ class Publications:
             if row is None or row['platform'] is None:
                 return False
             current = publication_input.input_hash(self.store,item) if row['feed_id'] is not None and not row['viewed'] else None
-            content = publication_input._reading_content(self.store,item) if row['content'] else None
-            available = bool(row['status']!='pending_collection' and content is not None and not publication_input.awaiting_input(content)
+            content = publication_input._reading_content(self.store,item) if 'blocks' in row['content'] else None
+            available = bool(row['status']!='pending_collection' and content is not None and not publication_input.awaiting_input(self.store,item,content)
                              and not publication_input.awaiting_linked_input(self.store,item,content))
             source_hash = publication_input.digest(publication_input.blocks(content)) if available and content is not None else None
         metadata = json.loads(row['processing_metadata'])

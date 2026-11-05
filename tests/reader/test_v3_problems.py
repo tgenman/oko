@@ -7,7 +7,8 @@ import pytest
 from tests.support.app import create_app
 from tests.support.v3 import TestClient
 from tests.support.reader import wait_for
-from oko.collection.contracts import Publication, SourceError
+from oko.collection.contracts import SourceError
+from tests.support.legacy_source import Publication
 
 HEADERS={'Authorization':'Bearer test'}
 

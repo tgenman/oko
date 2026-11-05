@@ -45,7 +45,7 @@ def _stage(store: 'Store', batch: list[str], kind: Kind, *, preserve_cancelled: 
     with material_read.material_inputs(store.db,set(batch)), reading_snapshot():
         for item in batch:
             row = material_read.item(store.db,item)
-            if not row or row['viewed'] or row['platform'] is None or row['feed_id'] is None or not row['content']:
+            if not row or row['viewed'] or row['platform'] is None or row['feed_id'] is None or 'blocks' not in row['content']:
                 continue
             operation = store.filters if kind=='filter' else store.processing.theses
             signature = operation.signature(item)

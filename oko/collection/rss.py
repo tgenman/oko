@@ -1,6 +1,6 @@
 """Finite RSS/Atom windows; content stays outside the state database."""
 from oko.diagnostics import record_caught
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 import httpx
 from oko.collection import request_observation as observation
 from oko.collection.adapters import MediaReference
-from oko.collection.contracts import Material, Publication, SourceError, SourceDeleted, DiscoveryResult, FetchResult, SourceObservation
+from oko.collection.contracts import SourceError, SourceUnavailable
 
 
 def normalized(url: str) -> str:
@@ -71,7 +71,10 @@ class Article(HTMLParser):
 
 @dataclass(frozen=True)
 class Entry:
-    publication: Publication
+    id: str
+    url: str
+    published: float
+    published_known: bool
     title: str
     excerpt: str
     media: tuple[MediaReference, ...] = ()
@@ -105,7 +108,7 @@ def feed_description(raw: bytes) -> str | None:
     if parent is None:
         return None
     node = next((node for node in parent if local(node.tag) in ('description', 'subtitle')), None)
-    return RSSSource.excerpt(''.join(node.itertext())) if node is not None else None
+    return RSSHTTP.excerpt(''.join(node.itertext())) if node is not None else None
 
 
 def entries(raw: bytes, base: str, *, strict: bool = False, diagnostics: list[str] | None = None) -> list[Entry]:
@@ -183,32 +186,28 @@ def entries(raw: bytes, base: str, *, strict: bool = False, diagnostics: list[st
                 length = child.get('length', '')
                 size = int(length) if length.isascii() and length.isdecimal() else None
                 media.append(MediaReference('rss:enclosure:'+str(len(media)), locator, '', child.get('type'), size, source_url=locator))
-        result.append(Entry(Publication(identity, url, stamp, published_known=known), value('title') or ('' if strict else 'Без заголовка'),
+        result.append(Entry(identity, url, stamp, known, value('title') or ('' if strict else 'Без заголовка'),
                             markup('description') or markup('summary') or markup('encoded') or markup('content')
                             or next((''.join(c.itertext()).strip() for c in node.iter()
                                      if c.tag == '{http://search.yahoo.com/mrss/}description'), ''), tuple(media)))
     if strict:
         unique: dict[str, Entry] = {}
         for entry in result:
-            prior = unique.get(entry.publication.id)
+            prior = unique.get(entry.id)
             if prior is not None and prior != entry:
                 raise SourceError('Разные записи RSS имеют один внешний ID',
                                   code='rss-identity-conflict', retryable=False)
-            unique[entry.publication.id] = entry
+            unique[entry.id] = entry
         return list(unique.values())
     counts: dict[str, int] = {}
     for entry in result:
-        counts[entry.publication.id] = counts.get(entry.publication.id, 0) + 1
-    return [Entry(Publication(e.publication.url if counts[e.publication.id] > 1 else e.publication.id, e.publication.url, e.publication.published, published_known=e.publication.published_known), e.title, e.excerpt) for e in result]
+        counts[entry.id] = counts.get(entry.id, 0) + 1
+    return [replace(e,id=e.url if counts[e.id] > 1 else e.id) for e in result]
 
 
-class RSSSource:
-    changes = 'RSS: articles are checked again within the available feed window; a local copy is kept after 404/410 responses. Disappearance from the window does not mean deletion.'
-    def __init__(self, url: str, initial_days: int, transport: httpx.AsyncBaseTransport | None = None) -> None:
-        self.url, self.initial_days, self.transport = normalized(url), initial_days, transport
-        self.gap: str | None = None
-        self.initial_history: dict[str, Any] | None = None
-        self.description: str | None = None
+class RSSHTTP:
+    def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
+        self.transport = transport
 
     async def download(self, url: str, limit: int = 4_000_000, *, purpose: str = 'feed') -> tuple[bytes, str, str]:
         try:
@@ -233,7 +232,7 @@ class RSSSource:
                         delay = 60.
                     raise SourceError('Ограничение частоты', delay)
                 if response.status_code in (404, 410):
-                    raise SourceDeleted()
+                    raise SourceUnavailable()
                 if response.status_code >= 400:
                     raise SourceError('Источник недоступен')
                 data = bytearray()

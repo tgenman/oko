@@ -1,4 +1,4 @@
-from oko.collection.contracts import FetchResult
+from tests.support.legacy_source import FetchResult
 from tests.support.synthetic_material import material as Material
 import asyncio
 from tests.support.synthetic_source import SyntheticSource

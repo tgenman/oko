@@ -1,5 +1,6 @@
 from tests.support.cards import read_all_cards
 from tests.support.presence import presence, close_presence
+from tests.support.reader import wait_for
 from oko.collection.youtube.source import LocalCaptions
 from tests.support.youtube import VIDEO, PNG, subscribe, feed_xml
 import json
@@ -111,7 +112,7 @@ def test_saved_captions_are_reused_during_collection_and_after_restart(tmp_path)
 
 
 
-def test_explicit_reload_revalidates_saved_captions_after_source_interval(tmp_path):
+def test_retry_preserves_saved_captions_after_source_interval(tmp_path):
     captions, downloads, shift = Captions(), [], [0.0]
     kwargs = dict(token='test', rss_enabled=True, rss_transport=transport(downloads), youtube_captions=captions,
                   lease=600, clock=lambda: time.monotonic()+shift[0], wall_clock=lambda: time.time()+shift[0])
@@ -122,9 +123,10 @@ def test_explicit_reload_revalidates_saved_captions_after_source_interval(tmp_pa
         assert captions.calls == [VIDEO]
         assert client.post('/api/v3/materials/' + material['id'] + '/retry').status_code == 200
         shift[0] += 60
-        updated = wait(client, lambda m: len(captions.calls) == 2 and not m['loading'])
+        wait(client,lambda m:not m['loading'])
+        updated=client.get('/api/v3/publication/'+material['id']).json()
         assert updated['text'] == material['text']
-        assert captions.calls == [VIDEO, VIDEO]
+        assert captions.calls == [VIDEO]
 
 def test_normal_feed_waits_for_mode_and_missing_captions_never_reach_ai(tmp_path):
     from oko.collection.contracts import SourceError
@@ -172,7 +174,7 @@ def test_normal_feed_waits_for_mode_and_missing_captions_never_reach_ai(tmp_path
         client.post('/api/v3/materials/' + material['id'] + '/retry')
         with psycopg.connect(database_url(tmp_path)) as db:
             pending=db.execute("SELECT m.status,j.status,p.content #>> '{extra,youtube,captions}' FROM media_files m JOIN jobs j ON j.item=m.id AND j.kind='download_media' JOIN publications p ON p.id=m.publication_id WHERE m.publication_id=%s AND m.resource_key='youtube:subtitles'",(material['id'],)).fetchone()
-        assert pending==('pending_download','pending','pending')
+        assert pending==('pending_download','pending',None)
         assert client.get('/api/v3/publication/'+material['id']).json()['source'].get('captions') == 'pending'
         with psycopg.connect(database_url(tmp_path),autocommit=True) as db:
             db.execute("UPDATE jobs SET status='running' WHERE kind='download_media' AND item=(SELECT id FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles')",(material['id'],))
@@ -439,25 +441,18 @@ class YouTubeTranscriptApi:
 
 
 def test_description_uses_common_content_block():
-    from datetime import datetime, timezone
-    from oko.collection.adapters import ExternalKey, ExternalReference, Platform, PublicationContent, PublicationMetadata
-    from oko.collection.youtube.publication_source import YouTubeAdapterSource
-    from oko.storage.publication_document import header
-
-    ref = ExternalReference(ExternalKey(Platform.youtube, 'video'), 'https://youtube.test/video')
-    value = PublicationContent(PublicationMetadata(ref, 'Title', datetime.now(timezone.utc)),
-                               {'blocks': [{'type': 'text', 'role': 'description', 'text': 'Description'}],
-                                'extra': {'youtube': {'captions': 'pending'}}})
-    source = object.__new__(YouTubeAdapterSource)
-    source.want_captions = True
-    material = source._material(value)
-    assert material.description == 'Description'
-    assert 'description' not in header(material)
-    assert material.adapter_content.content['blocks'][0]['text'] == 'Description'
-    cleared = PublicationContent(value.metadata,
-                                 {'blocks': [{'type': 'text', 'role': 'description', 'text': ''}],
-                                  'extra': {'youtube': {'captions': 'pending'}}})
-    assert source._material(cleared, material).description == ''
+    import asyncio
+    from oko.collection.youtube.adapter import YouTubeAdapter
+    from tests.support.youtube import CHANNEL,feed_xml,NoCaptions
+    raw=feed_xml().replace('</media:group>','<media:description>Description</media:description></media:group>')
+    adapter=YouTubeAdapter(NoCaptions(),httpx.MockTransport(lambda _:httpx.Response(200,text=raw)))
+    async def check():
+        feed=await adapter.resolve_feed('https://www.youtube.com/feeds/videos.xml?channel_id='+CHANNEL)
+        page=await adapter.discover(feed.reference,feed.latest_cursor,10)
+        value,=page.publications
+        descriptions=[block['text'] for block in value.content['blocks'] if block['type']=='text' and block['role']=='description']
+        assert descriptions==['Description']
+    asyncio.run(check())
 
 
 def test_confirmed_absent_captions_survive_restart_without_retry(tmp_path):
@@ -488,7 +483,7 @@ def test_confirmed_absent_captions_survive_restart_without_retry(tmp_path):
         assert captions.calls==[VIDEO]
 
 
-def test_replacing_captions_keeps_the_same_download_job(tmp_path):
+def test_retry_keeps_saved_captions_and_download_job(tmp_path):
     import psycopg
     from tests.support.storage import database_url
 
@@ -509,13 +504,15 @@ def test_replacing_captions_keeps_the_same_download_job(tmp_path):
         assert first is not None
         assert client.post('/api/v3/materials/'+material['id']+'/retry').status_code==200
         shift[0]+=60
-        wait(client,lambda m:m['text']=='Replacement captions' and not m['loading'])
+        wait(client,lambda m:not m['loading'])
+        assert client.get('/api/v3/publication/'+material['id']).json()['text']=='First captions'
+        assert captions.calls==[VIDEO]
         with psycopg.connect(database_url(tmp_path)) as db:
             second=db.execute("SELECT j.id,m.id,j.status FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=%s AND m.resource_key='youtube:subtitles'",(material['id'],)).fetchone()
         assert second is not None and second[0]==first[0] and second[2]=='done'
 
 
-def test_subtitles_disappearing_on_retry_keep_completed_job_and_reason(tmp_path):
+def test_retry_does_not_recheck_saved_subtitles(tmp_path):
     import psycopg
     from tests.support.storage import database_url
 
@@ -536,7 +533,9 @@ def test_subtitles_disappearing_on_retry_keep_completed_job_and_reason(tmp_path)
         assert first is not None
         assert client.post('/api/v3/materials/'+material['id']+'/retry').status_code==200
         shift[0]+=60
-        wait(client,lambda m:m['source'].get('captions')=='unavailable' and not m['loading'])
+        wait(client,lambda m:not m['loading'])
+        assert client.get('/api/v3/publication/'+material['id']).json()['text']=='Previously saved captions'
+        assert captions.calls==[VIDEO]
         with psycopg.connect(database_url(tmp_path)) as db:
             second=db.execute("SELECT j.id,j.status,j.reason_code FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=%s AND m.resource_key='youtube:subtitles'",(material['id'],)).fetchone()
-        assert second==(first[0],'done','subtitles_absent')
+        assert second==(first[0],'done',None)

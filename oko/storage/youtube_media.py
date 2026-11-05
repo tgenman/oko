@@ -33,21 +33,38 @@ def subtitle_path(store: 'Store', identity: str | None) -> Path | None:
     return None
 
 
+def subtitle_state(store: 'Store', content: dict[str,Any], item: str) -> str:
+    identity=subtitle_id(content)
+    if identity is None:
+        return 'not_requested'
+    media=next((value for value in store.media.publication_rows(item) if value['id']==identity),None)
+    if media is None:
+        return 'not_requested'
+    if media['status']=='ready':
+        return 'available' if existing_file(store.root,media.get('storage_key')) is not None else 'error'
+    if media.get('reader_job_id') is None or media.get('reader_job_status')=='cancelled':
+        return 'not_requested'
+    if media.get('reader_code')=='subtitles_absent' and media.get('reader_job_status')=='done':
+        return 'unavailable'
+    if media.get('reader_job_status') in ('running','pending','blocked'):
+        return 'running' if media['reader_job_status']=='running' else 'pending'
+    return 'error'
+
+
 def add_input(store: 'Store', content: dict[str,Any]) -> dict[str,Any]:
     if 'youtube' not in content.get('extra',{}):
         return content
     identity=subtitle_id(content)
     if identity is None:
         return content
-    path=subtitle_path(store,identity)
+    row=store.db.execute('SELECT publication_id FROM media_files WHERE id=%s',(identity,)).fetchone()
+    state=subtitle_state(store,content,row[0]) if row else 'not_requested'
+    path=subtitle_path(store,identity) if state in ('available','error') else None
     if path:
         try:
             text=saved_bytes(path).decode('utf-8')
         except (OSError,UnicodeError):
-            content['extra']['youtube']['captions']='error'
             return content
         index=next(i for i,block in enumerate(content['blocks']) if block.get('media_id')==identity)
         content['blocks'].append(dict(type='text',role='body',text=text,source_media_id=identity,source_block_index=index))
-    elif content['extra']['youtube'].get('captions')=='available':
-        content['extra']['youtube']['captions']='error'
     return content

@@ -20,7 +20,7 @@ from oko.collection import request_observation as observation
 from oko.collection.adapters import MediaReference
 from oko.diagnostics import redact
 
-from oko.collection.contracts import SourceError, SourceDeferred, Material, ResourceManifest
+from oko.collection.contracts import SourceError, SourceDeferred, ResourceManifest
 
 from oko.collection.telegram.contracts import ExpectedMedia
 

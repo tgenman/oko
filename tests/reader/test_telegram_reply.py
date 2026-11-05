@@ -36,9 +36,8 @@ def test_reply_is_separate_from_own_text_and_survives_restart(tmp_path, href):
     with database(tmp_path) as db:
         row=db.execute('SELECT content FROM publications WHERE id=%s', (card['id'],)).fetchone()
         content=row[0]
-        assert 'reply_preview' not in content['extra']['_reader']
-        assert 'title' not in content['extra']['_reader']
-        content['extra']['_reader']['reply_preview'] = dict(material['reply_preview'], text='Legacy displayed context')
+        assert '_reader' not in content['extra']
+        content['extra']['_reader']={'reply_preview':dict(material['reply_preview'], text='Legacy displayed context')}
         db.execute('UPDATE publications SET content=%s WHERE id=%s', (json.dumps(content), card['id']))
     with TestClient(create_app(tmp_path, **options), headers=headers) as client:
         configure_fast_web(client)
@@ -46,7 +45,6 @@ def test_reply_is_separate_from_own_text_and_survives_restart(tmp_path, href):
         assert saved['reply_preview'] == material['reply_preview']
     with database(tmp_path) as db:
         content=db.execute('SELECT content FROM publications WHERE id=%s', (card['id'],)).fetchone()[0]
-        assert content['extra']['_reader']['source_manifest']
         assert 'manifest' not in content['extra']['telegram']
         assert content['extra']['_reader']['reply_preview']['text'] == 'Legacy displayed context'
 
@@ -88,15 +86,9 @@ def test_both_ai_operations_receive_reply_and_reply_changes_invalidate_results(t
         count = len(calls)
         phase[0] = 'CONTEXT_TWO'
         assert client.post(url+'/retry').status_code == 200
-        second = wait_for(client,lambda: m if (m:=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json())['theses']['result'] and m['theses']['result']['points'][0]=='Summary CONTEXT_TWO' else None)
-        assert second['revision_id'] != first['revision_id']
-        assert len(calls) == count+2
+        second=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()
+        assert second['reply_preview']==first['reply_preview']
+        assert second['theses']['result']==first['theses']['result']
+        assert second['revision_id']==first['revision_id']
+        assert len(calls)==count
         assert 'previous_versions' not in second
-        count = len(calls)
-        client.post(url+'/retry')
-        wait_for(client,lambda: not client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['loading'])
-        assert len(calls) == count
-        phase[0] = 'HIDE_CONTEXT'
-        client.post(url+'/retry')
-        wait_for(client,lambda: (result:=client.get(url.replace('/api/v3/materials/', '/api/v3/publication/')).json()['filter']['result']) and result['hidden'])
-        assert calls[-1]['operation'] == 'filter'

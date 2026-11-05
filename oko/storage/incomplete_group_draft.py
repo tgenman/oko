@@ -62,7 +62,7 @@ def group_candidates(store: Any, keys: list[str], now: float, sticky: set[str] |
           CASE WHEN p.platform='youtube' THEN EXISTS(SELECT 1 FROM media_files file JOIN jobs mj ON mj.kind='download_media' AND mj.item=file.id
                   WHERE file.publication_id=p.id AND file.resource_key='youtube:subtitles' AND mj.status='pending' AND mj.reason_code IS NULL) ELSE FALSE END AS caption_waiting
         FROM pg_temp.oko_incomplete_facts p JOIN (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m ON m.id=p.id JOIN feeds f ON f.id=m.feed_id
-        LEFT JOIN jobs j ON j.kind='fetch' AND j.item=p.id WHERE p.incomplete_group_key COLLATE "C"=ANY(%s) AND p.viewed=0 AND p.content <> '{}'::jsonb AND NOT p.source_deleted
+        LEFT JOIN jobs j ON j.kind='fetch' AND j.item=p.id WHERE p.incomplete_group_key COLLATE "C"=ANY(%s) AND p.viewed=0 AND p.content ? 'blocks'
         ORDER BY p.incomplete_group_key,p.id''',(keys,)).fetchall()
     if not rows:return {}
     roots=[row['id'] for row in rows]
@@ -127,9 +127,7 @@ def sync_group(store: Any, key: str, now: float, *, previous_items: set[str] | N
         row=isolated[0]
     if candidate is None:
         if row is None:return
-        body=json.loads(row['body']);ids=[o['id'] for o in body['objects']]
-        irrelevant=bool(store.db.execute('SELECT 1 FROM publications WHERE id=ANY(%s) AND source_deleted LIMIT 1',(ids,)).fetchone())
-        store.problems.sync_candidate(row['identity'],None,now,removed_outcome='irrelevant' if irrelevant else 'resolved')
+        store.problems.sync_candidate(row['identity'],None,now,removed_outcome='resolved')
         return
     if row is not None:
         identity=row['identity']
@@ -476,7 +474,7 @@ def sync_groups_batch(store: Any, keys: list[str], now: float, previous_items: d
     if unresolved:raise RuntimeError('Unable to allocate incomplete occurrence')
     closing={key:row for key,row in selected.items() if key not in candidates}
     refs={obj['id'] for row in closing.values() for obj in json.loads(row['body'])['objects']}
-    deleted={r['id'] for r in store.db.execute('SELECT id FROM publications WHERE id=ANY(%s) AND source_deleted',(sorted(refs),))} if refs else set()
+    deleted: set[str]=set()
     finished: dict[str,list[str]]={'irrelevant':[],'resolved':[]}
     for row in closing.values():
         body=json.loads(row['body'])

@@ -52,7 +52,7 @@ class PostgresConnection:
             self._db.execute("""CREATE TEMPORARY VIEW oko_incomplete_facts AS
                 SELECT facts.*,
                   CASE WHEN facts.incomplete_class=0 AND facts.feed_id IS NOT NULL AND facts.viewed=0
-                    AND NOT facts.source_deleted AND facts.content<>'{}'::jsonb
+                    AND facts.content ? 'blocks'
                     THEN 'incomplete:'||facts.feed_id||':'||facts.id ELSE NULL END AS incomplete_group_key,
                   facts.feed_id AS incomplete_group_owner,true AS incomplete_group_ready,
                   false AS incomplete_group_unknown,false AS incomplete_group_conflict

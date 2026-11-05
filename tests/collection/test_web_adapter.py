@@ -41,9 +41,11 @@ def test_telegraph_is_feedless_and_its_links_do_not_start_another_fetch():
     assert 'https://telegra.ph/Other' in value.content['blocks'][0]['text']
 
 
-def test_web_media_stream_and_changed_locator():
+def test_web_media_stream_uses_saved_locator_without_refetching_article():
     current=['a']
+    calls=[]
     def respond(request):
+        calls.append(request.url.path)
         if request.url.path.endswith('.png'):
             return httpx.Response(200,content=b'image',headers={'content-type':'image/png','content-disposition':'attachment; filename=original.png'})
         return httpx.Response(200,text='<article><p>Text</p><img src="/'+current[0]+'.png"></article>')
@@ -55,9 +57,10 @@ def test_web_media_stream_and_changed_locator():
     assert output.getvalue()==b'image' and actual.size_bytes==5
     assert actual.mime_type=='image/png' and actual.name=='original.png'
     current[0]='b'
-    with pytest.raises(AdapterException) as caught:
-        asyncio.run(adapter.download_media(ref,value.media[0],BytesIO()))
-    assert caught.value.issue.kind==AdapterErrorKind.media_changed
+    again=BytesIO()
+    asyncio.run(adapter.download_media(ref,value.media[0],again))
+    assert again.getvalue()==b'image'
+    assert calls==['/post','/a.png','/a.png']
 
 
 def test_web_missing_article_has_a_typed_unavailable_error():

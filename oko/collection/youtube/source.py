@@ -3,19 +3,9 @@ from oko.diagnostics import record_caught
 from oko.collection import request_observation as observation
 import asyncio
 import json
-import re
 import sys
-import time
-from dataclasses import replace
-from typing import Any
-from urllib.parse import parse_qs, urlsplit
 
-import httpx
-
-from oko.collection.rss import RSSSource, Entry, entries
 from oko.collection.contracts import SourceError, SourceSkipped
-from oko.collection.contracts import Material, Publication, DiscoveryResult, FetchResult, SourceObservation, CaptionsClient
-from oko.collection.youtube.history import HistoryClient, LocalHistory
 from oko.collection.youtube.access import CaptionsBlocked
 
 
@@ -65,14 +55,3 @@ class LocalCaptions:
             # Drain the killed child's pipe: wait() alone can hang when stdout
             # reached the asyncio stream limit during an oversized response.
             await process.communicate()
-
-
-class YouTubeSource(RSSSource):
-    changes = 'YouTube: video titles and previews are checked again within the Atom window. Downloaded subtitles are kept without further requests. Deleted videos and changes outside this window are not detected.'
-    def __init__(self, url: str, initial_days: int, captions: CaptionsClient,
-                 transport: httpx.AsyncBaseTransport | None = None,
-                 history: HistoryClient | None = None) -> None:
-        super().__init__(url, initial_days, transport)
-        self.captions_client = captions
-        self.want_captions = False
-        self.history_client = history or LocalHistory()

@@ -14,9 +14,9 @@ from oko.collection.adapters import (
     ExternalReference, FeedMetadata, MediaReference, Platform, PublicationContent,
     PublicationMetadata,
 )
-from oko.collection.contracts import SourceDeleted, SourceDeferred, SourceError
+from oko.collection.contracts import SourceUnavailable, SourceDeferred, SourceError
 from oko.collection.telegram.telegraph import direct_articles
-from oko.collection.telegram.contracts import TelegramPublication
+from oko.collection.telegram.contracts import TelegramPost
 from oko.collection.telegram.media import Downloader
 from oko.collection.telegram.web import load, WebPage
 
@@ -51,7 +51,7 @@ def failure(error: SourceError, publication: ExternalReference | None = None,
             media_key: str | None = None, scope: str = 'telegram:html') -> AdapterException:
     kind = AdapterErrorKind.temporary if error.retryable else AdapterErrorKind.permanent
     issue_scope, retry_at = None, None
-    if isinstance(error, SourceDeleted):
+    if isinstance(error, SourceUnavailable):
         kind = AdapterErrorKind.unavailable
     if isinstance(error, SourceDeferred):
         kind = AdapterErrorKind.source_wait
@@ -81,43 +81,41 @@ def decode(cursor: str) -> dict[str, Any]:
 
 
 
-def content(post: TelegramPublication, *, linked_descriptions: bool = False) -> PublicationContent:
-    publication = post.publication
-    teaser = publication.teaser
-    if teaser is None:
-        return PublicationContent(PublicationMetadata(reference(publication.url), '', None), needs_fetch=True)
-    assert teaser.source_manifest
+def content(post: TelegramPost, *, linked_descriptions: bool = False) -> PublicationContent:
+    ref=reference(post.url)
+    metadata=PublicationMetadata(ref,post.title,
+        datetime.fromtimestamp(post.published,timezone.utc) if post.published is not None else None)
+    extra={'telegram':{'members':list(post.members)}}
+    if post.malformed:
+        return PublicationContent(metadata,{'extra':extra},needs_fetch=True)
     blocks: list[dict[str, Any]] = []
     if post.text:
         blocks.append(dict(type='text', role='body', text=post.text))
-    reply = teaser.source_manifest.post.get('reply_preview')
-    if isinstance(reply, dict):
-        blocks.append(dict(type='quote', text=reply['text'],
-            author=reply.get('author'), source_url=reply.get('source_url')))
+    if post.reply_preview:
+        blocks.append(dict(type='quote', **post.reply_preview))
+    if post.description:
+        blocks.append(dict(type='text',role='description',text=post.description))
     media = []
     issues = []
-    for item, resource in zip(post.media, teaser.source_manifest.resources):
+    name=urlsplit(post.url).path.strip('/').split('/')[0]
+    for item in post.media:
         if item.url:
-            origin=resource.origin
-            channel=re.fullmatch(r'telegram:([A-Za-z0-9_]+)/[0-9]+',origin)
             member=re.fullmatch(r'telegram-web:([1-9][0-9]*):[0-9]+:.+',item.id)
-            original=(f'https://t.me/{channel[1]}/{member[1]}' if channel and member else
-                      publication.url if len(publication.members)<=1 else None)
+            original=(f'https://t.me/{name}/{member[1]}' if member else
+                      post.url if len(post.members)<=1 else None)
             media.append(MediaReference(item.id, item.url, item.original_name, item.mime, item.size, resource_identity(item.url),source_url=item.url,publication_url=original))
-            blocks.append(dict(type='media', ref={'$media': item.id}, role='attachment' if resource.kind=='file' else resource.kind))
+            role={'photo':'image','document':'attachment','unsupported':'attachment'}.get(item.kind,item.kind)
+            blocks.append(dict(type='media', ref={'$media': item.id}, role=role))
         elif item.external:
             external=item.external.model_dump(exclude={'kind','source_url','poster_key'},exclude_none=True)
             blocks.append(dict(type='external_media',kind=item.external.kind,url=item.external.source_url,**external,
                                **({'poster_ref':item.external.poster_key} if item.external.poster_key else {})))
         else:
             issues.append(AdapterIssue('media_unavailable', item.reason or 'Вложение недоступно',
-                AdapterErrorKind.unavailable, reference(publication.url), item.id))
-    return PublicationContent(PublicationMetadata(reference(publication.url), teaser.title,
-        datetime.fromtimestamp(publication.published, timezone.utc) if publication.published_known else None),
-        dict(blocks=blocks, extra=dict(telegram=dict(members=list(publication.members),
-            description=teaser.description, manifest=teaser.source_manifest.model_dump(mode='json')))),
-        tuple(media), linked_publications=tuple(_article_reference(url) for url in direct_articles(post.text)) if linked_descriptions and teaser.source_manifest.preview_fragment is None else (),
-        needs_fetch=bool(issues or teaser.source_manifest.post_web_unavailable), issues=tuple(issues))
+                AdapterErrorKind.unavailable, ref, item.id))
+    return PublicationContent(metadata,dict(blocks=blocks,extra=extra),tuple(media),
+        linked_publications=tuple(_article_reference(url) for url in direct_articles(post.text)) if linked_descriptions and not post.restricted else (),
+        needs_fetch=bool(issues or post.restricted),issues=tuple(issues))
 
 
 def _article_reference(url: str) -> ExternalReference:
@@ -152,16 +150,16 @@ class TelegramWebAdapter:
         if not page.posts and page.issues:
             raise AdapterException(AdapterIssue('source_identity_unavailable',
                 'Telegram не предоставил пригодных идентификаторов публикаций', AdapterErrorKind.permanent))
-        upper = max((max(p.publication.members) for p in page.posts), default=0)
+        upper = max((max(p.members) for p in page.posts), default=0)
         self._head = (name, upper, page)
         return FeedMetadata(reference('https://t.me/s/'+name), page.title, page.description,
                             encode(upper, upper) if upper else '')
 
     async def _window(self, feed: ExternalReference, start: int, upper: int,
-                      *, count: int | None = None) -> tuple[list[TelegramPublication], tuple[AdapterIssue, ...]]:
+                      *, count: int | None = None) -> tuple[list[TelegramPost], tuple[AdapterIssue, ...]]:
         name = username(feed)
         before = upper + 1
-        posts: list[TelegramPublication] = []
+        posts: list[TelegramPost] = []
         issues: list[AdapterIssue] = []
         while True:
             try:
@@ -172,17 +170,17 @@ class TelegramWebAdapter:
             except SourceError as error:
                 raise failure(error) from error
             issues.extend(issue for issue in page.issues if issue not in issues)
-            for post in sorted(page.posts, key=lambda p: max(p.publication.members), reverse=True):
-                members = set(post.publication.members)
+            for post in sorted(page.posts, key=lambda p: max(p.members), reverse=True):
+                members = set(post.members)
                 if max(members) < start or max(members) > upper:
                     continue
-                existing = next((p for p in posts if members.intersection(p.publication.members)), None)
+                existing = next((p for p in posts if members.intersection(p.members)), None)
                 if existing is None:
                     posts.append(post)
                 # Overlapping pages must not count one album twice.
             if (count is not None and len(posts) >= count) or not page.next_before or any(
-                    min(p.publication.members) <= start for p in page.posts):
-                return sorted(posts, key=lambda p: max(p.publication.members), reverse=True), tuple(issues)
+                    min(p.members) <= start for p in page.posts):
+                return sorted(posts, key=lambda p: max(p.members), reverse=True), tuple(issues)
             before = page.next_before
 
     async def cursor_before(self, feed: ExternalReference, cursor: str, offset: int) -> str:
@@ -192,7 +190,7 @@ class TelegramWebAdapter:
             return cursor
         state = decode(cursor)
         posts, _ = await self._window(feed, 0, state['start'], count=offset+1)
-        return encode(max(posts[min(offset, len(posts)-1)].publication.members), state['upper']) if posts else ''
+        return encode(max(posts[min(offset, len(posts)-1)].members), state['upper']) if posts else ''
 
     async def discover(self, feed: ExternalReference, cursor: str, limit: int) -> DiscoveryPage:
         if limit < 1:
@@ -215,8 +213,14 @@ class TelegramWebAdapter:
         posts = list(reversed(window))
         selected = posts[:limit]
         more = len(posts) > limit
-        start = max(selected[-1].publication.members)+1 if selected else state['upper']+1
-        return DiscoveryPage(tuple(content(p,linked_descriptions=self.linked_descriptions) for p in selected), encode(start, state['upper'], done=not more), more, issues)
+        start = max(selected[-1].members)+1 if selected else state['upper']+1
+        values=[]
+        for post in selected:
+            value=content(post,linked_descriptions=self.linked_descriptions)
+            if not value.content:
+                value=replace(value,content={'extra':{'telegram':{'members':list(post.members)}}})
+            values.append(value)
+        return DiscoveryPage(tuple(values), encode(start, state['upper'], done=not more), more, issues)
 
     async def fetch(self, publication: ExternalReference) -> PublicationContent:
         name = username(publication)
@@ -228,41 +232,33 @@ class TelegramWebAdapter:
             page, _ = await load(name, identity+1, self.transport, partial=True)
         except SourceError as error:
             raise failure(error, publication) from error
-        post = next((p for p in page.posts if identity in p.publication.members or int(p.publication.id) == identity), None)
+        post = next((p for p in page.posts if identity in p.members or int(p.id) == identity), None)
         if post is None:
-            raise failure(SourceDeleted(), publication)
+            raise failure(SourceUnavailable(), publication)
         value = content(post,linked_descriptions=self.linked_descriptions)
-        if value.needs_fetch and post.text.strip() and post.publication.teaser and post.publication.teaser.source_manifest and post.publication.teaser.source_manifest.post_web_unavailable:
-            from oko.collection.telegram.preview import fragment
-            try:
-                preview, preview_error = await fragment(name, post.publication.id, self.transport)
-            except SourceError as source_error:
-                raise failure(source_error, publication) from source_error
-            manifest = value.content['extra']['telegram']['manifest']
-            manifest.update(preview_fragment=preview, preview_error=preview_error)
-            if preview:
-                value.content['blocks'].append(dict(type='text', role='body', text=preview))
-            value = replace(value, needs_fetch=False)
-        return replace(value,needs_fetch=False)
+        if post.restricted:
+            detail='Публикация недоступна для веб-просмотра'
+            if post.text.strip():
+                from oko.collection.telegram.preview import fragment
+                try:
+                    preview,preview_error=await fragment(name,post.id,self.transport)
+                except SourceError as source_error:
+                    raise failure(source_error,publication) from source_error
+                if preview:value.content['blocks'].append(dict(type='text',role='body',text=preview))
+                if preview_error:detail=preview_error
+            issue=AdapterIssue('post-web-unavailable',detail,AdapterErrorKind.unavailable,publication)
+            return replace(value,needs_fetch=True,issues=(*value.issues,issue))
+        return value
 
     async def download_media(self, publication: ExternalReference, media: MediaReference,
                              output: BinaryIO) -> MediaReference:
-        current = await self.fetch(publication)
-        actual = next((item for item in current.media if item.key == media.key), None)
-        if actual is None:
-            for issue in current.issues:
-                if issue.scope and issue.scope.startswith('telegraph:') and media.key.startswith(issue.scope+':'):
-                    raise AdapterException(replace(issue,publication=publication,media_key=media.key))
-        if actual is None or resource_identity(actual.locator) != resource_identity(media.locator):
-            raise AdapterException(AdapterIssue('media_changed', 'Вложение изменилось',
-                AdapterErrorKind.media_changed, publication, media.key))
         try:
             async with asyncio.timeout(180):
-                size, _ = await Downloader(self.transport).write(actual.locator, output,
-                    allow_empty=actual.mime_type is None or actual.mime_type.startswith(('application/','text/')))
+                size, _ = await Downloader(self.transport).write(media.locator, output,
+                    allow_empty=media.mime_type is None or media.mime_type.startswith(('application/','text/')))
         except SourceError as error:
-            raise failure(error, publication, media.key, 'telegram:media:'+urlsplit(actual.locator).netloc) from error
+            raise failure(error, publication, media.key, 'telegram:media:'+urlsplit(media.locator).netloc) from error
         except TimeoutError as error:
             raise AdapterException(AdapterIssue('media-unavailable', 'Истекло время загрузки вложения',
                 AdapterErrorKind.temporary, publication, media.key)) from error
-        return replace(actual, size_bytes=size)
+        return replace(media, size_bytes=size)

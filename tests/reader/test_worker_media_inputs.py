@@ -17,7 +17,7 @@ def image_material(source,store,item,text='Useful text'):
 def accept_material(store,service,item,material):
     with store.jobs.transaction(lambda:True):
         job_for_collection=running_collection_job(store,'fetch',item)
-        error,effects=service.collected(item,material,manual=False)
+        error,effects=service.collected_content(item,material.adapter_content)
         assert error is None
         apply_simulated_collection(store,effects,job=job_for_collection)
 

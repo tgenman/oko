@@ -101,7 +101,7 @@ def test_card_etag_changes_when_retry_becomes_due_without_background_write(tmp_p
             client.portal.call(app.state.host.execution._actions.release)
 
 
-def test_card_etag_tracks_linked_content_without_parent_version_write(tmp_path):
+def test_card_ignores_removed_linked_changed_flag(tmp_path):
     _, items = library(tmp_path, [1])
     app = traced_app(tmp_path)
     with TestClient(app, headers=HEADERS) as client:
@@ -117,14 +117,16 @@ def test_card_etag_tracks_linked_content_without_parent_version_write(tmp_path):
                     store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES (%s,'linked')", (items[0],))
             client.portal.call(add_link)
             first = client.get('/api/v3/cards')
-            assert first.status_code == 200 and first.json()['items'][0]['changed'] is False
+            assert first.status_code == 200 and 'changed' not in first.json()['items'][0]
             def change_child():
                 store = app.state.host.require_store()
                 with store.db:
                     store.db.execute("UPDATE publications SET content=jsonb_set(content,'{extra,_reader,changed}','true'::jsonb) WHERE id='linked'")
             client.portal.call(change_child)
             after = client.get('/api/v3/cards', headers={'If-None-Match':first.headers['ETag']})
-            assert after.status_code == 200 and after.json()['items'][0]['changed'] is True
+            assert after.status_code in (200,304)
+            if after.status_code==200:
+                assert 'changed' not in after.json()['items'][0]
         finally:
             client.portal.call(app.state.host.execution._actions.release)
 

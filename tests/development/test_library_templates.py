@@ -27,6 +27,10 @@ def test_library_copies_remain_independent_through_http(tmp_path, kind):
         result[0].clear()
     metadata = prepare(second)
     assert len(metadata['feeds'] if isinstance(metadata, dict) else metadata[0]) == 4
+    if kind == 'saved':
+        from tests.support.storage import database
+        with database(second) as db:
+            assert db.execute("SELECT count(*) FROM publications WHERE NOT (processing_metadata::jsonb ? '_revision')").fetchone()[0] == 0
     with TestClient(create_app(first, api_only=True, token='test'), headers=HEADERS) as a, TestClient(create_app(second, api_only=True, token='test'), headers=HEADERS) as b:
         cards = read_all_cards(a, '/api/v3/cards')
         assert len(cards) == 104

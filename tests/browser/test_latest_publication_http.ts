@@ -4,7 +4,7 @@ import {expect} from 'playwright/test';
 import {productionReader} from './http-reader';
 import {artifactPath} from './artifacts';
 
-test('publication shows latest text and media without stored history', {timeout:30000}, async t=>{
+test('retry preserves collected text and media without stored history', {timeout:30000}, async t=>{
   const r=await productionReader(t,{publicationPipeline:true});
   await r.api('settings/oko/global','PATCH',{theses:false,prompt_filters:'',telegram_http_rps:10});
   await r.openReader();
@@ -17,11 +17,11 @@ test('publication shows latest text and media without stored history', {timeout:
   const cards=(await r.api('cards')).items, id=cards[0].id;
   await r.updatePublication('Updated publication');
   await r.api(`materials/${id}/retry`,'POST');
-  await expect.poll(async()=>{const material=await r.api(`publication/${id}`);return material.availability==='available'&&material.text==='Updated publication'&&!material.loading;}).toBe(true);
+  await expect.poll(async()=>{const material=await r.api(`publication/${id}`);return material.availability==='available'&&material.text==='Initial publication'&&!material.loading;}).toBe(true);
   await r.page.reload();
   await expect(r.page.locator('[data-card]')).toHaveCount(1);
   await r.page.locator('[data-card]').click();
-  await expect(r.page.locator('#text')).toContainText('Updated publication');
+  await expect(r.page.locator('#text')).toContainText('Initial publication');
   await expect(r.page.locator('#images img')).toHaveAttribute('src',/^blob:/);
   await expect(r.page.locator('#versions')).toBeHidden();
   const current=await r.api(`publication/${id}`);
@@ -33,7 +33,7 @@ test('publication shows latest text and media without stored history', {timeout:
   await r.page.screenshot({path:artifactPath('latest-publication-mobile.png')});
   await r.page.locator('#viewed').click();
   await expect(r.page.locator('[data-card]')).toHaveCount(0);
-  await expect(r.page.locator('#text')).toContainText('Updated publication');
+  await expect(r.page.locator('#text')).toContainText('Initial publication');
   await r.page.reload();
   await expect(r.page.locator('#material')).toBeHidden();
 });

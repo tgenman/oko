@@ -64,14 +64,13 @@ class MediaFiles:
         return values
 
     def project_completeness(self, content: dict[str, Any], media: list[dict[str, Any]], *, collection_reason: str = '') -> bool:
-        header=content['extra']['_reader']
+        header=content.setdefault('extra',{}).setdefault('_reader',{})
         base=collection_reason
         subtitles={block.get('media_id') for block in content.get('blocks',[]) if block.get('type')=='media' and block.get('role')=='subtitles'}
-        not_requested=content['extra'].get('youtube',{}).get('captions')=='not_requested'
         def waiting_reason(row: dict[str,Any]) -> str:
             if row['reason']:
                 return str(row['reason'])
-            if not_requested and row['id'] in subtitles:
+            if row['id'] in subtitles and (row.get('reader_job_id') is None or row.get('reader_job_status')=='cancelled'):
                 return 'Субтитры не запрошены'
             if row['status']=='unavailable':
                 return 'Вложение недоступно'
@@ -94,7 +93,7 @@ class MediaFiles:
         return full
 
     def project_header(self, content: dict[str, Any], media: list[dict[str, Any]], *, collection_reason: str = '') -> bool:
-        header = content['extra']['_reader']
+        header = content.setdefault('extra',{}).setdefault('_reader',{})
         resources = header.get('source_manifest', {}).get('resources', [])
         by_key = {row['resource_key']: row for row in media}
         previous_attachments = {value['name']:value for value in header.get('attachments', [])}
@@ -231,15 +230,9 @@ class MediaFiles:
                 block['source_url']=actual.source_url if actual.source_url is not None else previous['source_url']
                 if actual.publication_url is not None:block['publication_url']=actual.publication_url
         if identity!=media_id:
-            if previous and previous['status']=='ready':
-                content['extra']['_reader']['changed']=True
             for block in content['blocks']:
                 if block.get('media_id')==media_id:
                     block['media_id']=identity
-        if subtitles:
-            content['extra']['youtube']['captions']='available'
-            content['extra']['_reader'].pop('captions', None)
-            content['extra']['youtube']['captions_digest']=files.file_digest(saved)
         media_complete=self.project_header(content, media)
         with store.db:
             memberships.lock_graph(store.db)
@@ -312,9 +305,6 @@ class MediaFiles:
         if row is None:
             return None
         content=saved_content(row['content'],mutable=True)
-        content['extra']['youtube']['captions']='unavailable'
-        content['extra']['_reader'].pop('captions', None)
-        content['extra']['youtube'].pop('captions_digest',None)
         media=self.publication_rows(owner)
         previous=next(value for value in media if value['id']==media_id)
         identity=str(uuid4()) if previous['storage_key'] else media_id
@@ -322,8 +312,6 @@ class MediaFiles:
             if value['id']==media_id:
                 value.update(id=identity,status='unavailable',reason=issue.message,storage_key=None,size_bytes=None)
         if identity!=media_id:
-            if previous and previous['status']=='ready':
-                content['extra']['_reader']['changed']=True
             for block in content['blocks']:
                 if block.get('media_id')==media_id:
                     block['media_id']=identity
@@ -371,9 +359,6 @@ class MediaFiles:
                 media = self.publication_rows(owner)
                 old=next((value for value in media if value['id']==media_id),None)
                 keep_file=bool(old and old['status']=='ready' and old['storage_key'] and existing_file(store.root,old['storage_key']) is not None)
-                if subtitles and not keep_file:
-                    content['extra']['youtube']['captions']='error'
-                    content['extra']['_reader'].pop('captions', None)
                 for value in media:
                     if value['id']==media_id:
                         value.update(reason=issue.message,status='ready' if keep_file else 'unavailable' if status=='unavailable' or changed else 'pending_download')

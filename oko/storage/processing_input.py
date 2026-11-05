@@ -23,7 +23,7 @@ def blocks(content: dict[str, Any]) -> list[dict[str, Any]]:
 def content(store: 'Store', item: str) -> dict[str, Any]:
     row=material_read.item(store.db,item)
     own=youtube_media.add_input(store,saved_content(row['content'],mutable=True)) if row else {}
-    linked=[row for row in publication_links.children(store,item) if row['content'] and row['status']!='pending_collection']
+    linked=[row for row in publication_links.children(store,item) if 'blocks' in row['content'] and row['status']!='pending_collection']
     if not linked:
         return own
     for block in own.get('blocks',[]):
@@ -68,16 +68,18 @@ def sources(store: 'Store', item: str, kind: str) -> tuple['InputSource', ...]:
     return tuple(result)
 
 
-def awaiting_input(content: dict[str, Any]) -> bool:
-    youtube=content.get('extra',{}).get('youtube')
-    if youtube and youtube.get('captions') not in ('available','unavailable','not_requested'):
-        return True
-    manifest=content.get('extra',{}).get('_reader',{}).get('source_manifest',{})
-    return manifest.get('preview_fragment') is not None or bool(manifest.get('post_web_unavailable') and not any(block.get('text','').strip() for block in blocks(content)))
+def awaiting_input(store: 'Store', item: str, content: dict[str, Any]) -> bool:
+    if 'youtube' not in content.get('extra',{}):
+        return False
+    state=youtube_media.subtitle_state(store,content,item)
+    if state=='not_requested':
+        row=material_read.item(store.db,item)
+        return bool(row and row['feed_id'] and store.subscriptions.youtube_theses(row['feed_id']))
+    return state not in ('available','unavailable')
 
 
 def awaiting_linked_input(store: 'Store', item: str, selected: dict[str,Any]) -> bool:
-    return any(not row['content'] or row['status']=='pending_collection' for row in publication_links.children(store,item))
+    return any('blocks' not in row['content'] or row['status']=='pending_collection' for row in publication_links.children(store,item))
 
 
 @reading_value
@@ -132,7 +134,7 @@ def settings(store: 'Store', item: str) -> dict[str, Any]:
 
 def signature(store: 'Store', item: str, kind: str) -> str | None:
     row=material_read.item(store.db,item)
-    if not row or row['viewed'] or row['feed_id'] is None or not row['content']:
+    if not row or row['viewed'] or row['feed_id'] is None or row['status']=='pending_collection' or 'blocks' not in row['content']:
         return None
     feed=processing_feed(store,item,kind)
     current=store.subscriptions.effective('feed',feed,details=False)
@@ -141,14 +143,18 @@ def signature(store: 'Store', item: str, kind: str) -> str | None:
     if kind=='filter' and not values['prompt_filters'].strip():
         return None
     rules=live_settings(store,item,feed)
-    selected_content=saved_content(row['content']) if youtube else _reading_content(store,item)
-    if youtube and selected_content.get('extra',{}).get('youtube',{}).get('captions')=='available' and not youtube_media.subtitle_path(store,youtube_media.subtitle_id(selected_content)):
+    selected_content=youtube_media.add_input(store,saved_content(row['content'],mutable=True)) if youtube else _reading_content(store,item)
+    if youtube and youtube_media.subtitle_state(store,selected_content,item)=='available' and not youtube_media.subtitle_path(store,youtube_media.subtitle_id(selected_content)):
         return None
-    if awaiting_input(selected_content) or awaiting_linked_input(store,item,selected_content):
+    if awaiting_input(store,item,selected_content) or awaiting_linked_input(store,item,selected_content):
         return None
-    selected=([dict(captions=selected_content.get('extra',{}).get('youtube',{}).get('captions'),
-                    digest=selected_content.get('extra',{}).get('youtube',{}).get('captions_digest'))]
-              if youtube else blocks(selected_content))
+    if youtube:
+        from oko.storage.files import file_digest
+        path=youtube_media.subtitle_path(store,youtube_media.subtitle_id(selected_content))
+        selected=[dict(captions=youtube_media.subtitle_state(store,selected_content,item),
+                       digest=file_digest(path) if path else None)]
+    else:
+        selected=blocks(selected_content)
     if kind=='theses':
         metadata=json.loads(row['processing_metadata'])
         unselected=not metadata.get('_pass',{}).get('feed_id')
@@ -202,11 +208,16 @@ def filtered(content: dict[str, Any], item: str, result: dict[str, Any]) -> dict
 
 def input_hash(store: 'Store', item: str) -> str:
     selected=_reading_content(store,item)
-    youtube=selected.get('extra',{}).get('youtube',{})
+    youtube=selected.get('extra',{}).get('youtube')
     row=material_read.item(store.db,item)
     rules = deepcopy(live_settings(store, item))
-    prefix = [row['title'] if row and not youtube else None,
-              [youtube.get('captions'),youtube.get('captions_digest')] if youtube else blocks(selected)]
+    if youtube is not None:
+        from oko.storage.files import file_digest
+        path=youtube_media.subtitle_path(store,youtube_media.subtitle_id(selected))
+        source: list[Any]=[youtube_media.subtitle_state(store,selected,item),file_digest(path) if path else None]
+    else:
+        source=blocks(selected)
+    prefix = [row['title'] if row and youtube is None else None,source]
     current = digest([*prefix, rules])
     # Old revisions included the theses switch. Preserve their revision when
     # that switch alone changes, without accepting changes to any other input.

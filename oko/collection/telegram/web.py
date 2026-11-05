@@ -19,8 +19,8 @@ from bs4.element import NavigableString, Tag
 import httpx
 from oko.collection import request_observation as observation
 
-from oko.collection.contracts import Material, Publication, SourceDeleted, SourceError, SourceManifest, ResourceManifest, ExternalMedia, ReplyPreview
-from oko.collection.telegram.contracts import TelegramPublication, ExpectedMedia
+from oko.collection.contracts import SourceError, ExternalMedia
+from oko.collection.telegram.contracts import TelegramPost, ExpectedMedia
 from oko.collection.telegram.media import Downloader
 from oko.collection.adapters import AdapterIssue, AdapterErrorKind, ExternalReference, ExternalKey, Platform
 
@@ -29,7 +29,7 @@ from oko.collection.adapters import AdapterIssue, AdapterErrorKind, ExternalRefe
 class WebPage:
     title: str
     description: str
-    posts: tuple[TelegramPublication, ...]
+    posts: tuple[TelegramPost, ...]
     next_before: int | None
     avatar_url: str | None = None
     issues: tuple[AdapterIssue, ...] = ()
@@ -211,7 +211,7 @@ def parse_page(data: bytes, username: str, *, partial: bool = False) -> WebPage:
                 except ValueError:
                     pass  # Malformed source addresses do not discard the saved excerpt.
 
-                reply_preview = ReplyPreview(author=author or None, text=fragment, source_url=safe)
+                reply_preview = dict(author=author or None, text=fragment, source_url=safe)
                 reply.decompose()
             own_text = [readable(node) for node in wrapper.select('.tgme_widget_message_text')]
             own_title = next((line.strip() for part in own_text for line in part.splitlines() if line.strip()), '')
@@ -244,17 +244,11 @@ def parse_page(data: bytes, username: str, *, partial: bool = False) -> WebPage:
                 media = (ExpectedMedia('telegram-web:'+str(message)+':unknown','unsupported',None,'media-'+str(message)+'.bin',reason='Предпросмотр не предоставил содержимое публикации'),)
             preview = wrapper.select_one('.tgme_widget_message_link_preview')
             preview_text = readable(preview) if preview else ''
-            meta = wrapper.select_one('.tgme_widget_message_meta')
-            edited = bool(meta and re.match(r'^edited\b',meta.get_text(' ',strip=True)))
-            resources = tuple(ResourceManifest(key=m.id,origin='telegram:'+username+'/'+str(message),order=i,
-                name=m.name,kind='image' if m.kind=='photo' else 'file' if m.kind in ('document','unsupported') else m.kind,
-                mime=m.mime or 'application/octet-stream',status='external' if m.external else 'missing' if m.url else 'unsupported',reason=m.reason or '',external=m.external) for i,m in enumerate(media))
-            manifest = SourceManifest(post_web_unavailable=post_web_unavailable,source_url=f'https://t.me/{username}/{message}',post=dict(text=body,description=preview_text,reply_preview=reply_preview.model_dump(mode="json") if reply_preview else None,edited=edited,members=list(members),resources=[dict(key=m.id,kind=m.id.rsplit(':',1)[-1]) for m in media]),resources=resources)
             file_title = next((node.get_text(' ',strip=True) for node in wrapper.select('.tgme_widget_message_document_title') if node.get_text(' ',strip=True)), '')
             file_fallback = file_title or ('Файл доступен в Telegram' if any(m.kind=='document' for m in media) else '')
-            teaser = Material(('Пост доступен только в Telegram' if post_web_unavailable else own_title) or (body.split('\n')[0] or file_fallback or ('Ответ на сообщение' if reply_preview else 'Telegram · медиа')),False,
-                              'Вложения ещё не загружены' if media else '',description=preview_text,source_manifest=manifest)
-            posts.append(TelegramPublication(Publication(str(message),f'https://t.me/{username}/{message}',published or 0,teaser,members,published_known=published is not None),body,media))
+            post_title=('Пост доступен только в Telegram' if post_web_unavailable else own_title) or (body.split('\n')[0] or file_fallback or ('Ответ на сообщение' if reply_preview else 'Telegram · медиа'))
+            posts.append(TelegramPost(str(message),f'https://t.me/{username}/{message}',published,members,post_title,body,
+                                      description=preview_text,reply_preview=reply_preview,restricted=post_web_unavailable,media=media))
         except (SourceError, ValueError) as error:
             if not partial:
                 raise
@@ -264,7 +258,7 @@ def parse_page(data: bytes, username: str, *, partial: bool = False) -> WebPage:
                 message = int(identity[1])
                 url = f'https://t.me/{username}/{message}'
                 ref = ExternalReference(ExternalKey(Platform.telegram, url), url)
-                posts.append(TelegramPublication(Publication(str(message), url, 0, members=(message,), published_known=False), ''))
+                posts.append(TelegramPost(str(message),url,None,(message,),'','',malformed=True))
             issues.append(AdapterIssue('malformed_publication', error.label if isinstance(error, SourceError) else 'Некорректные данные публикации Telegram', AdapterErrorKind.permanent, ref))
     more = history.select_one('a.js-messages_more[href*="before="]')
     next_before = None
@@ -303,7 +297,7 @@ async def load(username: str, before: int, transport: httpx.AsyncBaseTransport |
                             if len(data)>2*1024*1024:
                                 raise ValueError('preview too large')
                 page = await asyncio.to_thread(parse_page,bytes(data),username,partial=partial)
-                if before and any(int(post.publication.id)>=before for post in page.posts):
+                if before and any(int(post.id)>=before for post in page.posts):
                     raise SourceError('Telegram вернул страницу вне запрошенной границы')
                 if before and page.next_before is not None and page.next_before>=before:
                     raise SourceError('Telegram не продвинул позицию веб-истории')
@@ -335,42 +329,3 @@ async def avatar_metadata(page: WebPage, transport: httpx.AsyncBaseTransport | N
 async def preview(username: str, transport: httpx.AsyncBaseTransport | None = None) -> dict[str, Any]:
     page,url = await load(username,0,transport,partial=True)
     return dict(username=username,title=page.title,description=page.description,preview_url=url,**await avatar_metadata(page,transport))
-
-
-class WebTelegram:
-    """One bounded page per call; pagination state is returned for durable commit."""
-    def __init__(self, username: str, transport: httpx.AsyncBaseTransport | None = None) -> None:
-        self.username,self.transport = username,transport
-        self.identity_info: dict[str, Any] | None = None
-        self._avatar_url: str | None = None
-
-    async def metadata(self, page: WebPage) -> None:
-        avatar = await avatar_metadata(page,self.transport) if self.identity_info is None or page.avatar_url != self._avatar_url else {key:value for key,value in self.identity_info.items() if key == 'avatar'}
-        self.identity_info = dict(username=self.username,title=page.title,description=page.description,**avatar)
-        self._avatar_url = page.avatar_url
-
-    @staticmethod
-    def rows(posts: list[TelegramPublication]) -> list[dict[str, Any]]:
-        return [dict(id=max(p.publication.members),date=p.publication.published,post=p) for p in posts]
-
-    async def history_page(self, account: str, peer: int, upper: int, before: int, since: float) -> dict[str, Any]:
-        page,_ = await load(self.username,before or (upper+1 if upper else 0),self.transport)
-        await self.metadata(page)
-        upper = upper or max((max(p.publication.members) for p in page.posts),default=0)
-        posts = [p for p in page.posts if max(p.publication.members)<=upper]
-        return dict(messages=self.rows(posts),upper=upper,next_before=page.next_before or min((min(p.publication.members) for p in posts),default=before),more=page.next_before is not None)
-
-    async def page(self, account: str, peer: int, after: int, since: float, *, position: dict[str, Any] | None = None) -> dict[str, Any]:
-        progress = dict(position or {})
-        before = progress.get('catchup_before',0)
-        page,_ = await load(self.username,before,self.transport,partial=True)
-        await self.metadata(page)
-        upper = progress.get('catchup_upper') or max((max(p.publication.members) for p in page.posts),default=after)
-        self.observed = tuple(p.publication for p in page.posts if max(p.publication.members)<=after)
-        posts = [p for p in page.posts if after<max(p.publication.members)<=upper]
-        reached = not page.next_before or any(min(p.publication.members)<=after for p in page.posts)
-        if reached:
-            progress = {}
-        else:
-            progress = dict(catchup_upper=upper,catchup_before=page.next_before)
-        return dict(messages=self.rows(posts),more=not reached,next_after=max(after,upper) if reached else after,position=progress)

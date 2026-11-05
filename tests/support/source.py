@@ -8,10 +8,11 @@ import hashlib
 import json
 from typing import Any, BinaryIO
 from pydantic import JsonValue
-from oko.collection.contracts import Material, Publication, DiscoveryResult, FetchResult
-from tests.support.storage import Store
+from oko.collection.contracts import DiscoveryResult
+from tests.support.legacy_source import Material, Publication, FetchResult
+from tests.support.storage import Store, legacy_publication
 from oko.storage.job_types import Job
-from oko.collection.adapters import ExternalKey,ExternalReference,Platform,PublicationContent,PublicationMetadata,MediaReference,AdapterException,AdapterIssue,AdapterErrorKind
+from oko.collection.adapters import ExternalKey,ExternalReference,Platform,PublicationContent,PublicationMetadata,MediaReference,AdapterException,AdapterIssue,AdapterErrorKind,DiscoveryPage,FeedMetadata
 from oko.collection.contracts import SourceError
 
 
@@ -45,7 +46,7 @@ class StructuredSource:
         return Provider(self)
 
     def reference(self,publication: Publication) -> ExternalReference:
-        return ExternalReference(ExternalKey(Platform.other_web,publication.url),publication.url)
+        return publication.adapter_reference or ExternalReference(ExternalKey(Platform.other_web,publication.url),publication.url)
 
     def describe(self,publication: Publication,material: Material) -> Material:
         reference=self.reference(publication)
@@ -70,22 +71,32 @@ class StructuredSource:
         self.contents[reference.key]=value
         return replace(material,adapter_content=value)
 
-    async def discover(self,cursor: str | None) -> DiscoveryResult:
+    async def discover(self,feed: ExternalReference,cursor: str,limit: int) -> DiscoveryPage:
         previous=json.loads(cursor)['synthetic_cursor'] if cursor else None
         result: DiscoveryResult=await self.source.discover(previous)
         publications=[]
         for publication in result.publications:
+            assert isinstance(publication,Publication)
             self.publications[publication.id]=publication
             self.publications[self.reference(publication).key.external_id]=publication
-            publications.append(replace(publication,adapter_reference=self.reference(publication),
-                teaser=self.describe(publication,publication.teaser) if publication.teaser else None))
-        state=json.dumps(dict(synthetic_cursor=result.cursor,history_enroll=[p.id for p in publications],scan_complete=result.continuation is None))
-        return replace(result,publications=tuple(publications),cursor=state)
+            described=self.describe(publication,publication.teaser).adapter_content if publication.teaser else None
+            publications.append(described or PublicationContent(PublicationMetadata(self.reference(publication),'',datetime.fromtimestamp(publication.published,timezone.utc) if publication.published_known else None),needs_fetch=True))
+        state=json.dumps(dict(synthetic_cursor=result.cursor,history_enroll=[p.metadata.reference.key.external_id for p in publications],scan_complete=result.continuation is None))
+        if result.retry_error:
+            raise result.retry_error
+        return DiscoveryPage(tuple(publications),state,result.continuation is not None)
 
-    async def fetch(self,publication: Publication) -> FetchResult:
-        original=self.publications.get(publication.id,publication)
-        result: FetchResult=await self.source.fetch(original)
-        return replace(result,material=self.describe(original,result.material))
+    async def fetch(self,publication: ExternalReference) -> PublicationContent:
+        return await self.publication_adapter().fetch(publication)
+
+    async def download_media(self,publication: ExternalReference,media: MediaReference,output: BinaryIO) -> MediaReference:
+        return await self.publication_adapter().download_media(publication,media,output)
+
+    async def resolve_feed(self,url: str) -> FeedMetadata:
+        raise NotImplementedError
+
+    async def cursor_before(self,feed: ExternalReference,cursor: str,offset: int) -> str:
+        raise NotImplementedError
 
 
 class Provider:
@@ -93,14 +104,17 @@ class Provider:
         self.owner=owner
 
     async def fetch(self,publication: ExternalReference) -> PublicationContent:
-        if publication.key not in self.owner.contents:
-            original=Publication(publication.url.rstrip('/').rsplit('/',1)[-1],publication.url,0,adapter_reference=publication)
+        if self.owner.source is not None:
+            original=self.owner.publications.get(publication.key.external_id) or Publication(
+                publication.url.rstrip('/').rsplit('/',1)[-1],publication.url,0,adapter_reference=publication)
             result: FetchResult=await self.owner.source.fetch(original)
-            self.owner.describe(original,result.material)
+            described=self.owner.describe(original,result.material).adapter_content
+            assert described is not None
+            return described
         return self.owner.contents[publication.key]
 
     async def download_media(self,publication: ExternalReference,media: MediaReference,output: BinaryIO) -> MediaReference:
-        content=await self.fetch(publication)
+        content=self.owner.contents[publication.key]
         current=next((value for value in content.media if value.key==media.key),None)
         if current is None or current.resource_identity!=media.resource_identity:
             raise AdapterException(AdapterIssue('media_changed','Synthetic resource changed',AdapterErrorKind.media_changed,publication,media.key))
@@ -108,7 +122,7 @@ class Provider:
         return current
 
 
-def publication_packet(publication: Publication,material: Material | None=None,*,needs_fetch: bool=False) -> Publication:
+def publication_packet(publication: Publication,material: Material | None=None,*,needs_fetch: bool=False) -> PublicationContent:
     """An explicit metadata packet for closed synthetic-library builders."""
     owner=StructuredSource(None)
     material=material or publication.teaser
@@ -116,7 +130,10 @@ def publication_packet(publication: Publication,material: Material | None=None,*
     if described and needs_fetch:
         assert described.adapter_content is not None
         described=replace(described,adapter_content=replace(described.adapter_content,needs_fetch=True))
-    return replace(publication,adapter_reference=owner.reference(publication),teaser=described)
+    if described:
+        assert described.adapter_content is not None
+        return described.adapter_content
+    return PublicationContent(PublicationMetadata(owner.reference(publication),'',datetime.fromtimestamp(publication.published,timezone.utc) if publication.published_known else None),needs_fetch=True)
 
 
 def save_material(store: Store,job: Job,material: Material) -> None:
@@ -124,7 +141,7 @@ def save_material(store: Store,job: Job,material: Material) -> None:
     import asyncio
     from oko.storage.media import MediaOutput
     owner=StructuredSource(None)
-    publication=store.publication(job.item)
+    publication=legacy_publication(store,job.item)
     assert publication is not None
     save(store,job,owner.describe(publication,material))
     while store.db.execute("SELECT 1 FROM jobs j JOIN media_files m ON m.id=j.item WHERE m.publication_id=%s AND j.status='pending'",(job.item,)).fetchone():

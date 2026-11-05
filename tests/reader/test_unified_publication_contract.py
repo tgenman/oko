@@ -119,9 +119,10 @@ def test_album_media_blocks_keep_their_own_message_links(tmp_path):
         content=client.get('/api/v3/publication/'+item).json()['content']
         from tests.support.storage import database
         with database(tmp_path) as db:
-            saved=db.execute('SELECT content,members FROM publications WHERE id=%s',(item,)).fetchone()
+            saved=db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()
         assert content['extra']['telegram']['members']==[5,6]
         assert saved[0]['extra']['telegram']['members']==[5,6]
+        assert '_reader' not in saved[0].get('extra',{})
         blocks=[b for b in content['blocks'] if b['type']=='media']
         assert [(b['source_url'],b['publication_url']) for b in blocks]==[
             ('https://cdn.example/5.jpg','https://t.me/fixture/5'),('https://cdn.example/6.jpg','https://t.me/fixture/6')]
@@ -170,9 +171,24 @@ def test_common_content_is_readable_without_reader_metadata(tmp_path):
         with database(root) as db:
             db.execute("UPDATE publications SET content=content #- '{extra,_reader}' WHERE id=%s OR id IN (SELECT target_publication_id FROM publication_links WHERE source_publication_id=%s)",(item,item))
             db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,source_url,name,mime_type,status) VALUES ('sample-video',%s,'video','https://cdn.example/v.mp4','https://cdn.example/v.mp4','video.mp4','video/mp4','pending_download')",(item,))
-            db.execute("UPDATE publications SET content=jsonb_set(content,'{blocks}',content->'blocks' || '[{\"type\":\"media\",\"role\":\"attachment\",\"media_id\":\"sample-video\",\"source_url\":\"https://cdn.example/v.mp4\",\"publication_url\":null}]'::jsonb) WHERE id=%s",(item,))
+            db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,source_url,name,mime_type,status) VALUES ('sample-circle',%s,'circle','https://cdn.example/c.mp4','https://cdn.example/c.mp4','circle.mp4','video/mp4','pending_download')",(item,))
+            db.execute("UPDATE publications SET content=jsonb_set(content,'{blocks}',content->'blocks' || '[{\"type\":\"media\",\"role\":\"attachment\",\"media_id\":\"sample-video\",\"source_url\":\"https://cdn.example/v.mp4\",\"publication_url\":null},{\"type\":\"media\",\"role\":\"video\",\"presentation\":\"circle\",\"media_id\":\"sample-circle\",\"source_url\":\"https://cdn.example/c.mp4\",\"publication_url\":null}]'::jsonb) WHERE id=%s",(item,))
         response=client.get('/api/v3/publication/'+item)
         assert response.status_code==200
         assert any(block.get('text')=='Own excerpt' for block in response.json()['content']['blocks'])
         assert next(media for media in response.json()['media'] if media['id']=='sample-video')['kind']=='video'
+        assert next(media for media in response.json()['media'] if media['id']=='sample-circle')['kind']=='circle'
         assert any(card['id']==item and card['title']=='Announcement' for card in read_all_cards(client,'/api/v3/cards'))
+
+
+def test_card_and_publication_prefer_the_saved_title_over_body(tmp_path):
+    from tests.support.storage import database
+    from tests.support.telegram import configure_fast_web,settled
+    from tests.support.telegram_web import page
+    with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'Other body')])))),headers=HEADERS) as client:
+        configure_fast_web(client)
+        client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'})
+        item=settled(client)[0]['id']
+        with database(tmp_path) as db:db.execute("UPDATE publications SET title='Canonical title' WHERE id=%s",(item,))
+        assert client.get('/api/v3/publication/'+item).json()['title']=='Canonical title'
+        assert next(card for card in client.get('/api/v3/cards').json()['items'] if card['id']==item)['title']=='Canonical title'

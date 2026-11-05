@@ -1,7 +1,7 @@
 """Real temporary storage for worker transaction and recovery scenarios."""
 import json
 from tests.support.storage import Store, ensure_fixture
-from oko.collection.contracts import Publication
+from tests.support.legacy_source import Publication
 from tests.support.synthetic_material import material as Material
 from oko.subscriptions.subscriptions import Overrides
 from oko.processing.llamacpp import ProcessorConfig
@@ -28,7 +28,7 @@ def worker_library(root, *, text='Useful text', fault=lambda _:None, database_ur
     item=store.db.execute('SELECT id FROM publications').fetchone()[0]
     execution=Execution(lambda:True)
     execution._store=store
-    tasks=JobControl(execution,{},store.clock)
+    tasks=JobControl(execution,store.clock)
     return store,item,execution,tasks
 
 
@@ -54,5 +54,6 @@ def collection_worker(root,store,source):
     worker=app.state.host.collection
     worker.execution._store=store
     worker.execution._admitted=lambda:True
-    worker._sources['fixture']=source
+    from oko.collection.sources import FeedRuntime,SourceSettings
+    worker._sources['fixture']=FeedRuntime(source,SourceSettings('fixture','injected','https://fixture.invalid/feed',0,None),'injected')
     return worker

@@ -118,7 +118,6 @@ export type BrowserSessionRevoked = {
 };
 
 export type CardListItem = {
-    changed: boolean;
     external_attachment_kinds: Array<'audio' | 'video' | 'image' | 'document' | 'unsupported'>;
     feed_id: FeedId;
     hidden: boolean;
@@ -1903,6 +1902,7 @@ export type PublicationBlock = {
     caption?: string | null;
     language?: string | null;
     media_id: MaterialId;
+    presentation?: 'circle';
     publication_url: SourceUrl | null;
     role: 'image' | 'cover' | 'video' | 'audio' | 'attachment' | 'subtitles';
     source_url: SourceUrl | null;
@@ -1954,7 +1954,6 @@ export type PublicationReference = {
 
 export type PublicationResponse = {
     availability: 'available' | 'pending';
-    changed: boolean;
     completeness: ContentCompleteness | null;
     content: PublicationDocument;
     description: string;
@@ -2015,7 +2014,6 @@ export type PublicationResponse = {
     reply_preview: ReplyPreview | null;
     revision_id: RevisionId | null;
     source: SourceReference;
-    source_deleted: boolean;
     source_url: SourceUrl;
     status: 'pending_collection' | 'pending_filtering' | 'filter_out' | 'pending_summary' | 'ready';
     summarized_content: PublicationSummary;
@@ -2074,7 +2072,6 @@ export type ReadingStorageId = string;
 
 export type ReadingTextContent = {
     availability: 'available';
-    changed: boolean;
     completeness: ContentCompleteness;
     /**
      * Source description stored separately from publication text.
@@ -2091,7 +2088,6 @@ export type ReadingTextContent = {
     post_web_unavailable?: boolean;
     reply_preview: ReplyPreview | null;
     revision_id: RevisionId;
-    source_deleted: boolean;
     /**
      * Original stored publication text. Filtering is delivered separately for this source revision.
      */

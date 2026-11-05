@@ -1,7 +1,7 @@
 """Publication facts and actions needed by the collection worker."""
 from typing import TYPE_CHECKING
 
-from oko.collection.contracts import Publication
+from oko.collection.adapters import ExternalKey, ExternalReference, Platform
 from oko.storage import publication_links
 
 if TYPE_CHECKING:
@@ -18,16 +18,12 @@ class CollectionPublications:
     def feedless(self, item: str) -> bool:
         return publication_links.feedless(self._store, item)
 
-    def publication(self, item: str) -> Publication | None:
-        return self._store.publication(item)
+    def reference(self, item: str) -> ExternalReference | None:
+        row=self._store.db.execute('SELECT platform,external_id,url FROM publications WHERE id=%s AND viewed=0',(item,)).fetchone()
+        return ExternalReference(ExternalKey(Platform(row['platform']),row['external_id']),row['url']) if row else None
 
     def feed(self, item: str) -> str:
         return self._store.item_feed(item)
-
-    def source_removed(self, item: str) -> None:
-        if not self._store.db.in_transaction:
-            raise RuntimeError('Collection changes require an owning transaction')
-        self._store.mark_source_removed(item)
 
     def viewed(self, item: str) -> None:
         if not self._store.db.in_transaction:

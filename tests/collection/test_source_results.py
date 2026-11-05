@@ -5,8 +5,9 @@ import asyncio
 
 def test_configuration_detaches_history_and_keeps_youtube_discovery_cache():
     import httpx
-    from oko.collection.contracts import Publication
-    from oko.collection.sources import Sources, SourceSettings
+    from oko.collection.sources import FeedRuntime, Sources, SourceSettings
+    from oko.collection.youtube.adapter import YouTubeAdapter
+    from oko.workers.feed_discovery import discover_youtube
     from tests.support.youtube import PNG, VIDEO, feed_xml
     from tests.support.app import NoCaptions
 
@@ -23,16 +24,19 @@ def test_configuration_detaches_history_and_keeps_youtube_discovery_cache():
         assert updates.created == ('video',)
         assert sources.description('video').startswith('YouTube:')
         history['count'] = 500
-        initial = await sources.sources['video'].discover(None)
-        result = await sources.sources['video'].discover(initial.cursor)
-        assert [p.id for p in result.publications] == [VIDEO]
+        runtime=sources.sources['video']
+        assert isinstance(runtime,FeedRuntime) and isinstance(runtime.adapter,YouTubeAdapter)
+        initial=await discover_youtube(runtime.adapter,runtime.settings.url,runtime.settings.initial_history or {},None)
+        result=await discover_youtube(runtime.adapter,runtime.settings.url,runtime.settings.initial_history or {},initial.cursor)
+        assert [p.metadata.reference.key.external_id for p in result.publications] == [VIDEO]
         # Applying the unchanged original settings must not discard cached titles.
         original = SourceSettings('video', 'youtube', settings.url, 1, dict(mode='count',count=1,run='fixture'))
         assert sources.configure([original]).created == ()
-        plain = Publication(VIDEO, 'https://www.youtube.com/watch?v='+VIDEO, 0)
-        loaded = await sources.sources['video'].fetch(plain)
-        assert loaded.material.title == result.publications[0].teaser.title
-        assert loaded.material.title != 'YouTube'
-        assert loaded.material.captions == 'not_requested'
+        adapter=sources.publication_adapter('video')
+        assert adapter is not None
+        loaded=await adapter.fetch(result.publications[0].metadata.reference)
+        assert loaded.metadata.title == result.publications[0].metadata.title
+        assert loaded.metadata.title != 'YouTube'
+        assert 'captions' not in loaded.content['extra']['youtube']
 
     asyncio.run(check())

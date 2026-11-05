@@ -43,7 +43,7 @@ def test_two_files_on_one_publication_keep_separate_errors(tmp_path,postgres_url
 
 def test_real_material_replacement_rolls_back_file_job_and_problem(tmp_path,postgres_url):
     import pytest
-    from oko.collection.contracts import Publication
+    from tests.support.legacy_source import Publication
     from tests.support.synthetic_material import material as Material
     from tests.support.source import StructuredSource,publication_packet
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
@@ -62,7 +62,7 @@ def test_real_material_replacement_rolls_back_file_job_and_problem(tmp_path,post
         with pytest.raises(ValueError,match='rollback'):
             with transaction(store.db):
                 job_for_collection=running_collection_job(store,'fetch',item)
-                _,effects=store.collected_publication.accept(item,StructuredSource(None).describe(publication,Material('New','New text')))
+                _,effects=store.collected_publication.accept_content(item,StructuredSource(None).describe(publication,Material('New','New text')).adapter_content)
                 apply_simulated_collection(store,effects,job=job_for_collection)
                 assert store.db.execute('SELECT 1 FROM media_files WHERE id=%s',(file,)).fetchone() is None
                 raise ValueError('rollback')

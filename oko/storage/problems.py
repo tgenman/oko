@@ -326,9 +326,7 @@ class Problems:
             existing = self.db.execute('SELECT body FROM reader_problems WHERE identity=%s AND finished IS NULL', ('action:'+identity,)).fetchone()
             if existing:
                 for obj in json.loads(existing['body'])['objects']:
-                    if obj['kind'] == 'material' and self.store.publications.source_deleted(obj['id']):
-                        outcome = 'irrelevant'
-                    elif obj['kind'] == 'feed':
+                    if obj['kind'] == 'feed':
                         feed = self.db.execute('SELECT connection FROM feeds WHERE id=%s', (obj['id'],)).fetchone()
                         if not feed or feed['connection'] == 'deleting':
                             outcome = 'irrelevant'
@@ -921,7 +919,7 @@ class Problems:
                 affected={obj['id'] for _,body,_,_ in parsed for obj in body['objects']}
                 possible_active=self.active_fetch_roots(affected)
                 linked=self.fetch_linked_pairs(set(items),affected)
-                publications={row['id']:row for row in self.db.execute('SELECT id,viewed,source_deleted FROM publications WHERE id=ANY(%s)',(items,))} if items else {}
+                publications={row['id']:row for row in self.db.execute('SELECT id,viewed FROM publications WHERE id=ANY(%s)',(items,))} if items else {}
                 alive={row['id'] for row in self.db.execute("SELECT id FROM feeds WHERE id=ANY(%s) AND connection!='deleting'",(feeds,))} if feeds else set()
                 resolved_ids: list[str]=[]
                 irrelevant_ids: list[str]=[]
@@ -956,7 +954,7 @@ class Problems:
                         if any(obj['id']!=item and (obj['id'],item) not in linked for obj in body['objects']):
                             continue  # Every stored object needs evidence of its relationship to this Job.
                         publication=publications.get(item)
-                        irrelevant=feed not in alive or bool(publication and (publication['viewed'] or publication['source_deleted']))
+                        irrelevant=feed not in alive or bool(publication and (publication['viewed']))
                         (irrelevant_ids if irrelevant else resolved_ids).append(record['id'])
                 for job_id,previous in pending_jobs.items():
                     self.sync_fetch(job_id,previous,self.store.wall_clock())
@@ -1139,7 +1137,7 @@ class Problems:
         owners=sorted({prior['fetch_owner'] for prior in closing if prior.get('fetch_owner')})
         materials=sorted({obj['id'] for prior in closing for obj in prior['objects'] if obj.get('kind')=='material'})
         alive={row['id'] for row in self.db.execute("SELECT id FROM feeds WHERE id=ANY(%s) AND connection!='deleting'",(owners,))} if owners else set()
-        removed={row['id'] for row in self.db.execute('SELECT id FROM publications WHERE id=ANY(%s) AND (viewed=1 OR source_deleted)',(materials,))} if materials else set()
+        removed={row['id'] for row in self.db.execute('SELECT id FROM publications WHERE id=ANY(%s) AND viewed=1',(materials,))} if materials else set()
         finished: dict[str,list[str]]={'resolved':[],'irrelevant':[]}
         for prior in closing:
             owner=prior.get('fetch_owner')
@@ -1556,7 +1554,7 @@ class Problems:
                 publications_ids={row['publication_id'] for row in files.values()}
                 possible_active=self.active_media_roots(affected)
                 linked=self.fetch_linked_pairs(publications_ids,affected)
-                publications={row['id']:row for row in self.db.execute('SELECT id,viewed,source_deleted FROM publications WHERE id=ANY(%s)',(list(publications_ids),))} if publications_ids else {}
+                publications={row['id']:row for row in self.db.execute('SELECT id,viewed FROM publications WHERE id=ANY(%s)',(list(publications_ids),))} if publications_ids else {}
                 resolved_ids: list[str]=[]
                 irrelevant_ids: list[str]=[]
                 updates: list[tuple[str,str]]=[]
@@ -1594,7 +1592,7 @@ class Problems:
                         if any(obj['id']!=publication_id and (obj['id'],publication_id) not in linked for obj in body['objects']):
                             continue  # Every stored object needs evidence of its relationship to this Job.
                         publication=publications.get(publication_id)
-                        irrelevant=bool(publication and (publication['viewed'] or publication['source_deleted']))
+                        irrelevant=bool(publication and (publication['viewed']))
                         (irrelevant_ids if irrelevant else resolved_ids).append(record['id'])
                 for job_id,previous in pending_jobs.items():
                     self.sync_media_problem(job_id,previous,self.store.wall_clock())
@@ -1855,7 +1853,7 @@ class Problems:
         owners=sorted({prior['media_owner'] for prior in closing if prior.get('media_owner')})
         materials=sorted({obj['id'] for prior in closing for obj in prior['objects'] if obj.get('kind')=='material'})
         alive={row['id'] for row in self.db.execute("SELECT id FROM feeds WHERE id=ANY(%s) AND connection!='deleting'",(owners,))} if owners else set()
-        removed={row['id'] for row in self.db.execute('SELECT id FROM publications WHERE id=ANY(%s) AND (viewed=1 OR source_deleted)',(materials,))} if materials else set()
+        removed={row['id'] for row in self.db.execute('SELECT id FROM publications WHERE id=ANY(%s) AND viewed=1',(materials,))} if materials else set()
         files=sorted({prior['media_file_id'] for prior in closing if prior.get('media_file_id')})
         existing_files={row['id'] for row in self.db.execute('SELECT id FROM media_files WHERE id=ANY(%s)',(files,))} if files else set()
         finished: dict[str,list[str]]={'resolved':[],'irrelevant':[]}
@@ -2085,7 +2083,7 @@ class Problems:
                 affected={obj['id'] for _,body,_,_,_ in parsed for obj in body['objects']}
                 possible_active=self.active_processing_roots(affected)
                 linked=self.fetch_linked_pairs(set(items),affected)
-                publications={row['id']:row for row in self.db.execute('SELECT id,viewed,source_deleted FROM publications WHERE id=ANY(%s)',(items,))} if items else {}
+                publications={row['id']:row for row in self.db.execute('SELECT id,viewed FROM publications WHERE id=ANY(%s)',(items,))} if items else {}
                 alive={row['id'] for row in self.db.execute("SELECT id FROM feeds WHERE id=ANY(%s) AND connection!='deleting'",(feeds,))} if feeds else set()
                 resolved_ids: list[str]=[]
                 irrelevant_ids: list[str]=[]
@@ -2123,7 +2121,7 @@ class Problems:
                         if any(obj['id']!=item and (obj['id'],item) not in linked for obj in body['objects']):
                             continue  # Every stored object needs evidence of its relationship to this Job.
                         publication=publications.get(item)
-                        irrelevant=feed not in alive or bool(publication and (publication['viewed'] or publication['source_deleted']))
+                        irrelevant=feed not in alive or bool(publication and (publication['viewed']))
                         (irrelevant_ids if irrelevant else resolved_ids).append(record['id'])
                 for job_id,previous in pending_jobs.items():
                     self.sync_processing_problem(job_id,previous,self.store.wall_clock())
@@ -2247,7 +2245,7 @@ class Problems:
             owners=sorted({candidate['processing_owner'] for _,candidate in closing if candidate.get('processing_owner')})
             materials=sorted({obj['id'] for _,candidate in closing for obj in candidate['objects'] if obj.get('kind')=='material'})
             alive={row['id'] for row in self.db.execute("SELECT id FROM feeds WHERE id=ANY(%s) AND connection!='deleting'",(owners,))} if owners else set()
-            removed={row['id'] for row in self.db.execute('SELECT id FROM publications WHERE id=ANY(%s) AND (viewed=1 OR source_deleted)',(materials,))} if materials else set()
+            removed={row['id'] for row in self.db.execute('SELECT id FROM publications WHERE id=ANY(%s) AND viewed=1',(materials,))} if materials else set()
             finished: dict[str,list[str]]={'resolved':[],'irrelevant':[]}
             for identity,candidate in closing:
                 owner=candidate.get('processing_owner')
@@ -2380,7 +2378,7 @@ class Problems:
         owners=sorted({prior['processing_owner'] for prior in closing if prior.get('processing_owner')})
         materials=sorted({obj['id'] for prior in closing for obj in prior['objects'] if obj.get('kind')=='material'})
         alive={row['id'] for row in self.db.execute("SELECT id FROM feeds WHERE id=ANY(%s) AND connection!='deleting'",(owners,))} if owners else set()
-        removed={row['id'] for row in self.db.execute('SELECT id FROM publications WHERE id=ANY(%s) AND (viewed=1 OR source_deleted)',(materials,))} if materials else set()
+        removed={row['id'] for row in self.db.execute('SELECT id FROM publications WHERE id=ANY(%s) AND viewed=1',(materials,))} if materials else set()
         finished: dict[str,list[str]]={'resolved':[],'irrelevant':[]}
         for prior in closing:
             owner=prior.get('processing_owner')
@@ -4031,7 +4029,6 @@ class Problems:
                         if classify_legacy(row['identity'],body) in ('read','ambiguous'):
                             continue
                     irrelevant = body['code'] == 'codex-choice' and self.store.codex_config() is None
-                    irrelevant = irrelevant or any(obj['kind'] == 'material' and self.store.publications.source_deleted(obj['id']) for obj in body['objects'])
                     irrelevant = irrelevant or any(obj['kind'] == 'feed' and feeds.get(obj['id'], {}).get('connection', 'deleting') == 'deleting' for obj in body['objects'])
                     self.db.execute('UPDATE reader_problems SET finished = %s , outcome = %s WHERE id = %s', (now, 'irrelevant' if irrelevant else 'resolved', row['id']))
                     changed = True

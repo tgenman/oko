@@ -11,8 +11,8 @@ import httpx
 from oko.collection.adapter_errors import failure
 from oko.collection.adapters import (AdapterErrorKind,AdapterException,AdapterIssue,DiscoveryPage,
     ExternalKey,ExternalReference,FeedMetadata,MediaReference,Platform,PublicationContent,PublicationMetadata)
-from oko.collection.contracts import CaptionsClient,SourceError,SourceSkipped,Publication
-from oko.collection.rss import Entry,RSSSource,entries
+from oko.collection.contracts import CaptionsClient,SourceError,SourceSkipped
+from oko.collection.rss import Entry,RSSHTTP,entries
 from oko.collection.youtube.history import HistoryClient,LocalHistory
 
 
@@ -55,7 +55,7 @@ class YouTubeAdapter:
         if feed!=feed_reference(feed.url):
             raise AdapterException(AdapterIssue('youtube-invalid-feed','Ключ не соответствует каналу',AdapterErrorKind.permanent))
         channel=feed.key.external_id
-        source=RSSSource(feed.url,0,self.transport)
+        source=RSSHTTP(self.transport)
         found: dict[str,Entry]={}
         errors=[]
         self.anchors={}
@@ -64,7 +64,7 @@ class YouTubeAdapter:
             try:
                 raw,base,_=await source.download(url)
                 for entry in entries(raw,base,strict=True):
-                    match=re.fullmatch(r'yt:video:([A-Za-z0-9_-]{11})',entry.publication.id)
+                    match=re.fullmatch(r'yt:video:([A-Za-z0-9_-]{11})',entry.id)
                     if match:
                         found.setdefault(match[1],entry)
                         self.anchors.setdefault(category,match[1])
@@ -74,18 +74,18 @@ class YouTubeAdapter:
             raise failure(errors[0],scope='youtube:feed:'+channel) from errors[0]
         self.latest=found
         self.issues=tuple(AdapterIssue('youtube-feed-partial',error.label,AdapterErrorKind.notice) for error in errors)
-        ordered=sorted(found,key=lambda key:found[key].publication.published)
+        ordered=sorted(found,key=lambda key:found[key].published)
         return ordered
 
     def _value(self, video: str) -> PublicationContent:
         ref=video_reference(video)
         entry=self.latest.get(video)
-        stamp=entry.publication.published if entry and entry.publication.published_known else None
+        stamp=entry.published if entry and entry.published_known else None
         cover_url='https://i.ytimg.com/vi/'+video+'/hqdefault.jpg'
-        cover=MediaReference('youtube:cover',cover_url,'',mime_type='image/jpeg',source_url=cover_url)
-        subtitles=MediaReference('youtube:subtitles','youtube:'+video+':subtitles','',mime_type='text/plain')
-        extra: dict[str,Any]=dict(captions='pending')
-        description=RSSSource.excerpt(entry.excerpt) if entry else None
+        cover=MediaReference('youtube:cover',cover_url,'',mime_type='image/jpeg',source_url=cover_url,publication_url=ref.url)
+        subtitles=MediaReference('youtube:subtitles','youtube:'+video+':subtitles','',mime_type='text/plain',publication_url=ref.url)
+        extra: dict[str,Any]={}
+        description=RSSHTTP.excerpt(entry.excerpt) if entry else None
         return PublicationContent(PublicationMetadata(ref,entry.title if entry else '',
             datetime.fromtimestamp(stamp,timezone.utc) if stamp is not None else None),
             dict(blocks=[dict(type='external_media',kind='video',url=ref.url),
@@ -95,15 +95,15 @@ class YouTubeAdapter:
 
     def _metadata(self, keys: list[str]) -> dict[str,Any]:
         return {key:dict(title=self.latest[key].title,
-            published=self.latest[key].publication.published if self.latest[key].publication.published_known else None)
+            published=self.latest[key].published if self.latest[key].published_known else None)
             for key in keys if key in self.latest}
 
     def _restore(self, state: dict[str,Any]) -> None:
         for key,value in state.get('metadata',{}).items():
             if key not in self.latest:
                 stamp=value.get('published')
-                self.latest[key]=Entry(Publication(key,video_reference(key).url,stamp or 0,
-                    published_known=stamp is not None),value.get('title',''),'')
+                self.latest[key]=Entry(key,video_reference(key).url,stamp or 0,
+                    stamp is not None,value.get('title',''),'')
 
     async def _history(self, feed: ExternalReference, state: dict[str,Any]) -> None:
         provider=state.setdefault('history',dict(anchors=state.get('anchors',{})))
@@ -130,7 +130,7 @@ class YouTubeAdapter:
             if key not in keys:
                 keys.append(key)
             if key not in self.latest:
-                self.latest[key]=Entry(Publication(key,video_reference(key).url,0,published_known=False),entry.get('title',''),'')
+                self.latest[key]=Entry(key,video_reference(key).url,0,False,entry.get('title',''),'')
         keys.reverse()
         anchor=state['history_position']
         if anchor is not None and anchor not in keys:
@@ -212,13 +212,12 @@ class YouTubeAdapter:
         return self._value(expected.key.external_id)
 
     async def download_media(self, publication: ExternalReference, media: MediaReference, output: BinaryIO) -> MediaReference:
-        value=await self.fetch(publication)
-        current=next((ref for ref in value.media if ref.key==media.key),None)
-        if current is None or current.locator!=media.locator:
-            raise AdapterException(AdapterIssue('media-changed','Описание файла YouTube изменилось',AdapterErrorKind.media_changed,publication,media.key))
+        if media.key not in ('youtube:cover','youtube:subtitles'):
+            raise AdapterException(AdapterIssue('media-invalid','Неизвестный файл YouTube',AdapterErrorKind.permanent,publication,media.key))
+        current=media
         try:
             if current.key=='youtube:cover':
-                raw,_,mime=await RSSSource(publication.url,0,self.transport).download(current.locator,2_000_000)
+                raw,_,mime=await RSSHTTP(self.transport).download(current.locator,2_000_000)
                 if not (mime=='image/jpeg' and raw.startswith(b'\xff\xd8\xff')
                         or mime=='image/png' and raw.startswith(b'\x89PNG\r\n\x1a\n')):
                     raise SourceError('Превью недоступно',retryable=False)

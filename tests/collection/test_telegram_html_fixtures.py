@@ -55,25 +55,18 @@ def test_recorded_album_parser_does_not_create_individual_publications_for_parts
     from oko.collection.telegram.web import parse_page
     posts = parse_page((ROOT / 'album.html').read_bytes(), 'durov').posts
     assert len(posts) == 19
-    albums = [p for p in posts if 373 in p.publication.members]
+    albums = [p for p in posts if 373 in p.members]
     assert len(albums) == 1
-    assert albums[0].publication.members == tuple(range(373, 382))
-    assert not any(p.publication.members == (member,) for p in posts for member in range(374, 382))
+    assert albums[0].members == tuple(range(373, 382))
+    assert not any(p.members == (member,) for p in posts for member in range(374, 382))
 
 
-def test_collection_facts_do_not_duplicate_adapter_manifest():
-    from copy import deepcopy
+def test_adapter_exposes_only_common_blocks_and_telegram_members():
     from oko.collection.telegram.adapter import content
-    from oko.collection.telegram.channel_source import material
     from oko.collection.telegram.web import parse_page
 
-    post=next(post for post in parse_page((ROOT/'public.html').read_bytes(),'telegram').posts if post.publication.teaser)
+    post=next(post for post in parse_page((ROOT/'public.html').read_bytes(),'telegram').posts if not post.malformed)
     described=content(post)
-    before=deepcopy(described.content)
-    result=material(described)
-    assert result.source_manifest is not None
-    assert result.adapter_content is not None
-    assert result.adapter_content.content['blocks']==before['blocks']
-    assert all(key not in result.adapter_content.content['extra']['telegram'] for key in ('manifest','description'))
-    assert result.adapter_content.content['extra']['telegram']['members']==before['extra']['telegram']['members']
-    assert described.content==before
+    assert set(described.content['extra']['telegram'])=={'members'}
+    assert 'manifest' not in described.content['extra']['telegram']
+    assert 'blocks' in described.content

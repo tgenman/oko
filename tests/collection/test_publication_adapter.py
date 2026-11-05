@@ -129,19 +129,20 @@ def test_broken_record_preserves_other_posts_and_known_key_for_fetch(broken_url)
         assert [p.metadata.reference.key.external_id for p in found.publications] == [
             'https://t.me/fixture/3', 'https://t.me/fixture/5', 'https://t.me/fixture/6']
         assert found.publications[1].needs_fetch
-        assert found.publications[1].content == {}
+        assert found.publications[1].content == {'extra':{'telegram':{'members':[5]}}}
         assert any(issue.publication.key.external_id == 'https://t.me/fixture/5' for issue in found.issues if issue.publication)
     asyncio.run(scenario())
 
 
-def test_replaced_media_is_rejected_before_writing_new_bytes():
+def test_telegram_media_uses_saved_locator_without_rechecking_post():
     from io import BytesIO
-    from oko.collection.adapters import AdapterException, AdapterErrorKind
     from oko.collection.telegram.adapter import TelegramWebAdapter
     path = ['old']
+    calls=[]
     def response(request):
+        calls.append(str(request.url))
         if request.url.host == 'cdn.example':
-            return httpx.Response(200, content=b'replaced')
+            return httpx.Response(200, content=b'old')
         return httpx.Response(200, text=page([(5, 'Photo<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/'+path[0]+'\')"></a>')]))
     async def scenario():
         adapter = TelegramWebAdapter(httpx.MockTransport(response))
@@ -149,14 +150,11 @@ def test_replaced_media_is_rejected_before_writing_new_bytes():
         found = await adapter.discover(feed.reference, feed.latest_cursor, 10)
         post = found.publications[0]
         path[0] = 'replacement'
+        before=list(calls)
         output = BytesIO()
-        try:
-            await adapter.download_media(post.metadata.reference, post.media[0], output)
-        except AdapterException as error:
-            assert error.issue.kind == AdapterErrorKind.media_changed
-        else:
-            raise AssertionError('Replacement must not be written under old identity')
-        assert output.getvalue() == b''
+        await adapter.download_media(post.metadata.reference, post.media[0], output)
+        assert output.getvalue() == b'old'
+        assert calls==before+['https://cdn.example/old']
     asyncio.run(scenario())
 
 
@@ -194,4 +192,16 @@ def test_canonical_telegram_returns_telegraph_reference_without_fetching_the_art
         fetched=await adapter.fetch(value.metadata.reference)
         assert fetched.linked_publications==(ref,)
         assert all('api.telegra.ph' not in url for url in calls)
+    asyncio.run(scenario())
+
+
+def test_telegram_adapter_returns_display_blocks_without_legacy_manifest():
+    from oko.collection.telegram.adapter import TelegramWebAdapter
+    async def scenario():
+        adapter=TelegramWebAdapter(httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'Post text')]))))
+        feed=await adapter.resolve_feed('https://t.me/s/fixture')
+        result=await adapter.discover(feed.reference,feed.latest_cursor,10)
+        value,=result.publications
+        assert value.content['extra']['telegram']=={'members':[11]}
+        assert value.content['blocks']==[{'type':'text','role':'body','text':'Post text'}]
     asyncio.run(scenario())

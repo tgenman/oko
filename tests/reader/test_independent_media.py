@@ -16,7 +16,7 @@ from tests.support.reader import wait_for
 HEADERS = {'Authorization':'Bearer test'}
 
 
-def test_edited_text_is_readable_while_new_photo_download_is_held(tmp_path):
+def test_partial_text_is_readable_while_new_photo_download_is_held(tmp_path):
     root = publication_root(tmp_path)
     phase = [0]
     import time
@@ -44,6 +44,8 @@ def test_edited_text_is_readable_while_new_photo_download_is_held(tmp_path):
                 assert previous
                 previous_job,previous_key=previous['id'],previous['storage_key']
             phase[0] = 1
+            with database(root) as db:
+                db.execute("UPDATE publications SET status='pending_collection' WHERE id=%s",(item,))
             client.post('/api/v3/materials/'+item+'/retry')
             assert started.wait(3)
             updated = wait_for(client, lambda: (m if (m := client.get('/api/v3/publication/'+item).json())['text']=='Edited text' else None))
@@ -134,7 +136,7 @@ def test_one_file_failure_keeps_other_files_and_backoff_survives_restart(tmp_pat
             assert result and result['reason_message']
             raw=db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()[0]
             assert '_collection_reason' not in raw['extra']
-            assert 'full' not in raw['extra']['_reader'] and 'reason' not in raw['extra']['_reader']
+            assert '_reader' not in raw['extra']
             db.execute("UPDATE jobs SET reason_code=NULL,reason_message=NULL WHERE kind='download_media' AND item=(SELECT id FROM media_files WHERE publication_id=%s AND source_locator LIKE '%%/bad.jpg')",(item,))
         assert 'Вложение ожидает загрузки' in client.get('/api/v3/publication/'+item).json()['completeness']['message']
         with database(root) as db:
@@ -212,6 +214,9 @@ def test_manual_fetch_retry_preserves_a_source_wait_and_saved_text(tmp_path):
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         item=settled(client)[0]['id']
         limited[0]=True
+        from tests.support.storage import database
+        with database(root) as db:
+            db.execute("UPDATE publications SET status='pending_collection' WHERE id=%s",(item,))
         client.post('/api/v3/materials/'+item+'/retry')
         def deadline():
             state=client.get('/api/v3/status/details').json()

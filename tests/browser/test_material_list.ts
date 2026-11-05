@@ -175,3 +175,17 @@ test('news titles show link labels without Markdown destinations', async () => {
   expect(r.errors).toEqual([]);
  } finally {await r.close();}
 });
+
+test('old change marker does not appear on a publication card',async()=>{
+ const r=await reader();try{
+  await r.start([material('one')]);
+  await expect(r.page.locator('[data-card="one"]')).not.toContainText('Updated');
+ }finally{await r.close();}
+});
+
+test('card rendering does not branch on source-specific availability',async()=>{
+ const r=await reader();try{
+  await r.start([material('one',{card:{post_web_unavailable:true}})]);
+  await expect(r.page.locator('[data-card="one"] [aria-label="Публикация недоступна"]')).toHaveCount(0);
+ }finally{await r.close();}
+});

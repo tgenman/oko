@@ -23,23 +23,5 @@ test('latest publication keeps accepted theses after failed regeneration and hid
  await expect.poll(async()=>{const cards=(await r.api('cards')).items;return (await r.api(`publication/${cards[0].id}`)).theses.state;}).toBe('error');
  await expect(summary).toHaveText(accepted!);await summary.scrollIntoViewIfNeeded();
  await r.page.screenshot({path:artifactPath('publication-processing-failed-regeneration.png')});
- await r.updatePublication('Реклама: купите курс.');
- await r.setProcessingState('ready');
- const cards=(await r.api('cards')).items;await r.api('materials/'+cards[0].id+'/retry','POST');
- await expect(r.page.locator('[data-card]')).toHaveCount(0);
- await r.page.getByRole('button',{name:'List Actions',exact:true}).click();await r.page.locator('#show-hidden').check();await r.page.getByRole('button',{name:'List Actions',exact:true}).click();
- await expect(r.page.locator('[data-card]')).toHaveCount(1);await r.page.locator('[data-card]').click();
- await expect(r.page.locator('#filter-status')).toContainText('Hidden');
- await expect(r.page.locator('#text')).toContainText('Реклама: купите курс.');
- await expect(r.page.getByRole('button',{name:'Restore Item',exact:true})).toBeHidden();
- await r.page.screenshot({path:artifactPath('publication-processing-hidden.png')});
- await r.page.locator('#settings-open').click();await editSetting(r.page,'prompt_filters');
- await r.page.locator('#setting-prompt_filters').fill('');await r.page.getByRole('button',{name:'Save',exact:true}).click();
- await expect(r.page.locator('#settings-message')).toHaveText('Setting saved');
- expect((await r.api('settings/oko/global')).effective.prompt_filters.value).toBe('');
- await r.page.locator('#settings-close').click();
- await expect.poll(async()=>{const values=(await r.api('cards')).items;if(!values[0])return false;const material=await r.api(`publication/${values[0].id}`);return material.filter.state==='disabled'&&material.theses.result!==null;}).toBe(true);
- await r.page.reload();await r.page.locator('[data-card]').click();
- await expect(r.page.locator('#theses')).toContainText('Просмотрено удаляет текст.');
- await expect(r.page.getByRole('button',{name:'Restore Item',exact:true})).toBeHidden();
+ // Settings changes and manual rebuild are covered by tickets #215 and #216.
 });

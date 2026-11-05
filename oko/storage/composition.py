@@ -21,19 +21,6 @@ class FolderContents:
     cards: tuple[str, ...]
 
 
-def telegram_title(header: dict[str, Any], text: str) -> str:
-    # Structured web copies already derive the title from own text. Keep the
-    # full-first-line reading compatibility for older and account copies.
-    structured = 'reply_preview' in header.get('source_manifest', {}).get('post', {})
-    return str(header['title']) if structured or not text else text.split('\n')[0] or str(header['title'])
-
-
-def _reading_heading(material: dict[str, Any] | None, feed: dict[str, Any], header: dict[str, Any]) -> dict[str, Any] | None:
-    if material and material['complete'] and feed['kind'] == 'telegram' and feed.get('transport') != 'rss':
-        material['title'] = telegram_title(header, material['text'])
-    return material
-
-
 class ReadingComposition:
     def __init__(self, store: 'Store') -> None:
         self._store = store
@@ -77,7 +64,7 @@ class ReadingComposition:
     def _contents(self, owner: str, scope: str) -> FolderContents:
         self._store.subscriptions.check_owner(scope, owner)
         condition = 'i.feed_id = %s' if scope == 'feed' else 'f.folder_id = %s'
-        rows = list(self._store.db.execute(f'SELECT i.id, i.members, i.feed_id FROM publications i JOIN feeds f ON f.id=i.feed_id WHERE i.viewed=0 AND {condition} ORDER BY i.id', (owner,)))
+        rows = list(self._store.db.execute(f"SELECT i.id, COALESCE(i.content #> '{{extra,telegram,members}}','[]'::jsonb)::text AS members, i.feed_id FROM publications i JOIN feeds f ON f.id=i.feed_id WHERE i.viewed=0 AND {condition} ORDER BY i.id", (owner,)))
         # Pending and damaged publications both have a visible card. Completion
         # still captures every member, including those with no current feed.
         return FolderContents(tuple((row['id'], row['members']) for row in rows),
@@ -93,15 +80,7 @@ class ReadingComposition:
 
     @reading_snapshot()
     def material(self, identity: str) -> dict[str, Any] | None:
-        material = self._store.material(identity)
-        if material:
-            from oko.storage import material_read
-            try:
-                owner,_ = material_read.feed(self._store.db,material['feed_id'])
-            except ValueError:
-                return material
-            return _reading_heading(material, owner, self._store.original(identity)[0] if material['complete'] else {})
-        return material
+        return self._store.material(identity)
 
     def members(self, identity: str) -> list[str]:
         return [identity]

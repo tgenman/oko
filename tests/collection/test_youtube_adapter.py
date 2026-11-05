@@ -39,6 +39,7 @@ def test_youtube_discovery_describes_video_cover_and_subtitles_without_downloadi
     assert blocks[0]=={'type':'external_media','kind':'video','url':'https://www.youtube.com/watch?v='+VIDEO}
     assert [block['role'] for block in blocks if block['type']=='media']==['cover','subtitles']
     assert len(value.media)==2 and captions.calls==[]
+    assert all(media.publication_url==value.metadata.reference.url for media in value.media)
     assert all('/feeds/videos.xml?' in url for url in calls)
     assert asyncio.run(adapter.fetch(value.metadata.reference)).metadata.title==value.metadata.title
 
@@ -55,6 +56,9 @@ def test_youtube_files_stream_independently_and_missing_subtitles_are_notice():
     ref=video_reference(VIDEO)
     value=asyncio.run(adapter.fetch(ref))
     cover,subtitles=value.media
+    async def unexpected_fetch(_):
+        raise AssertionError('Downloaded media must not refetch its publication')
+    adapter.fetch=unexpected_fetch
     caption_output=BytesIO()
     actual=asyncio.run(adapter.download_media(ref,subtitles,caption_output))
     assert caption_output.getvalue()=='Оригинальные субтитры'.encode('utf-8')
@@ -140,21 +144,22 @@ def test_cover_rejects_non_image_and_oversize_without_accepting_partial_bytes():
 
 def test_paused_history_never_advances_and_cancel_opens_next_normal_window():
     import json
-    from oko.collection.youtube.publication_source import YouTubeAdapterSource
+    from oko.workers.feed_discovery import discover_youtube
     calls=[]
     def respond(request):
         calls.append(str(request.url))
         return httpx.Response(200,text=feed_xml())
-    source=YouTubeAdapterSource('https://www.youtube.com/feeds/videos.xml?channel_id='+CHANNEL,0,Captions(),httpx.MockTransport(respond))
-    source.initial_history=dict(count=10,run='one',paused=True)
-    paused=asyncio.run(source.discover(None))
+    url='https://www.youtube.com/feeds/videos.xml?channel_id='+CHANNEL
+    adapter=YouTubeAdapter(Captions(),httpx.MockTransport(respond))
+    selection=dict(count=10,run='one',paused=True)
+    paused=asyncio.run(discover_youtube(adapter,url,selection,None))
     assert paused.publications==() and calls==[]
-    source.initial_history=dict(count=10,run='one',cancelled=True)
-    cancelled=asyncio.run(source.discover(paused.cursor))
+    selection=dict(count=10,run='one',cancelled=True)
+    cancelled=asyncio.run(discover_youtube(adapter,url,selection,paused.cursor))
     assert json.loads(cancelled.cursor)['initial_complete'] and calls==[]
-    source.initial_history=dict(count=10,run='one')
-    following=asyncio.run(source.discover(cancelled.cursor))
-    assert [p.id for p in following.publications]==[VIDEO]
+    selection=dict(count=10,run='one')
+    following=asyncio.run(discover_youtube(adapter,url,selection,cancelled.cursor))
+    assert [p.metadata.reference.key.external_id for p in following.publications]==[VIDEO]
 
 
 def test_repeat_window_keeps_initial_count_and_only_admits_new_or_selected_videos():

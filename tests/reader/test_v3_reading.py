@@ -201,7 +201,7 @@ def test_reader_ignores_legacy_completeness_flags_when_job_and_status_are_ready(
         with database(tmp_path) as db:
             row=db.execute('SELECT content FROM publications WHERE id=%s',(item,)).fetchone()
             content=row[0] if not isinstance(row[0],str) else json.loads(row[0])
-            content['extra']['_reader']['full']=False
+            content['extra'].setdefault('_reader',{})['full']=False
             content['extra']['_reader']['reason']='Obsolete reason'
             content['extra'].pop('_collection_reason',None)
             db.execute("UPDATE publications SET content=%s,status='ready' WHERE id=%s",(json.dumps(content),item))
