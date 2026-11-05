@@ -72,7 +72,7 @@ def slow_reconciliation(dsn):
     with psycopg.connect(dsn, autocommit=True) as db:
         # A restored snapshot needs revision reconciliation even when no model
         # work is enabled; every saved root must receive its missing revision.
-        db.execute("UPDATE publications SET processing_metadata='{}' WHERE viewed=0")
+        db.execute("UPDATE publications SET processing_metadata='{}' WHERE TRUE")
         db.execute('''CREATE FUNCTION slow_recovery() RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN PERFORM pg_sleep(0.2); RETURN NEW; END $$''')
         db.execute('CREATE TRIGGER slow_recovery BEFORE UPDATE OF processing_metadata ON publications FOR EACH ROW EXECUTE FUNCTION slow_recovery()')

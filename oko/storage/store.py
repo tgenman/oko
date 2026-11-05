@@ -290,7 +290,7 @@ class Store:
         return not material or not material.get('complete',True)
 
     def _has_unviewed(self, item: str) -> bool:
-        return self.db.execute('SELECT 1 FROM publications WHERE id = %s AND viewed = 0',(item,)).fetchone() is not None
+        return self.db.execute('SELECT 1 FROM publications WHERE id = %s',(item,)).fetchone() is not None
 
 
     @reading_value
@@ -302,7 +302,7 @@ class Store:
         if row is None:
             raise LookupError('Publication not found')
         if row['reader_feed_id'] is None:
-            root=self.db.execute(f"SELECT {owner_expr('i')} AS feed_id FROM publication_links l JOIN publications i ON i.id=l.source_publication_id WHERE l.target_publication_id = %s AND i.viewed = 0 AND {owner_expr('i')} IS NOT NULL ORDER BY i.id LIMIT 1",(item,)).fetchone()
+            root=self.db.execute(f"SELECT {owner_expr('i')} AS feed_id FROM publication_links l JOIN publications i ON i.id=l.source_publication_id WHERE l.target_publication_id = %s AND {owner_expr('i')} IS NOT NULL ORDER BY i.id LIMIT 1",(item,)).fetchone()
             if root:
                 return str(root[0])
             return ''
@@ -338,20 +338,6 @@ class Store:
     def folder_contents(self, folder: str) -> FolderContents:
         return self.reading.folder_contents(folder)
 
-    def set_processor_viewed(self, items: list[str], viewed: bool) -> None:
-        """Keep processor visibility in the same graph transaction."""
-        membership_graph.lock_graph(self.db)
-        source_effects=CollectionDiagnostics()
-        publication_links.capture_source_groups(self,source_effects,set(items))
-        affected=self.problems.processor_jobs_for_materials(items)
-        previous=self.problems.prepare_processor_change(affected,self.wall_clock())
-        if previous is not None and viewed:
-            previous['objects']=[obj for obj in previous['objects'] if obj['kind']!='material' or obj['id'] not in items]
-        membership_graph.set_viewed(self.db,items,viewed)
-        if source_effects.source_groups_before:self.jobs.sync_captured_source_groups(source_effects)
-        if affected:
-            self.problems.finish_processor_change(affected,previous,self.wall_clock(),removed_outcome='irrelevant' if viewed else 'resolved')
-
     def viewed(self, item: str) -> bool:
         if self.db.execute("SELECT 1 FROM jobs WHERE kind = 'delete' AND item = %s",(item,)).fetchone():
             return True
@@ -368,7 +354,7 @@ class Store:
                 marks = ','.join('%s' for _ in batch)
                 rows.update({row['id']: row for row in self.db.execute(
                     f"SELECT i.id , COALESCE(i.content #> '{{extra,telegram,members}}','[]'::jsonb)::text AS members , {owner_expr('i')} AS feed_id FROM publications i WHERE i.id IN ( {marks} )", batch)})
-                for row in self.db.execute(f'SELECT i.id AS publication_id, i.feed_id FROM publications i WHERE i.viewed=0 AND i.feed_id IS NOT NULL AND i.id IN ( {marks} )', batch):
+                for row in self.db.execute(f'SELECT i.id AS publication_id, i.feed_id FROM publications i WHERE i.feed_id IS NOT NULL AND i.id IN ( {marks} )', batch):
                     memberships.setdefault(row['publication_id'], []).append(row['feed_id'])
             if len(rows) != len(members):
                 return False
@@ -415,11 +401,11 @@ class Store:
             shared=[r[0] for r in self.db.execute(f'SELECT p.id FROM ({owned_ids("= %s")}) owner JOIN publications p ON p.id=owner.id WHERE p.platform IS NOT NULL',(feed,feed))]
             # NULL-platform legacy roots can also own a timed fetch projection.
             # Capture only dependent timed jobs while the old graph still exists.
-            timed_fetch_items={row['item'] for row in self.db.execute("""SELECT DISTINCT j.item FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m
+            timed_fetch_items={row['item'] for row in self.db.execute("""SELECT DISTINCT j.item FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m
                 JOIN publication_links l ON l.source_publication_id=m.id
                 JOIN jobs j ON md5(j.item)=md5(l.target_publication_id) AND j.item=l.target_publication_id AND j.kind='fetch' AND j.fetch_youtube_sensitive
                 WHERE m.feed_id=%s
-                UNION SELECT j.item FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m JOIN jobs j ON md5(j.item)=md5(m.id) AND j.item=m.id AND j.kind='fetch' AND j.fetch_youtube_sensitive
+                UNION SELECT j.item FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m JOIN jobs j ON md5(j.item)=md5(m.id) AND j.item=m.id AND j.kind='fetch' AND j.fetch_youtube_sensitive
                 WHERE m.feed_id=%s AND TRUE""",(feed,feed))}
             if timed_fetch_items:publication_links.capture_fetch_problems(self,effects,timed_fetch_items)
             self.incomplete_draft.mark_materials(sorted(set(shared)))
@@ -432,22 +418,14 @@ class Store:
             items = [r[0] for r in self.db.execute(owned_ids('= %s'), (feed,feed))]
             self.problems.forget_materials(set(items), self.wall_clock())
             publication_links.capture_root_deletion_problems(self,effects,set(items))
-            for item in items:
-                self.filters.forget(item)
-                if self.publications.owns(item):
-                    self.publications.forget(item,effects=effects)
-                self.jobs.forget_input('theses', [item])
-                # This is local cleanup, not viewed(): never create read eligibility.
-                self.set_processor_viewed([item],True)
             self.processing.memberships_removed(removed)
             publication_links.notify_parents_many(self, set(removed))
             self.jobs.sync_captured_deletions(effects)
         self.db.after_commit(lambda: self.fault('after_feed_delete_commit'))
 
     def _remember_cleanup_owner(self, item: str, feed: str) -> None:
-        job_write(self.db, """INSERT INTO jobs(kind,item,payload)
-            SELECT 'delete',id,jsonb_build_object('cleanup_feed',%s::text) FROM publications WHERE id=%s AND viewed=1
-            ON CONFLICT(kind,item) DO UPDATE SET payload=jsonb_set(jobs.payload,'{cleanup_feed}',to_jsonb(%s::text))""", (feed,item,feed))
+        job_write(self.db, """UPDATE jobs SET payload=jsonb_set(payload,'{cleanup_feed}',to_jsonb(%s::text))
+            WHERE kind='delete' AND item=%s""", (feed,item))
 
 
     @reading_value
@@ -469,7 +447,7 @@ class Store:
     def material(self, item: str) -> dict[str, Any] | None:
         from oko.storage import material_read
         row = material_read.item(self.db,item)
-        material = self.saved_publication(row) if row and not row['viewed'] and row['feed_id'] is not None else None
+        material = self.saved_publication(row) if row and row['feed_id'] is not None else None
         if material and material['complete']:
             display = material['text']
             filtered = material['filter']

@@ -58,7 +58,7 @@ class ProcessingState:
             # it does not materialize another persistent queue for every item.
             after: str | None = None
             while True:
-                query = 'SELECT id FROM publications WHERE viewed=0' + (' AND id>%s' if after is not None else '') + ' ORDER BY id LIMIT 1'
+                query = 'SELECT id FROM publications WHERE TRUE' + (' AND id>%s' if after is not None else '') + ' ORDER BY id LIMIT 1'
                 row = self.store.db.execute(query, (after,) if after is not None else ()).fetchone()
                 if row is None:
                     break
@@ -70,7 +70,7 @@ class ProcessingState:
             yield
 
     def invalidate(self, scope: str = 'oko', owner: str = 'global') -> None:
-        query = 'SELECT DISTINCT i . id FROM publications i JOIN (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m ON m.id = i . id JOIN feeds f ON f . id = m . feed_id WHERE i . viewed = 0'
+        query = 'SELECT DISTINCT i . id FROM publications i JOIN (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m ON m.id = i . id JOIN feeds f ON f . id = m . feed_id WHERE TRUE'
         params: tuple[str, ...] = ()
         if scope in ('feed', 'folder'):
             condition = 'f.id=%s' if scope=='feed' else 'f.folder_id=%s'
@@ -78,8 +78,8 @@ class ProcessingState:
             # A linked source's privacy participates in its parent's AI input.
             query += """ UNION SELECT DISTINCT parent.id FROM publications parent
                 JOIN publication_links l ON l.source_publication_id=parent.id
-                JOIN (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m ON m.id=l.target_publication_id
-                JOIN feeds f ON f.id=m.feed_id WHERE parent.viewed=0 AND """ + condition
+                JOIN (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m ON m.id=l.target_publication_id
+                JOIN feeds f ON f.id=m.feed_id WHERE """ + condition
             params = (owner,owner)
         items = [row[0] for row in self.store.db.execute(query, params).fetchall()]
         from oko.storage.processing_batch import reconcile_settings
@@ -92,7 +92,7 @@ class ProcessingState:
         ordered = sorted(set(identities))
         for start in range(0,len(ordered),400):
             batch = ordered[start:start+400]
-            rows = self.store.db.execute("""SELECT i.id,EXISTS(SELECT 1 FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m
+            rows = self.store.db.execute("""SELECT i.id,EXISTS(SELECT 1 FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m
                 WHERE m.id=i.id) AS has_owner FROM publications i WHERE i.id=ANY(%s)""", (batch,)).fetchall()
             feedless = [row['id'] for row in rows if not row['has_owner']]
             if feedless:
@@ -107,10 +107,10 @@ class ProcessingState:
                     self.store.problems.finish_processor_change(processor_affected,processor_previous,self.store.wall_clock())
                 self.store.db.execute("""UPDATE publications SET filtered_content='{}',summarized_content='{}',
                     processing_metadata=(processing_metadata::jsonb-'filter'-'summary'-'_pass'-'_revision'-'_revision_input')::text,
-                    status=CASE WHEN viewed=0 THEN 'ready' ELSE status END WHERE id=ANY(%s)
+                    status='ready' WHERE id=ANY(%s)
                     AND (filtered_content IS DISTINCT FROM '{}' OR summarized_content IS DISTINCT FROM '{}'
                          OR processing_metadata::jsonb ?| ARRAY['filter','summary','_pass','_revision','_revision_input']
-                         OR (viewed=0 AND status IS DISTINCT FROM 'ready'))""", (feedless,))
+                         OR status IS DISTINCT FROM 'ready')""", (feedless,))
                 self.store.incomplete_draft.mark_materials(feedless)
                 for job_id,candidates in stage_previous.items():
                     self.store.problems.sync_processing_problem(job_id,candidates,self.store.wall_clock())
@@ -155,7 +155,7 @@ class ProcessingState:
                 begin_write(self.store.db)
                 self.store.db.after_rollback(lambda: self._repairs.add(item))
                 memberships.lock_graph(self.store.db)
-                row = self.store.db.execute("SELECT content FROM publications WHERE id=%s AND viewed=0", (item,)).fetchone()
+                row = self.store.db.execute("SELECT content FROM publications WHERE id=%s", (item,)).fetchone()
                 content = saved_content(row[0],mutable=True) if row else {}
                 identity = youtube_media.subtitle_id(content)
                 media = self.store.db.execute("SELECT storage_key FROM media_files WHERE id=%s AND publication_id=%s AND status='ready'", (identity,item)).fetchone() if identity else None

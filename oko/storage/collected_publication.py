@@ -22,7 +22,7 @@ class CollectedPublicationRepository:
         self._capture, self._collection_history, self._fault = capture, collection_history, fault
 
     def _unviewed(self, item: str) -> bool:
-        return self._db.execute('SELECT 1 FROM publications WHERE id=%s AND viewed=0', (item,)).fetchone() is not None
+        return self._db.execute('SELECT 1 FROM publications WHERE id=%s', (item,)).fetchone() is not None
 
     def accept_content(self, item: str, value: PublicationContent) -> tuple[SourceError | None,CollectionEffects]:
         try:

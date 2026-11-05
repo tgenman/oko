@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from oko.storage.store import Store
 from oko.storage.job_types import Job
 
-_TARGET = "kind IN ('discover','fetch','filter','theses','download_media')"
+_TARGET = "kind IN ('discover','fetch','rebuild','filter','theses','download_media')"
 
 
 def interrupt(store: 'Store', feeds: set[str] | None = None, *, backoff: bool = True) -> None:

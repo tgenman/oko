@@ -134,8 +134,7 @@ def test_shared_article_survives_one_root_then_disappears_after_the_last_link(tm
         assert 'Shared article' in client.get('/api/v3/publication/'+cards[1]['id']).json()['text']
         client.post('/api/v3/materials/'+cards[1]['id']+'/viewed')
         with database(root) as db:
-            row=db.execute('SELECT viewed , content FROM publications WHERE id = %s',(article,)).fetchone()
-            assert row is None or row==(1,{})
+            assert db.execute('SELECT 1 FROM publications WHERE id = %s',(article,)).fetchone() is None
             assert not db.execute('SELECT 1 FROM publication_links WHERE target_publication_id = %s',(article,)).fetchone()
 
 

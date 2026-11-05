@@ -38,7 +38,7 @@ def test_http_etag_stable_when_virtual_fetch_is_materialized(tmp_path,postgres_u
             with transaction(store.db):
                 store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
                 store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
-                store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('p','youtube','p',0)")
+                store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','youtube','p')")
                 store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
                 store.db.execute("INSERT INTO jobs(kind,item,status,reason_message) VALUES ('fetch','p','failed','waiting')")
             store.problems.recover_youtube_null_fetch();store.youtube.start(100)

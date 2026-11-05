@@ -78,7 +78,7 @@ class ReaderFacts:
                 FROM media_files m JOIN jobs mj ON mj.item=m.id AND mj.kind='download_media' WHERE m.publication_id=i.id) media ON true
             LEFT JOIN LATERAL (SELECT coalesce(jsonb_agg(jsonb_build_array(child.id,child.xmin::text) ORDER BY child.id),'[]'::jsonb) AS children
                 FROM publication_links l JOIN publications child ON child.id=l.target_publication_id
-                WHERE l.source_publication_id=i.id AND child.viewed=0) linked ON true
+                WHERE l.source_publication_id=i.id) linked ON true
             WHERE i.id=ANY(%s)""", (now,now,now,identities))
         return {row['id']:(row['row_generation'],row['feed_id'],row['kind'],row['transport'],
                 row['fetch_status'],row['fetch_deadline'],row['media_loading'],row['media_deadline'],row['children']) for row in rows}
@@ -96,18 +96,19 @@ class ReaderFacts:
         return (bytes(row['image']), row['mime']) if row else None
 
     def material_feeds(self, identities: set[str]) -> dict[str, str]:
-        return {row['id']: row['feed_id'] for row in self.storage().db.execute(f"SELECT i.id , {owner_expr('i')} AS feed_id FROM publications i WHERE i.viewed = 0 AND i.id IN ( {','.join(('%s' for _ in identities))} )", tuple(identities))} if identities else {}
+        return {row['id']: row['feed_id'] for row in self.storage().db.execute(f"SELECT i.id , {owner_expr('i')} AS feed_id FROM publications i WHERE i.id IN ( {','.join(('%s' for _ in identities))} )", tuple(identities))} if identities else {}
 
     def linked_preview(self, identity: str) -> dict[str, Any] | None:
         store=self.storage()
         return publication_links.reading(store,identity,store.publications.original(identity)[1])
 
     def was_viewed(self, identity: str) -> bool:
-        row=self.storage().db.execute('SELECT viewed FROM publications WHERE id = %s', (identity,)).fetchone()
-        return row is None or bool(row['viewed'])
+        return self.storage().db.execute('SELECT 1 FROM publications WHERE id = %s', (identity,)).fetchone() is None
 
     def viewed_ids(self) -> list[str]:
-        return [row['id'] for row in self.storage().db.execute('SELECT id FROM publications WHERE viewed = 1')]
+        # Completed roots are removed or retained only as linked dependencies;
+        # neither case is a persisted list of viewed publication identities.
+        return []
 
     def feed_members(self, identity: str) -> set[str]:
         return {row[0] for row in self.storage().db.execute(f'''SELECT id FROM publications WHERE feed_id=%s

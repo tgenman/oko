@@ -31,6 +31,7 @@ RESPONSES: dict[tuple[str, str], Any] = {
     ('POST', '/api/v3/folders/{folder}/completion'): models.CommandAcknowledgement,
     ('POST', '/api/v3/folders/{folder}/completion/preview'): models.CompletionPreview,
     ('POST', '/api/v3/materials/{item}/filter/retry'): models.CommandAcknowledgement,
+    ('POST', '/api/v3/materials/{item}/rebuild'): models.CommandAcknowledgement,
     ('POST', '/api/v3/materials/{item}/regenerate'): models.CommandAcknowledgement,
     ('POST', '/api/v3/materials/{item}/retry'): models.CommandAcknowledgement,
     ('POST', '/api/v3/materials/{item}/theses/retry'): models.CommandAcknowledgement,

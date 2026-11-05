@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shutil
 from uuid import UUID,uuid4
 from typing import Any, TYPE_CHECKING
 
@@ -135,7 +136,7 @@ class MediaFiles:
         return 'media-'+str(UUID(row['id']).int)+'.bin'
 
     def file(self, item: str, media: str) -> tuple[Path, str] | None:
-        row = self.store.db.execute("SELECT m . * FROM media_files m JOIN publications i ON i . id = m . publication_id WHERE m . id = %s AND m . publication_id = %s AND i . viewed = 0 AND m . status = 'ready' ", (media,item)).fetchone()
+        row = self.store.db.execute("SELECT m . * FROM media_files m JOIN publications i ON i . id = m . publication_id WHERE m . id = %s AND m . publication_id = %s AND m . status = 'ready' ", (media,item)).fetchone()
         if row and row['storage_key']:
             path = existing_file(self.store.root,row['storage_key'])
             if path is not None:
@@ -159,7 +160,7 @@ class MediaFiles:
 
     def begin(self, identity: str, attempt: str, revalidate: bool) -> MediaDownload | None:
         store = self.store
-        row = store.db.execute("SELECT m . * , i . platform , i . external_id , i . url FROM media_files m JOIN publications i ON i . id = m . publication_id WHERE m . id = %s AND i . viewed = 0 AND ( m . status = 'pending_download' OR m . status = 'ready' AND %s = 1 ) ", (identity,revalidate)).fetchone()
+        row = store.db.execute("SELECT m . * , i . platform , i . external_id , i . url FROM media_files m JOIN publications i ON i . id = m . publication_id WHERE m . id = %s AND ( m . status = 'pending_download' OR m . status = 'ready' AND %s = 1 ) ", (identity,revalidate)).fetchone()
         if row is None:
             return None
         temporary = store.root/'staging'/'_media'/(attempt+'-'+secrets.token_hex(8))
@@ -171,7 +172,7 @@ class MediaFiles:
 
     def current(self, identity: str, download: MediaDownload, problem_jobs: list[int] | None = None) -> bool:
         problem_column="" if problem_jobs is None else ", (SELECT j.id FROM jobs j WHERE j.kind='download_media' AND j.item=m.id AND j.status='running' AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL)) AS problem_job"
-        row=self.store.db.execute('SELECT m . * , i . platform , i . external_id'+problem_column+' FROM media_files m JOIN publications i ON i . id = m . publication_id WHERE m . id = %s AND i . viewed = 0',(identity,)).fetchone()
+        row=self.store.db.execute('SELECT m . * , i . platform , i . external_id'+problem_column+' FROM media_files m JOIN publications i ON i . id = m . publication_id WHERE m . id = %s',(identity,)).fetchone()
         valid=bool(row and row['publication_id']==download.publication_id
             and row['platform']==download.publication.key.platform.value and row['external_id']==download.publication.key.external_id
             and (row['resource_key'],row['source_locator'],row['name'],row['mime_type'],row['size_bytes'],row['resource_identity'])==
@@ -215,7 +216,7 @@ class MediaFiles:
         if not self.current(media_id,download):
             raise ValueError('Media owner changed')
         assert previous is not None
-        row = store.db.execute('SELECT content,status FROM publications WHERE id = %s AND viewed = 0', (download.publication_id,)).fetchone()
+        row = store.db.execute('SELECT content,status FROM publications WHERE id = %s', (download.publication_id,)).fetchone()
         if row is None:
             raise ValueError('Media owner changed')
         content = saved_content(row['content'],mutable=True)
@@ -298,10 +299,17 @@ class MediaFiles:
             for path in staging.iterdir():
                 if path.is_file() and path not in self.active_paths:
                     path.unlink()
+        staging_root=root/'staging'
+        for owner in staging_root.iterdir():
+            if not owner.is_dir() or owner.is_symlink() or owner.name=='_media':
+                continue
+            for directory in owner.glob('rebuild-*'):
+                if directory.is_dir() and not directory.is_symlink() and not any(directory==path or directory in path.parents for path in self.active_paths):
+                    shutil.rmtree(directory)
 
     def _subtitles_absent(self, media_id: str, owner: str, issue: AdapterIssue) -> str | None:
         store=self.store
-        row=store.db.execute('SELECT content FROM publications WHERE id = %s AND viewed = 0',(owner,)).fetchone()
+        row=store.db.execute('SELECT content FROM publications WHERE id = %s',(owner,)).fetchone()
         if row is None:
             return None
         content=saved_content(row['content'],mutable=True)
@@ -352,7 +360,7 @@ class MediaFiles:
         subtitles = False
         keep_file = False
         if owner:
-            publication = store.db.execute('SELECT content FROM publications WHERE id = %s AND viewed = 0', (owner,)).fetchone()
+            publication = store.db.execute('SELECT content FROM publications WHERE id = %s', (owner,)).fetchone()
             if publication:
                 content = saved_content(publication['content'],mutable=True)
                 subtitles=youtube_media.subtitle_id(content)==media_id

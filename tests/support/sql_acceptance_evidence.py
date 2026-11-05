@@ -25,14 +25,14 @@ def archive_evidence():
     with TemporaryDirectory() as d:
      s=Store(Path(d),lambda _:None);ensure_fixture(s.db)
      with s.db:
-      s.db.executemany("INSERT INTO publications ( id , external_id, platform, published_at , viewed ) VALUES ( %s , %s , 'rss', %s , %s )",[(f'archive-{n}',f'archive-{n}',n,int(n>=100)) for n in range(20000)])
-      s.db.executemany("UPDATE publications SET feed_id='fixture' WHERE id=%s", [(f'archive-{n}',) for n in range(20000)])
+      s.db.executemany("INSERT INTO publications ( id , external_id, platform, published_at ) VALUES ( %s , %s , 'rss', %s )",[(f'archive-{n}',f'archive-{n}',n) for n in range(20000)])
+      s.db.executemany("UPDATE publications SET feed_id='fixture' WHERE id=%s", [(f'archive-{n}',) for n in range(100)])
       s.db.executemany("INSERT INTO jobs ( kind , item , status ) VALUES ( 'fetch' , %s , 'done' )",[(f'archive-{n}',) for n in range(20000)])
       s.db.executemany("INSERT INTO history_members ( feed , item ) VALUES ( 'fixture' , %s )",[(f'archive-{n}',) for n in range(20000)])
       s.db.execute("INSERT INTO jobs(kind,item) VALUES ('filter','pending')")
       analyze(s.db)
      operations={
-      'unviewed':(f"SELECT i.id,{owner_expr('i')} AS feed_id FROM publications i WHERE i.viewed=0 ORDER BY i.published_at DESC",()),
+      'unviewed':(f"SELECT i.id,{owner_expr('i')} AS feed_id FROM publications i WHERE i.feed_id IS NOT NULL ORDER BY i.published_at DESC",()),
       'history_point':('SELECT * FROM history_members WHERE item=%s',('archive-100',)),
       'job_point':('SELECT * FROM jobs WHERE item=%s',('archive-100',)),
       'pending':("SELECT id FROM jobs WHERE status='pending' AND next<=%s ORDER BY next,id LIMIT 1",(0,))}

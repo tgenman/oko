@@ -174,9 +174,8 @@ def test_late_result_from_deleted_selected_feed_is_rejected(tmp_path):
                 store.jobs.remove_feed(second,{item})
             release.set()
             await tasks._ai
-            result = saved(store,item)
-            assert result['filtered_content'] == {}
-            assert '_pass' not in result['processing_metadata']
+            assert store.db.execute('SELECT 1 FROM publications WHERE id=%s',(item,)).fetchone() is None
+            assert store.db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()[0]=='cancelled'
         finally:
             store.db.close()
     asyncio.run(scenario())
@@ -354,7 +353,6 @@ def test_failed_delete_problem_follows_job_without_status_read(tmp_path, postgre
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
-            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('item','rss','item',1)")
             row=store.db.execute("INSERT INTO jobs(kind,item,status,generation,payload) VALUES ('delete','item','running',1,%s) RETURNING id", (json.dumps({'cleanup_feed':'fixture'}),)).fetchone()
         job=Job(row['id'],'delete','item',1)
         def current():

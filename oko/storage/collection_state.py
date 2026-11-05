@@ -94,7 +94,7 @@ class CollectionState:
         row=self.store.db.execute(f"""SELECT i.platform,i.external_id,i.url,
             COALESCE(i.content #> '{{extra,telegram,members}}','[]'::jsonb)::text AS members,
             {owner_expr('i')} AS feed_id,f.adapter,i.title,i.content FROM publications i
-            LEFT JOIN feeds f ON f.id={owner_expr('i')} WHERE i.id=%s AND i.viewed=0""",(item,)).fetchone()
+            LEFT JOIN feeds f ON f.id={owner_expr('i')} WHERE i.id=%s""",(item,)).fetchone()
         if row is None:return digest(None)
         content=saved_content(row['content'])
         blocks=[]

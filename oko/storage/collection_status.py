@@ -119,6 +119,10 @@ class CollectionStatus:
             self.db.execute('UPDATE feeds SET last_collection_result=%s::jsonb WHERE id=%s', (json.dumps(result), feed))
 
     def interrupt(self, job: Any, feed: str, data: dict[str, Any], elapsed: float) -> None:
+        # Cleanup may have removed a cancelled job while its worker was still
+        # unwinding. There is no longer an attempt to record in that case.
+        if self.db.execute('SELECT 1 FROM jobs WHERE id=%s',(job.id,)).fetchone() is None:
+            return
         data.update(finished_at=self.wall(), elapsed_seconds=elapsed)
         self._write(job.id, feed, data)
 
@@ -136,7 +140,7 @@ class CollectionStatus:
             discoveries = batch
             discovery_marks = ','.join('%s' for _ in discoveries)
             # Job kinds are disjoint, so these branches cannot duplicate an operation.
-            selected = f"SELECT {fields} , j . item AS feed FROM jobs j WHERE j . kind = 'discover' AND j . item IN ( {discovery_marks} ) UNION ALL SELECT {fields} , i.feed_id AS feed FROM jobs j JOIN publications i ON i . id = j . item WHERE j . kind = 'fetch' AND i . viewed = 0 AND i.feed_id IN ( {marks} ) UNION ALL SELECT {fields} , i.feed_id AS feed FROM jobs j JOIN media_files m ON m . id = j . item JOIN publications i ON i . id = m . publication_id WHERE j . kind = 'download_media' AND i . viewed = 0 AND i.feed_id IN ( {marks} )"
+            selected = f"SELECT {fields} , j . item AS feed FROM jobs j WHERE j . kind = 'discover' AND j . item IN ( {discovery_marks} ) UNION ALL SELECT {fields} , i.feed_id AS feed FROM jobs j JOIN publications i ON i . id = j . item WHERE j . kind = 'fetch' AND i.feed_id IN ( {marks} ) UNION ALL SELECT {fields} , i.feed_id AS feed FROM jobs j JOIN media_files m ON m . id = j . item JOIN publications i ON i . id = m . publication_id WHERE j . kind = 'download_media' AND i.feed_id IN ( {marks} )"
             jobs.extend(self.db.execute(f"SELECT {outer_fields}, {attempt_fields} FROM ( {selected} ) j WHERE ( j . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' ) OR j . status = 'done' AND j . reason_message IS NOT NULL AND NOT (j.kind='download_media' AND j.reason_code IS NOT DISTINCT FROM 'subtitles_absent') ) AND coalesce ( j . reason_code , '' ) != 'source-deleted'", (discoveries + batch + batch)).fetchall())
             for row in self.db.execute(f'SELECT f.id, f.last_discovery_at AS updated, {result_fields} FROM feeds f WHERE f.id IN ( {marks} )', batch):
                 if details:

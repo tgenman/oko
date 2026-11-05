@@ -2,7 +2,6 @@
 from oko.domain.publication import PublicationOwnershipConflict
 from oko.storage.database import Database
 from oko.storage.transaction import begin_write
-from oko.storage.reader_status import changed as status_changed
 
 
 _GRAPH_LOCK = 0x4F4B4F4752415048
@@ -51,15 +50,3 @@ def remove(db: Database, *, items: list[str] | None = None, feed: str | None = N
     mark=getattr(db,'incomplete_group_mark',None)
     if mark is not None and ids_removed:mark(ids_removed)
     return ids_removed
-
-
-def set_viewed(db: Database, items: list[str], viewed: bool) -> None:
-    """Update publication and transitional membership state in one transaction."""
-    if not items:
-        return
-    lock_graph(db)
-    changed = db.execute('UPDATE publications SET viewed=%s WHERE id=ANY(%s) AND viewed IS DISTINCT FROM %s', (int(viewed),items,int(viewed))).rowcount
-    if changed:
-        status_changed(db)
-        mark=getattr(db,'incomplete_group_mark',None)
-        if mark is not None:mark(items)

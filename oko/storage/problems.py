@@ -715,7 +715,7 @@ class Problems:
         """Restartable recovery; subsequent writes update projections transactionally."""
         if self.db.execute("SELECT 1 FROM state WHERE key='youtube-null-fetch-recovered-v1'").fetchone():return
         cursor: int | None=None
-        many_youtube_members=bool(self.db.execute('''SELECT 1 FROM feeds f JOIN (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m ON m.feed_id=f.id
+        many_youtube_members=bool(self.db.execute('''SELECT 1 FROM feeds f JOIN (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m ON m.feed_id=f.id
             WHERE f.kind='youtube' OFFSET 100 LIMIT 1''').fetchone())
         many_jobs=bool(self.db.execute("""SELECT 1 FROM jobs WHERE kind='fetch' AND item IS NOT NULL AND item<>''
             AND reason_code IS NULL AND reason_message IS NOT NULL OFFSET 100 LIMIT 1""").fetchone()) if many_youtube_members else False
@@ -723,11 +723,11 @@ class Problems:
         while True:
             sql="""WITH youtube_feeds AS MATERIALIZED (SELECT id FROM feeds WHERE kind='youtube'),
                 candidates AS (
-                    SELECT j.id FROM youtube_feeds f JOIN (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m ON m.feed_id=f.id
+                    SELECT j.id FROM youtube_feeds f JOIN (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m ON m.feed_id=f.id
                     JOIN jobs j ON md5(j.item)=md5(m.id) AND j.item=m.id
                     WHERE j.kind='fetch' AND j.item IS NOT NULL AND j.item<>'' AND j.status IN ('pending','running','failed','unavailable','blocked') AND j.reason_code IS NULL AND j.reason_message IS NOT NULL
                     UNION
-                    SELECT j.id FROM youtube_feeds f JOIN (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m ON m.feed_id=f.id
+                    SELECT j.id FROM youtube_feeds f JOIN (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m ON m.feed_id=f.id
                     JOIN publication_links l ON l.source_publication_id=m.id
                     JOIN jobs j ON md5(j.item)=md5(l.target_publication_id) AND j.item=l.target_publication_id
                     WHERE j.kind='fetch' AND j.item IS NOT NULL AND j.item<>'' AND j.status IN ('pending','running','failed','unavailable','blocked') AND j.reason_code IS NULL AND j.reason_message IS NOT NULL
@@ -919,7 +919,7 @@ class Problems:
                 affected={obj['id'] for _,body,_,_ in parsed for obj in body['objects']}
                 possible_active=self.active_fetch_roots(affected)
                 linked=self.fetch_linked_pairs(set(items),affected)
-                publications={row['id']:row for row in self.db.execute('SELECT id,viewed FROM publications WHERE id=ANY(%s)',(items,))} if items else {}
+                publications={row['id']:row for row in self.db.execute('SELECT id FROM publications WHERE id=ANY(%s)',(items,))} if items else {}
                 alive={row['id'] for row in self.db.execute("SELECT id FROM feeds WHERE id=ANY(%s) AND connection!='deleting'",(feeds,))} if feeds else set()
                 resolved_ids: list[str]=[]
                 irrelevant_ids: list[str]=[]
@@ -954,7 +954,7 @@ class Problems:
                         if any(obj['id']!=item and (obj['id'],item) not in linked for obj in body['objects']):
                             continue  # Every stored object needs evidence of its relationship to this Job.
                         publication=publications.get(item)
-                        irrelevant=feed not in alive or bool(publication and (publication['viewed']))
+                        irrelevant=feed not in alive
                         (irrelevant_ids if irrelevant else resolved_ids).append(record['id'])
                 for job_id,previous in pending_jobs.items():
                     self.sync_fetch(job_id,previous,self.store.wall_clock())
@@ -1137,7 +1137,7 @@ class Problems:
         owners=sorted({prior['fetch_owner'] for prior in closing if prior.get('fetch_owner')})
         materials=sorted({obj['id'] for prior in closing for obj in prior['objects'] if obj.get('kind')=='material'})
         alive={row['id'] for row in self.db.execute("SELECT id FROM feeds WHERE id=ANY(%s) AND connection!='deleting'",(owners,))} if owners else set()
-        removed={row['id'] for row in self.db.execute('SELECT id FROM publications WHERE id=ANY(%s) AND viewed=1',(materials,))} if materials else set()
+        removed={row['id'] for row in self.db.execute("SELECT item AS id FROM jobs WHERE kind='delete' AND item=ANY(%s)",(materials,))} if materials else set()
         finished: dict[str,list[str]]={'resolved':[],'irrelevant':[]}
         for prior in closing:
             owner=prior.get('fetch_owner')
@@ -1554,7 +1554,7 @@ class Problems:
                 publications_ids={row['publication_id'] for row in files.values()}
                 possible_active=self.active_media_roots(affected)
                 linked=self.fetch_linked_pairs(publications_ids,affected)
-                publications={row['id']:row for row in self.db.execute('SELECT id,viewed FROM publications WHERE id=ANY(%s)',(list(publications_ids),))} if publications_ids else {}
+                publications={row['id']:row for row in self.db.execute('SELECT id FROM publications WHERE id=ANY(%s)',(list(publications_ids),))} if publications_ids else {}
                 resolved_ids: list[str]=[]
                 irrelevant_ids: list[str]=[]
                 updates: list[tuple[str,str]]=[]
@@ -1592,7 +1592,7 @@ class Problems:
                         if any(obj['id']!=publication_id and (obj['id'],publication_id) not in linked for obj in body['objects']):
                             continue  # Every stored object needs evidence of its relationship to this Job.
                         publication=publications.get(publication_id)
-                        irrelevant=bool(publication and (publication['viewed']))
+                        irrelevant=False
                         (irrelevant_ids if irrelevant else resolved_ids).append(record['id'])
                 for job_id,previous in pending_jobs.items():
                     self.sync_media_problem(job_id,previous,self.store.wall_clock())
@@ -1853,7 +1853,7 @@ class Problems:
         owners=sorted({prior['media_owner'] for prior in closing if prior.get('media_owner')})
         materials=sorted({obj['id'] for prior in closing for obj in prior['objects'] if obj.get('kind')=='material'})
         alive={row['id'] for row in self.db.execute("SELECT id FROM feeds WHERE id=ANY(%s) AND connection!='deleting'",(owners,))} if owners else set()
-        removed={row['id'] for row in self.db.execute('SELECT id FROM publications WHERE id=ANY(%s) AND viewed=1',(materials,))} if materials else set()
+        removed={row['id'] for row in self.db.execute("SELECT item AS id FROM jobs WHERE kind='delete' AND item=ANY(%s)",(materials,))} if materials else set()
         files=sorted({prior['media_file_id'] for prior in closing if prior.get('media_file_id')})
         existing_files={row['id'] for row in self.db.execute('SELECT id FROM media_files WHERE id=ANY(%s)',(files,))} if files else set()
         finished: dict[str,list[str]]={'resolved':[],'irrelevant':[]}
@@ -2083,7 +2083,7 @@ class Problems:
                 affected={obj['id'] for _,body,_,_,_ in parsed for obj in body['objects']}
                 possible_active=self.active_processing_roots(affected)
                 linked=self.fetch_linked_pairs(set(items),affected)
-                publications={row['id']:row for row in self.db.execute('SELECT id,viewed FROM publications WHERE id=ANY(%s)',(items,))} if items else {}
+                publications={row['id']:row for row in self.db.execute('SELECT id FROM publications WHERE id=ANY(%s)',(items,))} if items else {}
                 alive={row['id'] for row in self.db.execute("SELECT id FROM feeds WHERE id=ANY(%s) AND connection!='deleting'",(feeds,))} if feeds else set()
                 resolved_ids: list[str]=[]
                 irrelevant_ids: list[str]=[]
@@ -2121,7 +2121,7 @@ class Problems:
                         if any(obj['id']!=item and (obj['id'],item) not in linked for obj in body['objects']):
                             continue  # Every stored object needs evidence of its relationship to this Job.
                         publication=publications.get(item)
-                        irrelevant=feed not in alive or bool(publication and (publication['viewed']))
+                        irrelevant=feed not in alive
                         (irrelevant_ids if irrelevant else resolved_ids).append(record['id'])
                 for job_id,previous in pending_jobs.items():
                     self.sync_processing_problem(job_id,previous,self.store.wall_clock())
@@ -2245,7 +2245,7 @@ class Problems:
             owners=sorted({candidate['processing_owner'] for _,candidate in closing if candidate.get('processing_owner')})
             materials=sorted({obj['id'] for _,candidate in closing for obj in candidate['objects'] if obj.get('kind')=='material'})
             alive={row['id'] for row in self.db.execute("SELECT id FROM feeds WHERE id=ANY(%s) AND connection!='deleting'",(owners,))} if owners else set()
-            removed={row['id'] for row in self.db.execute('SELECT id FROM publications WHERE id=ANY(%s) AND viewed=1',(materials,))} if materials else set()
+            removed={row['id'] for row in self.db.execute("SELECT item AS id FROM jobs WHERE kind='delete' AND item=ANY(%s)",(materials,))} if materials else set()
             finished: dict[str,list[str]]={'resolved':[],'irrelevant':[]}
             for identity,candidate in closing:
                 owner=candidate.get('processing_owner')
@@ -2378,7 +2378,7 @@ class Problems:
         owners=sorted({prior['processing_owner'] for prior in closing if prior.get('processing_owner')})
         materials=sorted({obj['id'] for prior in closing for obj in prior['objects'] if obj.get('kind')=='material'})
         alive={row['id'] for row in self.db.execute("SELECT id FROM feeds WHERE id=ANY(%s) AND connection!='deleting'",(owners,))} if owners else set()
-        removed={row['id'] for row in self.db.execute('SELECT id FROM publications WHERE id=ANY(%s) AND viewed=1',(materials,))} if materials else set()
+        removed={row['id'] for row in self.db.execute("SELECT item AS id FROM jobs WHERE kind='delete' AND item=ANY(%s)",(materials,))} if materials else set()
         finished: dict[str,list[str]]={'resolved':[],'irrelevant':[]}
         for prior in closing:
             owner=prior.get('processing_owner')
@@ -2418,10 +2418,10 @@ class Problems:
     def deletion_candidates(self, job_id: int, now: float) -> list[dict[str, Any]]:
         """Project one deletion Job for every affected root owner."""
         rows = self.db.execute(f"""SELECT j.kind,j.item,j.status,j.reason_message,j.reason_code,
-            coalesce({owner_expr('p')},{owner_expr('root')},j.feed_id) AS feed_id
+            coalesce({owner_expr('p')},{owner_expr('root')},j.feed_id,j.payload->>'cleanup_feed') AS feed_id
             FROM jobs j LEFT JOIN publications p ON p.id=j.item
             LEFT JOIN publication_links l ON l.target_publication_id=p.id
-            LEFT JOIN publications root ON root.id=l.source_publication_id AND root.viewed=0
+            LEFT JOIN publications root ON root.id=l.source_publication_id
             WHERE j.id=%s AND j.kind IN ('delete','feed-delete') AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL) ORDER BY root.id""", (job_id,)).fetchall()
         candidates: dict[str, dict[str, Any]] = {}
         for row in rows:
@@ -2691,7 +2691,7 @@ class Problems:
             legacy_rows=self.db.execute(f"""SELECT j.id,j.item,j.reason_code,coalesce({owner_expr('items')},{owner_expr('linked_root')},j.feed_id) AS legacy_owner
                 FROM jobs j LEFT JOIN publications items ON items.id=j.item
                 LEFT JOIN publication_links link ON link.target_publication_id=items.id
-                LEFT JOIN publications linked_root ON linked_root.id=link.source_publication_id AND linked_root.viewed=0
+                LEFT JOIN publications linked_root ON linked_root.id=link.source_publication_id
                 WHERE j.id=ANY(%s)""",([row['id'] for row in legacy_sources],)).fetchall()
             for row in legacy_rows:
                 code=row['reason_code'] or 'work-discover'
@@ -2749,16 +2749,16 @@ class Problems:
                 active={(row['item'] or '',row['code']) for row in self.db.execute("SELECT item,coalesce(reason_code,'work-discover') AS code FROM jobs WHERE kind='discover' AND item=ANY(%s) AND status IN ('pending','running','failed','unavailable','blocked') AND (reason_message IS NOT NULL OR reason_code IS NOT NULL)",(aliases,))} if aliases else set()
                 legacy_active: set[tuple[str,str]] = set()
                 if all_feeds:
-                    legacy_active.update((row['feed_id'],row['code']) for row in self.db.execute("""SELECT owner.feed_id,coalesce(j.reason_code,'work-discover') AS code FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) owner
+                    legacy_active.update((row['feed_id'],row['code']) for row in self.db.execute("""SELECT owner.feed_id,coalesce(j.reason_code,'work-discover') AS code FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) owner
                         JOIN jobs j ON j.item=owner.id AND j.kind='discover'
                         WHERE owner.feed_id=ANY(%s) AND j.status IN ('pending','running','failed','unavailable','blocked')
                           AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL)""",(sorted(all_feeds),)))
-                    legacy_active.update((row['feed_id'],row['code']) for row in self.db.execute("""SELECT owner.feed_id,coalesce(j.reason_code,'work-discover') AS code FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) owner
-                        JOIN publications root ON root.id=owner.id AND root.viewed=0 JOIN publication_links link ON link.source_publication_id=root.id
+                    legacy_active.update((row['feed_id'],row['code']) for row in self.db.execute("""SELECT owner.feed_id,coalesce(j.reason_code,'work-discover') AS code FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) owner
+                        JOIN publications root ON root.id=owner.id JOIN publication_links link ON link.source_publication_id=root.id
                         JOIN jobs j ON j.item=link.target_publication_id AND j.kind='discover'
                         WHERE owner.feed_id=ANY(%s) AND j.status IN ('pending','running','failed','unavailable','blocked')
                           AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL)
-                          AND NOT EXISTS (SELECT 1 FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) target WHERE target.id=j.item)""",(sorted(all_feeds),)))
+                          AND NOT EXISTS (SELECT 1 FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) target WHERE target.id=j.item)""",(sorted(all_feeds),)))
                 present={row['id'] for row in self.db.execute("SELECT id FROM feeds WHERE id=ANY(%s) AND connection!='deleting'",(sorted(all_feeds),))} if all_feeds else set()
                 profile_feeds={feed for record,code,feeds in parsed if code in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') for feed in feeds if (feed,code) in active}
                 bindings={row['feed']:row['indexed_role'] for row in self.db.execute('SELECT feed,indexed_role FROM telegram_bindings WHERE feed=ANY(%s)',(sorted(profile_feeds),))} if profile_feeds else {}
@@ -2783,22 +2783,22 @@ class Problems:
         params=(owner,excluded_job,code)
         query="""SELECT 1 FROM jobs j WHERE j.kind='discover' AND j.item=%s AND j.id!=%s AND j.status IN ('pending','running','failed','unavailable','blocked') AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL) AND coalesce(j.reason_code,'work-discover')=%s LIMIT 1"""
         if self.db.execute(query,params).fetchone():return True
-        query="""SELECT 1 FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) owner JOIN jobs j ON j.item=owner.id AND j.kind='discover'
+        query="""SELECT 1 FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) owner JOIN jobs j ON j.item=owner.id AND j.kind='discover'
             WHERE owner.feed_id=%s AND j.id!=%s AND j.status IN ('pending','running','failed','unavailable','blocked')
               AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL) AND coalesce(j.reason_code,'work-discover')=%s LIMIT 1"""
         if self.db.execute(query,params).fetchone():return True
-        query="""SELECT 1 FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) owner JOIN publications root ON root.id=owner.id AND root.viewed=0
+        query="""SELECT 1 FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) owner JOIN publications root ON root.id=owner.id
             JOIN publication_links link ON link.source_publication_id=root.id JOIN jobs j ON j.item=link.target_publication_id AND j.kind='discover'
             WHERE owner.feed_id=%s AND j.id!=%s AND j.status IN ('pending','running','failed','unavailable','blocked')
               AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL) AND coalesce(j.reason_code,'work-discover')=%s
-              AND NOT EXISTS (SELECT 1 FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) target WHERE target.id=j.item) LIMIT 1"""
+              AND NOT EXISTS (SELECT 1 FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) target WHERE target.id=j.item) LIMIT 1"""
         return self.db.execute(query,params).fetchone() is not None
 
     def discover_legacy_owners(self, row: Any) -> list[str]:
         rows=self.db.execute(f"""SELECT coalesce({owner_expr('items')},{owner_expr('linked_root')},%s) AS feed
             FROM (SELECT %s::text AS item) j LEFT JOIN publications items ON items.id=j.item
             LEFT JOIN publication_links link ON link.target_publication_id=items.id
-            LEFT JOIN publications linked_root ON linked_root.id=link.source_publication_id AND linked_root.viewed=0""",(row['feed_id'],row['item'])).fetchall()
+            LEFT JOIN publications linked_root ON linked_root.id=link.source_publication_id""",(row['feed_id'],row['item'])).fetchall()
         return sorted({r['feed'] or row['item'] or '' for r in rows})
 
     def sync_discover(self, job_id: int, now: float, *, previous_codes: tuple[str,...] = ()) -> None:
@@ -3075,14 +3075,14 @@ class Problems:
         params=(job_ids,) if job_ids is not None else ()
         return list(self.db.execute(f"""SELECT jobs.id,jobs.kind,jobs.item,jobs.status,jobs.reason_message,jobs.feed_id,
             CASE WHEN jobs.kind='read' THEN jobs.item ELSE coalesce({owner_expr('items')},{owner_expr('media_owner')},{owner_expr('linked_root')}) END AS resolved_feed_id,
-            coalesce(items.viewed,media_owner.viewed) AS viewed, m.resource_key,
+            m.resource_key,
             CASE WHEN jobs.kind='read' OR (jobs.kind='download_media' AND m.id IS NULL) THEN NULL ELSE coalesce(linked_root.id,m.publication_id,jobs.item) END AS affected_item
             FROM (SELECT * FROM jobs WHERE processor_visible{restriction} ORDER BY kind,item OFFSET 0) jobs
             LEFT JOIN publications items ON jobs.kind!='download_media' AND items.id=jobs.item
             LEFT JOIN media_files m ON jobs.kind='download_media' AND m.id=jobs.item
             LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
             LEFT JOIN publication_links link ON link.target_publication_id=coalesce(items.id,media_owner.id)
-            LEFT JOIN publications linked_root ON linked_root.id=link.source_publication_id AND linked_root.viewed=0
+            LEFT JOIN publications linked_root ON linked_root.id=link.source_publication_id
             WHERE (jobs.status IN ('pending','running','failed','unavailable','blocked')
                 OR (jobs.status='done' AND jobs.kind='fetch' AND jobs.reason_message IS NOT NULL)) ORDER BY jobs.kind,jobs.item,linked_root.id""",params).fetchall())
     def processor_configuration_candidate(self, now: float, job_ids: list[int] | None = None, *, overrides: dict[int,dict[str,Any]] | None = None) -> dict[str, Any] | None:
@@ -3111,8 +3111,6 @@ class Problems:
             kind=row['kind']
             if kind=='download_media' and row['resource_key']=='youtube:subtitles' and paused:
                 continue
-            if row['viewed'] and kind not in ('delete','feed-delete','discover','read'):
-                continue
             feed=(row['item'] if kind in ('discover','read','feed-delete') else row['resolved_feed_id'] or row['feed_id']) or row['item'] or ''
             if candidate is None:
                 candidate=dict(id='processor:configuration',code='processor-config',section='action',title='Требуется настройка обработчика',
@@ -3137,9 +3135,7 @@ class Problems:
                 SELECT j.id,coalesce(j.reason_code='processor-config' AND EXISTS (SELECT 1 FROM media_files m WHERE j.kind='download_media' AND m.id=j.item AND m.resource_key='youtube:subtitles'),false) AS caption,coalesce(j.reason_code='processor-config' AND
                     (j.status IN ('pending','running','failed','unavailable','blocked')
                         OR (j.kind='fetch' AND j.status='done' AND j.reason_message IS NOT NULL))
-                    AND (j.kind IN ('delete','feed-delete','discover','read') OR CASE WHEN j.kind='download_media' THEN coalesce(
-                        (SELECT p.viewed FROM media_files m JOIN publications p ON p.id=m.publication_id WHERE m.id=j.item),0)=0 ELSE coalesce(
-                        (SELECT p.viewed FROM publications p WHERE p.id=j.item),0)=0 END),false) AS visible
+                    ,false) AS visible
                 FROM jobs j WHERE j.id=ANY(%s) AND (j.processor_visible OR j.processor_caption OR j.reason_code='processor-config') OFFSET 0) AS requested
                 WHERE j.id=requested.id AND (j.processor_visible IS DISTINCT FROM requested.visible OR j.processor_caption IS DISTINCT FROM requested.caption) RETURNING j.id""",(job_ids[start:start+400],)).fetchall()
             if rows:
@@ -3415,7 +3411,7 @@ class Problems:
             "OR jobs.reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch','youtube-admission') "
             "OR (jobs.reason_code IS NULL AND NOT jobs.subtitle_event_owned) "
             + ("OR (m.resource_key='youtube:subtitles' AND jobs.reason_code IS DISTINCT FROM 'processor-config')" if youtube['paused'] else '') + ")") if scope_items is not None else 'TRUE'
-        jobs = self.db.execute(f"SELECT jobs . * , coalesce ( {owner_expr('items')} , {owner_expr('media_owner')} , {owner_expr('linked_root')} ) AS resolved_feed_id , coalesce ( items . viewed , media_owner . viewed ) AS viewed , m . resource_key AS resource_key , m.publication_id AS scoped_media_publication_id , coalesce ( linked_root . id , m . publication_id , jobs . item ) AS affected_item FROM (SELECT * FROM (SELECT * FROM jobs WHERE {direct_scope}kind IS DISTINCT FROM 'read' AND kind IS DISTINCT FROM 'discover' AND ({'TRUE' if scope_items is not None else 'FALSE'} OR reason_code IS DISTINCT FROM 'processor-config') AND ({'TRUE' if scope_items is not None else 'FALSE'} OR NOT ((kind IS NOT DISTINCT FROM 'filter' OR kind IS NOT DISTINCT FROM 'theses') AND item IS NOT NULL AND item<>'' AND (((reason_code='' OR (reason_code IS NULL AND reason_message IS NOT NULL))) OR (reason_code IS NOT NULL AND reason_code<>'' AND reason_code NOT LIKE '{source_like}' AND reason_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'))))) AND ({'TRUE' if scope_items is not None else 'FALSE'} OR NOT (kind IS NOT DISTINCT FROM 'fetch' AND item IS NOT NULL AND item<>'' AND reason_code IS NOT NULL AND reason_code NOT LIKE '{source_like}' AND reason_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') AND NOT fetch_null_ambiguous)) AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(reason_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')) AND (reason_code IS NOT NULL OR reason_message IS NOT NULL) {source_owned_filter} {admission_filter} AND ({'TRUE' if scope_items is not None else 'FALSE'} OR NOT (kind IS NOT DISTINCT FROM 'download_media' AND item IS NOT NULL AND item<>'' AND reason_code IS NOT NULL AND reason_code NOT LIKE '{source_like}' AND reason_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'))) UNION ALL SELECT j.* FROM media_files subtitle JOIN jobs j ON j.kind='download_media' AND j.item=subtitle.id WHERE {media_scope}{'FALSE' if scope_items is not None else 'TRUE'} AND subtitle.resource_key='youtube:subtitles' AND j.kind='download_media' {subtitle_owned_filter} AND j.item IS NOT NULL AND j.item<>'' AND j.reason_code IS NOT NULL AND j.reason_code NOT LIKE '{source_like}' AND j.reason_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) status_jobs ORDER BY kind,item OFFSET 0) jobs LEFT JOIN media_files m ON jobs . kind = 'download_media' AND m . id = jobs . item LEFT JOIN publications items ON items . id = jobs . item AND ({item_join_filter}) LEFT JOIN publications media_owner ON media_owner . id = m . publication_id LEFT JOIN publication_links link ON link . target_publication_id = coalesce ( items . id , media_owner . id ) LEFT JOIN publications linked_root ON linked_root . id = link . source_publication_id AND linked_root . viewed = 0 WHERE ( jobs . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' , 'blocked' ) OR ( jobs . status = 'done' AND jobs . kind = 'fetch' AND jobs . reason_code IS NOT NULL AND jobs . reason_message IS NOT NULL ) ) AND ( jobs . reason_code IS NOT NULL OR jobs . reason_message IS NOT NULL ) AND jobs.kind IS DISTINCT FROM 'read' AND ({'TRUE' if scope_items is not None else 'FALSE'} OR jobs.reason_code IS DISTINCT FROM 'processor-config') AND NOT (jobs.kind IN ('delete','feed-delete') AND coalesce(nullif(jobs.reason_code,''),'work-'||jobs.kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))",parameters).fetchall()
+        jobs = self.db.execute(f"SELECT jobs . * , coalesce ( {owner_expr('items')} , {owner_expr('media_owner')} , {owner_expr('linked_root')} ) AS resolved_feed_id , m . resource_key AS resource_key , m.publication_id AS scoped_media_publication_id , coalesce ( linked_root . id , m . publication_id , jobs . item ) AS affected_item FROM (SELECT * FROM (SELECT * FROM jobs WHERE {direct_scope}kind IS DISTINCT FROM 'read' AND kind IS DISTINCT FROM 'discover' AND ({'TRUE' if scope_items is not None else 'FALSE'} OR reason_code IS DISTINCT FROM 'processor-config') AND ({'TRUE' if scope_items is not None else 'FALSE'} OR NOT ((kind IS NOT DISTINCT FROM 'filter' OR kind IS NOT DISTINCT FROM 'theses') AND item IS NOT NULL AND item<>'' AND (((reason_code='' OR (reason_code IS NULL AND reason_message IS NOT NULL))) OR (reason_code IS NOT NULL AND reason_code<>'' AND reason_code NOT LIKE '{source_like}' AND reason_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'))))) AND ({'TRUE' if scope_items is not None else 'FALSE'} OR NOT (kind IS NOT DISTINCT FROM 'fetch' AND item IS NOT NULL AND item<>'' AND reason_code IS NOT NULL AND reason_code NOT LIKE '{source_like}' AND reason_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') AND NOT fetch_null_ambiguous)) AND NOT (kind IN ('delete','feed-delete') AND coalesce(nullif(reason_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete')) AND (reason_code IS NOT NULL OR reason_message IS NOT NULL) {source_owned_filter} {admission_filter} AND ({'TRUE' if scope_items is not None else 'FALSE'} OR NOT (kind IS NOT DISTINCT FROM 'download_media' AND item IS NOT NULL AND item<>'' AND reason_code IS NOT NULL AND reason_code NOT LIKE '{source_like}' AND reason_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'))) UNION ALL SELECT j.* FROM media_files subtitle JOIN jobs j ON j.kind='download_media' AND j.item=subtitle.id WHERE {media_scope}{'FALSE' if scope_items is not None else 'TRUE'} AND subtitle.resource_key='youtube:subtitles' AND j.kind='download_media' {subtitle_owned_filter} AND j.item IS NOT NULL AND j.item<>'' AND j.reason_code IS NOT NULL AND j.reason_code NOT LIKE '{source_like}' AND j.reason_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) status_jobs ORDER BY kind,item OFFSET 0) jobs LEFT JOIN media_files m ON jobs . kind = 'download_media' AND m . id = jobs . item LEFT JOIN publications items ON items . id = jobs . item AND ({item_join_filter}) LEFT JOIN publications media_owner ON media_owner . id = m . publication_id LEFT JOIN publication_links link ON link . target_publication_id = coalesce ( items . id , media_owner . id ) LEFT JOIN publications linked_root ON linked_root . id = link . source_publication_id WHERE ( jobs . status IN ( 'pending' , 'running' , 'failed' , 'unavailable' , 'blocked' ) OR ( jobs . status = 'done' AND jobs . kind = 'fetch' AND jobs . reason_code IS NOT NULL AND jobs . reason_message IS NOT NULL ) ) AND ( jobs . reason_code IS NOT NULL OR jobs . reason_message IS NOT NULL ) AND jobs.kind IS DISTINCT FROM 'read' AND ({'TRUE' if scope_items is not None else 'FALSE'} OR jobs.reason_code IS DISTINCT FROM 'processor-config') AND NOT (jobs.kind IN ('delete','feed-delete') AND coalesce(nullif(jobs.reason_code,''),'work-'||jobs.kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))",parameters).fetchall()
         if scope_items is not None:
             source_ids=sorted({job['resolved_feed_id'] or job['feed_id'] for job in jobs if job['resolved_feed_id'] or job['feed_id']})
             for start in range(0,len(source_ids),400):
@@ -3478,8 +3474,6 @@ class Problems:
             feed = resolved_feed or job['item'] or ''
             if code in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') and feed in profile_feeds:
                 continue
-            if job['viewed'] and job['kind'] not in ('delete','feed-delete'):
-                continue
             shared = code in ('processor-config', 'ai-permission') or code.startswith('source-')
             identity = 'job:' + code + ':' + feed + ':' + job['kind'] + ('' if shared else ':' + job['item'])
             if code.startswith('source-') and identity in source_owned:continue
@@ -3519,11 +3513,11 @@ class Problems:
             if youtube_feeds and scope_items is None:
                 rows=self.db.execute(f"""WITH affected(id) AS (
                     SELECT id FROM publications WHERE feed_id=ANY(%s)
-                    UNION SELECT l.target_publication_id FROM (SELECT id,feed_id,viewed FROM publications WHERE feed_id IS NOT NULL) m JOIN publication_links l ON l.source_publication_id=m.id WHERE m.feed_id=ANY(%s)
+                    UNION SELECT l.target_publication_id FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m JOIN publication_links l ON l.source_publication_id=m.id WHERE m.feed_id=ANY(%s)
                     UNION SELECT item FROM jobs WHERE kind='fetch' AND feed_id=ANY(%s) AND status IN ('pending','running') AND reason_code IN ('','work-fetch')
                 ) SELECT DISTINCT coalesce(root.id,j.item) AS affected FROM affected a JOIN jobs j ON j.kind='fetch' AND j.item=a.id
                 LEFT JOIN publications items ON items.id=j.item LEFT JOIN publication_links l ON l.target_publication_id=items.id
-                LEFT JOIN publications root ON root.id=l.source_publication_id AND root.viewed=0
+                LEFT JOIN publications root ON root.id=l.source_publication_id
                 WHERE j.status IN ('pending','running') AND j.reason_code IN ('','work-fetch')
                 AND coalesce({owner_expr('items')},{owner_expr('root')},j.feed_id)=ANY(%s)""",(youtube_feeds,youtube_feeds,youtube_feeds,youtube_feeds))
                 owners.update(row['affected'] for row in rows)

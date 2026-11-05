@@ -15,7 +15,7 @@ def test_status_deadline_virtual_and_tick_keep_ids_etag_and_body(tmp_path,postgr
             with transaction(store.db):
                 store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
                 raw=json.dumps({'blocks':[{'type':'text','role':'body','text':'partial'}],'extra':{}})
-                store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,content,status) VALUES ('a','youtube','a',0,%s,'pending_collection'),('b','youtube','b',0,%s,'pending_collection')",(raw,raw))
+                store.db.execute("INSERT INTO publications(id,platform,external_id,content,status) VALUES ('a','youtube','a',%s,'pending_collection'),('b','youtube','b',%s,'pending_collection')",(raw,raw))
                 store.db.execute("UPDATE publications SET feed_id=CASE id WHEN 'a' THEN 'f' WHEN 'b' THEN 'f' END WHERE id IN ('a','b')")
                 save_keys(store.db,['a','b'])
             store.youtube.blocked(clock[0],900)
@@ -51,7 +51,7 @@ def test_due_group_closure_keeps_id_and_etag_before_and_after_tick(tmp_path,post
             with transaction(store.db):
                 store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
                 raw=json.dumps({'blocks':[{'type':'text','role':'body','text':'partial'}],'extra':{}})
-                store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,content,status) VALUES ('a','youtube','a',0,%s,'pending_collection')",(raw,))
+                store.db.execute("INSERT INTO publications(id,platform,external_id,content,status) VALUES ('a','youtube','a',%s,'pending_collection')",(raw,))
                 store.db.execute("UPDATE publications SET feed_id='f' WHERE id='a'")
                 store.db.execute("INSERT INTO jobs(kind,item,status,reason_message,reason_code) VALUES ('fetch','a','failed','bad',NULL)")
                 save_keys(store.db,['a']);store.incomplete_draft.mark(['a'])

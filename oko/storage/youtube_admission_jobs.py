@@ -7,17 +7,15 @@ def contributions(store: Any, ids: list[int]) -> dict[int,set[str | None]]:
     """Project selected jobs only; caller is responsible for event coverage."""
     if not ids:return {}
     special="'codex-choice','ai-permission','youtube-admission','identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'"
-    query=f"""SELECT j.id,CASE WHEN affected_publication.id IS NOT NULL AND affected_publication.viewed IS NULL THEN NULL ELSE coalesce(root.id,m.publication_id,j.item) END AS affected
+    query=f"""SELECT j.id,coalesce(root.id,m.publication_id,j.item) AS affected
         FROM jobs j
         LEFT JOIN publications item ON item.id=j.item
         LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
         LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
         LEFT JOIN publication_links link ON link.target_publication_id=coalesce(item.id,media_owner.id)
-        LEFT JOIN publications root ON root.id=link.source_publication_id AND root.viewed=0
-        LEFT JOIN publications affected_publication ON affected_publication.id=coalesce(root.id,m.publication_id,j.item)
+        LEFT JOIN publications root ON root.id=link.source_publication_id
         JOIN feeds f ON f.id=coalesce({owner_expr('item')},{owner_expr('media_owner')},{owner_expr('root')},j.feed_id)
         WHERE j.id=ANY(%s) AND j.status IN ('pending','running') AND f.kind='youtube'
-        AND (affected_publication.id IS NULL OR affected_publication.viewed=0 OR affected_publication.viewed IS NULL)
         AND NOT (j.kind='fetch' AND item.id IS NULL AND j.youtube_admission_forgotten_item IS NOT NULL AND j.youtube_admission_forgotten_item=j.item)
         AND j.reason_code IS DISTINCT FROM 'processor-config'
         AND NOT (j.reason_code IS NOT NULL AND j.reason_code LIKE 'source-%%' AND j.source_event_owned)
@@ -43,8 +41,7 @@ def sync_ids(store: Any, ids: list[int]) -> None:
         batch=ids[start:start+100]
         store.db.execute("""UPDATE jobs j SET youtube_admission_forgotten_item=v.forgotten FROM (
             SELECT source.id,CASE
-              WHEN source.kind='fetch' AND p.id IS NOT NULL AND p.viewed<>0 THEN source.item
-              WHEN source.kind IS DISTINCT FROM 'fetch' OR (p.id IS NOT NULL AND p.viewed=0) OR source.item IS DISTINCT FROM source.youtube_admission_forgotten_item THEN NULL
+              WHEN source.kind IS DISTINCT FROM 'fetch' OR p.id IS NOT NULL OR source.item IS DISTINCT FROM source.youtube_admission_forgotten_item THEN NULL
               ELSE source.youtube_admission_forgotten_item END AS forgotten
             FROM jobs source LEFT JOIN publications p ON p.id=source.item WHERE source.id=ANY(%s)
         ) v WHERE j.id=v.id AND j.youtube_admission_forgotten_item IS DISTINCT FROM v.forgotten""",(batch,))
@@ -218,7 +215,7 @@ def capture_fetch_flag_changes(store: Any, ids: list[int]) -> None:
             LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
             LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
             LEFT JOIN publication_links link ON link.target_publication_id=coalesce(item.id,media_owner.id)
-            LEFT JOIN publications root ON root.id=link.source_publication_id AND root.viewed=0
+            LEFT JOIN publications root ON root.id=link.source_publication_id
             LEFT JOIN feeds f ON f.id=coalesce({owner_expr('item')},{owner_expr('media_owner')},{owner_expr('root')},j.feed_id)
             WHERE j.id=ANY(%s) AND (j.youtube_admission_candidate OR f.kind='youtube')''',(batch,)).fetchall()
         capture_ids(store,[row['id'] for row in rows])
