@@ -1,3 +1,4 @@
+from tests.support.youtube_action import youtube_action
 from fastapi.testclient import TestClient
 from tests.support.app import create_app
 from tests.support.reader import HEADERS
@@ -12,7 +13,7 @@ def test_virtual_expiry_http_etag_and_xmin_across_tick(tmp_path,postgres_url):
             store=app.state.host.require_store()
             recover_flags(store)
             store.youtube_admission_ready=True
-            store.youtube.blocked(100,900)
+            youtube_action(store, 'blocked', 100,900)
             app.state.host.execution.reader_advance=None
         client.portal.call(setup)
         def row():
@@ -42,7 +43,7 @@ def test_pause_extension_keeps_occurrence_and_replaces_boundary(tmp_path,postgre
     app=create_app(tmp_path,token='test',database_url=postgres_url,api_only=True,wall_clock=lambda:clock[0])
     with TestClient(app,headers=HEADERS) as client:
         def block():
-            store=app.state.host.require_store();store.youtube.blocked(clock[0],900)
+            store=app.state.host.require_store();youtube_action(store, 'blocked', clock[0],900)
             app.state.host.execution.reader_advance=None
         client.portal.call(block)
         first=client.get('/api/v3/status/details');assert first.status_code==200

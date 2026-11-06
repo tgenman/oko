@@ -1,3 +1,4 @@
+from tests.support.youtube_action import youtube_action
 from tests.support.storage import Store
 from oko.storage.transaction import transaction
 
@@ -16,7 +17,7 @@ def test_pause_rolls_back_timer_occurrence_and_flags_together(tmp_path,postgres_
         before=store.db.execute('SELECT id,identity,body,finished FROM reader_problems WHERE finished IS NULL AND body::jsonb->>\'fetch_job_id\'=%s',(str(job),)).fetchall()
         with pytest.raises(RuntimeError,match='rollback'):
             with transaction(store.db):
-                store.youtube.start(100)
+                youtube_action(store, 'start', 100)
                 assert store.db.execute('SELECT 1 FROM reader_problems WHERE youtube_fetch_due IS NOT NULL').fetchone()
                 raise RuntimeError('rollback')
         after=store.db.execute('SELECT id,identity,body,finished FROM reader_problems WHERE finished IS NULL AND body::jsonb->>\'fetch_job_id\'=%s',(str(job),)).fetchall()
@@ -41,7 +42,7 @@ def test_http_etag_stable_when_virtual_fetch_is_materialized(tmp_path,postgres_u
                 store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','youtube','p')")
                 store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
                 store.db.execute("INSERT INTO jobs(kind,item,status,reason_message) VALUES ('fetch','p','failed','waiting')")
-            store.problems.recover_youtube_null_fetch();store.youtube.start(100)
+            store.problems.recover_youtube_null_fetch();youtube_action(store, 'start', 100)
             app.state.host.execution.reader_advance=None
         client.portal.call(setup);clock[0]=111
         before=client.get('/api/v3/status/details');assert before.status_code==200
