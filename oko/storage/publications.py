@@ -66,10 +66,11 @@ class Publications:
         return self.store.db.execute("SELECT 1 FROM feeds WHERE id = %s AND adapter IN ( 'telegram_web_adapter' , 'rss_adapter' , 'youtube_adapter' )", (feed,)).fetchone() is not None
 
     def sync_feeds(self, feeds: list[str]) -> None:
+        if not self.store.db.transaction_depth:
+            raise RuntimeError('Feed synchronization requires an owning transaction')
         if self.store.db.execute("SELECT 1 FROM state WHERE key = 'publication-pipeline'").fetchone():
-            with self.store.db:
-                for feed in feeds:
-                    self.configure_feed(feed)
+            for feed in feeds:
+                self.configure_feed(feed)
 
     def configure_feed(self, feed: str) -> None:
         store = self.store
