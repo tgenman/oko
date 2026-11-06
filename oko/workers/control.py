@@ -29,7 +29,7 @@ class JobControl:
         self._collection_active: dict[int, _CollectionAttempt] = {}
         self._ai: asyncio.Task[None] | None = None
         self._lanes: dict[str, asyncio.Task[None]] = {}
-        self._media_jobs: dict[str, Job] = {}
+        self._lane_jobs: dict[str, Job] = {}
         self._lane_feeds: dict[str, str] = {}
         self._ai_feed: str | None = None
         self._ai_job: Job | None = None
@@ -77,9 +77,8 @@ class JobControl:
             ai_task = self._ai
             lanes = [lane for lane in self._lanes if feeds is None or self._lane_feeds.get(lane) in feeds]
             tasks = [self._lanes.pop(lane) for lane in lanes]
-            for media_lane in ('media','captions'):
-                if media_lane in lanes:
-                    self._media_jobs.pop(media_lane,None)
+            for lane in lanes:
+                self._lane_jobs.pop(lane,None)
             if self._ai and (feeds is None or self._ai_feed in feeds):
                 tasks.append(self._ai)
                 self._ai = None
