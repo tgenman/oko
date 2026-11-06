@@ -63,7 +63,7 @@ def test_explicit_restore_before_new_writes_recovers_matching_database_and_files
         shutil.copytree(media.parent.parent,saved_files)
         subprocess.run(['pg_dump','--format=custom','--no-owner','--schema',schema,'--file',str(backup)],env=env,check=True,capture_output=True)
         migrate(db,MIGRATIONS)
-        assert db.execute('SELECT max(version) FROM oko_schema_migrations').fetchone()[0]==120
+        assert db.execute('SELECT max(version) FROM oko_schema_migrations').fetchone()[0]==len(MIGRATIONS)
         media.unlink()
         db.execute(sql.SQL('DROP SCHEMA {} CASCADE').format(sql.Identifier(schema)))
     subprocess.run(['pg_restore','--exit-on-error','--no-owner','--dbname',env['PGDATABASE'],str(backup)],env=env,check=True,capture_output=True)

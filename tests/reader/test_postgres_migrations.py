@@ -1314,3 +1314,151 @@ def test_older_filter_copy_precedes_reader_prelude(connections):
         migrate(db,MIGRATIONS)
         saved=db.execute("SELECT filtered_content::jsonb FROM publications WHERE id='historical'").fetchone()[0]
         assert saved=={'blocks':filtered['blocks']}
+
+
+def test_migration_preserves_reason_for_external_media_on_successful_fetch(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    reason='Видео не предоставлено публичным предпросмотром'
+    url='https://example.test/post'
+    resource={'key':'video','status':'external','reason':reason,'external':{'kind':'video','source_url':url}}
+    content={'blocks':[{'type':'external_media','kind':'video','url':url}],
+             'extra':{'_reader':{'full':False,'reason':reason,'source_manifest':{'resources':[resource]}},'_collection_reason':reason}}
+    with connections() as db:
+        migrate(db,MIGRATIONS[:106])
+        db.execute("INSERT INTO publications(id,platform,external_id,status,content) VALUES ('p','telegram','p','ready',%s::jsonb)",(json.dumps(content),))
+        db.execute("INSERT INTO jobs(kind,item,status,payload) VALUES ('fetch','p','done','{}')")
+        migrate(db,MIGRATIONS)
+        status,message,payload=db.execute("SELECT status,reason_message,payload FROM jobs WHERE kind='fetch' AND item='p'").fetchone()
+        assert (status,message)==('done',None)
+        assert payload['historical_external_media_reason']==reason
+        saved=db.execute("SELECT content FROM publications WHERE id='p'").fetchone()[0]
+        assert saved['blocks'][0]['url']==url and '_reader' not in saved['extra']
+
+
+def test_migration_preserves_reason_for_external_embed(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    reason='External embed not saved locally'
+    content={'blocks':[{'type':'external_media','kind':'video','url':'https://example.test/video'}],
+             'extra':{'_reader':{'full':False,'reason':reason},'_collection_reason':reason}}
+    with connections() as db:
+        migrate(db,MIGRATIONS[:106])
+        db.execute("INSERT INTO publications(id,platform,external_id,status,content) VALUES ('p','other_web','p','ready',%s::jsonb)",(json.dumps(content),))
+        db.execute("INSERT INTO jobs(kind,item,status) VALUES ('fetch','p','done')")
+        migrate(db,MIGRATIONS)
+        assert db.execute("SELECT status,reason_message,payload->>'historical_external_media_reason' FROM jobs WHERE kind='fetch' AND item='p'").fetchone()==('done',None,reason)
+
+
+def test_migration_rejects_external_reason_without_matching_block(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    reason='Видео не предоставлено публичным предпросмотром'
+    resource={'key':'video','status':'external','reason':reason,'external':{'kind':'video','source_url':'https://example.test/a'}}
+    content={'blocks':[{'type':'external_media','kind':'video','url':'https://example.test/b'}],
+             'extra':{'_reader':{'full':False,'reason':reason,'source_manifest':{'resources':[resource]}},'_collection_reason':reason}}
+    with connections() as db:
+        migrate(db,MIGRATIONS[:106])
+        db.execute("INSERT INTO publications(id,platform,external_id,status,content) VALUES ('p','telegram','p','ready',%s::jsonb)",(json.dumps(content),))
+        db.execute("INSERT INTO jobs(kind,item,status) VALUES ('fetch','p','done')")
+        with pytest.raises(psycopg.errors.RaiseException,match='Unowned legacy collection reasons'):
+            migrate(db,MIGRATIONS)
+        verify(db,MIGRATIONS[:106])
+        assert db.execute("SELECT content FROM publications WHERE id='p'").fetchone()==(content,)
+
+
+def test_migration_preserves_external_reason_from_schema_99(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    reason='Файл документа не предоставлен публичным предпросмотром'
+    url='https://example.test/post'
+    resource={'key':'document','status':'external','reason':reason,'external':{'kind':'file','source_url':url}}
+    content={'blocks':[{'type':'external_media','kind':'file','url':url}],
+             'extra':{'_reader':{'full':False,'reason':reason,'source_manifest':{'resources':[resource]}},'_collection_reason':reason}}
+    with connections() as db:
+        migrate(db,MIGRATIONS[:99])
+        db.execute("INSERT INTO publications(id,platform,external_id,status,content) VALUES ('p','telegram','p','ready',%s)",(json.dumps(content),))
+        db.execute("INSERT INTO jobs(kind,item,status) VALUES ('fetch','p','done')")
+        migrate(db,MIGRATIONS)
+        assert db.execute("SELECT status,reason_message,payload->>'historical_external_media_reason' FROM jobs WHERE kind='fetch' AND item='p'").fetchone()==('done',None,reason)
+
+
+def test_migration_preserves_distinct_external_items_with_same_url(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    url='https://example.test/post'
+    resources=[{'key':f'doc-{n}','status':'external','external':{'kind':'file','source_url':url,'title':f'Document {n}'}} for n in (1,2)]
+    content={'blocks':[{'type':'external_media','kind':'file','url':url} for _ in resources],
+             'extra':{'_reader':{'source_manifest':{'resources':resources,'post':{'resources':[{'key':r['key'],'kind':'file'} for r in resources]}}}}}
+    with connections() as db:
+        migrate(db,MIGRATIONS[:107])
+        db.execute("INSERT INTO publications(id,platform,external_id,status,content) VALUES ('p','telegram','p','ready',%s::jsonb)",(json.dumps(content),))
+        db.execute("INSERT INTO jobs(kind,item,status) VALUES ('fetch','p','done')")
+        migrate(db,MIGRATIONS)
+        blocks=db.execute("SELECT content->'blocks' FROM publications WHERE id='p'").fetchone()[0]
+        assert [(b['url'],b['title']) for b in blocks]==[(url,'Document 1'),(url,'Document 2')]
+
+
+def test_migration_removes_empty_manifest_bookkeeping(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    content={'blocks':[{'type':'text','role':'body','text':'Saved'}], 'extra':{'_reader':{'source_manifest':{'post':{},'resources':[],'articles':[],'download_partial':False}}}}
+    with connections() as db:
+        migrate(db,MIGRATIONS[:112])
+        db.execute("INSERT INTO publications(id,platform,external_id,status,content) VALUES ('p','telegram','p','ready',%s::jsonb)",(json.dumps(content),))
+        migrate(db,MIGRATIONS)
+        assert db.execute("SELECT content #> '{extra,_reader}' FROM publications WHERE id='p'").fetchone()==(None,)
+
+
+def test_migration_rejects_nonempty_manifest_bookkeeping(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    content={'blocks':[], 'extra':{'_reader':{'source_manifest':{'post':{},'resources':[],'articles':[{'url':'https://example.test'}],'download_partial':True}}}}
+    with connections() as db:
+        migrate(db,MIGRATIONS[:112])
+        db.execute("INSERT INTO publications(id,platform,external_id,status,content) VALUES ('p','telegram','p','ready',%s::jsonb)",(json.dumps(content),))
+        with pytest.raises(psycopg.errors.RaiseException,match='Unrepresented reader facts'):
+            migrate(db,MIGRATIONS)
+        verify(db,MIGRATIONS[:112])
+        assert db.execute("SELECT content FROM publications WHERE id='p'").fetchone()==(content,)
+
+
+def test_migration_rejects_ambiguous_external_item_counts(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    url='https://example.test/post'
+    resources=[{'key':f'doc-{n}','status':'external','external':{'kind':'file','source_url':url,'title':f'Document {n}'}} for n in (1,2)]
+    content={'blocks':[{'type':'external_media','kind':'file','url':url}],
+             'extra':{'_reader':{'source_manifest':{'resources':resources}}}}
+    with connections() as db:
+        migrate(db,MIGRATIONS[:107])
+        db.execute("INSERT INTO publications(id,platform,external_id,status,content) VALUES ('p','telegram','p','ready',%s::jsonb)",(json.dumps(content),))
+        with pytest.raises(psycopg.errors.RaiseException,match='Ambiguous repeated external media'):
+            migrate(db,MIGRATIONS)
+        verify(db,MIGRATIONS[:107])
+        assert db.execute("SELECT content FROM publications WHERE id='p'").fetchone()==(content,)
+
+
+def test_migration_rejects_conflicting_duplicate_external_posters(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    url='https://example.test/post'
+    resources=[{'key':f'ext-{n}','status':'external','external':{'kind':'video','source_url':url,'poster_key':f'poster-{n}'}} for n in (1,2)]
+    content={'blocks':[{'type':'external_media','kind':'video','url':url,'poster_media_id':'poster-b'},
+                       {'type':'external_media','kind':'video','url':url}],
+             'extra':{'_reader':{'source_manifest':{'resources':resources}}}}
+    with connections() as db:
+        migrate(db,MIGRATIONS[:107])
+        db.execute("INSERT INTO publications(id,platform,external_id,status,content) VALUES ('p','telegram','p','ready',%s::jsonb)",(json.dumps(content),))
+        db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('poster-a','p','poster-1','opaque','a','pending_download'),('poster-b','p','poster-2','opaque','b','pending_download')")
+        with pytest.raises(psycopg.errors.RaiseException,match='Conflicting repeated external media poster'):
+            migrate(db,MIGRATIONS)
+        verify(db,MIGRATIONS[:107])
+        assert db.execute("SELECT content FROM publications WHERE id='p'").fetchone()==(content,)
+
+
+def test_migration_rejects_empty_duplicate_external_poster_key(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    url='https://example.test/post'
+    resources=[{'key':f'ext-{n}','status':'external','external':{'kind':'video','source_url':url,'poster_key':'' if n==1 else None}} for n in (1,2)]
+    content={'blocks':[{'type':'external_media','kind':'video','url':url,'poster_media_id':'poster-a'},
+                       {'type':'external_media','kind':'video','url':url}],
+             'extra':{'_reader':{'source_manifest':{'resources':resources}}}}
+    with connections() as db:
+        migrate(db,MIGRATIONS[:107])
+        db.execute("INSERT INTO publications(id,platform,external_id,status,content) VALUES ('p','telegram','p','ready',%s::jsonb)",(json.dumps(content),))
+        with pytest.raises(psycopg.errors.RaiseException,match='Conflicting repeated external media poster'):
+            migrate(db,MIGRATIONS)
+        verify(db,MIGRATIONS[:107])
+        assert db.execute("SELECT content FROM publications WHERE id='p'").fetchone()==(content,)
