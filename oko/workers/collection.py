@@ -75,12 +75,12 @@ class CollectionWorker:
         self._source,self._clock,self._fault=source,clock,fault
         self._source_feed = source_feed
         self._telegram_http = TelegramHTTP(rss_transport, clock, wall_clock,
-            lambda group: self.require_store().jobs.telegram_http_state(group),
+            lambda group: self.require_store().source_waits.telegram_state(group),
             self._save_telegram_http_wait,
             lambda: self._live() and not self.jobs._cancelling, lambda: self.execution._epoch,
             lambda: self.service.telegram_http_delay())
         self._source_http=SourceHTTP(rss_transport,wall_clock,
-            lambda scope:self.require_store().jobs.source_http_until(scope),self._save_source_http_wait,
+            lambda scope:self.require_store().source_waits.source_until(scope),self._save_source_http_wait,
             lambda:self._live() and not self.jobs._cancelling,lambda:self.execution._epoch)
         self._collection = Sources(source, source_feed, rss_enabled, rss_transport,
                                    self._youtube_captions, self._youtube_history, self._telegram_http,self._source_http)
@@ -105,7 +105,10 @@ class CollectionWorker:
                 raise asyncio.CancelledError
             current=self.require_store()
             with current.jobs.transaction(self._live):
-                return current.jobs.source_http_wait(scope,server_delay)
+                delay=max(current.subscriptions.retry_settings()['initial_seconds'],server_delay or 0)
+                until=max(current.source_waits.source_until(scope),current.wall_clock()+delay)
+                current.source_waits.save_source(scope,until)
+                return until
 
     async def _save_telegram_http_wait(self, group: str, server_delay: float | None, generation: int) -> float:
         async with self.execution._actions:
@@ -113,7 +116,13 @@ class CollectionWorker:
                 raise SourceDeferred('Запрос Telegram прерван',code='source_unavailable')
             current=self.require_store()
             with current.jobs.transaction(self._live):
-                return current.jobs.telegram_http_wait(group,server_delay)
+                state=current.source_waits.telegram_state(group)
+                strikes=min(int(state.get('strikes',0))+1,7)
+                settings=current.subscriptions.retry_settings()
+                delay=max(float(min(settings['initial_seconds']*2**(strikes-1),settings['max_seconds'])),server_delay or 0)
+                until=max(float(state.get('until',0)),current.wall_clock()+delay)
+                current.source_waits.save_telegram(group,until,strikes)
+                return until
 
     def _live(self) -> bool:
         return self.execution._live()

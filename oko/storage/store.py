@@ -14,6 +14,7 @@ from typing import Any
 
 from oko.storage.publications import Publications
 from oko.storage.media import MediaFiles
+from oko.storage.publication_files import PublicationFiles
 from oko.storage.reader_versions import ReaderVersions
 from oko.storage.source_configuration import changed as source_changed
 from oko.storage.reader_status import changed as status_changed
@@ -28,6 +29,7 @@ from oko.storage.subscriptions import SubscriptionRepository
 from oko.storage.job_writes import execute as job_write
 from oko.storage.transaction import begin_write, transaction
 from oko.storage.job_repository import JobRepository
+from oko.storage.source_waits import SourceWaits
 from oko.storage.collection_diagnostics import CollectionDiagnostics
 from oko.subscriptions.history import InitialHistory
 from oko.processing.config import ProcessorConfig
@@ -73,9 +75,11 @@ class Store:
             self.db = PostgresConnection(database_url, clock=clock, wall_clock=wall_clock)
             self.db.claim_store()
             self.jobs = JobRepository(self)
+            self.source_waits = SourceWaits(self.db)
             self.subscriptions = SubscriptionRepository(self.db, self.fault, wall_clock=self.wall_clock)
             self.publications = Publications(self)
             self.media = MediaFiles(self)
+            self.publication_files = PublicationFiles(self.root,self.media.active_paths,self.fault)
             self.collection_status = CollectionStatus(self.db, self.clock, self.wall_clock,self)
             self.filters = FilterResults(self)
             self.processing = ProcessingState(self)
@@ -266,26 +270,6 @@ class Store:
     def cursor(self, feed: str) -> str | None:
         row=self.db.execute('SELECT cursor FROM feeds WHERE id = %s',(feed,)).fetchone()
         return str(row[0]) or None if row else None
-
-    def source_http_until(self, scope: str) -> float:
-        row=self.db.execute('SELECT value FROM state WHERE key = %s',('source-http:'+scope,)).fetchone()
-        return float(row[0]) if row else 0.
-
-    def source_http_wait(self, scope: str, until: float) -> None:
-        if not self.db.transaction_depth:
-            raise RuntimeError('Storage action requires an owning transaction')
-        self.db.execute('INSERT INTO state VALUES ( %s , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value',
-                        ('source-http:'+scope,str(until)))
-
-    def telegram_http_state(self, group: str) -> dict[str, Any]:
-        row = self.db.execute('SELECT value FROM state WHERE key = %s', ('telegram-http:'+group,)).fetchone()
-        return json.loads(row[0]) if row else {}
-
-    def telegram_http_wait(self, group: str, state: dict[str, Any]) -> None:
-        if not self.db.transaction_depth:
-            raise RuntimeError('Storage action requires an owning transaction')
-        self.db.execute('INSERT INTO state VALUES ( %s , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value',
-                        ('telegram-http:'+group, json.dumps(state)))
 
     def _has_unviewed(self, item: str) -> bool:
         return self.db.execute('SELECT 1 FROM publications WHERE id = %s',(item,)).fetchone() is not None

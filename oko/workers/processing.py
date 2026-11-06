@@ -137,7 +137,7 @@ class ProcessingWorker:
                         return
                     with jobs.transaction(self.execution._live):
                         jobs.set_public_processor(job,not checked['local'],work.public_ai)
-                result=(await adapter.generate(work.request,jobs.workspace(job)) if isinstance(adapter,Codex) else await adapter.generate(work.request))
+                result=(await adapter.generate(work.request,store.publication_files.workspace(job.item)) if isinstance(adapter,Codex) else await adapter.generate(work.request))
             async with self.execution._actions:
                 if self.execution._store is not store or not self.execution._live():
                     return

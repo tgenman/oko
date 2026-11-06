@@ -5,10 +5,8 @@ from oko.storage.job_writes import execute as job_write
 from oko.storage.publication_owners import owned_ids, owner_expr
 from oko.storage.database import expect_row, Database, Row
 import json
-import shutil
 from oko.domain.collection import CollectionEffects
 from oko.storage.collection_diagnostics import CollectionDiagnostics
-from pathlib import Path
 from typing import Any
 from collections.abc import Callable,Iterator
 from contextlib import contextmanager
@@ -863,33 +861,10 @@ class JobRepository:
         if changed:self.store.problems.finish_processor_change([job.id],processor_previous,self.store.wall_clock())
         if changed:self.store.incomplete_draft.mark_job(job.kind,job.item,job.id)
 
-    def source_http_until(self, scope: str) -> float:
-        return self.store.source_http_until(scope)
-
-    def telegram_http_state(self, scope: str) -> dict[str,Any]:
-        return self.store.telegram_http_state(scope)
-
-    def source_http_wait(self, scope: str, delay: float | None) -> float:
-        delay=max(self.store.subscriptions.retry_settings()['initial_seconds'],delay or 0)
-        until=max(self.store.source_http_until(scope),self.store.wall_clock()+delay)
-        self.store.source_http_wait(scope,until)
-        return until
-
-    def telegram_http_wait(self, scope: str, delay: float | None) -> float:
-        state=self.store.telegram_http_state(scope)
-        strikes=min(int(state.get('strikes',0))+1,7)
-        delay=max(float(min(60*2**(strikes-1),3600)),delay or 0)
-        until=max(float(state.get('until',0)),self.store.wall_clock()+delay)
-        self.store.telegram_http_wait(scope,dict(until=until,strikes=strikes))
-        return until
-
     def deleting(self) -> bool:
         return bool(self.store.db.execute("""SELECT 1 FROM jobs j WHERE j.status != 'done'
             AND (j.kind='feed-delete' OR (j.kind='delete' AND EXISTS
                 (SELECT 1 FROM publications p WHERE p.id=j.item))) LIMIT 1""").fetchone())
-
-    def workspace(self, job: Job) -> Path:
-        return self.store.root/'staging'/job.item
 
     def collection_start(self, job: Job, feed: str) -> dict[str,Any]:
         return self.store.collection_status.start(job,feed)
@@ -1280,20 +1255,6 @@ class JobRepository:
         if source_effects.source_groups_before:self.sync_captured_source_groups(source_effects)
         return True
 
-
-    def delete_files(self, job: Job) -> bool | None:
-        if self.store.db.transaction_depth:
-            raise RuntimeError('File deletion must run outside a transaction')
-        if not self.valid(job):
-            return None
-        self.store.fault('before_delete')
-        for path in (self.store.root / 'content' / job.item, self.store.root / 'staging' / job.item, self.store.root / 'media' / job.item):
-            if any(path==active or path in active.parents for active in self.store.media.active_paths):
-                return False
-            if path.exists():
-                shutil.rmtree(path)
-        self.store.fault('after_delete_files')
-        return True
 
     def finish_delete(self, job: Job) -> None:
         if not self.store.db.transaction_depth:

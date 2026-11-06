@@ -375,7 +375,7 @@ def test_failed_delete_problem_follows_job_without_status_read(tmp_path, postgre
         claimed=claim_job(store, 1,deleting_only=True)
         assert claimed is not None and claimed.id==job.id
         assert json.loads(current()['body'])['state']=='retrying'
-        assert store.jobs.delete_files(claimed) is True
+        assert store.publication_files.delete(claimed.item) is True
         with pytest.raises(ValueError,match='finish rollback'):
             with transaction(store.db):
                 store.jobs.finish_delete(claimed)
