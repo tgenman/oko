@@ -126,6 +126,7 @@ def test_claim_reloads_source_after_selected_row_becomes_stale(tmp_path,postgres
 
 
 def test_manual_feed_refresh_resolves_old_source_problem_and_keeps_wait(tmp_path,postgres_url):
+    from oko.services.feed_refresh import FeedRefresh
     from oko.storage.job_types import Job
     from oko.storage.transaction import transaction
     from oko.collection.adapters import AdapterIssue, AdapterErrorKind
@@ -142,7 +143,7 @@ def test_manual_feed_refresh_resolves_old_source_problem_and_keeps_wait(tmp_path
         old=store.db.execute("SELECT id FROM reader_problems WHERE body::jsonb->>'source_group_identity'='job:source-network:f:fetch' AND finished IS NULL").fetchone()
         assert old
         with transaction(store.db):
-            store.jobs.refresh_feed('f')
+            FeedRefresh(store.media,store.subscriptions,store.jobs).refresh('f')
         row=store.db.execute('SELECT status,reason_code,reason_message,wait_scope,retry_at FROM jobs WHERE id=%s',(job,)).fetchone()
         assert row['status']=='pending' and row['reason_code'] is None and row['reason_message'] is None
         assert row['wait_scope']=='feed:f' and row['retry_at']>=deadline.timestamp()

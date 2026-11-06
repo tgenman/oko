@@ -12,6 +12,7 @@ from oko.execution import Execution
 from oko.storage.reader_facts import ReaderFacts
 from oko.storage.job_repository import JobRepository
 from oko.workers.processing_service import processing_service
+from oko.services.feed_refresh import FeedRefresh
 if TYPE_CHECKING:
     from oko.observability import Metrics
 
@@ -176,7 +177,7 @@ class JobControl:
     def refresh_feed(self, identity: str) -> None:
         store=self.execution.require_store()
         with store.jobs.transaction(self.execution._live):
-            store.jobs.refresh_feed(identity)
+            FeedRefresh(store.media,store.subscriptions,store.jobs).refresh(identity)
 
     def enqueue_discovery(self, identity: str) -> None:
         store=self.execution.require_store()
