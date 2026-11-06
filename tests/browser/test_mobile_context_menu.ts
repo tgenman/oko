@@ -5,7 +5,7 @@ import {artifactPath} from './artifacts';
 
 test('touch hold opens card, feed and folder menus without selecting them', {timeout:30000},async()=>{
  const r=await reader();try{
-  await r.page.setViewportSize({width:390,height:844});await r.start([material('a'),material('b')]);
+  await r.page.setViewportSize({width:390,height:844});await r.start([material('a'),material('b')]);await r.page.bringToFront();
   const c=await r.page.context().newCDPSession(r.page);await c.send('Emulation.setTouchEmulationEnabled',{enabled:true});
   const touch=async(selector:string,kind:'hold'|'tap'|'move'|'native'|'cancel')=>{
    const row=r.page.locator(selector);await expect(row).toBeVisible();const box=(await row.boundingBox())!;
@@ -18,7 +18,7 @@ test('touch hold opens card, feed and folder menus without selecting them', {tim
   };
   await touch('[data-card="a"]','hold');await expect(r.page.locator('#news-context-menu')).toBeVisible();
   await expect(r.page.locator('[data-card="a"]')).toHaveAttribute('aria-pressed','false');
-  await r.page.screenshot({path:artifactPath('mobile-card-context-menu.png')});await expect(r.page.locator('#news-context-menu [role=menuitem]:not(:disabled)').first()).toBeFocused();await r.page.keyboard.press('Escape');await expect(r.page.locator('#news-context-menu')).toHaveCount(0);
+  await r.page.screenshot({path:artifactPath('mobile-card-context-menu.png')});await r.page.bringToFront();await expect(r.page.locator('#news-context-menu [role=menuitem]:not(:disabled)').first()).toBeFocused();await r.page.keyboard.press('Escape');await expect(r.page.locator('#news-context-menu')).toHaveCount(0);
   await touch('[data-feed="feed"]','hold');await expect(r.page.locator('#feed-context-menu')).toBeVisible();
   await expect(r.page.locator('[data-feed="feed"]')).toHaveAttribute('aria-pressed','false');await r.page.mouse.click(5,5);
   await touch('[data-folder]','hold');await expect(r.page.locator('#folder-context-menu')).toBeVisible();
