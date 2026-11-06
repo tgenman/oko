@@ -6,7 +6,6 @@ from oko.processing.execution import CodexSettings
 from oko.processing.config import ProcessorConfig
 from oko.domain.processing import Kind, ProcessingInput, ProcessingPreparation
 from oko.services.access import repository_access
-from oko.storage.reading import reading_snapshot
 from oko.processing.contracts import FilterResult, Theses
 
 
@@ -32,23 +31,24 @@ class ProcessingOperations(Protocol):
 
 class ProcessingService:
     def __init__(self, *, access: Callable[[], AbstractContextManager[Any]],
-                 repository: Callable[[], ProcessingOperations]) -> None:
-        self._access, self._repository = access, repository
+                 repository: Callable[[], ProcessingOperations],
+                 snapshot: Callable[[], AbstractContextManager[Any]]) -> None:
+        self._access, self._repository, self._snapshot = access, repository, snapshot
 
     @repository_access
-    @reading_snapshot()
     def candidates(self, kind: Kind, *, item: str) -> list[tuple[str, str | None, bool, str]]:
-        repository=self._repository()
-        return [(identity,input_hash,repository.satisfied(identity,kind),repository.revision(identity)) for identity,input_hash in repository.candidates(kind,item=item)]
+        with self._snapshot():
+            repository=self._repository()
+            return [(identity,input_hash,repository.satisfied(identity,kind),repository.revision(identity)) for identity,input_hash in repository.candidates(kind,item=item)]
 
     @repository_access
     def prepare(self, item: str, kind: Kind) -> ProcessingPreparation:
         return self._repository().prepare(item,kind)
 
     @repository_access
-    @reading_snapshot()
     def current(self, value: ProcessingInput) -> bool:
-        return self._repository().current(value)
+        with self._snapshot():
+            return self._repository().current(value)
 
     @repository_access
     def accept(self, value: ProcessingInput, result: FilterResult | Theses | None, origin: dict[str, Any] | None) -> None:
