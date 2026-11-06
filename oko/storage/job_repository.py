@@ -552,15 +552,21 @@ class JobRepository:
             self.store.incomplete_draft.mark_job('fetch',item)
 
 
-    def next_job(self, now: float, deleting_only: bool = False, source_feed: str = '', feeds: list[str] | None = None, ai_only: bool = False, include_deletions: bool = True, media_only: bool = False, captions_only: bool = False, dependency_feeds: list[str] | None = None, processing_kind: str | None = None) -> Job | None:
+    def next_job(self, now: float, deleting_only: bool = False, source_feed: str = '', feeds: list[str] | None = None, ai_only: bool = False, include_deletions: bool = True, media_only: bool = False, captions_only: bool = False, dependency_feeds: list[str] | None = None, processing_kind: str | None = None, prefer_cleanup: bool = True) -> Job | None:
         if not self.store.db.transaction_depth:
             raise RuntimeError('Job claim requires an owning transaction')
+        return self._claim(self._candidate_job(now, deleting_only=deleting_only, source_feed=source_feed, feeds=feeds, ai_only=ai_only, include_deletions=include_deletions, media_only=media_only, captions_only=captions_only, dependency_feeds=dependency_feeds, processing_kind=processing_kind, prefer_cleanup=prefer_cleanup))
+
+    def has_due_job(self, now: float, **options: Any) -> bool:
+        return self._candidate_job(now, **options) is not None
+
+    def _candidate_job(self, now: float, deleting_only: bool = False, source_feed: str = '', feeds: list[str] | None = None, ai_only: bool = False, include_deletions: bool = True, media_only: bool = False, captions_only: bool = False, dependency_feeds: list[str] | None = None, processing_kind: str | None = None, prefer_cleanup: bool = True) -> Row | None:
         if media_only and not ai_only and not deleting_only:
             if processing_kind is not None:
                 return None
             available = feeds if feeds is not None else [source_feed]
             dependencies = available if dependency_feeds is None else dependency_feeds
-            return self._claim(self._media_candidate(now, available, dependencies, captions_only))
+            return self._media_candidate(now, available, dependencies, captions_only)
         query = "SELECT * FROM jobs WHERE status = 'pending' AND next <= %s AND NOT ( coalesce ( reason_code , '' ) = 'ai-permission' AND reason_message IS NOT NULL )"
         if processing_kind is not None:
             query += " AND kind=" + ("'filter'" if processing_kind=='filter' else "'theses'")
@@ -609,10 +615,10 @@ class JobRepository:
         query += f""" AND NOT (kind='fetch' AND
             (jobs.item IS NULL OR EXISTS ({blocked_history} AND m.item=jobs.item OFFSET 0)))"""
         query += " AND NOT (kind='feed-delete' AND EXISTS (SELECT 1 FROM jobs d WHERE d.kind='delete' AND d.status!='done' AND d.payload::jsonb->>'cleanup_feed'=jobs.item))"
-        query += " ORDER BY CASE WHEN kind IN ('delete','feed-delete') AND reason_message IS NULL THEN 0 WHEN kind='discover' THEN 1 WHEN kind IN ('filter','read') THEN 2 WHEN kind IN ('delete','feed-delete') THEN 4 ELSE 3 END,id LIMIT 1"
+        query += f" ORDER BY CASE WHEN kind IN ('delete','feed-delete') THEN {0 if prefer_cleanup else 4} WHEN kind='discover' THEN 1 WHEN kind IN ('filter','read') THEN 2 ELSE 3 END,id LIMIT 1"
         params = (now,) if deleting_only or ai_only else (now, *available, *dependencies) if media_only else (now, *available, *available, *dependencies)
         row = self.store.db.execute(query, params).fetchone()
-        return self._claim(row)
+        return row
 
     def _media_candidate(self, now: float, feeds: list[str], dependencies: list[str], captions: bool) -> Row | None:
         # Avoid walking every publication and media file when no due download
@@ -678,17 +684,17 @@ class JobRepository:
         return Job(current['id'], current['kind'], current['item'], current['generation'])
 
 
-    def retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None, terminal: bool = False, issue: AdapterIssue | None = None) -> None:
+    def retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None, terminal: bool = False, issue: AdapterIssue | None = None, cleanup_backoff: bool = False) -> None:
         if not self.store.db.transaction_depth:
             raise RuntimeError('Job retry requires an owning transaction')
         try:
-            self._retry(job,now,error,delay,code=code,terminal=terminal,issue=issue)
+            self._retry(job,now,error,delay,code=code,terminal=terminal,issue=issue,cleanup_backoff=cleanup_backoff)
         except BaseException:
             if self.store.db.transaction_depth:
                 self.store.db.transaction_failed = True
             raise
 
-    def _retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None, terminal: bool = False, issue: AdapterIssue | None = None) -> None:
+    def _retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None, terminal: bool = False, issue: AdapterIssue | None = None, cleanup_backoff: bool = False) -> None:
         if job.kind in ('discover','fetch','rebuild','filter','theses'):
             valid=self.valid(job)
             collection_jobs.fail(self.store,job,issue or AdapterIssue(code or 'collection-failed',error,
@@ -697,12 +703,22 @@ class JobRepository:
             if valid and not self.valid(job):self._complete_collection_outcome(job)
             return
         memberships.lock_graph(self.store.db)
+        retry_at = None
+        if cleanup_backoff:
+            if job.kind not in ('delete','feed-delete') or terminal:
+                raise ValueError('Cleanup backoff requires a temporary cleanup failure')
+            row=self.store.db.execute('SELECT retry_delay FROM jobs WHERE id=%s AND generation=%s AND status=\'running\'',(job.id,job.generation)).fetchone()
+            if row is None:
+                return
+            settings=self.store.subscriptions.retry_settings()
+            delay=min(settings['max_seconds'],max(settings['initial_seconds'],row['retry_delay']*2))
+            retry_at=self.store.wall_clock()+delay
         processor_previous=self.store.problems.prepare_processor_change([job.id],self.store.wall_clock(),source_lock=job.kind in ('download_media','delete','feed-delete') and (code or '').startswith('source-'))
         previous = self.store.problems.deletion_candidates(job.id,self.store.wall_clock()) if job.kind in ('delete','feed-delete') else []
         from oko.storage.media_job_problems import previous_candidates as media_candidates
         previous_media=media_candidates(self.store,job.id,self.store.wall_clock()) if job.kind=='download_media' else []
-        changed = job_write(self.store.db, "UPDATE jobs SET status = %s , next = %s , reason_message = %s , reason_code = %s WHERE id = %s AND generation = %s AND status = 'running' AND CASE WHEN kind IN ('download_media','delete','feed-delete') AND (reason_code LIKE 'source-%%' OR %s LIKE 'source-%%') THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING OLD.reason_code AS previous_code",
-            ('failed' if terminal else 'pending',0 if code=='ai-permission' else now+delay,error,code or job.kind,job.id,job.generation,code or job.kind)).fetchone()
+        changed = job_write(self.store.db, "UPDATE jobs SET status = %s , next = %s , reason_message = %s , reason_code = %s , retry_at = CASE WHEN %s = 1 THEN %s ELSE retry_at END , retry_delay = CASE WHEN %s = 1 THEN %s ELSE retry_delay END WHERE id = %s AND generation = %s AND status = 'running' AND CASE WHEN kind IN ('download_media','delete','feed-delete') AND (reason_code LIKE 'source-%%' OR %s LIKE 'source-%%') THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING OLD.reason_code AS previous_code",
+            ('failed' if terminal else 'pending',0 if code=='ai-permission' else now+delay,error,code or job.kind,cleanup_backoff,retry_at,cleanup_backoff,delay,job.id,job.generation,code or job.kind)).fetchone()
         if changed and job.kind in ('download_media','delete','feed-delete') and ((changed['previous_code'] or '').startswith('source-') or (code or '').startswith('source-')):
             from oko.storage import source_groups
             source_old_keys=source_groups.job_keys(self.store,job.id,changed['previous_code']) if (changed['previous_code'] or '').startswith('source-') else set()

@@ -75,17 +75,18 @@ def test_other_folder_and_wrong_folder_confirmation_are_untouched(tmp_path):
         assert len(read_all_cards(client, '/api/v3/cards?folder=' + other)) == 1
 
 
-def test_delete_failure_is_reported_then_recovered_before_collection(tmp_path):
-    from tests.support.reader import wait_for
+def test_delete_failure_is_reported_and_recovered_without_blocking_collection(tmp_path):
+    from tests.support.reader import Clock, wait_for
+    clock=Clock()
     fail = [True]
     def fault(point):
         if point == 'before_delete' and fail[0]:
             raise OSError('disk error')
-    options = dict(source=SyntheticSource(), token='test-token', fault=fault)
+    options = dict(source=SyntheticSource(), token='test-token', fault=fault,clock=clock,wall_clock=clock)
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global', json={})
         presence(client, 'a')
-        wait_cards(client, 3)
+        old_ids=[card['id'] for card in wait_cards(client, 3)]
         preview = client.post('/api/v3/folders/fixture/completion/preview').json()
         assert client.post('/api/v3/folders/fixture/completion', json={'token': preview['token']}).status_code == 503
         assert read_all_cards(client, '/api/v3/cards') == []
@@ -96,11 +97,11 @@ def test_delete_failure_is_reported_then_recovered_before_collection(tmp_path):
             self.calls += 1
             return await super().discover(cursor)
     source = Counting()
-    with TestClient(create_app(tmp_path, source=source, token='test-token', fault=fault), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=source, token='test-token', fault=fault,clock=clock,wall_clock=clock), headers=HEADERS) as client:
         presence(client, 'b')
-        assert read_all_cards(client, '/api/v3/cards') == []
-        assert source.calls == 0
+        assert not any(card['id'] in old_ids for card in read_all_cards(client, '/api/v3/cards'))
+        wait_for(client,lambda:source.calls >= 1)
         fail[0] = False
-        wait_for(client, lambda: not list((tmp_path/'content').iterdir()))
-        assert not list((tmp_path / 'content').iterdir())
-        assert read_all_cards(client, '/api/v3/cards') == []
+        clock.now += 61
+        wait_for(client, lambda: not any((tmp_path/'content'/identity).exists() for identity in old_ids))
+        assert not any((tmp_path/'content'/identity).exists() for identity in old_ids)

@@ -161,7 +161,7 @@ class JobControl:
             record_caught('runtime._delete')
             with current.jobs.transaction(lambda: True):
                 if current.jobs.valid(job):
-                    current.jobs.retry(job, self._clock(), 'Ошибка удаления', code='delete')
+                    current.jobs.retry(job, self._clock(), 'Ошибка удаления', code='delete', cleanup_backoff=True)
 
 
     def retry_material(self, identity: str) -> bool:
