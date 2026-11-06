@@ -1,3 +1,4 @@
+from tests.support.youtube_action import youtube_action
 from tests.support.storage_action import storage_action
 from tests.support.job_claim import retry_job
 import json
@@ -91,7 +92,7 @@ def test_http_etag_after_caption_deadline_without_host_tick(tmp_path,postgres_ur
                 store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','youtube:subtitles','synthetic','captions','pending')")
                 job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('download_media','m','running',1) RETURNING id").fetchone()[0]
             retry_job(store, Job(job_id,'download_media','m',1),1,'missing',code='processor-config')
-            store.youtube.blocked(clock[0],900)
+            youtube_action(store, 'blocked', clock[0],900)
             app.state.host.execution.reader_advance=None
         client.portal.call(setup)
         paused=client.get('/api/v3/status/details')
