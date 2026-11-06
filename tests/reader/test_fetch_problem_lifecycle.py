@@ -1,3 +1,4 @@
+from tests.support.job_claim import claim_job
 import json
 from oko.storage.job_types import Job
 from oko.storage.transaction import transaction
@@ -16,7 +17,7 @@ def test_fetch_failure_retry_and_finish_without_status_read(tmp_path,postgres_ur
         row=store.db.execute("SELECT id,body FROM reader_problems WHERE identity='job:article-limit:feed:fetch:article' AND finished IS NULL").fetchone()
         assert row and json.loads(row['body'])['objects']==[dict(kind='material',id='article')]
         with store.db: store.db.execute('UPDATE jobs SET next=0 WHERE id=%s',(job_id,))
-        job=store.jobs.next_job(1,feeds=['feed'])
+        job=claim_job(store, 1,feeds=['feed'])
         assert job and job.id==job_id
         assert json.loads(store.db.execute('SELECT body FROM reader_problems WHERE id=%s',(row['id'],)).fetchone()[0])['state']=='retrying'
         with transaction(store.db):store.jobs.finish(job)

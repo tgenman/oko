@@ -1,4 +1,5 @@
 """Publication HTTP contract: one representation with conditional retrieval."""
+from tests.support.job_claim import claim_job
 from fastapi.testclient import TestClient
 from tests.support.reader import HEADERS
 from tests.support.reading_cost import library, traced_app
@@ -14,7 +15,7 @@ def test_running_retry_takes_precedence_over_previous_processing_error(tmp_path)
         assert client.patch('/api/v3/settings/oko/global',json={'theses':True}).status_code==200
         def prepare():
             store=app.state.host.require_store()
-            fetch=store.jobs.next_job(store.clock(),feeds=[store.item_feed(items[0])])
+            fetch=claim_job(store, store.clock(),feeds=[store.item_feed(items[0])])
             assert fetch and fetch.kind=='fetch'
             save_material(store,fetch,Material('Synthetic','Original text',captions='available'))
         client.portal.call(prepare)
@@ -27,7 +28,7 @@ def test_running_retry_takes_precedence_over_previous_processing_error(tmp_path)
         def fail():
             store=app.state.host.require_store()
             reconcile(store,'theses')
-            job=store.jobs.next_job(store.clock(),ai_only=True)
+            job=claim_job(store, store.clock(),ai_only=True)
             assert job and job.kind=='theses'
             store.jobs.retry(job,store.clock(),'Previous failure',30,code='synthetic')
         client.portal.call(fail)
@@ -36,7 +37,7 @@ def test_running_retry_takes_precedence_over_previous_processing_error(tmp_path)
         def start():
             store=app.state.host.require_store()
             with store.db:store.db.execute("UPDATE jobs SET next=0 WHERE kind='theses' AND item=%s",(items[0],))
-            job=store.jobs.next_job(store.clock(),ai_only=True)
+            job=claim_job(store, store.clock(),ai_only=True)
             assert job and job.kind=='theses'
         client.portal.call(start)
         running=next(job for job in client.get('/api/v3/publication/'+items[0]).json()['jobs'] if job['operation']=='theses')

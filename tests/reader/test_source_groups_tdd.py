@@ -1,3 +1,4 @@
+from tests.support.job_claim import claim_job
 import pytest
 from tests.support.storage import Store
 
@@ -55,7 +56,7 @@ def test_source_failure_changes_group_after_retry_claim(tmp_path,postgres_url):
         store.jobs.retry(Job(job_id,'fetch','p',1),1,'offline',code='source-network')
         old=store.db.execute("SELECT id FROM reader_problems WHERE body::jsonb->>'source_group_identity'='job:source-network:f:fetch' AND finished IS NULL").fetchone()[0]
         with transaction(store.db):store.db.execute('UPDATE jobs SET next=0 WHERE id=%s',(job_id,))
-        claimed=store.jobs.next_job(1,feeds=['f'])
+        claimed=claim_job(store, 1,feeds=['f'])
         assert claimed
         assert store.db.execute("SELECT body::jsonb->>'state' FROM reader_problems WHERE id=%s",(old,)).fetchone()[0]=='retrying'
         store.jobs.retry(claimed,1,'access changed',code='source-reconnect')
