@@ -7,7 +7,7 @@ import {artifactPath} from './artifacts';
 
 test('retry preserves collected text and media without stored history', {timeout:30000}, async t=>{
   const r=await productionReader(t,{publicationPipeline:true});
-  await r.api('settings/oko/global','PATCH',{theses:false,prompt_filters:'',telegram_http_rps:10,retry_initial_seconds:1,retry_max_seconds:1});
+  await r.api('settings/oko/global','PATCH',{theses:false,prompt_filters:'',telegram_http_rps:10,retry_initial_seconds:60,retry_max_seconds:60});
   await r.openReader();
   await r.api('telegram/connect','POST',{source_locator:'@lateststate',folder:'Inbox',initial_history:{mode:'count',count:'1'}});
   await expect(r.page.locator('[data-card]')).toHaveCount(1);
@@ -41,7 +41,7 @@ test('retry preserves collected text and media without stored history', {timeout
 
 test('reader rebuilds the publication from its context menu', {timeout:30000}, async t=>{
   const r=await productionReader(t,{publicationPipeline:true});
-  await r.api('settings/oko/global','PATCH',{theses:false,prompt_filters:'',telegram_http_rps:10,retry_initial_seconds:1,retry_max_seconds:1});
+  await r.api('settings/oko/global','PATCH',{theses:false,prompt_filters:'',telegram_http_rps:10,retry_initial_seconds:60,retry_max_seconds:60});
   await r.openReader();
   await r.api('telegram/connect','POST',{source_locator:'@lateststate',folder:'Inbox',initial_history:{mode:'count',count:'1'}});
   await expect(r.page.locator('[data-card]')).toHaveCount(1);
@@ -63,6 +63,7 @@ test('reader rebuilds the publication from its context menu', {timeout:30000}, a
   await expect.poll(async()=>{const publication=await r.api(`publication/${id}`);return publication.jobs.some((job:any)=>job.operation==='rebuild'&&job.status==='pending'&&job.reason_message);}).toBe(true);
   await expect(r.page.locator('#text')).toContainText('Initial publication');
   await r.setMediaState('ready');
+  await r.advanceClock(61);
   await expect.poll(async()=>{const publication=await r.api(`publication/${id}`);return text(publication);}).toBe('Rebuilt publication');
   await r.page.reload();
   await r.page.locator('[data-card]').click();

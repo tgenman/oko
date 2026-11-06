@@ -14424,16 +14424,16 @@ components:
           description: Global initial delay for temporary pipeline failures, seconds. Null resets to 60.
           anyOf:
           - type: integer
-            minimum: 1
-            maximum: 86400
+            minimum: 60
+            maximum: 3600
           - type: 'null'
         retry_max_seconds:
           description: Global maximum exponential retry delay, seconds. Must not be lower than the effective initial delay.
             Null resets to 3600. Source waits are preserved.
           anyOf:
           - type: integer
-            minimum: 1
-            maximum: 86400
+            minimum: 60
+            maximum: 3600
           - type: 'null'
       required: []
       additionalProperties: false
@@ -19418,12 +19418,12 @@ components:
       properties:
         initial_seconds:
           type: integer
-          minimum: 1
-          maximum: 86400
+          minimum: 60
+          maximum: 3600
         max_seconds:
           type: integer
-          minimum: 1
-          maximum: 86400
+          minimum: 60
+          maximum: 3600
       required:
       - initial_seconds
       - max_seconds

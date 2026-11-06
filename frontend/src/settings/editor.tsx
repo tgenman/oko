@@ -56,7 +56,7 @@ function RetryFields({owner,path}:{owner:MenusOwner;path:string}){
   const id='setting-'+field,value=owner.retries?.[key],draft=owner.draft(path),raw=String(id in draft?draft[id]:value??''),busy=owner.saving.has(path+'/'+field);
   const save=(reset=false)=>{const number=reset?null:Number(raw);const body:SettingsPatch=field==='retry_initial_seconds'?{retry_initial_seconds:number}:{retry_max_seconds:number};void owner.updateRetry(field,body,raw);};
   return <Page key={field} owner={owner} name={'retry/'+field} title={title}>{value===undefined?<p>Loading…</p>:<form className="setting-row settings-group" onSubmit={event=>{event.preventDefault();if(event.currentTarget.reportValidity())save();}}>
-  <label className="settings-control">Delay (seconds)<input id={id} type="number" min={1} max={86400} step={1} required value={raw} onChange={event=>owner.edit(path,id,event.target.value)}/></label>
+  <label className="settings-control">Delay (seconds)<input id={id} type="number" min={60} max={3600} step={1} required value={raw} onChange={event=>owner.edit(path,id,event.target.value)}/></label>
   <small>Default: {defaultValue} seconds. Maximum delay must be at least the initial delay.</small>
   <button type="submit" className="settings-action" disabled={busy}>Save</button><button type="button" className="settings-action" disabled={busy} onClick={()=>save(true)}>Reset</button><button type="button" className="settings-action" onClick={()=>void owner.discardField(path,field)}>Discard Change</button>
   </form>}</Page>;

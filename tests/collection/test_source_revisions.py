@@ -103,7 +103,7 @@ def test_interrupted_version_publish_keeps_old_until_fresh_retry(tmp_path):
             raise OSError('interrupted')
     options = dict(source=source, token='test-token')
     with TestClient(create_app(tmp_path, fault=fault, **options), headers=HEADERS) as client:
-        client.patch('/api/v3/settings/oko/global',json={'retry_initial_seconds':1,'retry_max_seconds':1})
+        client.patch('/api/v3/settings/oko/global',json={'retry_initial_seconds':60,'retry_max_seconds':60})
         client.patch('/api/v3/settings/oko/global', json={})
         presence(client, 'test')
         item = wait_cards(client)[0]['id']

@@ -213,7 +213,7 @@ def test_manual_fetch_retry_preserves_a_source_wait_and_saved_text(tmp_path):
     options=dict(token='test',api_only=True,rss_transport=httpx.MockTransport(response))
     with TestClient(create_app(root,**options),headers=HEADERS) as client:
         configure_fast_web(client)
-        client.patch('/api/v3/settings/oko/global',json={'retry_initial_seconds':1,'retry_max_seconds':2})
+        client.patch('/api/v3/settings/oko/global',json={'retry_initial_seconds':60,'retry_max_seconds':120})
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         item=settled(client)[0]['id']
         limited[0]=True

@@ -53,7 +53,7 @@ def test_retrying_a_missing_file_does_not_refetch_saved_article(tmp_path):
         if fail[0]:return httpx.Response(503)
         return httpx.Response(200,content=b'image',headers={'content-type':'image/png'})
     with TestClient(create_app(tmp_path,token='test-token',rss_enabled=True,rss_transport=httpx.MockTransport(source)),headers={'Authorization':'Bearer test-token'}) as client:
-        client.patch('/api/v3/settings/oko/global',json={'theses':False,'retry_initial_seconds':1,'retry_max_seconds':1})
+        client.patch('/api/v3/settings/oko/global',json={'theses':False,'retry_initial_seconds':60,'retry_max_seconds':60})
         import_feed(client);presence(client,'reader')
         item=wait_cards(client,idle=False)[0]['id']
         wait_for(client,lambda:any(job['operation']=='download_media' and job['reason_message'] for job in client.get('/api/v3/publication/'+item).json()['jobs']))
@@ -81,7 +81,7 @@ def test_failed_media_is_retried_until_saved_without_refetching_article(tmp_path
     options=dict(token='test-token',rss_enabled=True,rss_transport=httpx.MockTransport(source),
                  clock=lambda:time.monotonic()+offset[0],wall_clock=lambda:time.time()+offset[0])
     with TestClient(create_app(tmp_path,**options),headers={'Authorization':'Bearer test-token'}) as client:
-        client.patch('/api/v3/settings/oko/global',json={'theses':False,'retry_initial_seconds':1,'retry_max_seconds':2})
+        client.patch('/api/v3/settings/oko/global',json={'theses':False,'retry_initial_seconds':60,'retry_max_seconds':120})
         import_feed(client);presence(client,'reader')
         item=wait_cards(client,idle=False)[0]['id']
         wait_for(client,lambda:any(job['operation']=='download_media' and job['reason_message'] for job in client.get('/api/v3/publication/'+item).json()['jobs']))
@@ -210,7 +210,7 @@ def test_failed_article_fetch_is_retried_until_success(tmp_path):
     options=dict(token='test-token',rss_enabled=True,rss_transport=httpx.MockTransport(source),
                  clock=lambda:time.monotonic()+offset[0],wall_clock=lambda:time.time()+offset[0])
     with TestClient(create_app(tmp_path,**options),headers={'Authorization':'Bearer test-token'}) as client:
-        client.patch('/api/v3/settings/oko/global',json={'theses':False,'retry_initial_seconds':1,'retry_max_seconds':2})
+        client.patch('/api/v3/settings/oko/global',json={'theses':False,'retry_initial_seconds':60,'retry_max_seconds':120})
         import_feed(client);presence(client,'reader')
         item=wait_cards(client,idle=False)[0]['id']
         wait_for(client,lambda:any(job['operation']=='fetch' and job['reason_message'] for job in client.get('/api/v3/publication/'+item).json()['jobs']))

@@ -67,7 +67,7 @@ def test_rebuild_failure_keeps_old_copy_and_retries_after_restart(tmp_path):
                  clock=lambda:time.monotonic()+offset[0],wall_clock=lambda:time.time()+offset[0])
     with TestClient(create_app(tmp_path,**options),headers=HEADERS) as client:
         configure_fast_web(client)
-        client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':'','retry_initial_seconds':1,'retry_max_seconds':2})
+        client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':'','retry_initial_seconds':60,'retry_max_seconds':120})
         client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'})
         item=settled(client,timeout=15)[0]['id']
         old=client.get('/api/v3/publication/'+item).json()
@@ -77,7 +77,7 @@ def test_rebuild_failure_keeps_old_copy_and_retries_after_restart(tmp_path):
         failed=wait_for(client,lambda:(v if (v:=client.get('/api/v3/publication/'+item).json()) and any(j['operation']=='rebuild' and j['status']=='pending' and j['reason_message'] for j in v['jobs']) else None))
         assert body_text(failed)=='Old text' and client.get(old_url).content==b'old-image'
     phase[0]=2
-    offset[0]+=5
+    offset[0]+=61
     with TestClient(create_app(tmp_path,**options),headers=HEADERS) as client:
         old=client.get('/api/v3/publication/'+item).json()
         assert body_text(old)=='Old text' and client.get(old_url).content==b'old-image'
@@ -235,7 +235,7 @@ def test_rebuild_preserves_source_wait_when_requested_again(tmp_path):
         return httpx.Response(200,text=page([(11,'Initial text')]))
     with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(source)),headers=HEADERS) as client:
         configure_fast_web(client)
-        client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':'','retry_initial_seconds':1,'retry_max_seconds':1})
+        client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':'','retry_initial_seconds':60,'retry_max_seconds':60})
         client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'})
         item=settled(client,timeout=15)[0]['id']
         phase[0]=1
