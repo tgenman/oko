@@ -621,36 +621,33 @@ class CollectionWorker:
                 for feed in self._sources:
                     self.execution._store.jobs.enqueue_discovery(feed)
                 self._last_collection = now
-            state = self.execution._store.status()
             caption_feeds=self._collection.caption_feeds()
             for lane in ('common', 'media','captions'):
                 if lane=='captions' and not caption_feeds:
                     continue
                 media_lane=lane in ('media','captions')
                 task = self.jobs._lanes.get(lane)
-                if media_lane and task and not task.done() and lane in self.jobs._media_jobs and not self.execution._store.jobs.valid(self.jobs._media_jobs[lane]):
+                if task and not task.done() and lane in self.jobs._lane_jobs and not self.execution._store.jobs.valid(self.jobs._lane_jobs[lane]):
                     task.cancel()
                     self.jobs._detach_task(task)
                     del self.jobs._lanes[lane]
-                    self.jobs._media_jobs.pop(lane,None)
+                    self.jobs._lane_jobs.pop(lane,None)
                     task = None
                 if task and task.done():
                     if not task.cancelled():
                         await task
                     del self.jobs._lanes[lane]
-                    if media_lane:
-                        self.jobs._media_jobs.pop(lane,None)
+                    self.jobs._lane_jobs.pop(lane,None)
                 if lane in self.jobs._lanes:
                     continue
                 feeds = [feed for feed in self._sources if self._collection.publication_adapter(feed) is not None] if media_lane else [feed for feed in self._sources if self._lane(feed) == lane]
                 if lane=='captions':
                     feeds=caption_feeds
                 dependencies=self._dependency_feeds if lane in ('common','media') else []
-                job = self.execution._store.jobs.next_job(now, deleting_only=state['deleting'] or not (feeds or dependencies),
+                job = self.execution._store.jobs.next_job(now, deleting_only=not (feeds or dependencies),
                                            feeds=feeds, include_deletions=lane == 'common', media_only=media_lane,captions_only=lane=='captions',dependency_feeds=dependencies)
                 if job:
-                    if media_lane:
-                        self.jobs._media_jobs[lane] = job
+                    self.jobs._lane_jobs[lane] = job
                     if job.kind=='delete':
                         owner=self.execution._store.db.execute("SELECT payload->>'cleanup_feed' FROM jobs WHERE id=%s",(job.id,)).fetchone()
                         self.jobs._lane_feeds[lane]=owner[0] if owner and owner[0] else job.item

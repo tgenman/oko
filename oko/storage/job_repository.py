@@ -605,7 +605,7 @@ class JobRepository:
         query += f""" AND NOT (kind='fetch' AND
             (jobs.item IS NULL OR EXISTS ({blocked_history} AND m.item=jobs.item OFFSET 0)))"""
         query += " AND NOT (kind='feed-delete' AND EXISTS (SELECT 1 FROM jobs d WHERE d.kind='delete' AND d.status!='done' AND d.payload::jsonb->>'cleanup_feed'=jobs.item))"
-        query += " ORDER BY CASE kind WHEN 'delete' THEN 0 WHEN 'feed-delete' THEN 0 WHEN 'discover' THEN 1 WHEN 'filter' THEN 2 WHEN 'read' THEN 2 ELSE 3 END,id LIMIT 1"
+        query += " ORDER BY CASE WHEN kind IN ('delete','feed-delete') AND reason_message IS NULL THEN 0 WHEN kind='discover' THEN 1 WHEN kind IN ('filter','read') THEN 2 WHEN kind IN ('delete','feed-delete') THEN 4 ELSE 3 END,id LIMIT 1"
         params = (now,) if deleting_only or ai_only else (now, *available, *dependencies) if media_only else (now, *available, *available, *dependencies)
         row = self.store.db.execute(query, params).fetchone()
         return self._claim(row)
@@ -867,7 +867,9 @@ class JobRepository:
         return until
 
     def deleting(self) -> bool:
-        return bool(self.store.db.execute("SELECT 1 FROM jobs WHERE kind IN ( 'delete' , 'feed-delete' ) AND status != 'done' LIMIT 1").fetchone())
+        return bool(self.store.db.execute("""SELECT 1 FROM jobs j WHERE j.status != 'done'
+            AND (j.kind='feed-delete' OR (j.kind='delete' AND EXISTS
+                (SELECT 1 FROM publications p WHERE p.id=j.item))) LIMIT 1""").fetchone())
 
     def workspace(self, job: Job) -> Path:
         return self.store.root/'staging'/job.item
