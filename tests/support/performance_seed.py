@@ -27,7 +27,8 @@ def saved_library(root:Path, per_feed:int) -> dict[str,object]:
             feeds.append(store.subscriptions.add_feed(AddFeed(url='https://fixture.test/feed/'+str(index),
                 title=f'Synthetic {index}',folder=f'Folder {index}',verification='synthetic'))['id'])
         store.subscriptions.update_settings('oko','global',Overrides(theses=False,prompt_filters='',processor='llamacpp'))
-        store.jobs.enqueue_discovery(feeds[0])
+        with transaction(store.db):
+            store.jobs.enqueue_discovery(feeds[0])
         discovery=store.jobs.next_job(store.clock(),feeds=[feeds[0]])
         assert discovery is not None
         discovered(store,[publication_packet(Publication('prototype','https://example.org/prototype',1),

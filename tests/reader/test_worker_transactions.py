@@ -306,7 +306,7 @@ def test_discovery_page_and_continuation_roll_back_together(tmp_path):
                                    'page-two',continuation=30)
     store, _, _, _ = worker_library(tmp_path,fault=fault)
     try:
-        with store.db:
+        with transaction(store.db):
             store.db.execute("UPDATE feeds SET cursor='' WHERE id='fixture'")
             store.jobs.enqueue_discovery('fixture')
         job=store.jobs.next_job(store.clock(),feeds=['fixture'])

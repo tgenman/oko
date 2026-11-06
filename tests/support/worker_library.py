@@ -6,6 +6,7 @@ from tests.support.synthetic_material import material as Material
 from oko.subscriptions.subscriptions import Overrides
 from oko.processing.config import ProcessorConfig
 from oko.execution import Execution
+from oko.storage.transaction import transaction
 from oko.workers.control import JobControl
 from oko.workers.processing import FilterWorker,SummaryWorker
 from tests.support.collection_acceptance import discovered
@@ -21,7 +22,8 @@ def worker_library(root, *, text='Useful text', fault=lambda _:None, database_ur
     store.configure_processor(ProcessorConfig(endpoint='http://localhost:9931',model='local:latest',local_execution=True))
     store.subscriptions.update_settings('oko','global',Overrides(processor='llamacpp',theses=True,prompt_filters='Keep useful text'))
     store.settings_changed()
-    store.jobs.enqueue_discovery('fixture')
+    with transaction(store.db):
+        store.jobs.enqueue_discovery('fixture')
     job=store.jobs.next_job(store.clock(),feeds=['fixture'])
     assert job.kind=='discover'
     discovered(store,[publication_packet(Publication('one','https://example.org/one',100),Material('Title',text),needs_fetch=False)],'{}',job)

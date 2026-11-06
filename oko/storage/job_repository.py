@@ -452,56 +452,57 @@ class JobRepository:
 
 
     def enqueue_discovery(self, feed: str, next_at: float = 0) -> None:
+        if not self.store.db.transaction_depth:
+            raise RuntimeError('Discovery scheduling requires an owning transaction')
         # Monotonic deadlines belong to this process; persist their wall-clock
         # equivalent so a continuation keeps its remaining delay after restart.
         retry_at = self.store.wall_clock()+max(0,next_at-self.store.clock()) if next_at else None
-        with self.store.db:
-            prior=self.store.db.execute("SELECT id,processor_visible,reason_code FROM jobs WHERE kind='discover' AND item=%s",(feed,)).fetchone()
-            affected=[prior['id']] if prior and (prior['processor_visible'] or prior['reason_code']=='processor-config') else []
-            previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
-            changed=job_write(self.store.db, """INSERT INTO jobs(kind,item,next,retry_at,queued_wall)
-                VALUES ('discover',%s,%s,%s,extract(epoch FROM clock_timestamp()))
-                ON CONFLICT(kind,item) DO UPDATE SET queued_wall=excluded.queued_wall,status='pending',
-                    next=excluded.next,retry_at=excluded.retry_at,reason_message=NULL WHERE jobs.status='done' RETURNING id,reason_message,reason_code""",
-                (feed,next_at,retry_at)).fetchone()
-            if changed and (changed['reason_message'] is not None or changed['reason_code'] is not None):self.store.problems.sync_discover(changed['id'],self.store.wall_clock())
-            if changed and affected:self.store.problems.finish_processor_change(affected,previous,self.store.wall_clock())
+        prior=self.store.db.execute("SELECT id,processor_visible,reason_code FROM jobs WHERE kind='discover' AND item=%s",(feed,)).fetchone()
+        affected=[prior['id']] if prior and (prior['processor_visible'] or prior['reason_code']=='processor-config') else []
+        previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
+        changed=job_write(self.store.db, """INSERT INTO jobs(kind,item,next,retry_at,queued_wall)
+            VALUES ('discover',%s,%s,%s,extract(epoch FROM clock_timestamp()))
+            ON CONFLICT(kind,item) DO UPDATE SET queued_wall=excluded.queued_wall,status='pending',
+                next=excluded.next,retry_at=excluded.retry_at,reason_message=NULL WHERE jobs.status='done' RETURNING id,reason_message,reason_code""",
+            (feed,next_at,retry_at)).fetchone()
+        if changed and (changed['reason_message'] is not None or changed['reason_code'] is not None):self.store.problems.sync_discover(changed['id'],self.store.wall_clock())
+        if changed and affected:self.store.problems.finish_processor_change(affected,previous,self.store.wall_clock())
 
     def refresh_feed(self, feed: str) -> None:
         """Admit one manual refresh without restarting work already in progress."""
-        with self.store.db:
-            for row in self.store.db.execute('SELECT DISTINCT i . id FROM publications i JOIN media_files m ON m . publication_id = i . id WHERE i.feed_id = %s', (feed,)).fetchall():
-                self.retry_media(row['id'],revalidate_ready=False)
+        if not self.store.db.transaction_depth:
+            raise RuntimeError('Feed refresh requires an owning transaction')
+        for row in self.store.db.execute('SELECT DISTINCT i . id FROM publications i JOIN media_files m ON m . publication_id = i . id WHERE i.feed_id = %s', (feed,)).fetchall():
+            self.retry_media(row['id'],revalidate_ready=False)
         discovery = feed
         active = self.store.db.execute("SELECT 1 FROM jobs WHERE kind = 'discover' AND item = %s AND ( status = 'running' OR ( status = 'pending' AND reason_message IS NULL AND next <= %s ) )", (discovery,self.store.clock())).fetchone()
-        with self.store.db:
-            memberships.lock_graph(self.store.db)
-            history = self.store.subscriptions.history.status(feed)
-            if history and not history.get('cancelled'):
-                self.store.subscriptions.history.pause(feed, False)
-            if not active:
-                self.enqueue_discovery(feed)
-                changed_discover=job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , reason_code = NULL , reason_message = NULL , next = CASE WHEN reason_code LIKE '%%FloodWaitError' OR reason_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'discover' AND item = %s AND status != 'running' RETURNING id,reason_message,reason_code", (self.store.wall_clock(),self.store.wall_clock(),discovery)).fetchone()
-                if changed_discover and (changed_discover['reason_message'] is not None or changed_discover['reason_code'] is not None):self.store.problems.sync_discover(changed_discover['id'],self.store.wall_clock())
-                if changed_discover and changed_discover['reason_code']=='processor-config':self.store.problems.finish_processor_change([changed_discover['id']],None,self.store.wall_clock())
-            source_rows: list[Any]=[]
-            from oko.storage.fetch_job_problems import previous_candidates as managed_candidates
-            for row in self.store.db.execute("SELECT i . id , j . id AS job_id, j . reason_message , j . reason_code, j . status FROM publications i JOIN jobs j ON j . item = i . id AND j . kind = 'fetch' WHERE i.feed_id = %s AND j . status != 'running'", (feed,)).fetchall():
-                if row['status']=='unavailable' or row['status']=='done' and row['reason_message'] is None and row['reason_code'] is None:
-                    continue
-                prior=managed_candidates(self.store,row['job_id'],self.store.wall_clock()) if row['reason_message'] is not None or row['reason_code'] is not None else []
-                changed_fetch=job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , manual_once = CASE WHEN ( status = 'done' AND reason_message IS NOT NULL ) THEN true ELSE manual_once END , status = 'pending' , reason_code = NULL , reason_message = NULL , next = CASE WHEN reason_code LIKE '%%FloodWaitError' OR reason_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'fetch' AND item = %s AND CASE WHEN reason_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING id,processor_visible,OLD.reason_code AS previous_code", (self.store.wall_clock(),self.store.wall_clock(),row['id'])).fetchone()
-                if changed_fetch and (changed_fetch['processor_visible'] or changed_fetch['previous_code']=='processor-config'):
-                    self.store.problems.finish_processor_change([changed_fetch['id']],None,self.store.wall_clock())
-                if prior:self.store.problems.sync_fetch(row['job_id'],prior,self.store.wall_clock())
-                self.store.incomplete_draft.mark_materials([row['id']])
-                if changed_fetch and (changed_fetch['previous_code'] or '').startswith('source-'):source_rows.append(changed_fetch)
-            if source_rows:
-                from oko.storage import source_groups
-                source_groups.sync_changed_rows(self.store,source_rows,self.store.wall_clock())
-            for kind in ('filter','theses'):
-                for row in self.store.db.execute(f'SELECT j.item FROM jobs j JOIN ({owned_ids("= %s")}) owner ON owner.id=j.item WHERE j.kind = %s AND j.reason_message IS NOT NULL',(feed,feed,kind)).fetchall():
-                    self.retry_processing(row[0],kind)
+        memberships.lock_graph(self.store.db)
+        history = self.store.subscriptions.history.status(feed)
+        if history and not history.get('cancelled'):
+            self.store.subscriptions.history.pause(feed, False)
+        if not active:
+            self.enqueue_discovery(feed)
+            changed_discover=job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , reason_code = NULL , reason_message = NULL , next = CASE WHEN reason_code LIKE '%%FloodWaitError' OR reason_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'discover' AND item = %s AND status != 'running' RETURNING id,reason_message,reason_code", (self.store.wall_clock(),self.store.wall_clock(),discovery)).fetchone()
+            if changed_discover and (changed_discover['reason_message'] is not None or changed_discover['reason_code'] is not None):self.store.problems.sync_discover(changed_discover['id'],self.store.wall_clock())
+            if changed_discover and changed_discover['reason_code']=='processor-config':self.store.problems.finish_processor_change([changed_discover['id']],None,self.store.wall_clock())
+        source_rows: list[Any]=[]
+        from oko.storage.fetch_job_problems import previous_candidates as managed_candidates
+        for row in self.store.db.execute("SELECT i . id , j . id AS job_id, j . reason_message , j . reason_code, j . status FROM publications i JOIN jobs j ON j . item = i . id AND j . kind = 'fetch' WHERE i.feed_id = %s AND j . status != 'running'", (feed,)).fetchall():
+            if row['status']=='unavailable' or row['status']=='done' and row['reason_message'] is None and row['reason_code'] is None:
+                continue
+            prior=managed_candidates(self.store,row['job_id'],self.store.wall_clock()) if row['reason_message'] is not None or row['reason_code'] is not None else []
+            changed_fetch=job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , manual_once = CASE WHEN ( status = 'done' AND reason_message IS NOT NULL ) THEN true ELSE manual_once END , status = 'pending' , reason_code = NULL , reason_message = NULL , next = CASE WHEN reason_code LIKE '%%FloodWaitError' OR reason_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'fetch' AND item = %s AND CASE WHEN reason_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING id,processor_visible,OLD.reason_code AS previous_code", (self.store.wall_clock(),self.store.wall_clock(),row['id'])).fetchone()
+            if changed_fetch and (changed_fetch['processor_visible'] or changed_fetch['previous_code']=='processor-config'):
+                self.store.problems.finish_processor_change([changed_fetch['id']],None,self.store.wall_clock())
+            if prior:self.store.problems.sync_fetch(row['job_id'],prior,self.store.wall_clock())
+            self.store.incomplete_draft.mark_materials([row['id']])
+            if changed_fetch and (changed_fetch['previous_code'] or '').startswith('source-'):source_rows.append(changed_fetch)
+        if source_rows:
+            from oko.storage import source_groups
+            source_groups.sync_changed_rows(self.store,source_rows,self.store.wall_clock())
+        for kind in ('filter','theses'):
+            for row in self.store.db.execute(f'SELECT j.item FROM jobs j JOIN ({owned_ids("= %s")}) owner ON owner.id=j.item WHERE j.kind = %s AND j.reason_message IS NOT NULL',(feed,feed,kind)).fetchall():
+                self.retry_processing(row[0],kind)
 
 
     def enqueue_rebuild(self, item: str) -> bool:
