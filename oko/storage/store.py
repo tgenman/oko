@@ -110,7 +110,8 @@ class Store:
                         self.problems.sync_deletion(job_id,[],self.wall_clock())
             self.problems.recover_deletion_problems()
             self.problems.recover_deletion_extra_problems()
-            collection_jobs.recover(self)
+            with transaction(self.db):
+                collection_jobs.recover(self)
             self.problems.recover_discover_problems()
             self.problems.recover_fetch_problems()
             self.problems.recover_finished_foreign_fetch_deletions()
@@ -179,8 +180,11 @@ class Store:
             self.processing.recovering = True
             self._recovery: Generator[None,None,None] | None = self._recover_steps()
             if not defer_recovery:
-                while self.recover_step():
-                    pass
+                while True:
+                    with transaction(self.db):
+                        recovering = self.recover_step()
+                    if not recovering:
+                        break
         except BaseException:
             if hasattr(self, 'db'):
                 self.db.close()

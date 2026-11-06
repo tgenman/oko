@@ -59,7 +59,8 @@ def saved_library(root:Path, per_feed:int) -> dict[str,object]:
         with transaction(store.db):
             for row in rows:
                 store.publications.reconcile(row[0])
-        store.processing.sync()
+        with transaction(store.db):
+            store.processing.sync()
         storage_action(store, 'set_work_enabled', False)
         count=store.db.execute("SELECT count(*) FROM publications WHERE content <> '{}'::jsonb").fetchone()[0]
         assert count==per_feed*4
@@ -75,7 +76,8 @@ def seed(root:Path, per_feed:int, active:bool=False) -> dict[str,object]:
         try:
             subscription_action(store, 'update_settings', 'oko','global',Overrides(theses=True))
             storage_action(store, 'settings_changed')
-            store.processing.sync()
+            with transaction(store.db):
+                store.processing.sync()
             storage_action(store, 'set_work_enabled', True)
         finally:
             store.db.close()

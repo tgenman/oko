@@ -420,7 +420,8 @@ def test_legacy_quote_migration_reconciles_saved_processing_after_restart(tmp_pa
         db.execute((Path(__file__).parents[2]/'oko/storage/postgres/103-publication-reader-blocks.sql').read_text())
     reopened=Store(tmp_path,lambda _:None)
     try:
-        reopened.processing.recover()
+        with transaction(reopened.db):
+            reopened.processing.recover()
         if case == 'header_only':
             assert reopened.filters.read(item)['status'] != 'done'
             assert reopened.processing.theses.read(item) is None
@@ -462,7 +463,8 @@ def test_legacy_linked_quote_copy_does_not_invalidate_parent_after_restart(tmp_p
         db.execute((Path(__file__).parents[2]/'oko/storage/postgres/103-publication-reader-blocks.sql').read_text())
     reopened=Store(tmp_path,lambda _:None)
     try:
-        reopened.processing.recover()
+        with transaction(reopened.db):
+            reopened.processing.recover()
         assert reopened.filters.read(item)['status'] == 'done'
         assert reopened.processing.theses.read(item) is not None
     finally:
@@ -487,7 +489,8 @@ def test_publication_title_wins_after_content_migration(tmp_path):
         db.execute((Path(__file__).parents[2]/'oko/storage/postgres/103-publication-reader-blocks.sql').read_text())
     reopened=Store(tmp_path,lambda _:None)
     try:
-        reopened.processing.recover()
+        with transaction(reopened.db):
+            reopened.processing.recover()
         assert reopened.db.execute('SELECT title FROM publications WHERE id=%s',(item,)).fetchone()[0]=='Title'
         assert reopened.filters.read(item)['status']=='done'
         assert reopened.processing.theses.read(item) is not None
@@ -524,7 +527,8 @@ def test_publication_linked_title_wins_after_content_migration(tmp_path):
         assert 'title' not in raw['extra']['_reader']
     reopened=Store(tmp_path,lambda _:None)
     try:
-        reopened.processing.recover()
+        with transaction(reopened.db):
+            reopened.processing.recover()
         assert reopened.filters.read(item)['status'] == 'done'
         assert reopened.processing.theses.read(item) is not None
     finally:

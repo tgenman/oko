@@ -145,34 +145,35 @@ class ProcessingState:
             self._repair_one()
 
     def _repair_one(self) -> None:
+        if not self.store.db.transaction_depth:
+            raise RuntimeError('Processing recovery requires an owning transaction')
         item = min(self._repairs)
         self._repairs.remove(item)
         self._repairing.add(item)
         try:
             from oko.storage import memberships, publication_links, youtube_media
             from oko.storage.reading import saved_content
-            with self.store.db:
-                begin_write(self.store.db)
-                self.store.db.after_rollback(lambda: self._repairs.add(item))
-                memberships.lock_graph(self.store.db)
-                row = self.store.db.execute("SELECT content FROM publications WHERE id=%s", (item,)).fetchone()
-                content = saved_content(row[0],mutable=True) if row else {}
-                identity = youtube_media.subtitle_id(content)
-                media = self.store.db.execute("SELECT storage_key FROM media_files WHERE id=%s AND publication_id=%s AND status='ready'", (identity,item)).fetchone() if identity else None
-                if media and (not media[0] or existing_file(self.store.root,media[0]) is None):
-                    affected=self.store.problems.processor_jobs_for_materials([item])
-                    previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
-                    self.store.db.execute("UPDATE media_files SET status='pending_download',storage_key=NULL WHERE id=%s", (identity,))
-                    self.store.db.execute('UPDATE publications SET content=%s WHERE id=%s', (json.dumps(stored_content(content),ensure_ascii=False),item))
-                    from oko.storage.incomplete_index import save_class
-                    save_class(self.store.db,item,content)
-                    job_write(self.store.db, """INSERT INTO jobs(kind,item,status) VALUES ('download_media',%s,'pending')
-                        ON CONFLICT(kind,item) DO UPDATE SET status='pending',generation=jobs.generation+1
-                        WHERE jobs.status IN ('done','cancelled','failed','unavailable')""",(identity,))
-                    self.store.jobs.schedule_media(item,sync_processor=False)
-                    if affected:self.store.problems.finish_processor_change(affected,previous,self.store.wall_clock())
-                    publication_links.notify_parents(self.store,item)
-                self.reconcile_accepted_item(item)
+            begin_write(self.store.db)
+            self.store.db.after_rollback(lambda: self._repairs.add(item))
+            memberships.lock_graph(self.store.db)
+            row = self.store.db.execute("SELECT content FROM publications WHERE id=%s", (item,)).fetchone()
+            content = saved_content(row[0],mutable=True) if row else {}
+            identity = youtube_media.subtitle_id(content)
+            media = self.store.db.execute("SELECT storage_key FROM media_files WHERE id=%s AND publication_id=%s AND status='ready'", (identity,item)).fetchone() if identity else None
+            if media and (not media[0] or existing_file(self.store.root,media[0]) is None):
+                affected=self.store.problems.processor_jobs_for_materials([item])
+                previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
+                self.store.db.execute("UPDATE media_files SET status='pending_download',storage_key=NULL WHERE id=%s", (identity,))
+                self.store.db.execute('UPDATE publications SET content=%s WHERE id=%s', (json.dumps(stored_content(content),ensure_ascii=False),item))
+                from oko.storage.incomplete_index import save_class
+                save_class(self.store.db,item,content)
+                job_write(self.store.db, """INSERT INTO jobs(kind,item,status) VALUES ('download_media',%s,'pending')
+                    ON CONFLICT(kind,item) DO UPDATE SET status='pending',generation=jobs.generation+1
+                    WHERE jobs.status IN ('done','cancelled','failed','unavailable')""",(identity,))
+                self.store.jobs.schedule_media(item,sync_processor=False)
+                if affected:self.store.problems.finish_processor_change(affected,previous,self.store.wall_clock())
+                publication_links.notify_parents(self.store,item)
+            self.reconcile_accepted_item(item)
         except BaseException:
             self._repairs.add(item)
             raise
@@ -180,10 +181,11 @@ class ProcessingState:
             self._repairing.discard(item)
 
     def reconcile_item(self, item: str) -> None:
+        if not self.store.db.transaction_depth:
+            raise RuntimeError('Processing reconciliation requires an owning transaction')
         # Accepted state and both stage Jobs commit together.
-        with self.store.db:
-            begin_write(self.store.db)
-            self.reconcile_accepted_item(item)
+        begin_write(self.store.db)
+        self.reconcile_accepted_item(item)
 
     def reconcile_accepted_item(self, item: str, *, preserve_cancelled: bool = False) -> None:
         """Update both processing Jobs inside the owner's acceptance transaction."""

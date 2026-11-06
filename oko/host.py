@@ -124,7 +124,9 @@ class Host:
                             and (recovering or time.monotonic() >= next_recovery_check)):
                         try:
                             assert self.execution._store is not None
-                            recovering = self.execution._store.recover_step()
+                            if recovering or self.execution._store.processing.pending():
+                                with transaction(self.execution._store.db):
+                                    recovering = self.execution._store.recover_step()
                             next_recovery_check = time.monotonic()+.25
                             if initial_recovery and not recovering:
                                 crons = [asyncio.create_task(worker.run()) for worker in (self.collection,self.filters,self.summaries)]

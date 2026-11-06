@@ -1326,15 +1326,18 @@ class JobRepository:
             pass
 
     def backfill_processing_steps(self) -> Iterator[None]:
+        if not self.store.db.transaction_depth:
+            raise RuntimeError('Input recovery requires an owning transaction')
         for kind in ('filter', 'theses'):
             # The partial index excludes unrelated completed work.
             identities = [row[0] for row in self.store.db.execute("SELECT id FROM jobs WHERE kind=%s AND input_snapshot IS NOT NULL AND (payload::jsonb->>'input_revision') IS NULL", (kind,))]
             for identity in identities:
-                with self.store.db:
-                    row = self.store.db.execute("SELECT id,item,input_snapshot->>'input_hash' AS input_hash FROM jobs WHERE id=%s AND kind=%s AND input_snapshot IS NOT NULL AND (payload::jsonb->>'input_revision') IS NULL", (identity,kind)).fetchone()
-                    if row is not None and row['input_hash']==processing_input.input_hash(self.store,row['item'],kind):
-                        revision = processing_input.revision(self.store,row['item'])
-                        self.store.db.execute("UPDATE jobs SET payload=jsonb_set(payload,'{input_revision}',to_jsonb(%s::text)) WHERE id=%s", (revision,row['id']))
+                if not self.store.db.transaction_depth:
+                    raise RuntimeError('Input recovery requires an owning transaction')
+                row = self.store.db.execute("SELECT id,item,input_snapshot->>'input_hash' AS input_hash FROM jobs WHERE id=%s AND kind=%s AND input_snapshot IS NOT NULL AND (payload::jsonb->>'input_revision') IS NULL", (identity,kind)).fetchone()
+                if row is not None and row['input_hash']==processing_input.input_hash(self.store,row['item'],kind):
+                    revision = processing_input.revision(self.store,row['item'])
+                    self.store.db.execute("UPDATE jobs SET payload=jsonb_set(payload,'{input_revision}',to_jsonb(%s::text)) WHERE id=%s", (revision,row['id']))
                 yield
 
     def replace_media_input(self, job: Job) -> None:
