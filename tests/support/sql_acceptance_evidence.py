@@ -62,7 +62,10 @@ def background_evidence():
       def cost(call):
        queries=[];s.db.set_trace_callback(queries.append);call();s.db.set_trace_callback(None);return len(queries)
       idle=cost(s.processing.sync)
-      viewed=cost(lambda:s.viewed(items[0]))
+      def mark_viewed():
+       from oko.storage.transaction import transaction
+       with transaction(s.db):s.viewed(items[0])
+      viewed=cost(mark_viewed)
 
       with s.db:s.db.execute("UPDATE jobs SET status = 'pending' , next = 0 WHERE kind = 'discover' AND item = %s",(feeds[0],))
       job=claim_job(s, s.clock(),feeds=[feeds[0]],include_deletions=False)

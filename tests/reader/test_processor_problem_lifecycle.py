@@ -70,7 +70,8 @@ def test_mark_viewed_through_store_closes_processor_without_status_get(tmp_path,
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('filter','item','running',1) RETURNING id").fetchone()[0]
         retry_job(store, Job(job_id,'filter','item',1),1,'missing',code='processor-config')
         row=store.db.execute("SELECT id FROM reader_problems WHERE identity='processor:configuration' AND finished IS NULL").fetchone()
-        assert store.viewed_set(['item'])
+        with transaction(store.db):
+            assert store.viewed_set(['item'])
         assert not store.db.execute('SELECT 1 FROM reader_problems WHERE id=%s AND finished IS NULL',(row[0],)).fetchone()
     finally:store.db.close()
 
