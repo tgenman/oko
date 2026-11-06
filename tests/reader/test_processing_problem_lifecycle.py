@@ -92,7 +92,7 @@ def test_processing_retry_clears_previous_reason_without_shortening_source_wait(
     from tests.support.worker_library import worker_library
     store,item,_,_=worker_library(tmp_path,database_url=postgres_url)
     try:
-        with store.db:
+        with transaction(store.db):
             deadline=store.wall_clock()+3600
             row=store.db.execute("UPDATE jobs SET status='failed',generation=5,reason_code='source-wait',reason_message='old',wait_scope='source',retry_at=%s,next=123 WHERE kind='filter' AND item=%s RETURNING id",(deadline,item)).fetchone()
             assert row is not None

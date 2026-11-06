@@ -3,6 +3,7 @@ from oko.collection.request_observation import Capture
 import asyncio
 from dataclasses import dataclass
 from collections.abc import Callable
+from contextlib import nullcontext
 from typing import Any, Literal, TYPE_CHECKING
 from oko.storage.store import Store
 from oko.storage.job_types import Job
@@ -48,7 +49,9 @@ class JobControl:
 
     def invalidate(self, feeds: set[str] | None = None) -> None:
         if self._store:
-            with self._store.jobs.cancellation():
+            # Revocation remains possible even after new-work admission closes.
+            boundary = nullcontext() if self._store.db.transaction_depth else self._store.jobs.transaction(lambda: True)
+            with boundary:
                 for attempt in list(self._collection_active.values()):
                     if feeds is None or attempt.feed in feeds:
                         self._store.jobs.collection_interrupt(attempt.job, attempt.feed, attempt.saved, max(0., self._clock()-attempt.started))
