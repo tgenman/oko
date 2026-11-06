@@ -7,6 +7,7 @@ from tests.support.legacy_source import Publication
 
 from tests.support.synthetic_material import material as Material
 from oko.storage.publication_owners import owner_expr, owned_ids
+from oko.storage.transaction import transaction
 from tests.support.storage import Store
 from oko.subscriptions.subscriptions import AddFeed
 from tests.support.app import create_app
@@ -38,7 +39,8 @@ def build_library(root, counts):
                 url='https://fixture.test/feed/'+str(index),
                 title=f'Synthetic {index}', folder=f'Folder {index}', verification='synthetic'))['id']
             feeds.append(feed)
-            store.jobs.enqueue_discovery(feed)
+            with transaction(store.db):
+                store.jobs.enqueue_discovery(feed)
             job = store.jobs.next_job(0, feeds=[feed])
             assert job is not None
             discovered(store,[publication_packet(Publication(str(n), f'https://example.org/{index}/{n}', n),

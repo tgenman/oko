@@ -160,10 +160,14 @@ class JobControl:
         return self._retry_processing(identity,'theses')
 
     def refresh_feed(self, identity: str) -> None:
-        self.execution.require_store().jobs.refresh_feed(identity)
+        store=self.execution.require_store()
+        with store.jobs.transaction(self.execution._live):
+            store.jobs.refresh_feed(identity)
 
     def enqueue_discovery(self, identity: str) -> None:
-        self.execution.require_store().jobs.enqueue_discovery(identity)
+        store=self.execution.require_store()
+        with store.jobs.transaction(self.execution._live):
+            store.jobs.enqueue_discovery(identity)
 
     def _retry_processing(self, identity: str, kind: Literal['filter','theses']) -> bool:
         store=self.execution.require_store()

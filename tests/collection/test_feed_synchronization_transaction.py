@@ -59,3 +59,20 @@ def test_collection_attempt_joins_caller_transaction(tmp_path):
         assert row['status']=='running' and row['collection_attempt']['finished_at'] is None
     finally:
         store.db.close()
+
+
+def test_discovery_scheduling_rolls_back_with_caller(tmp_path):
+    configured_sources(tmp_path, [('https://example.test/feed', 'Feed', 'Folder')])
+    store = Store(tmp_path, lambda _: None)
+    try:
+        feed = store.subscriptions.feeds()[0]['id']
+        with pytest.raises(RuntimeError, match='owning transaction'):
+            store.jobs.enqueue_discovery(feed)
+        with pytest.raises(ValueError, match='abort scheduling'):
+            with transaction(store.db):
+                store.jobs.enqueue_discovery(feed)
+                assert store.db.execute("SELECT id FROM jobs WHERE kind='discover' AND item=%s", (feed,)).fetchone()
+                raise ValueError('abort scheduling')
+        assert store.db.execute("SELECT id FROM jobs WHERE kind='discover' AND item=%s", (feed,)).fetchone() is None
+    finally:
+        store.db.close()

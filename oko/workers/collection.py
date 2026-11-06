@@ -126,8 +126,10 @@ class CollectionWorker:
         self._dependency_feeds=snapshot.dependencies
         settings=[setting for setting in snapshot.settings if not (setting.feed==self._source_feed and self._source)]
         updates=self._collection.configure(settings)
-        for identity in updates.created:
-            current.jobs.enqueue_discovery(identity)
+        if updates.created:
+            with current.jobs.transaction(self._live):
+                for identity in updates.created:
+                    current.jobs.enqueue_discovery(identity)
         for identity,want_captions in updates.captions:
             current.jobs.prepare_youtube(identity,want_captions)
         self._telegram_bindings.clear()
@@ -598,7 +600,9 @@ class CollectionWorker:
     def initialize(self) -> None:
         if self.execution._store is not None and not self._started:
             self._collection_interval=self.service.startup(self._source is not None,self._source_feed)
-            if self._source:self.execution._store.jobs.enqueue_discovery(self._source_feed)
+            if self._source:
+                with self.execution._store.jobs.transaction(self._live):
+                    self.execution._store.jobs.enqueue_discovery(self._source_feed)
             self._started=True
 
     async def run(self) -> None:
@@ -624,8 +628,9 @@ class CollectionWorker:
                 self._last_media_cleanup=now
             self._sync_sources()
             if now-self._last_collection >= self._collection_interval:
-                for feed in self._sources:
-                    self.execution._store.jobs.enqueue_discovery(feed)
+                with self.execution._store.jobs.transaction(self._live):
+                    for feed in self._sources:
+                        self.execution._store.jobs.enqueue_discovery(feed)
                 self._last_collection = now
             caption_feeds=self._collection.caption_feeds()
             for lane in ('common', 'media','captions'):
