@@ -335,45 +335,46 @@ class Store:
         return self.viewed_set(self.reading.members(item))
 
     def viewed_set(self, members: list[str]) -> bool:
+        if not self.db.transaction_depth:
+            raise RuntimeError('Marking publications viewed requires an owning transaction')
         members = sorted(set(members))
-        with self.db:
-            membership_graph.lock_graph(self.db)
-            rows = {}
-            memberships: dict[str, list[str]] = {}
-            for start in range(0, len(members), 400):
-                batch = members[start:start+400]
-                marks = ','.join('%s' for _ in batch)
-                rows.update({row['id']: row for row in self.db.execute(
-                    f"SELECT i.id , COALESCE(i.content #> '{{extra,telegram,members}}','[]'::jsonb)::text AS members , {owner_expr('i')} AS feed_id FROM publications i WHERE i.id IN ( {marks} )", batch)})
-                for row in self.db.execute(f'SELECT i.id AS publication_id, i.feed_id FROM publications i WHERE i.feed_id IS NOT NULL AND i.id IN ( {marks} )', batch):
-                    memberships.setdefault(row['publication_id'], []).append(row['feed_id'])
-            if len(rows) != len(members):
-                return False
-            effects = CollectionDiagnostics()
-            publication_links.capture_root_deletion_problems(self,effects,set(members))
-            eligibility: dict[str, set[int]] = {}
-            for member, feeds in memberships.items():
-                for feed in feeds:
-                    eligibility.setdefault(feed, set()).update(json.loads(rows[member]['members']))
-            for feed, messages in eligibility.items():
-                self.subscriptions.details.record(feed, 'marked_read')
-            self.incomplete_draft.mark_materials(members)
-            self.problems.forget_materials(set(members), self.wall_clock())
-            # A single reachability pass sees the final remaining roots.
-            for start in range(0, len(members), 400):
-                batch = members[start:start+400]
-                marks = ','.join('%s' for _ in batch)
-                if self.db.execute(f"UPDATE history_members SET outcome = 'viewed' WHERE item IN ( {marks} ) AND outcome IN ( 'pending' , 'retrying' )", batch).rowcount:
-                    status_changed(self.db)
-                removed = membership_graph.remove(self.db,items=batch)
-                self.read_versions.memberships_changed(removed)
-            publication_links.prune(self, set(members),effects=effects)
-            self.processing.memberships_removed(members)
-            publication_links.notify_parents_many(self, set(members))
-            for item, row in rows.items():
-                if row['feed_id'] is not None:
-                    self._remember_cleanup_owner(item, row['feed_id'])
-            self.jobs.sync_captured_deletions(effects)
+        membership_graph.lock_graph(self.db)
+        rows = {}
+        memberships: dict[str, list[str]] = {}
+        for start in range(0, len(members), 400):
+            batch = members[start:start+400]
+            marks = ','.join('%s' for _ in batch)
+            rows.update({row['id']: row for row in self.db.execute(
+                f"SELECT i.id , COALESCE(i.content #> '{{extra,telegram,members}}','[]'::jsonb)::text AS members , {owner_expr('i')} AS feed_id FROM publications i WHERE i.id IN ( {marks} )", batch)})
+            for row in self.db.execute(f'SELECT i.id AS publication_id, i.feed_id FROM publications i WHERE i.feed_id IS NOT NULL AND i.id IN ( {marks} )', batch):
+                memberships.setdefault(row['publication_id'], []).append(row['feed_id'])
+        if len(rows) != len(members):
+            return False
+        effects = CollectionDiagnostics()
+        publication_links.capture_root_deletion_problems(self,effects,set(members))
+        eligibility: dict[str, set[int]] = {}
+        for member, feeds in memberships.items():
+            for feed in feeds:
+                eligibility.setdefault(feed, set()).update(json.loads(rows[member]['members']))
+        for feed, messages in eligibility.items():
+            self.subscriptions.details.record(feed, 'marked_read')
+        self.incomplete_draft.mark_materials(members)
+        self.problems.forget_materials(set(members), self.wall_clock())
+        # A single reachability pass sees the final remaining roots.
+        for start in range(0, len(members), 400):
+            batch = members[start:start+400]
+            marks = ','.join('%s' for _ in batch)
+            if self.db.execute(f"UPDATE history_members SET outcome = 'viewed' WHERE item IN ( {marks} ) AND outcome IN ( 'pending' , 'retrying' )", batch).rowcount:
+                status_changed(self.db)
+            removed = membership_graph.remove(self.db,items=batch)
+            self.read_versions.memberships_changed(removed)
+        publication_links.prune(self, set(members),effects=effects)
+        self.processing.memberships_removed(members)
+        publication_links.notify_parents_many(self, set(members))
+        for item, row in rows.items():
+            if row['feed_id'] is not None:
+                self._remember_cleanup_owner(item, row['feed_id'])
+        self.jobs.sync_captured_deletions(effects)
         self.processing.sync()
         self.db.after_commit(lambda: self.fault('after_viewed_commit'))
         return True

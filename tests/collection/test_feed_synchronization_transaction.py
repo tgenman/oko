@@ -76,3 +76,23 @@ def test_discovery_scheduling_rolls_back_with_caller(tmp_path):
         assert store.db.execute("SELECT id FROM jobs WHERE kind='discover' AND item=%s", (feed,)).fetchone() is None
     finally:
         store.db.close()
+
+
+def test_mark_viewed_rolls_back_with_owning_action(tmp_path):
+    configured_sources(tmp_path, [('https://example.test/feed', 'Feed', 'Folder')])
+    events=[]
+    store = Store(tmp_path, events.append)
+    try:
+        feed=store.subscriptions.feeds()[0]['id']
+        with transaction(store.db):
+            store.db.execute("INSERT INTO publications(id,platform,external_id,feed_id) VALUES ('p','rss','p',%s)", (feed,))
+        events.clear()
+        with pytest.raises(ValueError, match='abort viewed'):
+            with transaction(store.db):
+                assert store.viewed_set(['p'])
+                raise ValueError('abort viewed')
+        assert store.db.execute("SELECT feed_id FROM publications WHERE id='p'").fetchone()[0] == feed
+        assert store.db.execute("SELECT id FROM jobs WHERE kind='delete' AND item='p'").fetchone() is None
+        assert 'after_viewed_commit' not in events
+    finally:
+        store.db.close()

@@ -34,7 +34,8 @@ def test_viewed_during_pause_never_restores_forgotten_object(tmp_path,postgres_u
             store.incomplete_draft.mark_job('fetch','p')
         store.youtube.blocked(100,900)
         assert json.loads(current(store)['body'])['objects']==[dict(kind='material',id='p')]
-        assert store.viewed_set(['p'])
+        with transaction(store.db):
+            assert store.viewed_set(['p'])
         for row in store.db.execute("SELECT body FROM reader_problems WHERE body::jsonb->>'code'='youtube-admission'"):
             assert all(o.get('id')!='p' for o in json.loads(row['body'])['objects'])
     finally:store.db.close()
