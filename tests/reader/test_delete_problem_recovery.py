@@ -40,3 +40,35 @@ def test_restarted_running_deletion_updates_retry_state(tmp_path,postgres_url):
     try:
         assert json.loads(store.db.execute("SELECT body FROM reader_problems WHERE identity='job:delete:feed:feed-delete:feed' AND finished IS NULL").fetchone()[0])['state']=='current'
     finally:store.db.close()
+def test_cleanup_failure_backoff_survives_restart_and_increases(tmp_path,postgres_url):
+    clock=[100.]
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url,clock=lambda:clock[0],wall_clock=lambda:clock[0])
+    try:
+        with transaction(store.db):
+            identity=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('delete','retired','running',1) RETURNING id").fetchone()[0]
+            store.jobs.retry(Job(identity,'delete','retired',1),clock[0],'cleanup failed',code='delete',cleanup_backoff=True)
+        assert tuple(store.db.execute('SELECT retry_delay,retry_at,next FROM jobs WHERE id=%s',(identity,)).fetchone())==(60.,160.,160.)
+    finally:
+        store.db.close()
+    clock[0]=110.
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url,clock=lambda:clock[0],wall_clock=lambda:clock[0])
+    try:
+        row=store.db.execute('SELECT retry_delay,retry_at,next FROM jobs WHERE id=%s',(identity,)).fetchone()
+        assert tuple(row)==(60.,160.,160.)
+        assert claim_job(store,159.,deleting_only=True) is None
+        job=claim_job(store,160.,deleting_only=True)
+        assert job is not None
+        clock[0]=160.
+        with transaction(store.db):
+            store.jobs.retry(job,clock[0],'cleanup failed again',code='delete',cleanup_backoff=True)
+        assert tuple(store.db.execute('SELECT retry_delay,retry_at,next FROM jobs WHERE id=%s',(identity,)).fetchone())==(120.,280.,280.)
+        for expected in (240,480,960,1920,3600,3600):
+            clock[0]=store.db.execute('SELECT retry_at FROM jobs WHERE id=%s',(identity,)).fetchone()[0]
+            job=claim_job(store,clock[0],deleting_only=True)
+            assert job is not None
+            with transaction(store.db):
+                store.jobs.retry(job,clock[0],'cleanup still failing',code='delete',cleanup_backoff=True)
+            delay,deadline=store.db.execute('SELECT retry_delay,retry_at FROM jobs WHERE id=%s',(identity,)).fetchone()
+            assert (delay,deadline)==(expected,clock[0]+expected)
+    finally:
+        store.db.close()

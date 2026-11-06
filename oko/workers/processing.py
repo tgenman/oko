@@ -54,6 +54,8 @@ class ProcessingWorker:
                 return True
             if jobs.deleting():
                 return False
+            if not jobs.has_due_job(self.clock(), ai_only=True, processing_kind=self.kind):
+                return False
             with jobs.transaction(self.execution._live):
                 if not self.execution._live():
                     return False

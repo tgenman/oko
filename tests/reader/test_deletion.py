@@ -41,7 +41,7 @@ def test_delete_failure_is_visible_and_retried_without_content_in_errors(tmp_pat
     def fault(point):
         if point == 'before_delete' and fail:
             raise OSError('secret content in provider exception')
-    with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test-token', fault=fault, clock=clock), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test-token', fault=fault, clock=clock, wall_clock=clock), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global', json={'theses': False})
         presence(client, 'a')
         for _ in range(100):
@@ -62,7 +62,7 @@ def test_delete_failure_is_visible_and_retried_without_content_in_errors(tmp_pat
             job = db.execute("SELECT reason_code,reason_message,payload->>'cleanup_feed' FROM jobs WHERE kind='delete' AND item=%s",(item,)).fetchone()
             assert job is not None and tuple(job)==('delete','Ошибка удаления',cards[0]['feed_id'])
         fail = False
-        clock.now += 1.1
+        clock.now += 61
         wait_for(client, lambda: not any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status/details').json()['problems']['current']))
         assert not any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status/details').json()['problems']['current'])
         assert not retained(tmp_path,item)
@@ -81,7 +81,7 @@ def test_corrupt_database_is_reported_and_never_replaced(tmp_path: Path, postgre
         assert db.execute('SELECT checksum FROM oko_schema_migrations WHERE version=1').fetchone()[0] == 'preserve-corruption-evidence'
 
 
-def test_restart_keeps_failed_deletion_retryable_and_blocks_collection(tmp_path: Path):
+def test_restart_keeps_failed_deletion_retryable_without_blocking_collection(tmp_path: Path):
     class CountingSource(SyntheticSource):
         def __init__(self):
             self.calls = 0
@@ -93,7 +93,7 @@ def test_restart_keeps_failed_deletion_retryable_and_blocks_collection(tmp_path:
     def fault(point):
         if point == 'before_delete' and fail:
             raise OSError('temporary disk error')
-    with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test-token', fault=fault, clock=clock), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test-token', fault=fault, clock=clock, wall_clock=clock), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global', json={'theses': False})
         presence(client, 'a')
         for _ in range(100):
@@ -105,20 +105,20 @@ def test_restart_keeps_failed_deletion_retryable_and_blocks_collection(tmp_path:
         viewed_source = cards[0]['source_url'].rsplit('/', 1)[1]
         client.post(f'/api/v3/materials/{item}/viewed')
     source = CountingSource()
-    with TestClient(create_app(tmp_path, source=source, token='test-token', fault=fault, clock=clock), headers=HEADERS) as client:
+    with TestClient(create_app(tmp_path, source=source, token='test-token', fault=fault, clock=clock, wall_clock=clock), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global', json={'theses': False})
         presence(client, 'a')
         time.sleep(.1)
         status = client.get('/api/v3/status/details').json()
         assert status['runtime_state']=='running'
         assert any(p['code']=='feed_delete_failed' for p in status['problems']['current'])
-        assert source.calls == 0
+        wait_for(client,lambda:source.calls >= 1)
         assert not retained(tmp_path,item)
         fail = False
-        clock.now += 1.2
-        wait_for(client, lambda: source.calls == 1 and not retained(tmp_path,item))
+        clock.now += 61
+        wait_for(client, lambda: not any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status/details').json()['problems']['current']))
         assert not retained(tmp_path,item)
-        assert source.calls == 1
+        assert source.calls >= 1
         assert not any(p['code']=='feed_delete_failed' for p in client.get('/api/v3/status/details').json()['problems']['current'])
 
 
@@ -128,7 +128,7 @@ def test_restart_finishes_cleanup_after_files_were_removed(tmp_path: Path):
     def fault(point):
         if point=='after_delete_files' and fail[0]:
             raise OSError('interrupted after removing files')
-    kwargs=dict(source=SyntheticSource(),token='test-token',fault=fault,clock=clock)
+    kwargs=dict(source=SyntheticSource(),token='test-token',fault=fault,clock=clock,wall_clock=clock)
     with TestClient(create_app(tmp_path,**kwargs),headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global',json={'theses':False})
         presence(client,'reader')
@@ -138,7 +138,7 @@ def test_restart_finishes_cleanup_after_files_were_removed(tmp_path: Path):
         with database(tmp_path) as db:
             assert db.execute("SELECT status FROM jobs WHERE kind='delete' AND item=%s",(item,)).fetchone() is not None
     fail[0]=False
-    clock.now+=2
+    clock.now+=61
     with TestClient(create_app(tmp_path,**kwargs),headers=HEADERS) as client:
         presence(client,'reader')
         def cleanup_finished():

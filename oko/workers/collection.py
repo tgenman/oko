@@ -70,6 +70,7 @@ class CollectionWorker:
         self._captions_active: 'CaptionAttempt | None' = None
         self._started=False
         self._source_revision: int | None = None
+        self._prefer_cleanup = True
         self._dependency_feeds: list[str] = []
         self._source,self._clock,self._fault=source,clock,fault
         self._source_feed = source_feed
@@ -349,7 +350,8 @@ class CollectionWorker:
                     with current.jobs.transaction(self._live):
                         current.jobs.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,code=code,
                             terminal=isinstance(error, SourceError) and not error.retryable or job.kind in ('discover','fetch') and (isinstance(error,ValueError) or Store.is_integrity_failure(error)),
-                            issue=error.adapter_issue if isinstance(error,SourceError) else None)
+                            issue=error.adapter_issue if isinstance(error,SourceError) else None,
+                            cleanup_backoff=job.kind in ('delete','feed-delete') and not (isinstance(error,SourceError) and not error.retryable))
                         if job.kind=='fetch':
                             current.jobs.notify_publication_parents(job.item)
                         if job.kind=='discover':
@@ -657,10 +659,17 @@ class CollectionWorker:
                 if lane=='captions':
                     feeds=caption_feeds
                 dependencies=self._dependency_feeds if lane in ('common','media') else []
+                options: dict[str,Any]=dict(deleting_only=not (feeds or dependencies), feeds=feeds,
+                             include_deletions=lane == 'common', media_only=media_lane,
+                             captions_only=lane=='captions', dependency_feeds=dependencies,
+                             prefer_cleanup=self._prefer_cleanup)
+                if not self.execution._store.jobs.has_due_job(now,**options):
+                    continue
                 with self.execution._store.jobs.transaction(self._live):
-                    job = self.execution._store.jobs.next_job(now, deleting_only=not (feeds or dependencies),
-                                               feeds=feeds, include_deletions=lane == 'common', media_only=media_lane,captions_only=lane=='captions',dependency_feeds=dependencies)
+                    job = self.execution._store.jobs.next_job(now,**options)
                 if job:
+                    if lane=='common':
+                        self._prefer_cleanup=not self._prefer_cleanup
                     self.jobs._lane_jobs[lane] = job
                     if job.kind=='delete':
                         owner=self.execution._store.db.execute("SELECT payload->>'cleanup_feed' FROM jobs WHERE id=%s",(job.id,)).fetchone()

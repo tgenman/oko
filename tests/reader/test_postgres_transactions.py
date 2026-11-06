@@ -75,6 +75,7 @@ def test_projection_failure_rolls_back_data_and_jobs(database):
 
 @pytest.mark.parametrize('delete_fault', [False, True])
 def test_reader_http_collection_media_settings_viewed_and_restart(postgres_url, tmp_path, delete_fault):
+    import time
     import httpx
     from fastapi.testclient import TestClient
     from tests.support.app import create_app
@@ -84,6 +85,7 @@ def test_reader_http_collection_media_settings_viewed_and_restart(postgres_url, 
     from tests.support.youtube import PNG
 
     fail_delete = [False]
+    offset = [0.]
     failed_deletions = []
     requests = []
     def fault(point):
@@ -100,7 +102,8 @@ def test_reader_http_collection_media_settings_viewed_and_restart(postgres_url, 
 
     def app():
         return create_app(tmp_path, token='test', api_only=True, database_url=postgres_url,
-                          rss_enabled=True, rss_transport=httpx.MockTransport(response), fault=fault)
+                          rss_enabled=True, rss_transport=httpx.MockTransport(response), fault=fault,
+                          clock=lambda:time.monotonic()+offset[0],wall_clock=lambda:time.time()+offset[0])
 
     with TestClient(app(), headers=HEADERS) as client:
         assert client.get('/api/v3/status').status_code == 200
@@ -144,6 +147,7 @@ def test_reader_http_collection_media_settings_viewed_and_restart(postgres_url, 
         assert restarted.get('/api/v3/publication/' + item).status_code == 404
     if delete_fault:
         fail_delete[0] = False
+        offset[0] += 61
         with TestClient(app(), headers=HEADERS) as recovered:
             # Oko remains powered off; an explicit replay resumes its retained cleanup.
             assert recovered.post('/api/v3/materials/' + item + '/viewed').status_code == 200
