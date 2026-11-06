@@ -150,8 +150,8 @@ class JobControl:
                     if current.jobs.valid(job) and not current.jobs.finish_feed_deletion(job):
                         current.jobs.retry(job, self._clock(), 'Ожидание очистки файлов', .1)
             else:
-                deleted = current.jobs.delete_files(job)
-                if deleted is not None:
+                if current.jobs.valid(job):
+                    deleted = current.publication_files.delete(job.item)
                     with current.jobs.transaction(lambda: True):
                         if deleted:
                             current.jobs.finish_delete(job)

@@ -20,7 +20,7 @@ def test_delete_problem_event_get_is_read_only_and_finish_rollback(tmp_path,post
         assert store.db.execute('SELECT id,xmin::text,body FROM reader_problems WHERE identity=%s AND finished IS NULL',(identity,)).fetchone()==before
         with store.db:store.db.execute('UPDATE jobs SET next=0 WHERE id=%s',(job_id,))
         claimed=claim_job(store, 1,deleting_only=True)
-        assert claimed and store.jobs.delete_files(claimed) is True
+        assert claimed and store.publication_files.delete(claimed.item) is True
         with pytest.raises(RuntimeError):
             with transaction(store.db):
                 store.jobs.finish_delete(claimed)

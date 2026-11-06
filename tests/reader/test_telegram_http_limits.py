@@ -33,6 +33,29 @@ def test_429_blocks_other_connections_and_survives_restart(tmp_path):
         assert len(calls) == 2
 
 
+def test_telegram_backoff_uses_configured_delay_without_shortening_existing_wait(tmp_path):
+    from tests.support.storage import database
+    import json
+    calls=[]
+    wall=[1800000000.]
+    def response(request):
+        calls.append(str(request.url))
+        return httpx.Response(429,headers={'Retry-After':'120'})
+    options=dict(token='test',api_only=True,rss_transport=httpx.MockTransport(response),wall_clock=lambda:wall[0])
+    with TestClient(create_app(tmp_path,**options),headers=HEADERS) as client:
+        assert client.patch('/api/v3/settings/oko/global',json={'retry_initial_seconds':600,'retry_max_seconds':1200}).status_code==200
+        assert client.post('/api/v3/telegram/connect',json={'source_locator':'@firstchannel','folder':'Inbox'}).status_code==503
+        with database(tmp_path) as db:
+            state=json.loads(db.execute("SELECT value FROM state WHERE key='telegram-http:html'").fetchone()[0])
+        assert state['until']==wall[0]+600
+        assert client.patch('/api/v3/settings/oko/global',json={'retry_initial_seconds':60}).status_code==200
+        assert client.post('/api/v3/telegram/connect',json={'source_locator':'@secondchannel','folder':'Inbox'}).status_code==503
+        assert len(calls)==1
+    with TestClient(create_app(tmp_path,**options),headers=HEADERS) as client:
+        assert client.post('/api/v3/telegram/connect',json={'source_locator':'@thirdchannel','folder':'Inbox'}).status_code==503
+        assert len(calls)==1
+
+
 def test_feed_refresh_cannot_override_429_deadline_and_rss_keeps_working(tmp_path):
     from tests.support.telegram import settled
     calls = []
