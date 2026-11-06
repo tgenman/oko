@@ -104,8 +104,9 @@ sudo python3 /srv/oko/releases/<operator-SHA>/deployment/deploy.py rollback
 The root-owned `previous-release.json` selects the exact previous pair. Rollback
 uses its retained local image/source/runtime, avoiding a new registry credential
 or dependency installation. It refuses a schema outside that release's recorded
-range. If the schema is incompatible, it stops the reader and helper before
-returning the error, preserving the database and files. Choose a compatible
+range. A rollback stops the reader and helper before checking the cached
+artifacts or database compatibility, preserving the database and files even
+if those checks fail. If the schema is incompatible, choose a compatible
 forward fix or explicitly plan a backward migration; do not restore an old
 backup over data written after the upgrade. No restore, SQL downgrade or
 deletion of newer library data occurs automatically.
