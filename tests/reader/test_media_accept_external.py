@@ -18,6 +18,8 @@ def test_media_accept_changed_identity_and_problem_roll_back_together(tmp_path,p
         before=store.db.execute("SELECT id,identity,body,finished FROM reader_problems WHERE body::jsonb->>'media_job_id'=%s AND finished IS NULL",(str(job),)).fetchone()
         download=store.media.begin(old_media,'attempt',True)
         download.final.parent.mkdir(parents=True,exist_ok=True);download.final.write_bytes(b'synthetic')
+        with pytest.raises(RuntimeError,match='owning transaction'):
+            store.media.accept(old_media,download,download.media,(new_media,download.final,9))
         with pytest.raises(ValueError,match='rollback'):
             with transaction(store.db):
                 store.media.accept(old_media,download,download.media,(new_media,download.final,9))
