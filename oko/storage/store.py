@@ -10,7 +10,6 @@ from pathlib import Path
 import shutil
 import time
 from collections.abc import Callable, Generator
-from contextlib import nullcontext
 from typing import Any
 
 from oko.storage.publications import Publications
@@ -456,26 +455,27 @@ class Store:
         return row is None or row['value'] != 'false'
 
     def set_work_enabled(self, enabled: bool) -> None:
-        with self.db:
-            self.db.execute("INSERT INTO state VALUES ( 'work-enabled' , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value", ('true' if enabled else 'false',))
+        if not self.db.transaction_depth:
+            raise RuntimeError('Configuration changes require an owning transaction')
+        self.db.execute("INSERT INTO state VALUES ( 'work-enabled' , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value", ('true' if enabled else 'false',))
 
     def codex_config(self) -> CodexSettings | None:
         value = self.subscriptions.settings.state_value('processor:codex')
         return CodexSettings.model_validate_json(value) if value else None
 
     def configure_codex(self, config: CodexSettings) -> None:
+        if not self.db.transaction_depth:
+            raise RuntimeError('Configuration changes require an owning transaction')
         # Future execution choice does not invalidate inputs or cancel work.
-        boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
-        with boundary:
-            membership_graph.lock_graph(self.db)
-            self.subscriptions.settings.set_state('processor:codex', config.model_dump_json())
-            ids=[row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE status='pending' AND reason_code='processor-config' AND payload::jsonb->>'preclaim_blocked'='true'")]
-            processor_previous=self.problems.prepare_processor_change(ids,self.wall_clock())
-            job_write(self.db, """UPDATE jobs SET status='pending',next=0,reason_message=NULL,reason_code=NULL,
-                payload=(payload-'preclaim_blocked')
-                WHERE status='pending' AND reason_code='processor-config' AND payload::jsonb->>'preclaim_blocked'='true'""")
-            self.problems.finish_processor_change(ids,processor_previous,self.wall_clock())
-            self.problems.sync_codex_choice(self.wall_clock())
+        membership_graph.lock_graph(self.db)
+        self.subscriptions.settings.set_state('processor:codex', config.model_dump_json())
+        ids=[row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE status='pending' AND reason_code='processor-config' AND payload::jsonb->>'preclaim_blocked'='true'")]
+        processor_previous=self.problems.prepare_processor_change(ids,self.wall_clock())
+        job_write(self.db, """UPDATE jobs SET status='pending',next=0,reason_message=NULL,reason_code=NULL,
+            payload=(payload-'preclaim_blocked')
+            WHERE status='pending' AND reason_code='processor-config' AND payload::jsonb->>'preclaim_blocked'='true'""")
+        self.problems.finish_processor_change(ids,processor_previous,self.wall_clock())
+        self.problems.sync_codex_choice(self.wall_clock())
 
     @reading_value
     def processor_config(self) -> ProcessorConfig | None:
@@ -483,13 +483,13 @@ class Store:
         return ProcessorConfig.model_validate_json(value) if value else None
 
     def configure_processor(self, config: ProcessorConfig) -> bool:
-        boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
-        with boundary:
-            membership_graph.lock_graph(self.db)
-            if self.processor_config() == config:
-                return False
-            self.subscriptions.settings.set_state('processor:llamacpp', config.model_dump_json())
-            self.settings_changed()
+        if not self.db.transaction_depth:
+            raise RuntimeError('Configuration changes require an owning transaction')
+        membership_graph.lock_graph(self.db)
+        if self.processor_config() == config:
+            return False
+        self.subscriptions.settings.set_state('processor:llamacpp', config.model_dump_json())
+        self.settings_changed()
         return True
 
     @reading_value
@@ -498,20 +498,21 @@ class Store:
         return max((int(value) for key in keys if (value := material_read.state(self.db,key)) is not None), default=0)
 
     def settings_changed(self, scope: str = 'oko', owner: str = 'global') -> None:
-        with self.db:
-            membership_graph.lock_graph(self.db)
-            row = self.db.execute("SELECT value FROM state WHERE key = 'settings-sequence'").fetchone()
-            sequence = max(int(row[0]) if row else 0, self.settings_version()) + 1
-            self.db.execute("INSERT INTO state VALUES ( 'settings-sequence' , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value", (str(sequence),))
-            if scope == 'oko':
-                keys = ['settings-version']
-            else:
-                query = 'SELECT id FROM feeds WHERE ' + ('id = %s' if scope == 'feed' else 'folder_id = %s')
-                keys = ['settings-version:' + row[0] for row in self.db.execute(query, (owner,))]
-            self.db.executemany('INSERT INTO state VALUES ( %s , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value', [(key, str(sequence)) for key in keys])
-            self.jobs.revoke_changed_running_inputs()
-            self.processing.invalidate(scope, owner)
-            self.problems.sync_codex_choice(self.wall_clock())
+        if not self.db.transaction_depth:
+            raise RuntimeError('Configuration changes require an owning transaction')
+        membership_graph.lock_graph(self.db)
+        row = self.db.execute("SELECT value FROM state WHERE key = 'settings-sequence'").fetchone()
+        sequence = max(int(row[0]) if row else 0, self.settings_version()) + 1
+        self.db.execute("INSERT INTO state VALUES ( 'settings-sequence' , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value", (str(sequence),))
+        if scope == 'oko':
+            keys = ['settings-version']
+        else:
+            query = 'SELECT id FROM feeds WHERE ' + ('id = %s' if scope == 'feed' else 'folder_id = %s')
+            keys = ['settings-version:' + row[0] for row in self.db.execute(query, (owner,))]
+        self.db.executemany('INSERT INTO state VALUES ( %s , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value', [(key, str(sequence)) for key in keys])
+        self.jobs.revoke_changed_running_inputs()
+        self.processing.invalidate(scope, owner)
+        self.problems.sync_codex_choice(self.wall_clock())
         self.processing.sync()
 
     @reading_value

@@ -1,3 +1,4 @@
+from tests.support.storage_action import storage_action
 from tests.support.subscription_action import subscription_action
 from tests.support.job_claim import claim_job
 from tests.support.source import save_material
@@ -52,14 +53,14 @@ def saved_library(root:Path, per_feed:int) -> dict[str,object]:
             store.db.execute('DELETE FROM publications WHERE id=%s',(job.item,))
             store.db.executemany("""INSERT INTO publications(id,url,platform,external_id,feed_id,published_at,discovered_at,title,content,status)
                 VALUES (%s,%s,'other_web',%s,%s,%s,%s,%s,%s::jsonb,'ready')""",rows)
-        store.configure_processor(ProcessorConfig(endpoint='http://localhost:9931',model='local:latest',local_execution=True))
+        storage_action(store, 'configure_processor', ProcessorConfig(endpoint='http://localhost:9931',model='local:latest',local_execution=True))
         subscription_action(store, 'update_settings', 'oko','global',Overrides(theses=False))
-        store.settings_changed()
+        storage_action(store, 'settings_changed')
         with transaction(store.db):
             for row in rows:
                 store.publications.reconcile(row[0])
         store.processing.sync()
-        store.set_work_enabled(False)
+        storage_action(store, 'set_work_enabled', False)
         count=store.db.execute("SELECT count(*) FROM publications WHERE content <> '{}'::jsonb").fetchone()[0]
         assert count==per_feed*4
     finally:
@@ -73,9 +74,9 @@ def seed(root:Path, per_feed:int, active:bool=False) -> dict[str,object]:
         store = Store(root, lambda _:None)
         try:
             subscription_action(store, 'update_settings', 'oko','global',Overrides(theses=True))
-            store.settings_changed()
+            storage_action(store, 'settings_changed')
             store.processing.sync()
-            store.set_work_enabled(True)
+            storage_action(store, 'set_work_enabled', True)
         finally:
             store.db.close()
     return dict(result, active=active)

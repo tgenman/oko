@@ -1,3 +1,4 @@
+from tests.support.storage_action import storage_action
 from tests.support.subscription_action import subscription_action
 from tests.support.job_claim import claim_job
 from tests.support.collection_acceptance import discovered
@@ -49,7 +50,7 @@ def build_library(root, counts):
                               Material(f'Video {n}', '', captions='not_requested', description='Synthetic video'),needs_fetch=True)
                               for n in range(count)], '{}', job, feed)
             items.append(store.db.execute(owned_ids('= %s')+' ORDER BY id', (feed,feed)).fetchone()[0])
-        store.set_work_enabled(False)
+        storage_action(store, 'set_work_enabled', False)
     finally:
         store.db.close()
     return feeds, items

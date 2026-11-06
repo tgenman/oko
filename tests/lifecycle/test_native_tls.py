@@ -1,4 +1,5 @@
 """The actual CLI terminates TLS; local control verifies identity on loopback."""
+from tests.support.storage_action import storage_action
 import json
 from pathlib import Path
 import socket
@@ -35,7 +36,7 @@ def test_native_tls_login_control_and_certificate_validation(tmp_path):
     origin = f'https://localhost:{port}'
     from tests.support.storage import Store
     seed = Store(data, lambda _: None)
-    seed.set_work_enabled(False)
+    storage_action(seed, 'set_work_enabled', False)
     seed.db.close()
     log_path = tmp_path / 'server.log'
     with log_path.open('w') as log:
