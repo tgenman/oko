@@ -1,4 +1,5 @@
 """Real SQL failure boundaries for the three independent cron workers."""
+from tests.support.storage_action import storage_action
 from tests.support.subscription_action import subscription_action
 from tests.support.job_claim import claim_job, retry_job
 from tests.support.collection_acceptance import apply_simulated_collection, running_collection_job
@@ -188,7 +189,7 @@ def test_processing_waits_when_publication_feed_disallows_processor(tmp_path):
     try:
         with transaction(store.db):
             subscription_action(store, 'update_settings', 'feed','fixture',Overrides(processor='codex'))
-            store.settings_changed('feed','fixture')
+            storage_action(store, 'settings_changed', 'feed','fixture')
             store.processing.reconcile_accepted_item(item)
         worker = workers(execution,tasks)[0]
         asyncio.run(pass_worker(worker,tasks))
@@ -197,7 +198,7 @@ def test_processing_waits_when_publication_feed_disallows_processor(tmp_path):
         assert saved(store,item)['filtered_content'] == {}
         with transaction(store.db):
             subscription_action(store, 'update_settings', 'feed','fixture',Overrides(processor='llamacpp'))
-            store.settings_changed('feed','fixture')
+            storage_action(store, 'settings_changed', 'feed','fixture')
             store.processing.reconcile_accepted_item(item)
         asyncio.run(pass_worker(worker,tasks))
         assert store.filters.read(item)['status'] == 'done'
@@ -252,7 +253,7 @@ def test_new_revision_does_not_shorten_source_wait(tmp_path):
         next_at=store.clock()+120
         store.db.execute("UPDATE jobs SET status = 'pending' , wait_scope = 'source:synthetic' , retry_at = %s , next = %s , reason_message = 'source wait' WHERE kind = 'filter'",(deadline,next_at))
         subscription_action(store, 'update_feed', 'fixture',FeedPatch(importance='high'))
-        store.settings_changed('feed','fixture')
+        storage_action(store, 'settings_changed', 'feed','fixture')
         worker.service.reconcile()
     row=store.db.execute("SELECT retry_at,next,wait_scope,reason_message FROM jobs WHERE kind='filter'").fetchone()
     assert tuple(row)==(deadline,next_at,'source:synthetic','source wait')
@@ -280,7 +281,7 @@ def test_linked_source_privacy_change_reconciles_parent_job_atomically(tmp_path)
         store.processing.background = True
         def change():
             subscription_action(store, 'update_feed', other,FeedPatch(public_ai=False))
-            store.settings_changed('feed',other)
+            storage_action(store, 'settings_changed', 'feed',other)
             after = store.db.execute("SELECT generation,input_snapshot->>'input_hash' FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()
             assert tuple(after)==before
         with pytest.raises(ValueError, match='rollback'):

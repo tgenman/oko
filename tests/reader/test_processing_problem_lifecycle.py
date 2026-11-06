@@ -1,3 +1,4 @@
+from tests.support.storage_action import storage_action
 from tests.support.subscription_action import subscription_action
 from tests.support.job_claim import retry_job
 import json
@@ -43,7 +44,7 @@ def test_settings_reconciliation_and_problem_roll_back_together(tmp_path,postgre
         with pytest.raises(ValueError,match='rollback'):
             with transaction(store.db):
                 subscription_action(store, 'update_settings', 'feed','fixture',Overrides(filter_enabled=False))
-                store.settings_changed('feed','fixture')
+                storage_action(store, 'settings_changed', 'feed','fixture')
                 assert store.db.execute('SELECT status FROM jobs WHERE id=%s',(row['id'],)).fetchone()[0]=='blocked'
                 raise ValueError('rollback')
         assert store.db.execute('SELECT status FROM jobs WHERE id=%s',(row['id'],)).fetchone()[0]=='pending'
@@ -61,7 +62,7 @@ def test_settings_reenable_blocked_processing_with_same_input(tmp_path,postgres_
         for enabled,expected in [(False,'blocked'),(True,'pending')]:
             with transaction(store.db):
                 subscription_action(store, 'update_settings', 'feed','fixture',Overrides(filter_enabled=enabled))
-                store.settings_changed('feed','fixture')
+                storage_action(store, 'settings_changed', 'feed','fixture')
             after=store.db.execute('SELECT id,input_snapshot,status FROM jobs WHERE id=%s',(before['id'],)).fetchone()
             assert (after['id'],after['input_snapshot'],after['status'])==(before['id'],before['input_snapshot'],expected)
     finally:store.db.close()

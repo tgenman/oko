@@ -1,3 +1,4 @@
+from tests.support.storage_action import storage_action
 from tests.support.job_claim import retry_job
 import json
 import pytest
@@ -55,7 +56,7 @@ def test_configure_codex_closes_last_preclaim_problem_before_status_get(tmp_path
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation,payload) VALUES ('read','feed','running',1,%s) RETURNING id",(json.dumps({'preclaim_blocked':True}),)).fetchone()[0]
         retry_job(store, Job(job_id,'read','feed',1),1,'missing',code='processor-config')
         choice=CodexChoice(model='synthetic',reasoning_effort='low',fast=False)
-        store.configure_codex(CodexSettings(filter=choice,theses=choice))
+        storage_action(store, 'configure_codex', CodexSettings(filter=choice,theses=choice))
         assert not store.db.execute("SELECT 1 FROM reader_problems WHERE identity='processor:configuration' AND finished IS NULL").fetchone()
     finally:store.db.close()
 

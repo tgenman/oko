@@ -1,4 +1,5 @@
 """Repository transaction ownership against real PostgreSQL and independent readers."""
+from tests.support.storage_action import storage_action
 from tests.support.publications import body_text
 from tests.support.cards import read_all_cards
 from tests.support.storage import ensure_fixture
@@ -174,7 +175,7 @@ def test_reader_role_needs_no_schema_ownership_or_migration_credentials(postgres
             try:
                 ensure_fixture(store.db)
                 assert store.subscriptions.feeds()[0]['id'] == 'fixture'
-                store.set_work_enabled(True)
+                storage_action(store, 'set_work_enabled', True)
                 assert store.work_enabled() is True
             finally:
                 store.db.close()

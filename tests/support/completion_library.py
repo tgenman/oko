@@ -1,9 +1,10 @@
+from tests.support.storage_action import storage_action
 from tests.support.worker_library import worker_library
 from psycopg.types.json import Jsonb
 
 def library(root, database_url, count):
     store, original, _, _ = worker_library(root, database_url=database_url)
-    store.set_work_enabled(False)
+    storage_action(store, 'set_work_enabled', False)
     store.processing.background = True
     with store.db:
         template = dict(store.db.execute('SELECT * FROM publications WHERE id = %s', (original,)).fetchone())

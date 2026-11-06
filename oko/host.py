@@ -10,6 +10,7 @@ import httpx
 from oko.collection.adapters import FeedAdapter
 from oko.processing.codex import CodexClient,LocalCodex
 from oko.storage.store import Store
+from oko.storage.transaction import transaction
 from oko.collection.contracts import CaptionsClient
 from oko.collection.youtube.history import HistoryClient
 from oko.diagnostics import Journal, active_journal, record_caught
@@ -92,7 +93,8 @@ class Host:
     async def set_power(self, enabled: bool) -> None:
         async with self.execution._actions:
             current = self.require_store()
-            current.set_work_enabled(enabled)
+            with transaction(current.db):
+                current.set_work_enabled(enabled)
             self.execution.enabled = enabled
             if not enabled:
                 self.clear_feed_checks()

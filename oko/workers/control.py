@@ -135,11 +135,11 @@ class JobControl:
         feeds = ReaderFacts(lambda: current).deletion_feeds()
         if feeds:
             await self.cancel(feeds)
-        with current.jobs.transaction(self.execution._live):
+        with current.jobs.transaction(lambda: not self.execution.stopped):
             job = current.jobs.next_job(self._clock(), deleting_only=True)
         while job:
             self._delete(job, current)
-            with current.jobs.transaction(self.execution._live):
+            with current.jobs.transaction(lambda: not self.execution.stopped):
                 job = current.jobs.next_job(self._clock(), deleting_only=True)
 
 
