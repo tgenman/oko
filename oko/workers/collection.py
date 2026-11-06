@@ -205,7 +205,9 @@ class CollectionWorker:
                     return
                 feed = job.item if job.kind in ('discover', 'read') else self.service.feed(job.item)
                 if job.kind in ('discover','fetch'):
-                    self.jobs._collection_active[job.id] = _CollectionAttempt(job,feed,self._clock(),capture,current.jobs.collection_start(job,feed))
+                    with current.jobs.transaction(self._live):
+                        saved=current.jobs.collection_start(job,feed)
+                    self.jobs._collection_active[job.id] = _CollectionAttempt(job,feed,self._clock(),capture,saved)
                     if self.jobs.metrics:
                         from oko.observability import event
                         event('job_started', job_id=job.id, kind=job.kind)
@@ -297,7 +299,8 @@ class CollectionWorker:
         except CaptionsDeferred:
             async with self.execution._actions:
                 if current and self.execution._store is current and not self.stopped:
-                    self._finish_collection(job,current)
+                    with current.jobs.transaction(lambda: not self.stopped):
+                        self._finish_collection(job,current)
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -533,7 +536,9 @@ class CollectionWorker:
             diagnostic_materials.set((owner,))
             diagnostic_source.set('Сбор · '+feed+' · download_media')
             capture_scope.set(secrets.token_hex(16))
-            self.jobs._collection_active[job.id]=_CollectionAttempt(job,feed,self._clock(),capture,current.jobs.collection_start(job,feed))
+            with current.jobs.transaction(self._live):
+                saved=current.jobs.collection_start(job,feed)
+            self.jobs._collection_active[job.id]=_CollectionAttempt(job,feed,self._clock(),capture,saved)
             if self.jobs.metrics:
                 from oko.observability import event
                 event('job_started', job_id=job.id, kind=job.kind)
