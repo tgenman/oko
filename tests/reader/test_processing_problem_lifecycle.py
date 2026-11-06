@@ -1,3 +1,4 @@
+from tests.support.subscription_action import subscription_action
 from tests.support.job_claim import retry_job
 import json
 import pytest
@@ -41,7 +42,7 @@ def test_settings_reconciliation_and_problem_roll_back_together(tmp_path,postgre
             before=store.db.execute("SELECT id,body,finished FROM reader_problems WHERE body::jsonb->>'processing_job_id'=%s AND finished IS NULL",(str(row['id']),)).fetchone()
         with pytest.raises(ValueError,match='rollback'):
             with transaction(store.db):
-                store.subscriptions.update_settings('feed','fixture',Overrides(filter_enabled=False))
+                subscription_action(store, 'update_settings', 'feed','fixture',Overrides(filter_enabled=False))
                 store.settings_changed('feed','fixture')
                 assert store.db.execute('SELECT status FROM jobs WHERE id=%s',(row['id'],)).fetchone()[0]=='blocked'
                 raise ValueError('rollback')
@@ -59,7 +60,7 @@ def test_settings_reenable_blocked_processing_with_same_input(tmp_path,postgres_
         before=store.db.execute("SELECT id,input_snapshot FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()
         for enabled,expected in [(False,'blocked'),(True,'pending')]:
             with transaction(store.db):
-                store.subscriptions.update_settings('feed','fixture',Overrides(filter_enabled=enabled))
+                subscription_action(store, 'update_settings', 'feed','fixture',Overrides(filter_enabled=enabled))
                 store.settings_changed('feed','fixture')
             after=store.db.execute('SELECT id,input_snapshot,status FROM jobs WHERE id=%s',(before['id'],)).fetchone()
             assert (after['id'],after['input_snapshot'],after['status'])==(before['id'],before['input_snapshot'],expected)

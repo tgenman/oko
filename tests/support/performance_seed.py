@@ -1,3 +1,4 @@
+from tests.support.subscription_action import subscription_action
 from tests.support.job_claim import claim_job
 from tests.support.source import save_material
 """Deterministic temporary libraries for HTTP/browser performance acceptance."""
@@ -25,9 +26,9 @@ def saved_library(root:Path, per_feed:int) -> dict[str,object]:
     try:
         feeds=[]
         for index in range(4):
-            feeds.append(store.subscriptions.add_feed(AddFeed(url='https://fixture.test/feed/'+str(index),
+            feeds.append(subscription_action(store, 'add_feed', AddFeed(url='https://fixture.test/feed/'+str(index),
                 title=f'Synthetic {index}',folder=f'Folder {index}',verification='synthetic'))['id'])
-        store.subscriptions.update_settings('oko','global',Overrides(theses=False,prompt_filters='',processor='llamacpp'))
+        subscription_action(store, 'update_settings', 'oko','global',Overrides(theses=False,prompt_filters='',processor='llamacpp'))
         with transaction(store.db):
             store.jobs.enqueue_discovery(feeds[0])
         discovery=claim_job(store, store.clock(),feeds=[feeds[0]])
@@ -52,7 +53,7 @@ def saved_library(root:Path, per_feed:int) -> dict[str,object]:
             store.db.executemany("""INSERT INTO publications(id,url,platform,external_id,feed_id,published_at,discovered_at,title,content,status)
                 VALUES (%s,%s,'other_web',%s,%s,%s,%s,%s,%s::jsonb,'ready')""",rows)
         store.configure_processor(ProcessorConfig(endpoint='http://localhost:9931',model='local:latest',local_execution=True))
-        store.subscriptions.update_settings('oko','global',Overrides(theses=False))
+        subscription_action(store, 'update_settings', 'oko','global',Overrides(theses=False))
         store.settings_changed()
         with transaction(store.db):
             for row in rows:
@@ -71,7 +72,7 @@ def seed(root:Path, per_feed:int, active:bool=False) -> dict[str,object]:
     if active:
         store = Store(root, lambda _:None)
         try:
-            store.subscriptions.update_settings('oko','global',Overrides(theses=True))
+            subscription_action(store, 'update_settings', 'oko','global',Overrides(theses=True))
             store.settings_changed()
             store.processing.sync()
             store.set_work_enabled(True)

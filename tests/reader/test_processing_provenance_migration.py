@@ -1,4 +1,5 @@
 """Historical results retain their provenance when attempt hashes change."""
+from tests.support.subscription_action import subscription_action
 import json
 import psycopg
 import pytest
@@ -73,7 +74,7 @@ def test_migrated_done_job_can_be_explicitly_retried_after_restart(tmp_path,post
     store=Store(tmp_path,lambda _:None,database_url=postgres_database_url)
     try:
         with transaction(store.db):
-            store.subscriptions.update_settings('oko','global',Overrides(theses=True,prompt_filters=''))
+            subscription_action(store, 'update_settings', 'oko','global',Overrides(theses=True,prompt_filters=''))
             store.settings_changed()
             assert JobRepository(store).retry_processing('p','theses')
         status,generation,snapshot=store.db.execute("SELECT status,generation,input_snapshot FROM jobs WHERE item='p' AND kind='theses'").fetchone()[:]

@@ -3,6 +3,7 @@ import pytest
 
 from oko.storage.transaction import transaction
 from oko.storage.job_types import Job
+from oko.subscriptions.subscriptions import FeedPatch, Overrides
 from tests.support.storage import Store
 from tests.support.subscriptions import configured_sources
 
@@ -94,5 +95,23 @@ def test_mark_viewed_rolls_back_with_owning_action(tmp_path):
         assert store.db.execute("SELECT feed_id FROM publications WHERE id='p'").fetchone()[0] == feed
         assert store.db.execute("SELECT id FROM jobs WHERE kind='delete' AND item='p'").fetchone() is None
         assert 'after_viewed_commit' not in events
+    finally:
+        store.db.close()
+
+
+def test_feed_and_settings_changes_roll_back_together(tmp_path):
+    configured_sources(tmp_path, [('https://example.test/feed', 'Feed', 'Folder')])
+    store=Store(tmp_path, lambda _: None)
+    try:
+        feed=store.subscriptions.feeds()[0]['id']
+        with pytest.raises(RuntimeError, match='owning transaction'):
+            store.subscriptions.update_feed(feed, FeedPatch(title='New title'))
+        with pytest.raises(ValueError, match='abort settings'):
+            with transaction(store.db):
+                store.subscriptions.update_feed(feed, FeedPatch(title='New title'))
+                store.subscriptions.update_settings('feed', feed, Overrides(theses=True))
+                raise ValueError('abort settings')
+        assert store.subscriptions.feeds()[0]['title']=='Feed'
+        assert 'theses' not in store.subscriptions._settings('feed', feed)
     finally:
         store.db.close()
