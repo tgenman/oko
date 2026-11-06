@@ -1,3 +1,4 @@
+from tests.support.subscription_action import subscription_action
 import asyncio
 from oko.subscriptions.subscriptions import Overrides
 from oko.application.subscription_service import subscription_service
@@ -9,7 +10,7 @@ def test_cancelled_theses_stay_cancelled_when_settings_change(tmp_path,postgres_
     store,item,execution,tasks=worker_library(tmp_path,database_url=postgres_url)
     try:
         with transaction(store.db):
-            store.subscriptions.update_settings('oko','global',Overrides(prompt_filters=''))
+            subscription_action(store, 'update_settings', 'oko','global',Overrides(prompt_filters=''))
             store.settings_changed()
         asyncio.run(pass_worker(workers(execution,tasks)[1],tasks))
         with transaction(store.db):

@@ -1,3 +1,4 @@
+from tests.support.subscription_action import subscription_action
 from tests.support.publications import summary,filter_result,filter_state
 """Worker invariants on PostgreSQL: accepted output, restart and late completion."""
 from tests.support.cards import read_all_cards
@@ -114,7 +115,7 @@ def test_disabled_filter_without_a_result_is_reported_disabled_over_http(postgre
 
     store, item, _, _ = worker_library(tmp_path, database_url=postgres_url)
     try:
-        store.subscriptions.update_settings('oko', 'global', Overrides(filter_enabled=False))
+        subscription_action(store, 'update_settings', 'oko', 'global', Overrides(filter_enabled=False))
         store.settings_changed()
         store.set_work_enabled(False)
     finally:
@@ -157,7 +158,7 @@ def test_disabled_theses_without_result_are_reported_disabled_over_http(postgres
 
     store, item, _, _ = worker_library(tmp_path, database_url=postgres_url)
     try:
-        store.subscriptions.update_settings('oko', 'global', Overrides(theses=False, filter_enabled=False))
+        subscription_action(store, 'update_settings', 'oko', 'global', Overrides(theses=False, filter_enabled=False))
         store.settings_changed()
         store.set_work_enabled(False)
     finally:
@@ -266,8 +267,8 @@ def test_interrupted_attempt_uses_new_model_on_next_attempt(postgres_url, tmp_pa
 
     store, item, execution, tasks = worker_library(tmp_path, database_url=postgres_url)
     try:
-        store.subscriptions.update_feed('fixture', FeedPatch(public_ai=True))
-        store.subscriptions.update_settings('oko', 'global', Overrides(processor='codex'))
+        subscription_action(store, 'update_feed', 'fixture', FeedPatch(public_ai=True))
+        subscription_action(store, 'update_settings', 'oko', 'global', Overrides(processor='codex'))
         store.settings_changed()
         store.configure_codex(CodexSettings.model_validate(configuration()))
         worker = workers(execution, tasks)[0]

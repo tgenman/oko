@@ -1,4 +1,5 @@
 """Real SQL failure boundaries for the three independent cron workers."""
+from tests.support.subscription_action import subscription_action
 from tests.support.job_claim import claim_job, retry_job
 from tests.support.collection_acceptance import apply_simulated_collection, running_collection_job
 from oko.storage.job_types import Job
@@ -105,9 +106,9 @@ def test_other_feed_settings_do_not_change_publication_processing_after_restart(
     from oko.subscriptions.subscriptions import AddFeed, Overrides
     store, item, execution, tasks = worker_library(tmp_path)
     try:
-        second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other', title='Other', folder='Other', verification='synthetic'))['id']
+        second = subscription_action(store, 'add_feed', AddFeed(url='https://fixture.test/other', title='Other', folder='Other', verification='synthetic'))['id']
         with transaction(store.db):
-            store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=False,theses=True,prompt_theses='Other feed rules'))
+            subscription_action(store, 'update_settings', 'feed',second,Overrides(filter_enabled=False,theses=True,prompt_theses='Other feed rules'))
             store.processing.reconcile_accepted_item(item)
         asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
         assert store.db.execute("SELECT input_snapshot->>'feed_id' FROM jobs WHERE item=%s AND kind='filter'",(item,)).fetchone()[0]=='fixture'
@@ -129,9 +130,9 @@ def test_competing_workers_commit_one_shared_processing_context(tmp_path):
         calls = []
         store,item,execution,tasks = worker_library(tmp_path)
         try:
-            second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other',title='Other',folder='Other',verification='synthetic'))['id']
+            second = subscription_action(store, 'add_feed', AddFeed(url='https://fixture.test/other',title='Other',folder='Other',verification='synthetic'))['id']
             with transaction(store.db):
-                store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=False,theses=True))
+                subscription_action(store, 'update_settings', 'feed',second,Overrides(filter_enabled=False,theses=True))
                 store.processing.reconcile_accepted_item(item)
             filter_worker, summary_worker = workers(execution,tasks,transport(calls,theses=True))
             await asyncio.gather(filter_worker.tick(),summary_worker.tick())
@@ -159,11 +160,11 @@ def test_late_result_from_deleted_selected_feed_is_rejected(tmp_path):
             return native.handler(request)
         store,item,execution,tasks = worker_library(tmp_path)
         try:
-            second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other',title='Other',folder='Other',verification='synthetic'))['id']
+            second = subscription_action(store, 'add_feed', AddFeed(url='https://fixture.test/other',title='Other',folder='Other',verification='synthetic'))['id']
             with transaction(store.db):
                 store.db.execute('UPDATE publications SET feed_id=%s WHERE id=%s', (second,item))
-                store.subscriptions.update_settings('feed','fixture',Overrides(filter_enabled=False))
-                store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=True))
+                subscription_action(store, 'update_settings', 'feed','fixture',Overrides(filter_enabled=False))
+                subscription_action(store, 'update_settings', 'feed',second,Overrides(filter_enabled=True))
                 store.processing.reconcile_accepted_item(item)
             worker = workers(execution,tasks,httpx.MockTransport(model))[0]
             await worker.tick()
@@ -186,7 +187,7 @@ def test_processing_waits_when_publication_feed_disallows_processor(tmp_path):
     store, item, execution, tasks = worker_library(tmp_path)
     try:
         with transaction(store.db):
-            store.subscriptions.update_settings('feed','fixture',Overrides(processor='codex'))
+            subscription_action(store, 'update_settings', 'feed','fixture',Overrides(processor='codex'))
             store.settings_changed('feed','fixture')
             store.processing.reconcile_accepted_item(item)
         worker = workers(execution,tasks)[0]
@@ -195,7 +196,7 @@ def test_processing_waits_when_publication_feed_disallows_processor(tmp_path):
         assert job['reason_code'] == 'ai-permission'
         assert saved(store,item)['filtered_content'] == {}
         with transaction(store.db):
-            store.subscriptions.update_settings('feed','fixture',Overrides(processor='llamacpp'))
+            subscription_action(store, 'update_settings', 'feed','fixture',Overrides(processor='llamacpp'))
             store.settings_changed('feed','fixture')
             store.processing.reconcile_accepted_item(item)
         asyncio.run(pass_worker(worker,tasks))
@@ -250,7 +251,7 @@ def test_new_revision_does_not_shorten_source_wait(tmp_path):
         deadline=store.wall_clock()+120
         next_at=store.clock()+120
         store.db.execute("UPDATE jobs SET status = 'pending' , wait_scope = 'source:synthetic' , retry_at = %s , next = %s , reason_message = 'source wait' WHERE kind = 'filter'",(deadline,next_at))
-        store.subscriptions.update_feed('fixture',FeedPatch(importance='high'))
+        subscription_action(store, 'update_feed', 'fixture',FeedPatch(importance='high'))
         store.settings_changed('feed','fixture')
         worker.service.reconcile()
     row=store.db.execute("SELECT retry_at,next,wait_scope,reason_message FROM jobs WHERE kind='filter'").fetchone()
@@ -265,10 +266,10 @@ def test_linked_source_privacy_change_reconciles_parent_job_atomically(tmp_path)
     from oko.subscriptions.subscriptions import AddFeed, FeedPatch
     store, item, _, _ = worker_library(tmp_path)
     try:
-        other = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/linked-feed',title='Linked',folder='Other',verification='synthetic'))['id']
+        other = subscription_action(store, 'add_feed', AddFeed(url='https://fixture.test/linked-feed',title='Linked',folder='Other',verification='synthetic'))['id']
         with transaction(store.db):
-            store.subscriptions.update_feed('fixture',FeedPatch(public_ai=True))
-            store.subscriptions.update_feed(other,FeedPatch(public_ai=True))
+            subscription_action(store, 'update_feed', 'fixture',FeedPatch(public_ai=True))
+            subscription_action(store, 'update_feed', other,FeedPatch(public_ai=True))
             memberships.lock_graph(store.db)
             store.db.execute("""INSERT INTO publications(id,url,platform,external_id,status,content,title,discovered_at)
                 SELECT 'linked','https://example.org/linked','rss','linked','ready',content,title,discovered_at FROM publications WHERE id=%s""", (item,))
@@ -278,7 +279,7 @@ def test_linked_source_privacy_change_reconciles_parent_job_atomically(tmp_path)
         before = store.db.execute("SELECT generation,input_snapshot->>'input_hash' FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()[:]
         store.processing.background = True
         def change():
-            store.subscriptions.update_feed(other,FeedPatch(public_ai=False))
+            subscription_action(store, 'update_feed', other,FeedPatch(public_ai=False))
             store.settings_changed('feed',other)
             after = store.db.execute("SELECT generation,input_snapshot->>'input_hash' FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()
             assert tuple(after)==before

@@ -1,3 +1,4 @@
+from tests.support.subscription_action import subscription_action
 from tests.support.job_claim import claim_job
 from tests.support.collection_acceptance import discovered
 """Bound HTTP reading work independently of machine speed and background work."""
@@ -36,7 +37,7 @@ def build_library(root, counts):
     try:
         feeds, items = [], []
         for index, count in enumerate(counts):
-            feed = store.subscriptions.add_feed(AddFeed(
+            feed = subscription_action(store, 'add_feed', AddFeed(
                 url='https://fixture.test/feed/'+str(index),
                 title=f'Synthetic {index}', folder=f'Folder {index}', verification='synthetic'))['id']
             feeds.append(feed)

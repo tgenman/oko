@@ -1,4 +1,5 @@
 """Real temporary storage for worker transaction and recovery scenarios."""
+from tests.support.subscription_action import subscription_action
 from tests.support.job_claim import claim_job
 import json
 from tests.support.storage import Store, ensure_fixture
@@ -21,7 +22,7 @@ def worker_library(root, *, text='Useful text', fault=lambda _:None, database_ur
     if database_url is not None:store.set_work_enabled(True)
     ensure_fixture(store.db)
     store.configure_processor(ProcessorConfig(endpoint='http://localhost:9931',model='local:latest',local_execution=True))
-    store.subscriptions.update_settings('oko','global',Overrides(processor='llamacpp',theses=True,prompt_filters='Keep useful text'))
+    subscription_action(store, 'update_settings', 'oko','global',Overrides(processor='llamacpp',theses=True,prompt_filters='Keep useful text'))
     store.settings_changed()
     with transaction(store.db):
         store.jobs.enqueue_discovery('fixture')
