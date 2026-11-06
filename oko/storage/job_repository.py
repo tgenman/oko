@@ -158,11 +158,12 @@ class JobRepository:
         return [(Job(row['id'],'download_media',row['item'],row['generation']),row['storage_key']) for row in rows]
 
     def finish_retired_media_cleanup(self, job: Job, key: str | None) -> None:
-        with self.store.db:
-            job_write(self.store.db,"""DELETE FROM jobs j WHERE j.id=%s AND j.kind='download_media'
-                AND j.item=%s AND j.generation=%s AND j.status<>'running' AND j.payload ? 'retired_media_key'
-                AND j.payload->>'retired_media_key' IS NOT DISTINCT FROM %s
-                AND NOT EXISTS (SELECT 1 FROM media_files m WHERE m.id=j.item)""",(job.id,job.item,job.generation,key))
+        if not self.store.db.transaction_depth:
+            raise RuntimeError('Media cleanup requires an owning transaction')
+        job_write(self.store.db,"""DELETE FROM jobs j WHERE j.id=%s AND j.kind='download_media'
+            AND j.item=%s AND j.generation=%s AND j.status<>'running' AND j.payload ? 'retired_media_key'
+            AND j.payload->>'retired_media_key' IS NOT DISTINCT FROM %s
+            AND NOT EXISTS (SELECT 1 FROM media_files m WHERE m.id=j.item)""",(job.id,job.item,job.generation,key))
 
     def retarget_completed_media(self, job: Job, identity: str, publication: str) -> None:
         """Keep the accepted file and its completed Job together in one transaction."""

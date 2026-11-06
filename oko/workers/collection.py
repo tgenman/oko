@@ -619,7 +619,8 @@ class CollectionWorker:
                 self.media.cleanup()
                 for retired,key in self.execution._store.jobs.retired_media_jobs():
                     if retired.id not in self.jobs._collection_active and self.media.retired_file_cleaned(key):
-                        self.execution._store.jobs.finish_retired_media_cleanup(retired,key)
+                        with self.execution._store.jobs.transaction(self._live):
+                            self.execution._store.jobs.finish_retired_media_cleanup(retired,key)
                 self._last_media_cleanup=now
             self._sync_sources()
             if now-self._last_collection >= self._collection_interval:
