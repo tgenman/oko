@@ -10,3 +10,11 @@ def claim_job(store: Store, *args: Any, **kwargs: Any) -> Job | None:
         return store.jobs.next_job(*args, **kwargs)
     with transaction(store.db):
         return store.jobs.next_job(*args, **kwargs)
+
+
+def retry_job(store: Store, *args: Any, **kwargs: Any) -> None:
+    if store.db.transaction_depth:
+        store.jobs.retry(*args, **kwargs)
+    else:
+        with transaction(store.db):
+            store.jobs.retry(*args, **kwargs)

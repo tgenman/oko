@@ -1,4 +1,5 @@
 """Synchronous acceptance boundary for synthetic storage fixtures."""
+from tests.support.job_claim import retry_job
 from typing import Any
 from tests.support.storage import Store
 from oko.storage.job_types import Job
@@ -25,7 +26,7 @@ def save(store: Store, job: Job, material: Material) -> None:
         error,effects=store.collected_publication.accept_content(job.item,material.adapter_content)
         jobs.apply_collection(effects,job=job)
         if error:
-            store.jobs.retry(job,store.clock(),error.label,issue=error.adapter_issue or AdapterIssue(error.code or 'fetch-failed',error.label,AdapterErrorKind.temporary if error.retryable else AdapterErrorKind.permanent))
+            retry_job(store, job,store.clock(),error.label,issue=error.adapter_issue or AdapterIssue(error.code or 'fetch-failed',error.label,AdapterErrorKind.temporary if error.retryable else AdapterErrorKind.permanent))
         else: jobs.finish(job)
 
 

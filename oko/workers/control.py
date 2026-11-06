@@ -146,13 +146,22 @@ class JobControl:
     def _delete(self, job: Job, current: Store) -> None:
         try:
             if job.kind == 'feed-delete':
-                current.jobs.finish_feed_deletion(job)
+                with current.jobs.transaction(lambda: True):
+                    if current.jobs.valid(job) and not current.jobs.finish_feed_deletion(job):
+                        current.jobs.retry(job, self._clock(), 'Ожидание очистки файлов', .1)
             else:
-                current.jobs.delete(job)
+                deleted = current.jobs.delete_files(job)
+                if deleted is not None:
+                    with current.jobs.transaction(lambda: True):
+                        if deleted:
+                            current.jobs.finish_delete(job)
+                        elif current.jobs.valid(job):
+                            current.jobs.retry(job, self._clock(), 'Ожидание завершения сохранения файла', .1)
         except Exception:
             record_caught('runtime._delete')
-            if current.jobs.valid(job):
-                current.jobs.retry(job, self._clock(), 'Ошибка удаления', code='delete')
+            with current.jobs.transaction(lambda: True):
+                if current.jobs.valid(job):
+                    current.jobs.retry(job, self._clock(), 'Ошибка удаления', code='delete')
 
 
     def retry_material(self, identity: str) -> bool:

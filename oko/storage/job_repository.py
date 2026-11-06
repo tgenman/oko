@@ -679,6 +679,8 @@ class JobRepository:
 
 
     def retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None, terminal: bool = False, issue: AdapterIssue | None = None) -> None:
+        if not self.store.db.transaction_depth:
+            raise RuntimeError('Job retry requires an owning transaction')
         try:
             self._retry(job,now,error,delay,code=code,terminal=terminal,issue=issue)
         except BaseException:
@@ -688,33 +690,31 @@ class JobRepository:
 
     def _retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None, terminal: bool = False, issue: AdapterIssue | None = None) -> None:
         if job.kind in ('discover','fetch','rebuild','filter','theses'):
-            with self.store.db:
-                valid=self.valid(job)
-                collection_jobs.fail(self.store,job,issue or AdapterIssue(code or 'collection-failed',error,
-                    AdapterErrorKind.permanent if terminal else AdapterErrorKind.temporary))
-                if valid and job.kind=='filter':self.store.processing.filter_changed(job.item)
-                if valid and not self.valid(job):self._complete_collection_outcome(job)
+            valid=self.valid(job)
+            collection_jobs.fail(self.store,job,issue or AdapterIssue(code or 'collection-failed',error,
+                AdapterErrorKind.permanent if terminal else AdapterErrorKind.temporary))
+            if valid and job.kind=='filter':self.store.processing.filter_changed(job.item)
+            if valid and not self.valid(job):self._complete_collection_outcome(job)
             return
-        with self.store.db:
-            memberships.lock_graph(self.store.db)
-            processor_previous=self.store.problems.prepare_processor_change([job.id],self.store.wall_clock(),source_lock=job.kind in ('download_media','delete','feed-delete') and (code or '').startswith('source-'))
-            previous = self.store.problems.deletion_candidates(job.id,self.store.wall_clock()) if job.kind in ('delete','feed-delete') else []
-            from oko.storage.media_job_problems import previous_candidates as media_candidates
-            previous_media=media_candidates(self.store,job.id,self.store.wall_clock()) if job.kind=='download_media' else []
-            changed = job_write(self.store.db, "UPDATE jobs SET status = %s , next = %s , reason_message = %s , reason_code = %s WHERE id = %s AND generation = %s AND status = 'running' AND CASE WHEN kind IN ('download_media','delete','feed-delete') AND (reason_code LIKE 'source-%%' OR %s LIKE 'source-%%') THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING OLD.reason_code AS previous_code",
-                ('failed' if terminal else 'pending',0 if code=='ai-permission' else now+delay,error,code or job.kind,job.id,job.generation,code or job.kind)).fetchone()
-            if changed and job.kind in ('download_media','delete','feed-delete') and ((changed['previous_code'] or '').startswith('source-') or (code or '').startswith('source-')):
-                from oko.storage import source_groups
-                source_old_keys=source_groups.job_keys(self.store,job.id,changed['previous_code']) if (changed['previous_code'] or '').startswith('source-') else set()
-                complete=source_groups.sync(self.store,job.kind,source_old_keys | source_groups.job_keys(self.store,job.id),self.store.wall_clock(),evidence=source_groups.job_evidence_many(self.store,[(job.id,changed['previous_code'])]))
-                job_write(self.store.db,"UPDATE jobs SET source_event_owned=(%s=1) AND (reason_code LIKE 'source-%%') IS TRUE WHERE id=%s",(complete,job.id))
-            if changed and job.kind in ('delete','feed-delete'):
-                self.store.problems.sync_deletion(job.id,previous,self.store.wall_clock())
-            if changed and job.kind=='download_media':
-                self.store.problems.sync_media_problem(job.id,previous_media,self.store.wall_clock())
-            if changed:
-                self.store.problems.finish_processor_change([job.id],processor_previous,self.store.wall_clock())
-                self.store.incomplete_draft.mark_job(job.kind,job.item,job.id)
+        memberships.lock_graph(self.store.db)
+        processor_previous=self.store.problems.prepare_processor_change([job.id],self.store.wall_clock(),source_lock=job.kind in ('download_media','delete','feed-delete') and (code or '').startswith('source-'))
+        previous = self.store.problems.deletion_candidates(job.id,self.store.wall_clock()) if job.kind in ('delete','feed-delete') else []
+        from oko.storage.media_job_problems import previous_candidates as media_candidates
+        previous_media=media_candidates(self.store,job.id,self.store.wall_clock()) if job.kind=='download_media' else []
+        changed = job_write(self.store.db, "UPDATE jobs SET status = %s , next = %s , reason_message = %s , reason_code = %s WHERE id = %s AND generation = %s AND status = 'running' AND CASE WHEN kind IN ('download_media','delete','feed-delete') AND (reason_code LIKE 'source-%%' OR %s LIKE 'source-%%') THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING OLD.reason_code AS previous_code",
+            ('failed' if terminal else 'pending',0 if code=='ai-permission' else now+delay,error,code or job.kind,job.id,job.generation,code or job.kind)).fetchone()
+        if changed and job.kind in ('download_media','delete','feed-delete') and ((changed['previous_code'] or '').startswith('source-') or (code or '').startswith('source-')):
+            from oko.storage import source_groups
+            source_old_keys=source_groups.job_keys(self.store,job.id,changed['previous_code']) if (changed['previous_code'] or '').startswith('source-') else set()
+            complete=source_groups.sync(self.store,job.kind,source_old_keys | source_groups.job_keys(self.store,job.id),self.store.wall_clock(),evidence=source_groups.job_evidence_many(self.store,[(job.id,changed['previous_code'])]))
+            job_write(self.store.db,"UPDATE jobs SET source_event_owned=(%s=1) AND (reason_code LIKE 'source-%%') IS TRUE WHERE id=%s",(complete,job.id))
+        if changed and job.kind in ('delete','feed-delete'):
+            self.store.problems.sync_deletion(job.id,previous,self.store.wall_clock())
+        if changed and job.kind=='download_media':
+            self.store.problems.sync_media_problem(job.id,previous_media,self.store.wall_clock())
+        if changed:
+            self.store.problems.finish_processor_change([job.id],processor_previous,self.store.wall_clock())
+            self.store.incomplete_draft.mark_job(job.kind,job.item,job.id)
 
 
     def interrupted(self, feeds: set[str] | None = None) -> None:
@@ -1214,81 +1214,89 @@ class JobRepository:
         if store.db.in_transaction:store.incomplete_draft.mark_job('download_media',identity)
 
 
-    def finish_feed_deletion(self, job: Job) -> None:
+    def finish_feed_deletion(self, job: Job) -> bool:
+        if not self.store.db.transaction_depth:
+            raise RuntimeError('Feed deletion requires an owning transaction')
         feed = job.item
         if self.store.db.execute("SELECT 1 FROM jobs WHERE kind='delete' AND status!='done' AND payload::jsonb->>'cleanup_feed' = %s", (feed,)).fetchone():
-            self.retry(job, 0, 'Ожидание очистки файлов', .1)
-            return
+            return False
         self.store.fault('before_feed_claim_release')
-        with self.store.db:
-            memberships.lock_graph(self.store.db)
-            self.store.incomplete_draft.mark_admission_feed(feed)
-            feed_exists = self.store.db.execute('SELECT 1 FROM feeds WHERE id=%s', (feed,)).fetchone() is not None
-            affects_codex = feed_exists and self.store.problems.codex_choice(self.store.wall_clock(), feed=feed) is not None
-            previous_problem = self.store.problems.deletion_candidates(job.id,self.store.wall_clock())
-            owned = "SELECT item FROM jobs WHERE kind='delete' AND payload::jsonb->>'cleanup_feed' = %s"
-            source_effects=CollectionDiagnostics()
-            source_items={row[0] for row in self.store.db.execute(owned,(feed,))}
-            source_items.add(feed)
-            publication_links.capture_source_groups(self.store,source_effects,source_items)
-            source_ids=[row['id'] for row in self.store.db.execute("SELECT id FROM jobs WHERE feed_id=%s AND collection_attempt IS NOT NULL AND reason_code LIKE 'source-%%'",(feed,))]
-            from oko.storage import source_groups
-            for start in range(0,len(source_ids),400):
-                group=source_ids[start:start+400]
-                source_effects.source_groups_before.update(source_groups.job_keys_many(self.store,group))
-                evidence=source_groups.job_evidence_many(self.store,[(job_id,None) for job_id in group])
-                for key,objects in evidence.items():source_effects.source_evidence_before.setdefault(key,set()).update(objects)
-            self.store.incomplete_draft.mark_materials([row['item'] for row in self.store.db.execute(owned,(feed,))])
-            affected=[row['id'] for row in self.store.db.execute(f"SELECT id FROM jobs WHERE (processor_visible OR reason_code='processor-config') AND (item=%s OR (kind='delete' AND payload::jsonb->>'cleanup_feed'=%s) OR (kind!='delete' AND item IN ({owned})))",(feed,feed,feed))]
-            processor_previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
-            job_write(self.store.db, f"DELETE FROM jobs WHERE kind != 'delete' AND item IN ({owned})", (feed,))
-            if self.store.db.execute(f'DELETE FROM publications WHERE id IN ({owned})', (feed,)).rowcount:
-                status_changed(self.store.db)
-            job_write(self.store.db, "DELETE FROM jobs WHERE item = %s OR (kind='delete' AND payload::jsonb->>'cleanup_feed' = %s)", (feed, feed))
-            self.store.problems.sync_deletion(job.id,previous_problem,self.store.wall_clock())
-            if affected:self.store.problems.finish_processor_change(affected,processor_previous,self.store.wall_clock(),removed_outcome='irrelevant')
-            for table in ('history_members', 'initial_history'):
-                deleted = self.store.db.execute(f'DELETE FROM {table} WHERE feed = %s', (feed,)).rowcount
-                if table=='initial_history' and deleted:
-                    source_changed(self.store.db)
-                if table in ('history_members',) and deleted:
-                    status_changed(self.store.db)
-            self.store.db.execute('UPDATE jobs SET feed_id=NULL, collection_attempt=NULL WHERE feed_id=%s AND collection_attempt IS NOT NULL', (feed,))
-            self.store.subscriptions.clear_settings('feed', feed)
-            self.store.db.execute('DELETE FROM state WHERE key = %s', ('feed-status:'+feed,))
-            self.store.subscriptions.telegram.release(feed)
-            if self.store.db.execute('DELETE FROM feeds WHERE id = %s', (feed,)).rowcount:
+        memberships.lock_graph(self.store.db)
+        self.store.incomplete_draft.mark_admission_feed(feed)
+        feed_exists = self.store.db.execute('SELECT 1 FROM feeds WHERE id=%s', (feed,)).fetchone() is not None
+        affects_codex = feed_exists and self.store.problems.codex_choice(self.store.wall_clock(), feed=feed) is not None
+        previous_problem = self.store.problems.deletion_candidates(job.id,self.store.wall_clock())
+        owned = "SELECT item FROM jobs WHERE kind='delete' AND payload::jsonb->>'cleanup_feed' = %s"
+        source_effects=CollectionDiagnostics()
+        source_items={row[0] for row in self.store.db.execute(owned,(feed,))}
+        source_items.add(feed)
+        publication_links.capture_source_groups(self.store,source_effects,source_items)
+        source_ids=[row['id'] for row in self.store.db.execute("SELECT id FROM jobs WHERE feed_id=%s AND collection_attempt IS NOT NULL AND reason_code LIKE 'source-%%'",(feed,))]
+        from oko.storage import source_groups
+        for start in range(0,len(source_ids),400):
+            group=source_ids[start:start+400]
+            source_effects.source_groups_before.update(source_groups.job_keys_many(self.store,group))
+            evidence=source_groups.job_evidence_many(self.store,[(job_id,None) for job_id in group])
+            for key,objects in evidence.items():source_effects.source_evidence_before.setdefault(key,set()).update(objects)
+        self.store.incomplete_draft.mark_materials([row['item'] for row in self.store.db.execute(owned,(feed,))])
+        affected=[row['id'] for row in self.store.db.execute(f"SELECT id FROM jobs WHERE (processor_visible OR reason_code='processor-config') AND (item=%s OR (kind='delete' AND payload::jsonb->>'cleanup_feed'=%s) OR (kind!='delete' AND item IN ({owned})))",(feed,feed,feed))]
+        processor_previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
+        job_write(self.store.db, f"DELETE FROM jobs WHERE kind != 'delete' AND item IN ({owned})", (feed,))
+        if self.store.db.execute(f'DELETE FROM publications WHERE id IN ({owned})', (feed,)).rowcount:
+            status_changed(self.store.db)
+        job_write(self.store.db, "DELETE FROM jobs WHERE item = %s OR (kind='delete' AND payload::jsonb->>'cleanup_feed' = %s)", (feed, feed))
+        self.store.problems.sync_deletion(job.id,previous_problem,self.store.wall_clock())
+        if affected:self.store.problems.finish_processor_change(affected,processor_previous,self.store.wall_clock(),removed_outcome='irrelevant')
+        for table in ('history_members', 'initial_history'):
+            deleted = self.store.db.execute(f'DELETE FROM {table} WHERE feed = %s', (feed,)).rowcount
+            if table=='initial_history' and deleted:
                 source_changed(self.store.db)
-                if affects_codex:
-                    self.store.problems.sync_codex_choice(self.store.wall_clock())
-            if source_effects.source_groups_before:self.sync_captured_source_groups(source_effects)
+            if table in ('history_members',) and deleted:
+                status_changed(self.store.db)
+        self.store.db.execute('UPDATE jobs SET feed_id=NULL, collection_attempt=NULL WHERE feed_id=%s AND collection_attempt IS NOT NULL', (feed,))
+        self.store.subscriptions.clear_settings('feed', feed)
+        self.store.db.execute('DELETE FROM state WHERE key = %s', ('feed-status:'+feed,))
+        self.store.subscriptions.telegram.release(feed)
+        if self.store.db.execute('DELETE FROM feeds WHERE id = %s', (feed,)).rowcount:
+            source_changed(self.store.db)
+            if affects_codex:
+                self.store.problems.sync_codex_choice(self.store.wall_clock())
+        if source_effects.source_groups_before:self.sync_captured_source_groups(source_effects)
+        return True
 
 
-    def delete(self, job: Job) -> None:
+    def delete_files(self, job: Job) -> bool | None:
+        if self.store.db.transaction_depth:
+            raise RuntimeError('File deletion must run outside a transaction')
         if not self.valid(job):
-            return
+            return None
         self.store.fault('before_delete')
         for path in (self.store.root / 'content' / job.item, self.store.root / 'staging' / job.item, self.store.root / 'media' / job.item):
             if any(path==active or path in active.parents for active in self.store.media.active_paths):
-                self.retry(job,self.store.clock(),'Ожидание завершения сохранения файла',.1)
-                return
+                return False
             if path.exists():
                 shutil.rmtree(path)
         self.store.fault('after_delete_files')
-        with self.store.db:
-            memberships.lock_graph(self.store.db)
-            source_effects=CollectionDiagnostics()
-            publication_links.capture_source_groups(self.store,source_effects,{job.item})
-            affected=self.store.problems.processor_jobs_for_materials([job.item])
-            previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
-            self.store.db.execute('UPDATE jobs SET execution_settings=NULL WHERE item=%s AND execution_settings IS NOT NULL', (job.item,))
-            self.finish(job)
-            if affected:self.store.problems.finish_processor_change(affected,previous,self.store.wall_clock())
-            if source_effects.source_groups_before:self.sync_captured_source_groups(source_effects)
-            if not self.store.db.execute('SELECT 1 FROM publications WHERE id=%s',(job.item,)).fetchone():
-                job_write(self.store.db, """DELETE FROM jobs WHERE
-                    (item=%s AND kind IN ('fetch','rebuild','filter','theses','download_media','delete'))
-                    OR (kind='download_media' AND payload->>'cleanup_publication'=%s)""", (job.item,job.item))
+        return True
+
+    def finish_delete(self, job: Job) -> None:
+        if not self.store.db.transaction_depth:
+            raise RuntimeError('Deletion requires an owning transaction')
+        if not self.valid(job):
+            return
+        memberships.lock_graph(self.store.db)
+        source_effects=CollectionDiagnostics()
+        publication_links.capture_source_groups(self.store,source_effects,{job.item})
+        affected=self.store.problems.processor_jobs_for_materials([job.item])
+        previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
+        self.store.db.execute('UPDATE jobs SET execution_settings=NULL WHERE item=%s AND execution_settings IS NOT NULL', (job.item,))
+        self.finish(job)
+        if affected:self.store.problems.finish_processor_change(affected,previous,self.store.wall_clock())
+        if source_effects.source_groups_before:self.sync_captured_source_groups(source_effects)
+        if not self.store.db.execute('SELECT 1 FROM publications WHERE id=%s',(job.item,)).fetchone():
+            job_write(self.store.db, """DELETE FROM jobs WHERE
+                (item=%s AND kind IN ('fetch','rebuild','filter','theses','download_media','delete'))
+                OR (kind='download_media' AND payload->>'cleanup_publication'=%s)""", (job.item,job.item))
 
 
     def retry_linked(self, item: str) -> None:

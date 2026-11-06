@@ -1,4 +1,4 @@
-from tests.support.job_claim import claim_job
+from tests.support.job_claim import claim_job, retry_job
 import json
 
 import pytest
@@ -29,7 +29,7 @@ def test_failure_claim_and_stale_attempt_keep_one_problem(tmp_path, postgres_url
             if kind == 'download_media':
                 store.jobs.fail_media(old, issue)
             else:
-                store.jobs.retry(old, 1, 'failure', issue=issue)
+                retry_job(store, old, 1, 'failure', issue=issue)
         problem = store.db.execute("SELECT id,body FROM reader_problems WHERE body::jsonb->>'operation'=%s AND finished IS NULL", ('producer:' + kind,)).fetchone()
         assert problem
         with transaction(store.db):
@@ -52,7 +52,7 @@ def test_failure_claim_and_stale_attempt_keep_one_problem(tmp_path, postgres_url
             if kind == 'download_media':
                 store.jobs.fail_media(old, issue)
             else:
-                store.jobs.retry(old, 1, 'stale failure', issue=issue)
+                retry_job(store, old, 1, 'stale failure', issue=issue)
         assert store.db.execute('SELECT generation,status FROM jobs WHERE id=%s', (job_id,)).fetchone()[:] == (claimed.generation, 'running')
         assert store.db.execute('SELECT body FROM reader_problems WHERE id=%s', (problem['id'],)).fetchone()[0] == after['body']
     finally:
