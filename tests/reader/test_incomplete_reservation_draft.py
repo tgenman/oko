@@ -48,7 +48,8 @@ def test_feed_removal_after_deadline_does_not_restore_forgotten_material(tmp_pat
             save_keys(store.db,['p'])
         store.youtube.blocked(100,900);clock[0]=1001
         seen=virtual_due_groups(store,clock[0]);assert len(seen)==1
-        store.remove_feed('f')
+        with transaction(store.db):
+            store.remove_feed('f')
         row=store.db.execute('SELECT body,finished FROM reader_problems WHERE id=%s',(seen[0]['id'],)).fetchone()
         assert row and row['finished'] is not None
         assert not any(o.get('id')=='p' for o in json.loads(row['body'])['objects'])
