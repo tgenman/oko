@@ -1,3 +1,4 @@
+from tests.support.job_claim import claim_job
 import json
 import pytest
 from oko.storage.job_types import Job
@@ -18,7 +19,7 @@ def test_delete_problem_event_get_is_read_only_and_finish_rollback(tmp_path,post
         assert any(p['id']==before['id'] for p in store.problems.snapshot(2)['current'])
         assert store.db.execute('SELECT id,xmin::text,body FROM reader_problems WHERE identity=%s AND finished IS NULL',(identity,)).fetchone()==before
         with store.db:store.db.execute('UPDATE jobs SET next=0 WHERE id=%s',(job_id,))
-        claimed=store.jobs.next_job(1,deleting_only=True)
+        claimed=claim_job(store, 1,deleting_only=True)
         with pytest.raises(RuntimeError):
             with transaction(store.db):
                 store.jobs.delete(claimed)

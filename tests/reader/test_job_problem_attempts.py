@@ -1,3 +1,4 @@
+from tests.support.job_claim import claim_job
 import json
 
 import pytest
@@ -34,7 +35,7 @@ def test_failure_claim_and_stale_attempt_keep_one_problem(tmp_path, postgres_url
         with transaction(store.db):
             store.db.execute('UPDATE jobs SET next=0 WHERE id=%s', (job_id,))
         def claim():
-            return store.jobs.next_job(1, feeds=['feed'], media_only=kind == 'download_media',
+            return claim_job(store, 1, feeds=['feed'], media_only=kind == 'download_media',
                                        ai_only=kind in ('filter', 'theses'))
         with pytest.raises(RuntimeError, match='rollback'):
             with transaction(store.db):

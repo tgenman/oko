@@ -1,4 +1,5 @@
 """Real temporary storage for worker transaction and recovery scenarios."""
+from tests.support.job_claim import claim_job
 import json
 from tests.support.storage import Store, ensure_fixture
 from tests.support.legacy_source import Publication
@@ -24,7 +25,7 @@ def worker_library(root, *, text='Useful text', fault=lambda _:None, database_ur
     store.settings_changed()
     with transaction(store.db):
         store.jobs.enqueue_discovery('fixture')
-    job=store.jobs.next_job(store.clock(),feeds=['fixture'])
+    job=claim_job(store, store.clock(),feeds=['fixture'])
     assert job.kind=='discover'
     discovered(store,[publication_packet(Publication('one','https://example.org/one',100),Material('Title',text),needs_fetch=False)],'{}',job)
     item=store.db.execute('SELECT id FROM publications').fetchone()[0]

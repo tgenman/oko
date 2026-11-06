@@ -1,4 +1,5 @@
 """Real SQL failure boundaries for the three independent cron workers."""
+from tests.support.job_claim import claim_job
 from tests.support.collection_acceptance import apply_simulated_collection, running_collection_job
 from oko.storage.job_types import Job
 import asyncio
@@ -254,7 +255,8 @@ def test_new_revision_does_not_shorten_source_wait(tmp_path):
         worker.service.reconcile()
     row=store.db.execute("SELECT retry_at,next,wait_scope,reason_message FROM jobs WHERE kind='filter'").fetchone()
     assert tuple(row)==(deadline,next_at,'source:synthetic','source wait')
-    assert store.jobs.claim_processing('filter',store.clock()) is None
+    with transaction(store.db):
+        assert store.jobs.claim_processing('filter',store.clock()) is None
     store.db.close()
 
 
@@ -309,7 +311,7 @@ def test_discovery_page_and_continuation_roll_back_together(tmp_path):
         with transaction(store.db):
             store.db.execute("UPDATE feeds SET cursor='' WHERE id='fixture'")
             store.jobs.enqueue_discovery('fixture')
-        job=store.jobs.next_job(store.clock(),feeds=['fixture'])
+        job=claim_job(store, store.clock(),feeds=['fixture'])
         assert job and job.kind=='discover'
         worker=collection_worker(tmp_path,store,StructuredSource(Paginated()))
         asyncio.run(worker._execute(job))
@@ -368,7 +370,7 @@ def test_failed_delete_problem_follows_job_without_status_read(tmp_path, postgre
         assert not any(c['id']=='job:delete:fixture:delete:item' for c in store.problems.candidates(5))
         with store.db:
             store.db.execute("UPDATE jobs SET next=0 WHERE id=%s", (job.id,))
-        claimed=store.jobs.next_job(1,deleting_only=True)
+        claimed=claim_job(store, 1,deleting_only=True)
         assert claimed is not None and claimed.id==job.id
         assert json.loads(current()['body'])['state']=='retrying'
         with pytest.raises(ValueError,match='finish rollback'):

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.support.job_claim import claim_job
 from tests.support.collection_acceptance import save
 """Synthetic provider for behavioural scenarios, using the current adapter contract."""
 from dataclasses import dataclass,replace
@@ -145,7 +146,7 @@ def save_material(store: Store,job: Job,material: Material) -> None:
     assert publication is not None
     save(store,job,owner.describe(publication,material))
     while store.db.execute("SELECT 1 FROM jobs j JOIN media_files m ON m.id=j.item WHERE m.publication_id=%s AND j.status='pending'",(job.item,)).fetchone():
-        media_job=store.jobs.next_job(store.clock(),feeds=[store.item_feed(job.item)],media_only=True)
+        media_job=claim_job(store, store.clock(),feeds=[store.item_feed(job.item)],media_only=True)
         assert media_job is not None
         download=store.media.begin(media_job.item,str(media_job.id)+'-'+str(media_job.generation),store.jobs.manual(media_job))
         assert download is not None

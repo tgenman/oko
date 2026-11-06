@@ -1,3 +1,4 @@
+from tests.support.job_claim import claim_job
 from tests.support.source import save_material
 """Deterministic temporary libraries for HTTP/browser performance acceptance."""
 from pathlib import Path
@@ -29,11 +30,11 @@ def saved_library(root:Path, per_feed:int) -> dict[str,object]:
         store.subscriptions.update_settings('oko','global',Overrides(theses=False,prompt_filters='',processor='llamacpp'))
         with transaction(store.db):
             store.jobs.enqueue_discovery(feeds[0])
-        discovery=store.jobs.next_job(store.clock(),feeds=[feeds[0]])
+        discovery=claim_job(store, store.clock(),feeds=[feeds[0]])
         assert discovery is not None
         discovered(store,[publication_packet(Publication('prototype','https://example.org/prototype',1),
             Material('Prototype','',captions='not_requested',description='Synthetic video'),needs_fetch=True)],'{}',discovery,feeds[0])
-        job=store.jobs.next_job(store.clock(),feeds=[feeds[0]])
+        job=claim_job(store, store.clock(),feeds=[feeds[0]])
         assert job is not None and job.kind=='fetch'
         save_material(store,job,Material('Prototype','Synthetic saved text.',captions='available'))
         prototype=store.db.execute('SELECT content FROM publications WHERE id=%s',(job.item,)).fetchone()[0]

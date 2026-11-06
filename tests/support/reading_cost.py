@@ -1,3 +1,4 @@
+from tests.support.job_claim import claim_job
 from tests.support.collection_acceptance import discovered
 """Bound HTTP reading work independently of machine speed and background work."""
 from contextvars import ContextVar
@@ -41,7 +42,7 @@ def build_library(root, counts):
             feeds.append(feed)
             with transaction(store.db):
                 store.jobs.enqueue_discovery(feed)
-            job = store.jobs.next_job(0, feeds=[feed])
+            job = claim_job(store, 0, feeds=[feed])
             assert job is not None
             discovered(store,[publication_packet(Publication(str(n), f'https://example.org/{index}/{n}', n),
                               Material(f'Video {n}', '', captions='not_requested', description='Synthetic video'),needs_fetch=True)

@@ -1,3 +1,4 @@
+from tests.support.job_claim import claim_job
 import json
 import pytest
 from oko.storage.job_types import Job
@@ -24,7 +25,7 @@ def test_discover_failure_and_completion_are_saved_without_status_read(tmp_path,
         store.jobs.retry(job,1,'source failed',code='source-connection')
         prior=current(); assert prior
         with store.db: store.db.execute('UPDATE jobs SET next=0 WHERE id=%s',(job_id,))
-        claimed=store.jobs.next_job(1,feeds=['feed'])
+        claimed=claim_job(store, 1,feeds=['feed'])
         assert claimed and claimed.id==job_id
         assert json.loads(current()['body'])['state']=='retrying'
         with transaction(store.db): store.jobs.finish(claimed)

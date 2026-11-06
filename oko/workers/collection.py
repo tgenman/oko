@@ -655,8 +655,9 @@ class CollectionWorker:
                 if lane=='captions':
                     feeds=caption_feeds
                 dependencies=self._dependency_feeds if lane in ('common','media') else []
-                job = self.execution._store.jobs.next_job(now, deleting_only=not (feeds or dependencies),
-                                           feeds=feeds, include_deletions=lane == 'common', media_only=media_lane,captions_only=lane=='captions',dependency_feeds=dependencies)
+                with self.execution._store.jobs.transaction(self._live):
+                    job = self.execution._store.jobs.next_job(now, deleting_only=not (feeds or dependencies),
+                                               feeds=feeds, include_deletions=lane == 'common', media_only=media_lane,captions_only=lane=='captions',dependency_feeds=dependencies)
                 if job:
                     self.jobs._lane_jobs[lane] = job
                     if job.kind=='delete':
