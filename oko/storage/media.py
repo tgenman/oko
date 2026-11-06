@@ -87,6 +87,10 @@ class MediaFiles:
         row = self.store.db.execute('SELECT publication_id FROM media_files WHERE id = %s', (media,)).fetchone()
         return str(row[0]) if row else None
 
+    def publications_for_feed(self, feed: str) -> list[str]:
+        rows=self.store.db.execute('SELECT DISTINCT p.id FROM publications p JOIN media_files m ON m.publication_id=p.id WHERE p.feed_id=%s',(feed,)).fetchall()
+        return [str(row[0]) for row in rows]
+
 
     @reading_value
     def loading(self, item: str) -> bool:

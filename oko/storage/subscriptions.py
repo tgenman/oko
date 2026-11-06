@@ -174,6 +174,14 @@ class SubscriptionRepository:
     def feed_refresh_minutes(self) -> int:
         return int(self._settings('oko', 'global').get('feed_refresh_minutes', DEFAULT_FEED_REFRESH_MINUTES))
 
+    def resume_history(self, feed: str) -> None:
+        if not self.db.transaction_depth:
+            raise RuntimeError('History changes require an owning transaction')
+        memberships.lock_graph(self.db)
+        history=self.history.status(feed)
+        if history and not history.get('cancelled'):
+            self.history.pause(feed,False)
+
     def telegram_http_settings(self) -> dict[str, Any]:
         values = self._settings('oko', 'global')
         return dict(value=float(values.get('telegram_http_rps', 2.)),

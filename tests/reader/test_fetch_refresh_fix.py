@@ -1,5 +1,6 @@
 import json
 import pytest
+from oko.services.feed_refresh import FeedRefresh
 from tests.support.storage import Store
 from oko.storage.transaction import transaction
 
@@ -17,12 +18,12 @@ def test_refresh_failed_fetch_clears_its_explicit_problem(tmp_path,postgres_url)
         assert json.loads(before['body'])['next_step']=='Повторите загрузку вручную.'
         with pytest.raises(ValueError,match='abort refresh'):
             with transaction(store.db):
-                store.jobs.refresh_feed('feed')
+                FeedRefresh(store.media,store.subscriptions,store.jobs).refresh('feed')
                 raise ValueError('abort refresh')
         assert store.db.execute('SELECT status FROM jobs WHERE id=%s',(job,)).fetchone()[0]=='failed'
         assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s',(before['id'],)).fetchone()[0] is None
         with transaction(store.db):
-            store.jobs.refresh_feed('feed')
+            FeedRefresh(store.media,store.subscriptions,store.jobs).refresh('feed')
         after=store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s',(before['id'],)).fetchone()
         assert after and after['outcome']=='resolved'
         current=store.db.execute('SELECT status,reason_code,reason_message FROM jobs WHERE id=%s',(job,)).fetchone()

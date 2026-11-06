@@ -466,23 +466,20 @@ class JobRepository:
         if changed and (changed['reason_message'] is not None or changed['reason_code'] is not None):self.store.problems.sync_discover(changed['id'],self.store.wall_clock())
         if changed and affected:self.store.problems.finish_processor_change(affected,previous,self.store.wall_clock())
 
-    def refresh_feed(self, feed: str) -> None:
-        """Admit one manual refresh without restarting work already in progress."""
+    def refresh_discovery(self, feed: str) -> None:
         if not self.store.db.transaction_depth:
             raise RuntimeError('Feed refresh requires an owning transaction')
-        for row in self.store.db.execute('SELECT DISTINCT i . id FROM publications i JOIN media_files m ON m . publication_id = i . id WHERE i.feed_id = %s', (feed,)).fetchall():
-            self.retry_media(row['id'],revalidate_ready=False)
         discovery = feed
         active = self.store.db.execute("SELECT 1 FROM jobs WHERE kind = 'discover' AND item = %s AND ( status = 'running' OR ( status = 'pending' AND reason_message IS NULL AND next <= %s ) )", (discovery,self.store.clock())).fetchone()
-        memberships.lock_graph(self.store.db)
-        history = self.store.subscriptions.history.status(feed)
-        if history and not history.get('cancelled'):
-            self.store.subscriptions.history.pause(feed, False)
         if not active:
             self.enqueue_discovery(feed)
             changed_discover=job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , reason_code = NULL , reason_message = NULL , next = CASE WHEN reason_code LIKE '%%FloodWaitError' OR reason_code = 'youtube-admission' OR ( wait_scope IS NOT NULL AND retry_at > %s ) THEN next ELSE 0 END , retry_at = CASE WHEN wait_scope IS NOT NULL AND retry_at > %s THEN retry_at ELSE NULL END , generation = generation + 1 WHERE kind = 'discover' AND item = %s AND status != 'running' RETURNING id,reason_message,reason_code", (self.store.wall_clock(),self.store.wall_clock(),discovery)).fetchone()
             if changed_discover and (changed_discover['reason_message'] is not None or changed_discover['reason_code'] is not None):self.store.problems.sync_discover(changed_discover['id'],self.store.wall_clock())
             if changed_discover and changed_discover['reason_code']=='processor-config':self.store.problems.finish_processor_change([changed_discover['id']],None,self.store.wall_clock())
+
+    def retry_feed_fetches(self, feed: str) -> None:
+        if not self.store.db.transaction_depth:
+            raise RuntimeError('Feed refresh requires an owning transaction')
         source_rows: list[Any]=[]
         from oko.storage.fetch_job_problems import previous_candidates as managed_candidates
         for row in self.store.db.execute("SELECT i . id , j . id AS job_id, j . reason_message , j . reason_code, j . status FROM publications i JOIN jobs j ON j . item = i . id AND j . kind = 'fetch' WHERE i.feed_id = %s AND j . status != 'running'", (feed,)).fetchall():
@@ -498,6 +495,10 @@ class JobRepository:
         if source_rows:
             from oko.storage import source_groups
             source_groups.sync_changed_rows(self.store,source_rows,self.store.wall_clock())
+
+    def retry_feed_processing(self, feed: str) -> None:
+        if not self.store.db.transaction_depth:
+            raise RuntimeError('Feed refresh requires an owning transaction')
         for kind in ('filter','theses'):
             for row in self.store.db.execute(f'SELECT j.item FROM jobs j JOIN ({owned_ids("= %s")}) owner ON owner.id=j.item WHERE j.kind = %s AND j.reason_message IS NOT NULL',(feed,feed,kind)).fetchall():
                 self.retry_processing(row[0],kind)
