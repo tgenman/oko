@@ -127,4 +127,10 @@ MIGRATIONS = (
     Migration(119, 'publication-contract-audit', (Path(__file__).parent / 'postgres' / '119-publication-contract-audit.sql').read_text(),
               (Path(__file__).parent / 'postgres' / 'prelude-publication-filter-extra.sql').read_text(), 96, 114),
     Migration(120, 'remove-processing-revision', (Path(__file__).parent / 'postgres' / '120-remove-processing-revision.sql').read_text()),
+    Migration(121, 'preserve-legacy-external-reasons', (Path(__file__).parent / 'postgres' / '121-preserve-legacy-external-reasons.sql').read_text(),
+              (Path(__file__).parent / 'postgres' / 'prelude-legacy-external-reasons.sql').read_text(), 107, 107),
+    Migration(122, 'restore-external-media-urls', (Path(__file__).parent / 'postgres' / '122-restore-external-media-urls.sql').read_text(),
+              (Path(__file__).parent / 'postgres' / 'prelude-duplicate-external-media.sql').read_text(), 108, 108),
+    Migration(123, 'empty-manifest-bookkeeping', (Path(__file__).parent / 'postgres' / '123-empty-manifest-bookkeeping.sql').read_text(),
+              (Path(__file__).parent / 'postgres' / 'prelude-empty-manifest-bookkeeping.sql').read_text(), 113, 113),
 )
