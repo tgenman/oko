@@ -164,7 +164,7 @@ def test_changed_media_waits_for_new_metadata_with_explanation(tmp_path):
 
 def test_cancelled_caption_attempt_cannot_block_or_release_new_owner(tmp_path):
     from oko.collection.youtube.access import CaptionsDeferred
-    from oko.storage.job_types import Job
+    from oko.domain.job import Job
     from oko.workers.collection import CaptionAttempt
     async def scenario():
         store,item,execution,tasks=worker_library(tmp_path)

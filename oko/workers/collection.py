@@ -23,7 +23,7 @@ from oko.collection.telegram.http import TelegramHTTP
 from oko.collection.http import SourceHTTP
 from oko.storage.media import MediaOutput, MediaDownload
 from oko.storage.store import Store
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from oko.collection.telegram.contracts import TelegramBinding
 from oko.collection.youtube.source import LocalCaptions
 from oko.collection.contracts import CaptionsClient
@@ -39,6 +39,7 @@ from oko.services.discovery import DiscoveryService
 from oko.storage.collection_state import CollectionState
 from oko.storage.collection_publications import CollectionPublications
 from oko.services.media import MediaService
+from oko.application.collection_effects import CollectionApplication
 
 
 def collection_service(storage: Callable[[], Store]) -> CollectionService:
@@ -269,7 +270,7 @@ class CollectionWorker:
                                 self.service.refresh_identity(feed, outcome.observation.identity.as_info())
                             current.jobs.begin_collection(job)
                             effects=self.discovery.accept(list(outcome.publications),outcome.cursor,feed,namespace,description=outcome.observation.description,successful=outcome.retry_error is None)
-                            current.jobs.apply_collection(effects,job=job)
+                            CollectionApplication(current.jobs,current.publications,current.processing).apply(effects,job=job)
                             current.jobs.checkpoint('collection_after_result')
                             current.jobs.finish(job)
                             current.jobs.checkpoint('collection_after_finish')
@@ -301,7 +302,7 @@ class CollectionWorker:
                                 self.service.refresh_identity(feed, observation.identity.as_info())
                             current.jobs.begin_collection(job)
                             collection_error,effects=self.service.collected_content(job.item,value)
-                            current.jobs.apply_collection(effects,job=job)
+                            CollectionApplication(current.jobs,current.publications,current.processing).apply(effects,job=job)
                             current.jobs.checkpoint('collection_after_result')
                             if collection_error:
                                 current.jobs.retry(job,self._clock(),collection_error.label,issue=collection_error.adapter_issue or AdapterIssue(collection_error.code or 'fetch-failed',collection_error.label,AdapterErrorKind.temporary if collection_error.retryable else AdapterErrorKind.permanent))
@@ -337,7 +338,7 @@ class CollectionWorker:
                         with current.jobs.transaction(self._live):
                             current.jobs.retry(job,self._clock(),error.label,terminal=True,
                                 issue=error.adapter_issue or AdapterIssue('source-unavailable',error.label,AdapterErrorKind.unavailable))
-                            current.jobs.notify_publication_parents(job.item)
+                            current.publications.notify_parents(job.item)
                             self._finish_collection(job,current)
                         return
                     label = error.label if isinstance(error, SourceError) else str(error) if isinstance(error, (TelegramConflict, PublicationOwnershipConflict, PublicationIdentityConflict)) else 'Ошибка сбора'
@@ -362,7 +363,7 @@ class CollectionWorker:
                             issue=error.adapter_issue if isinstance(error,SourceError) else None,
                             cleanup_backoff=job.kind in ('delete','feed-delete') and not (isinstance(error,SourceError) and not error.retryable))
                         if job.kind=='fetch':
-                            current.jobs.notify_publication_parents(job.item)
+                            current.publications.notify_parents(job.item)
                         if job.kind=='discover':
                             self.service.discovery_wait(feed,label,current.jobs.retry_at(job))
                         if isinstance(error, SourceError):
@@ -460,7 +461,7 @@ class CollectionWorker:
                     current.jobs.after_commit(lambda:committed.__setitem__(0,True))
                     current.jobs.begin_collection(job)
                     effects=repository.accept(job.item,tuple(replacements))
-                    current.jobs.apply_collection(effects,job=job)
+                    CollectionApplication(current.jobs,current.publications,current.processing).apply(effects,job=job)
                     current.jobs.finish(job)
                     for replacement in replacements:
                         current.jobs.after_commit(partial(current.publications.prune,replacement.identity))

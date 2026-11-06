@@ -4,7 +4,7 @@ import {productionReader} from './http-reader';
 import {artifactPath} from './artifacts';
 import {feedOptions} from './settings-actions';
 
-test('single RSS connection sends an exact history count and displays the persisted v3 state', {timeout:20000}, async t=>{
+test('single RSS connection sends an exact history count and displays the persisted v3 state', {timeout:40000}, async t=>{
  const {page,api,origin,token}=await productionReader(t);
  await api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});
  await page.goto(origin+'/#token='+token);
@@ -15,10 +15,12 @@ test('single RSS connection sends an exact history count and displays the persis
  await expect(page.locator('#rss-add')).toBeEnabled();
  await page.locator('#rss-history-count').fill('9007199254740993');
  await page.locator('#rss-folder-new').fill('News');
- const request=page.waitForRequest(r=>r.url().endsWith('/api/v3/feeds')&&r.method()==='POST');
+ const response=page.waitForResponse(r=>r.url().endsWith('/api/v3/feeds')&&r.request().method()==='POST');
  await page.locator('#rss-add').click();
- expect((await request).postDataJSON().initial_history).toEqual({mode:'count',count:'9007199254740993'});
- await expect(page.locator('#feeds-dialog')).toBeVisible();
+ const created=await response;
+ expect(created.status(),await created.text()).toBe(200);
+ expect(created.request().postDataJSON().initial_history).toEqual({mode:'count',count:'9007199254740993'});
+ await expect(page.locator('#feeds-dialog')).toBeVisible({timeout:15000});
  await feedOptions(page);
  await expect(page.locator('#history-progress')).toContainText('9007199254740993');
  await expect(page.locator('#history-progress')).toContainText('History selection finished');

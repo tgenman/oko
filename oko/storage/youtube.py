@@ -11,7 +11,7 @@ from oko.collection.youtube.access import proxy_settings
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 
 
 class YouTubeAccess:

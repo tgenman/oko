@@ -11,7 +11,7 @@ from oko.collection.adapters import AdapterIssue, AdapterErrorKind
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 
 _TARGET = "kind IN ('discover','fetch','rebuild','filter','theses','download_media')"
 

@@ -1,7 +1,7 @@
 from tests.support.youtube_action import youtube_action
 from tests.support.storage import Store
 from oko.storage.transaction import transaction
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 
 
 def test_success_during_wait_cancels_future_occurrence(tmp_path,postgres_url):

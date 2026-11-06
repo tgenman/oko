@@ -4,7 +4,7 @@ import json
 import pytest
 
 from oko.collection.adapters import AdapterErrorKind, AdapterIssue
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from oko.storage.transaction import transaction
 from tests.support.storage import Store
 

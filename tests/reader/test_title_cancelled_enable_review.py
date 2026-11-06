@@ -3,7 +3,7 @@ from tests.support.subscription_action import subscription_action
 import asyncio
 from oko.subscriptions.subscriptions import Overrides
 from oko.application.subscription_service import subscription_service
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from oko.storage.transaction import transaction
 from tests.support.worker_library import worker_library,workers,pass_worker
 

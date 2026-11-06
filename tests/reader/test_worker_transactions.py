@@ -1,9 +1,10 @@
 """Real SQL failure boundaries for the three independent cron workers."""
+from oko.application.collection_effects import CollectionApplication
 from tests.support.storage_action import storage_action
 from tests.support.subscription_action import subscription_action
 from tests.support.job_claim import claim_job, retry_job
 from tests.support.collection_acceptance import apply_simulated_collection, running_collection_job
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 import asyncio
 import json
 from tests.support.storage import database
@@ -350,7 +351,7 @@ def test_missing_subtitle_repair_is_rediscovered_after_restart(tmp_path):
 
 def test_failed_delete_problem_follows_job_without_status_read(tmp_path, postgres_url):
     import json
-    from oko.storage.job_types import Job
+    from oko.domain.job import Job
     from oko.storage.transaction import transaction
     from tests.support.storage import Store
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
@@ -606,7 +607,7 @@ def test_collection_diagnostics_are_scoped_to_owning_transaction(tmp_path):
         with pytest.raises(TransactionAborted):
             with transaction(store.db):
                 with pytest.raises(RuntimeError,match='no capture'):
-                    store.jobs.apply_collection(effects,job=Job(0,'discover','fixture',0))
+                    CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=Job(0,'discover','fixture',0))
         assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/new'").fetchone() is None
     finally:
         store.db.close()
@@ -635,7 +636,7 @@ def test_collection_capture_does_not_outlive_failed_transaction_callback(tmp_pat
         with pytest.raises(TransactionAborted):
             with transaction(store.db):
                 with pytest.raises(RuntimeError,match='no capture'):
-                    store.jobs.apply_collection(effects,job=Job(0,'discover','fixture',0))
+                    CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=Job(0,'discover','fixture',0))
     finally:
         store.db.close()
 
@@ -673,7 +674,7 @@ def test_caught_collection_effect_failure_still_aborts_transaction(tmp_path):
                 effects=store.discovery.accept([publication_packet(Publication('failed','https://example.test/failed',100))],'failed-cursor','fixture')
                 fail[0]=True
                 try:
-                    store.jobs.apply_collection(effects,job=job)
+                    CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=job)
                 except RuntimeError as error:
                     assert str(error)=='synthetic effects failure'
         assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/failed'").fetchone() is None
@@ -698,9 +699,9 @@ def test_retrying_caught_effect_failure_cannot_commit_partial_transaction(tmp_pa
                 effects=store.discovery.accept([publication_packet(Publication('failed','https://example.test/retried',100))],'{}','fixture')
                 fail[0]=True
                 with pytest.raises(RuntimeError,match='synthetic effects failure'):
-                    store.jobs.apply_collection(effects,job=job)
+                    CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=job)
                 fail[0]=False
-                store.jobs.apply_collection(effects,job=job)
+                CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=job)
                 store.jobs.finish(job)
         assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/retried'").fetchone() is None
     finally:
@@ -739,7 +740,7 @@ def test_caught_discovery_conflict_cannot_commit_earlier_page_items(tmp_path):
 def test_collection_requires_original_job_outcome_before_commit(tmp_path, ending):
     from dataclasses import replace
     from tests.support.legacy_source import Publication
-    from oko.storage.job_types import Job
+    from oko.domain.job import Job
     from oko.storage.job_repository import JobRejected
     from tests.support.source import publication_packet
 
@@ -754,7 +755,7 @@ def test_collection_requires_original_job_outcome_before_commit(tmp_path, ending
             with transaction(store.db):
                 store.jobs.begin_collection(job)
                 effects=store.discovery.accept([publication_packet(Publication('new','https://example.test/job-outcome',100))],'changed','fixture')
-                store.jobs.apply_collection(effects,job=job)
+                CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=job)
                 if ending=='rejected':
                     with pytest.raises(JobRejected):
                         store.jobs.finish(replace(job,generation=job.generation+1))
@@ -803,7 +804,7 @@ def test_collection_rejects_job_for_another_operation_or_target(tmp_path, kind, 
                 correct=running_collection_job(store,'discover','fixture')
                 effects=store.discovery.accept([publication_packet(Publication('new','https://example.test/wrong-job',100))],'changed','fixture')
                 with pytest.raises(JobRejected,match='does not own this result'):
-                    store.jobs.apply_collection(effects,job=job)
+                    CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=job)
                 store.jobs.finish(job)
         assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/wrong-job'").fetchone() is None
     finally:
@@ -824,8 +825,8 @@ def test_retry_after_wrong_collection_job_cannot_commit(tmp_path):
                 correct=running_collection_job(store,'discover','fixture')
                 effects=store.discovery.accept([publication_packet(Publication('new','https://example.test/wrong-then-right',100))],'changed','fixture')
                 with pytest.raises(JobRejected):
-                    store.jobs.apply_collection(effects,job=wrong)
-                store.jobs.apply_collection(effects,job=correct)
+                    CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=wrong)
+                CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=correct)
                 store.jobs.finish(correct)
         assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/wrong-then-right'").fetchone() is None
     finally:
@@ -848,7 +849,7 @@ def test_collection_result_cannot_move_to_new_job_generation(tmp_path):
                 store.db.execute("UPDATE jobs SET generation=generation+1 WHERE id=%s",(job.id,))
                 replacement=replace(job,generation=job.generation+1)
                 with pytest.raises(JobRejected):
-                    store.jobs.apply_collection(effects,job=replacement)
+                    CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=replacement)
                 store.jobs.finish(replacement)
         assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/new-generation'").fetchone() is None
     finally:
@@ -867,7 +868,7 @@ def test_retry_after_rejected_collection_finish_cannot_commit(tmp_path):
             with transaction(store.db):
                 job=running_collection_job(store,'discover','fixture')
                 effects=store.discovery.accept([publication_packet(Publication('new','https://example.test/stale-finish',100))],'changed','fixture')
-                store.jobs.apply_collection(effects,job=job)
+                CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=job)
                 with pytest.raises(JobRejected):
                     store.jobs.finish(replace(job,generation=job.generation+1))
                 store.jobs.finish(job)
@@ -903,7 +904,7 @@ def test_collection_result_and_retry_outcome_commit_together(tmp_path):
         with transaction(store.db):
             job=running_collection_job(store,'discover','fixture')
             effects=store.discovery.accept([publication_packet(Publication('retry','https://example.test/retry',100))],'retry-cursor','fixture')
-            store.jobs.apply_collection(effects,job=job)
+            CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=job)
             retry_job(store, job,store.clock(),'temporary failure',code='source-temporary')
         assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/retry'").fetchone()
         assert store.db.execute("SELECT cursor FROM feeds WHERE id='fixture'").fetchone()[0]=='retry-cursor'

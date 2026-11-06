@@ -8,10 +8,10 @@ import json
 from oko.domain.collection import CollectionEffects
 from oko.storage.collection_diagnostics import CollectionDiagnostics
 from typing import Any
+from dataclasses import dataclass
 from collections.abc import Callable,Iterator
 from contextlib import contextmanager
 from oko.storage.transaction import transaction
-from oko.storage.source_configuration import changed as source_changed
 from oko.storage.reader_status import changed as status_changed
 from typing import TYPE_CHECKING
 from oko.storage import collection_jobs, material_read, processing_input, memberships
@@ -21,7 +21,7 @@ from oko.diagnostics import record_caught
 if TYPE_CHECKING:
     from oko.storage.store import Store
 
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 
 from oko.domain.processing import Kind, ProcessingInput
 
@@ -32,6 +32,27 @@ _ACTIVE_COLLECTION = object()
 
 class JobRejected(Exception):
     pass
+
+
+@dataclass
+class FeedDeletionPlan:
+    feed: str
+    publication_ids: list[str]
+    job_id: int
+    previous_problem: list[dict[str,Any]]
+    affected: list[int]
+    processor_previous: dict[str,Any] | None
+    affects_codex: bool
+    source_effects: CollectionDiagnostics
+
+
+@dataclass
+class CollectionApplicationState:
+    effects: CollectionEffects
+    diagnostics: CollectionDiagnostics
+    capture_state: dict[str,Any]
+    processor_jobs: list[int]
+    processor_previous: dict[str,Any] | None
 
 
 class JobRepository:
@@ -876,43 +897,35 @@ class JobRepository:
     def collection_interrupt(self, job: Job, feed: str, saved: dict[str,Any], elapsed: float) -> None:
         self.store.collection_status.interrupt(job,feed,saved,elapsed)
 
-    def notify_publication_parents(self, item: str) -> None:
-        if not self.store.db.in_transaction or not self.store.db.transaction_depth:
-            raise RuntimeError('Collection effects require an owning transaction')
-        from oko.storage import publication_links
-        publication_links.notify_parents(self.store, item)
-
-    def apply_collection(self, effects: CollectionEffects, *, job: Job) -> None:
-        db = self.store.db
+    def begin_collection_effects(self, effects: CollectionEffects, job: Job) -> CollectionApplicationState:
+        db=self.store.db
         if not db.in_transaction or not db.transaction_depth:
             raise RuntimeError('Collection effects require an owning transaction')
-        try:
-            memberships.lock_graph(db)
-            context = db.transaction_context
-            captures: dict[int,tuple[CollectionEffects,CollectionDiagnostics,Job,dict[str,Any]]] = context.resources.get(_COLLECTION_CAPTURES,{}) if context is not None else {}
-            registered = captures.get(id(effects))
-            if registered is None or registered[0] is not effects:
-                raise RuntimeError('Collection effects have no capture in this transaction')
-            if job != registered[2] or not self.valid(job):
-                raise JobRejected('Collection Job does not own this result')
-            self._apply_collection_effects(effects, registered[1])
-            registered[3]['applied'] = True
-            captures.pop(id(effects))
-        except BaseException:
-            db.transaction_failed = True
-            raise
+        memberships.lock_graph(db)
+        context=db.transaction_context
+        captures: dict[int,tuple[CollectionEffects,CollectionDiagnostics,Job,dict[str,Any]]] = context.resources.get(_COLLECTION_CAPTURES,{}) if context is not None else {}
+        registered=captures.get(id(effects))
+        if registered is None or registered[0] is not effects:
+            raise RuntimeError('Collection effects have no capture in this transaction')
+        if job != registered[2] or not self.valid(job):
+            raise JobRejected('Collection Job does not own this result')
+        return CollectionApplicationState(effects,registered[1],registered[3],[],None)
 
-    def _apply_collection_effects(self, effects: CollectionEffects, diagnostics: CollectionDiagnostics) -> None:
-        db = self.store.db
-        for identity,(code,message) in effects.unavailable_media.items():
-            self.mark_media_unavailable(identity,code,message)
-        for item in effects.source_url_changes:
-            self.invalidate_source_metadata_inputs(item)
-        for item,preserve in effects.source_title_changes.items():
-            self.invalidate_source_metadata_inputs(item,title=True,preserve_cancelled=preserve)
-        from oko.storage import publication_links
-        for item,preserve in effects.parent_notifications.items():
-            publication_links.notify_parents(self.store,item,preserve_cancelled=preserve)
+    def reject_collection_effects(self) -> None:
+        if self.store.db.transaction_depth:
+            self.store.db.transaction_failed=True
+
+    def _check_collection_effects(self, effects: CollectionEffects, state: CollectionApplicationState) -> None:
+        context=self.store.db.transaction_context
+        captures=context.resources.get(_COLLECTION_CAPTURES,{}) if context is not None else {}
+        registered=captures.get(id(effects))
+        if not self.store.db.transaction_depth or state.effects is not effects or not registered or registered[3] is not state.capture_state:
+            raise RuntimeError('Collection effects require their owning transaction')
+
+    def schedule_collection_effects(self, effects: CollectionEffects, state: CollectionApplicationState) -> None:
+        self._check_collection_effects(effects,state)
+        db=self.store.db
+        diagnostics=state.diagnostics
         previous_deletions: dict[str, tuple[int,list[dict[str,Any]]]] = {}
         captured_fetch_items={row['item'] for row in db.execute("SELECT item FROM jobs WHERE kind='fetch' AND id=ANY(%s)",(list(diagnostics.fetch_problems_before),))} if diagnostics.fetch_problems_before else set()
         captured_source_fetch_items={row['item'] for row in db.execute("SELECT item FROM jobs WHERE kind='fetch' AND id=ANY(%s)",(list(diagnostics.source_groups_before),))} if diagnostics.source_groups_before else set()
@@ -949,12 +962,14 @@ class JobRepository:
             deletion_job_id,previous = previous_deletions[item]
             self.store.problems.sync_deletion(deletion_job_id,previous,self.store.wall_clock())
         for item in effects.media:self.schedule_media(item,skip_problem_jobs=set(diagnostics.media_problems_before),skip_source_jobs=set(diagnostics.source_groups_before),sync_processor=False)
-        for item in sorted(effects.processing_items):
-            self.store.processing.reconcile_accepted_item(item)
-        if effects.sync_processing:
-            self.store.processing.sync()
-        for item in sorted(effects.refresh_status):
-            self.store.publications.status(item)
+        state.processor_jobs=processor_jobs
+        state.processor_previous=processor_previous
+
+    def complete_collection_effects(self, effects: CollectionEffects, state: CollectionApplicationState) -> None:
+        self._check_collection_effects(effects,state)
+        diagnostics=state.diagnostics
+        processor_jobs=state.processor_jobs
+        processor_previous=state.processor_previous
         self.reconcile_cleanup(sync_processor=False,skip_source_jobs=set(diagnostics.source_groups_before),skip_media_jobs=set(diagnostics.media_problems_before))
         for job_id,previous in diagnostics.fetch_problems_before.items():
             self.store.problems.sync_fetch(job_id,previous,self.store.wall_clock())
@@ -965,6 +980,10 @@ class JobRepository:
             self.store.problems.sync_processing_problems(diagnostics.processing_problems_before,self.store.wall_clock())
         if diagnostics.source_groups_before:self.sync_captured_source_groups(diagnostics)
         self.store.fault('collection_effects_before_completion')
+        state.capture_state['applied']=True
+        context=self.store.db.transaction_context
+        if context is not None:
+            context.resources.get(_COLLECTION_CAPTURES,{}).pop(id(effects),None)
 
     def processor_cleanup_jobs(self) -> list[int]:
         db=self.store.db
@@ -1206,12 +1225,12 @@ class JobRepository:
         if store.db.in_transaction:store.incomplete_draft.mark_job('download_media',identity)
 
 
-    def finish_feed_deletion(self, job: Job) -> bool:
+    def prepare_feed_deletion(self, job: Job) -> FeedDeletionPlan | None:
         if not self.store.db.transaction_depth:
             raise RuntimeError('Feed deletion requires an owning transaction')
         feed = job.item
         if self.store.db.execute("SELECT 1 FROM jobs WHERE kind='delete' AND status!='done' AND payload::jsonb->>'cleanup_feed' = %s", (feed,)).fetchone():
-            return False
+            return None
         self.store.fault('before_feed_claim_release')
         memberships.lock_graph(self.store.db)
         self.store.incomplete_draft.mark_admission_feed(feed)
@@ -1220,7 +1239,8 @@ class JobRepository:
         previous_problem = self.store.problems.deletion_candidates(job.id,self.store.wall_clock())
         owned = "SELECT item FROM jobs WHERE kind='delete' AND payload::jsonb->>'cleanup_feed' = %s"
         source_effects=CollectionDiagnostics()
-        source_items={row[0] for row in self.store.db.execute(owned,(feed,))}
+        publication_ids=[str(row[0]) for row in self.store.db.execute(owned,(feed,))]
+        source_items=set(publication_ids)
         source_items.add(feed)
         publication_links.capture_source_groups(self.store,source_effects,source_items)
         source_ids=[row['id'] for row in self.store.db.execute("SELECT id FROM jobs WHERE feed_id=%s AND collection_attempt IS NOT NULL AND reason_code LIKE 'source-%%'",(feed,))]
@@ -1230,32 +1250,28 @@ class JobRepository:
             source_effects.source_groups_before.update(source_groups.job_keys_many(self.store,group))
             evidence=source_groups.job_evidence_many(self.store,[(job_id,None) for job_id in group])
             for key,objects in evidence.items():source_effects.source_evidence_before.setdefault(key,set()).update(objects)
-        self.store.incomplete_draft.mark_materials([row['item'] for row in self.store.db.execute(owned,(feed,))])
+        self.store.incomplete_draft.mark_materials(publication_ids)
         affected=[row['id'] for row in self.store.db.execute(f"SELECT id FROM jobs WHERE (processor_visible OR reason_code='processor-config') AND (item=%s OR (kind='delete' AND payload::jsonb->>'cleanup_feed'=%s) OR (kind!='delete' AND item IN ({owned})))",(feed,feed,feed))]
         processor_previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
         job_write(self.store.db, f"DELETE FROM jobs WHERE kind != 'delete' AND item IN ({owned})", (feed,))
-        if self.store.db.execute(f'DELETE FROM publications WHERE id IN ({owned})', (feed,)).rowcount:
-            status_changed(self.store.db)
-        job_write(self.store.db, "DELETE FROM jobs WHERE item = %s OR (kind='delete' AND payload::jsonb->>'cleanup_feed' = %s)", (feed, feed))
-        self.store.problems.sync_deletion(job.id,previous_problem,self.store.wall_clock())
-        if affected:self.store.problems.finish_processor_change(affected,processor_previous,self.store.wall_clock(),removed_outcome='irrelevant')
-        for table in ('history_members', 'initial_history'):
-            deleted = self.store.db.execute(f'DELETE FROM {table} WHERE feed = %s', (feed,)).rowcount
-            if table=='initial_history' and deleted:
-                source_changed(self.store.db)
-            if table in ('history_members',) and deleted:
-                status_changed(self.store.db)
-        self.store.db.execute('UPDATE jobs SET feed_id=NULL, collection_attempt=NULL WHERE feed_id=%s AND collection_attempt IS NOT NULL', (feed,))
-        self.store.subscriptions.clear_settings('feed', feed)
-        self.store.db.execute('DELETE FROM state WHERE key = %s', ('feed-status:'+feed,))
-        self.store.subscriptions.telegram.release(feed)
-        if self.store.db.execute('DELETE FROM feeds WHERE id = %s', (feed,)).rowcount:
-            source_changed(self.store.db)
-            if affects_codex:
-                self.store.problems.sync_codex_choice(self.store.wall_clock())
-        if source_effects.source_groups_before:self.sync_captured_source_groups(source_effects)
-        return True
+        return FeedDeletionPlan(feed,publication_ids,job.id,previous_problem,affected,processor_previous,affects_codex,source_effects)
 
+    def remove_feed_jobs(self, plan: FeedDeletionPlan) -> None:
+        if not self.store.db.transaction_depth:
+            raise RuntimeError('Feed deletion requires an owning transaction')
+        feed=plan.feed
+        job_write(self.store.db, "DELETE FROM jobs WHERE item = %s OR (kind='delete' AND payload::jsonb->>'cleanup_feed' = %s)", (feed, feed))
+        self.store.problems.sync_deletion(plan.job_id,plan.previous_problem,self.store.wall_clock())
+        if plan.affected:self.store.problems.finish_processor_change(plan.affected,plan.processor_previous,self.store.wall_clock(),removed_outcome='irrelevant')
+        self.store.db.execute('UPDATE jobs SET feed_id=NULL, collection_attempt=NULL WHERE feed_id=%s AND collection_attempt IS NOT NULL', (feed,))
+
+    def complete_feed_deletion(self, plan: FeedDeletionPlan, deleted: bool) -> None:
+        if not self.store.db.transaction_depth:
+            raise RuntimeError('Feed deletion requires an owning transaction')
+        if deleted and plan.affects_codex:
+            self.store.problems.sync_codex_choice(self.store.wall_clock())
+        if plan.source_effects.source_groups_before:
+            self.sync_captured_source_groups(plan.source_effects)
 
     def finish_delete(self, job: Job) -> None:
         if not self.store.db.transaction_depth:

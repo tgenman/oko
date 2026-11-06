@@ -2,7 +2,7 @@
 import pytest
 
 from oko.storage.transaction import transaction
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from oko.subscriptions.subscriptions import FeedPatch, Overrides
 from tests.support.storage import Store
 from tests.support.subscriptions import configured_sources

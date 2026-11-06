@@ -1,6 +1,6 @@
 from tests.support.youtube_action import youtube_action
 from oko.storage.transaction import transaction
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 
 
 def test_http_etag_stays_stable_when_admission_and_subtitle_materialize(tmp_path,postgres_url):

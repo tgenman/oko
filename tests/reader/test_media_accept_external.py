@@ -1,6 +1,6 @@
 import json,uuid
 from tests.support.storage import Store
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from oko.storage.transaction import transaction
 
 

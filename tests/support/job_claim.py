@@ -1,6 +1,6 @@
 """Claim a test job at the same transaction boundary as a worker."""
 from oko.storage.transaction import transaction
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from oko.storage.store import Store
 from typing import Any
 
