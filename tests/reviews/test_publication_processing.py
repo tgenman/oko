@@ -366,6 +366,7 @@ def test_invalid_model_output_does_not_become_a_result(tmp_path,invalid):
 def test_local_retry_records_the_model_actually_used_and_ready_result_survives_choice_change(tmp_path):
     from tests.support.models import model_transport
     root=publication_root(tmp_path)
+    offset=[0.0]
     selected=['local:latest']
     broken=[True]
     sent=[]
@@ -379,15 +380,17 @@ def test_local_retry_records_the_model_actually_used_and_ready_result_survives_c
                 return httpx.Response(503)
         return native.handler(request)
     source=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'Useful text')])) )
-    with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,ai_transport=httpx.MockTransport(model)),headers=HEADERS) as client:
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,ai_transport=httpx.MockTransport(model),
+                               clock=lambda:time.monotonic()+offset[0],wall_clock=lambda:time.time()+offset[0]),headers=HEADERS) as client:
         configure_fast_web(client)
         client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':selected[0],'local_execution':True})
-        client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':'','retry_initial_seconds':1,'retry_max_seconds':1})
+        client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':'','retry_initial_seconds':60,'retry_max_seconds':60})
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         card=wait_for(client,lambda:next((c for c in read_publications_for_cards(client, '/api/v3/cards') if reasons(c,'theses')),None))
         selected[0]='local:second'
         client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':selected[0],'local_execution':True})
         broken[0]=False
+        offset[0]+=61
         wait_for(client,lambda:summary(client.get('/api/v3/publication/'+card['id']).json()))
         metadata=stored(root,card['id'])['processing_metadata']
         assert metadata['summary']['model']==sent[-1]=='local:second'

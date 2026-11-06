@@ -9,7 +9,7 @@ for(const kind of ['rss','telegram'] as const) test(`${kind} root stays readable
  await r.setArticleState('held');
  await r.setMediaState('held');
  await r.api('processors/llamacpp','PUT',{endpoint:'http://localhost:9931',model:'local:latest',local_execution:true});
- await r.api('settings/oko/global','PATCH',{processor:'llamacpp',theses:true,prompt_filters:'',telegram_http_rps:10,retry_initial_seconds:1,retry_max_seconds:1});
+ await r.api('settings/oko/global','PATCH',{processor:'llamacpp',theses:true,prompt_filters:'',telegram_http_rps:10,retry_initial_seconds:60,retry_max_seconds:60});
  await r.openReader();
  if(kind==='rss') await addSources(r.api,[['https://a.test/linked-feed','RSS pipeline','Inbox']]);
  else await r.api('telegram/connect','POST',{source_locator:'@linkedposts',folder:'Inbox',initial_history:{mode:'count',count:'1'}});
