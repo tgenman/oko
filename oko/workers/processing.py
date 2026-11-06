@@ -7,7 +7,7 @@ import httpx
 from oko.execution import Execution
 from oko.workers.control import JobControl
 from oko.storage.store import Store
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from oko.storage.job_repository import JobRepository, JobRejected
 from oko.domain.processing import Kind, ProcessingInput
 from oko.services.processing import StaleInput

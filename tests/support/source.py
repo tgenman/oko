@@ -13,7 +13,7 @@ from pydantic import JsonValue
 from oko.collection.contracts import DiscoveryResult
 from tests.support.legacy_source import Material, Publication, FetchResult
 from tests.support.storage import Store, legacy_publication
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from oko.collection.adapters import ExternalKey,ExternalReference,Platform,PublicationContent,PublicationMetadata,MediaReference,AdapterException,AdapterIssue,AdapterErrorKind,DiscoveryPage,FeedMetadata
 from oko.collection.contracts import SourceError
 

@@ -1,6 +1,6 @@
 from tests.support.storage import Store
 from oko.storage.transaction import transaction
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 
 
 def test_real_collection_outer_catch_persists_extra_delete_error(tmp_path,postgres_url,monkeypatch):

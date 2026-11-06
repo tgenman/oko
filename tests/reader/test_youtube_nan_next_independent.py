@@ -6,7 +6,7 @@ def test_nan_next_at_never_launches_caption_network(tmp_path,postgres_url):
     import asyncio
     from types import SimpleNamespace
     from oko.storage.transaction import transaction
-    from oko.storage.job_types import Job
+    from oko.domain.job import Job
     from oko.workers.collection import CaptionAttempt,CaptionsDeferred
     import pytest
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100,clock=lambda:10)

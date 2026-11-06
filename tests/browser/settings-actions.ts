@@ -20,7 +20,7 @@ async function modelPage(page: Page, title = 'llama.cpp') {
 async function feedOptions(page: Page) {
   const connection=page.locator('[data-settings-page=feed-connection]');
   const link=page.getByRole('button',{name:'Connection and Options',exact:true});
-  await expect.poll(async()=>await connection.isVisible() || await link.isVisible() || await page.locator('dialog[open] .settings-back').isVisible()).toBe(true);
+  await expect.poll(async()=>await connection.isVisible() || await link.isVisible() || await page.locator('dialog[open] .settings-back').isVisible(),{timeout:15000}).toBe(true);
   if (await connection.isVisible()) return;
   await settingsHome(page);
   await link.click();

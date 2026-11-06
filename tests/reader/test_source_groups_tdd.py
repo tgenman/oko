@@ -5,7 +5,7 @@ from tests.support.storage import Store
 
 @pytest.mark.parametrize('kind',['fetch','download_media','filter','theses','delete','feed-delete'])
 def test_job_events_create_and_finish_source_occurrence_without_get(kind,tmp_path,postgres_url):
-    from oko.storage.job_types import Job
+    from oko.domain.job import Job
     from oko.storage.transaction import transaction
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
@@ -26,7 +26,7 @@ def test_job_events_create_and_finish_source_occurrence_without_get(kind,tmp_pat
 
 
 def test_source_failure_and_group_rollback_together(tmp_path,postgres_url):
-    from oko.storage.job_types import Job
+    from oko.domain.job import Job
     from oko.storage.transaction import transaction
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
@@ -44,7 +44,7 @@ def test_source_failure_and_group_rollback_together(tmp_path,postgres_url):
 
 
 def test_source_failure_changes_group_after_retry_claim(tmp_path,postgres_url):
-    from oko.storage.job_types import Job
+    from oko.domain.job import Job
     from oko.storage.transaction import transaction
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
@@ -67,7 +67,7 @@ def test_source_failure_changes_group_after_retry_claim(tmp_path,postgres_url):
 
 def test_removing_one_of_two_source_roots_finishes_only_its_group(tmp_path,postgres_url):
     from oko.storage.transaction import transaction
-    from oko.storage.job_types import Job
+    from oko.domain.job import Job
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
@@ -127,7 +127,7 @@ def test_claim_reloads_source_after_selected_row_becomes_stale(tmp_path,postgres
 
 def test_manual_feed_refresh_resolves_old_source_problem_and_keeps_wait(tmp_path,postgres_url):
     from oko.services.feed_refresh import FeedRefresh
-    from oko.storage.job_types import Job
+    from oko.domain.job import Job
     from oko.storage.transaction import transaction
     from oko.collection.adapters import AdapterIssue, AdapterErrorKind
     from datetime import datetime, timezone, timedelta

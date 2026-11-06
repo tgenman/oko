@@ -1,6 +1,6 @@
 from tests.support.job_claim import claim_job, retry_job
 import json
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from oko.storage.transaction import transaction
 from tests.support.storage import Store
 

@@ -6,13 +6,14 @@ from collections.abc import Callable
 from contextlib import nullcontext
 from typing import Any, Literal, TYPE_CHECKING
 from oko.storage.store import Store
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from oko.diagnostics import Journal, record_caught
 from oko.execution import Execution
 from oko.storage.reader_facts import ReaderFacts
 from oko.storage.job_repository import JobRepository
 from oko.workers.processing_service import processing_service
 from oko.services.feed_refresh import FeedRefresh
+from oko.services.feed_deletion import FeedDeletion
 if TYPE_CHECKING:
     from oko.observability import Metrics
 
@@ -148,7 +149,7 @@ class JobControl:
         try:
             if job.kind == 'feed-delete':
                 with current.jobs.transaction(lambda: True):
-                    if current.jobs.valid(job) and not current.jobs.finish_feed_deletion(job):
+                    if current.jobs.valid(job) and not FeedDeletion(current.jobs,current.publications,current.subscriptions).finish(job):
                         current.jobs.retry(job, self._clock(), 'Ожидание очистки файлов', .1)
             else:
                 if current.jobs.valid(job):

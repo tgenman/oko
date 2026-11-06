@@ -1,7 +1,7 @@
 from tests.support.collection_acceptance import apply_simulated_collection, running_collection_job
 import json
 from oko.collection.adapters import AdapterIssue,AdapterErrorKind
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from oko.storage.transaction import transaction
 from tests.support.storage import Store, ensure_fixture
 

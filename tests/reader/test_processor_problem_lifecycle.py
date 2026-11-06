@@ -3,7 +3,7 @@ from tests.support.storage_action import storage_action
 from tests.support.job_claim import retry_job
 import json
 import pytest
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from oko.storage.transaction import transaction
 from tests.support.storage import Store
 

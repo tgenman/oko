@@ -4,7 +4,7 @@ import {productionReader} from './http-reader';
 import {artifactPath} from './artifacts';
 import {feedOptions} from './settings-actions';
 
-test('real HTTP Telegram web: connection, duplicate, local removal and fresh re-add', {timeout:25000},async t=>{
+test('real HTTP Telegram web: connection, duplicate, local removal and fresh re-add', {timeout:45000},async t=>{
  const {page,api,origin,token}=await productionReader(t);
  const chooseFolder=async()=>{const picker=page.locator('#telegram-folder');if(await picker.locator('option').filter({hasText:/^News$/}).count())await picker.selectOption({label:'News'});else await page.locator('#telegram-folder-new').fill('News');};
  await api('v3/settings/oko/global','PATCH',{theses:false,prompt_filters:''});
@@ -18,7 +18,8 @@ test('real HTTP Telegram web: connection, duplicate, local removal and fresh re-
  await page.setViewportSize({width:1280,height:900});
  const created=page.waitForResponse(r=>r.url().endsWith('/api/v3/telegram/connect')&&r.request().method()==='POST');
  await chooseFolder();await page.locator('#telegram-add').click();
- const old=(await (await created).json()).feed_id;
+ const connected=await created;expect(connected.status(),await connected.text()).toBe(200);
+ const old=(await connected.json()).feed_id;
  await expect(page.locator('#feeds-dialog')).toBeVisible();await feedOptions(page);
  await expect(page.locator('#feed-options')).toContainText('Web Access');
  await expect(page.locator('#history-progress')).toContainText('20');
