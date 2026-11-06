@@ -838,8 +838,8 @@ class RequestInvalidErrorDetails(WireModel):
 
 class RetrySettings(WireModel):
     model_config = ConfigDict(extra="forbid")
-    initial_seconds: StrictInt = Field(..., ge=1, le=86400)
-    max_seconds: StrictInt = Field(..., ge=1, le=86400)
+    initial_seconds: StrictInt = Field(..., ge=60, le=3600)
+    max_seconds: StrictInt = Field(..., ge=60, le=3600)
 
 
 class RuntimeDisabledError(WireModel):
@@ -944,8 +944,8 @@ class RetryInitialSeconds(RootModel[StrictInt]):
     root: StrictInt = Field(
         ...,
         description="Global initial delay for temporary pipeline failures, seconds. Null resets to 60.",
-        ge=1,
-        le=86400,
+        ge=60,
+        le=3600,
     )
 
 
@@ -954,8 +954,8 @@ class RetryMaxSeconds(RootModel[StrictInt]):
     root: StrictInt = Field(
         ...,
         description="Global maximum exponential retry delay, seconds. Must not be lower than the effective initial delay. Null resets to 3600. Source waits are preserved.",
-        ge=1,
-        le=86400,
+        ge=60,
+        le=3600,
     )
 
 

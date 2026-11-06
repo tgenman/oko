@@ -1,4 +1,5 @@
 """Repository transaction ownership against real PostgreSQL and independent readers."""
+from tests.support.storage_action import storage_action
 from tests.support.publications import body_text
 from tests.support.cards import read_all_cards
 from tests.support.storage import ensure_fixture
@@ -74,6 +75,7 @@ def test_projection_failure_rolls_back_data_and_jobs(database):
 
 @pytest.mark.parametrize('delete_fault', [False, True])
 def test_reader_http_collection_media_settings_viewed_and_restart(postgres_url, tmp_path, delete_fault):
+    import time
     import httpx
     from fastapi.testclient import TestClient
     from tests.support.app import create_app
@@ -83,6 +85,7 @@ def test_reader_http_collection_media_settings_viewed_and_restart(postgres_url, 
     from tests.support.youtube import PNG
 
     fail_delete = [False]
+    offset = [0.]
     failed_deletions = []
     requests = []
     def fault(point):
@@ -99,7 +102,8 @@ def test_reader_http_collection_media_settings_viewed_and_restart(postgres_url, 
 
     def app():
         return create_app(tmp_path, token='test', api_only=True, database_url=postgres_url,
-                          rss_enabled=True, rss_transport=httpx.MockTransport(response), fault=fault)
+                          rss_enabled=True, rss_transport=httpx.MockTransport(response), fault=fault,
+                          clock=lambda:time.monotonic()+offset[0],wall_clock=lambda:time.time()+offset[0])
 
     with TestClient(app(), headers=HEADERS) as client:
         assert client.get('/api/v3/status').status_code == 200
@@ -143,6 +147,7 @@ def test_reader_http_collection_media_settings_viewed_and_restart(postgres_url, 
         assert restarted.get('/api/v3/publication/' + item).status_code == 404
     if delete_fault:
         fail_delete[0] = False
+        offset[0] += 61
         with TestClient(app(), headers=HEADERS) as recovered:
             # Oko remains powered off; an explicit replay resumes its retained cleanup.
             assert recovered.post('/api/v3/materials/' + item + '/viewed').status_code == 200
@@ -174,7 +179,7 @@ def test_reader_role_needs_no_schema_ownership_or_migration_credentials(postgres
             try:
                 ensure_fixture(store.db)
                 assert store.subscriptions.feeds()[0]['id'] == 'fixture'
-                store.set_work_enabled(True)
+                storage_action(store, 'set_work_enabled', True)
                 assert store.work_enabled() is True
             finally:
                 store.db.close()
@@ -209,6 +214,8 @@ def test_migration_cannot_run_while_reader_owns_the_schema(postgres_url, tmp_pat
     from oko.storage.postgres_migrations import migrate
     from oko.storage.postgres_schema import MIGRATIONS
     reader = Store(tmp_path, lambda _: None, database_url=postgres_url)
+    assert isinstance(reader.db, PostgresConnection)
+    backend = reader.db._db.info.backend_pid
     with psycopg.connect(postgres_url, autocommit=True) as migrator:
         try:
             with pytest.raises(RuntimeError, match='another reader or migration'):
@@ -216,7 +223,46 @@ def test_migration_cannot_run_while_reader_owns_the_schema(postgres_url, tmp_pat
             assert reader.work_enabled() is False
         finally:
             reader.db.close()
+        assert not migrator.execute("SELECT 1 FROM pg_locks WHERE pid=%s AND locktype='advisory'",(backend,)).fetchone()
         migrate(migrator, MIGRATIONS)
+
+
+def test_close_waits_for_connection_owner_before_releasing_schema(postgres_url,tmp_path):
+    import threading
+    import psycopg
+    from tests.support.storage import Store
+    from oko.storage.postgres_migrations import migrate
+    from oko.storage.postgres_schema import MIGRATIONS
+
+    reader=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    held,release,closed=threading.Event(),threading.Event(),threading.Event()
+
+    def use_connection():
+        with reader.db.access_lock:
+            held.set()
+            assert release.wait(10)
+
+    def close_connection():
+        reader.db.close()
+        closed.set()
+
+    owner=threading.Thread(target=use_connection)
+    closer=threading.Thread(target=close_connection)
+    try:
+        owner.start()
+        assert held.wait(10)
+        closer.start()
+        assert not closed.wait(.2)
+        with psycopg.connect(postgres_url,autocommit=True) as migrator:
+            with pytest.raises(RuntimeError,match='another reader or migration'):
+                migrate(migrator,MIGRATIONS)
+            release.set()
+            assert closed.wait(10)
+            migrate(migrator,MIGRATIONS)
+    finally:
+        release.set()
+        owner.join(timeout=10)
+        if closer.ident is not None:closer.join(timeout=10)
 
 
 def test_read_snapshot_is_consistent_and_rejects_writes(database):

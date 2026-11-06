@@ -1,3 +1,4 @@
+from tests.support.youtube_action import youtube_action
 import json
 from fastapi.testclient import TestClient
 from tests.support.app import create_app
@@ -18,7 +19,7 @@ def test_status_deadline_virtual_and_tick_keep_ids_etag_and_body(tmp_path,postgr
                 store.db.execute("INSERT INTO publications(id,platform,external_id,content,status) VALUES ('a','youtube','a',%s,'pending_collection'),('b','youtube','b',%s,'pending_collection')",(raw,raw))
                 store.db.execute("UPDATE publications SET feed_id=CASE id WHEN 'a' THEN 'f' WHEN 'b' THEN 'f' END WHERE id IN ('a','b')")
                 save_keys(store.db,['a','b'])
-            store.youtube.blocked(clock[0],900)
+            youtube_action(store, 'blocked', clock[0],900)
             app.state.host.execution.reader_advance=None
         client.portal.call(setup)
         before=client.get('/api/v3/status/details')
@@ -55,7 +56,7 @@ def test_due_group_closure_keeps_id_and_etag_before_and_after_tick(tmp_path,post
                 store.db.execute("UPDATE publications SET feed_id='f' WHERE id='a'")
                 store.db.execute("INSERT INTO jobs(kind,item,status,reason_message,reason_code) VALUES ('fetch','a','failed','bad',NULL)")
                 save_keys(store.db,['a']);store.incomplete_draft.mark(['a'])
-            store.youtube.start(clock[0]);app.state.host.execution.reader_advance=None
+            youtube_action(store, 'start', clock[0]);app.state.host.execution.reader_advance=None
         client.portal.call(setup)
         before=client.get('/api/v3/status/details')
         problem=next(p for p in before.json()['problems']['current'] if p['code']=='material_incomplete')

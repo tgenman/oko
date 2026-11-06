@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 from oko.storage.job_writes import execute as job_write
 
 if TYPE_CHECKING:
-    from oko.storage.job_types import Job
+    from oko.domain.job import Job
     from oko.storage.store import Store
 
 

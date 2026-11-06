@@ -1,4 +1,5 @@
 """Single-feed HTTP setup and explicit pre-history database fixtures."""
+from tests.support.subscription_action import subscription_action
 from tests.support.presence import presence, close_presence
 import json
 from datetime import date, timedelta
@@ -35,10 +36,12 @@ def configured_sources(root: Path,rows, *, history=True):
     store=Store(root,lambda _:None)
     try:
         for url,title,folder in rows:
-            store.subscriptions.add_feed(AddFeed(url=url,title=title,folder=folder,verification='synthetic',initial_history=InitialHistory(count=1 if 'youtube.com' in url else 20)))
+            subscription_action(store, 'add_feed', AddFeed(url=url,title=title,folder=folder,verification='synthetic',initial_history=InitialHistory(count=1 if 'youtube.com' in url else 20)))
         if not history:
             with store.db:
                 store.db.execute('DELETE FROM initial_history')
-        store.publications.sync_feeds([feed['id'] for feed in store.subscriptions.feeds()])
+        from oko.storage.transaction import transaction
+        with transaction(store.db):
+            store.publications.sync_feeds([feed['id'] for feed in store.subscriptions.feeds()])
     finally:
         store.db.close()

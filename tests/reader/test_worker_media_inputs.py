@@ -1,4 +1,5 @@
 """Independent fetch/media completion must not lose a newer resource description."""
+from tests.support.job_claim import claim_job
 from tests.support.collection_acceptance import apply_simulated_collection, running_collection_job
 import asyncio
 from dataclasses import replace
@@ -42,7 +43,7 @@ def test_old_download_success_or_error_cannot_replace_a_refreshed_locator(tmp_pa
         service=worker.service
         material=image_material(source,store,item)
         accept_material(store,service,item,material)
-        job=store.jobs.next_job(store.clock(),feeds=['fixture'],media_only=True)
+        job=claim_job(store, store.clock(),feeds=['fixture'],media_only=True)
         assert job
         task=asyncio.create_task(worker._execute(job))
         await asyncio.wait_for(entered.wait(),2)
@@ -69,7 +70,7 @@ def test_media_key_cannot_read_outside_library(tmp_path, kind):
         service=collection_service(execution.require_store)
         source=StructuredSource(None)
         accept_material(store,service,item,image_material(source,store,item))
-        job=store.jobs.next_job(store.clock(),feeds=['fixture'],media_only=True)
+        job=claim_job(store, store.clock(),feeds=['fixture'],media_only=True)
         external=tmp_path/'outside.txt'
         external.write_text('private')
         if kind == 'absolute':
@@ -101,7 +102,7 @@ def test_reader_http_does_not_serve_a_media_key_outside_the_library(tmp_path):
         service=collection_service(execution.require_store)
         source=StructuredSource(None)
         accept_material(store,service,item,image_material(source,store,item))
-        job=store.jobs.next_job(store.clock(),feeds=['fixture'],media_only=True)
+        job=claim_job(store, store.clock(),feeds=['fixture'],media_only=True)
         secret=tmp_path/'outside.txt'
         secret.write_text('private')
         with store.jobs.transaction(lambda:True):
@@ -127,7 +128,7 @@ def test_failed_media_attempt_and_diagnostic_roll_back_together(tmp_path, monkey
         source=Failing(None)
         worker=collection_worker(tmp_path,store,source)
         accept_material(store,worker.service,item,image_material(source,store,item))
-        job=store.jobs.next_job(store.clock(),feeds=['fixture'],media_only=True)
+        job=claim_job(store, store.clock(),feeds=['fixture'],media_only=True)
         def fail_diagnostic(*args, **kwargs):
             raise RuntimeError('diagnostic failure')
         monkeypatch.setattr(worker,'_finish_collection',fail_diagnostic)
@@ -153,7 +154,7 @@ def test_changed_media_waits_for_new_metadata_with_explanation(tmp_path):
         source=Changed(None)
         worker=collection_worker(tmp_path,store,source)
         accept_material(store,worker.service,item,image_material(source,store,item))
-        job=store.jobs.next_job(store.clock(),feeds=['fixture'],media_only=True)
+        job=claim_job(store, store.clock(),feeds=['fixture'],media_only=True)
         asyncio.run(worker._execute(job))
         row=store.db.execute("SELECT m.status,j.status,j.reason_code,j.reason_message FROM media_files m JOIN jobs j ON j.item=m.id AND j.kind='download_media' WHERE m.id=%s",(job.item,)).fetchone()
         assert row[:]==('unavailable','unavailable','media-metadata-changed','Media locator changed')
@@ -163,7 +164,7 @@ def test_changed_media_waits_for_new_metadata_with_explanation(tmp_path):
 
 def test_cancelled_caption_attempt_cannot_block_or_release_new_owner(tmp_path):
     from oko.collection.youtube.access import CaptionsDeferred
-    from oko.storage.job_types import Job
+    from oko.domain.job import Job
     from oko.workers.collection import CaptionAttempt
     async def scenario():
         store,item,execution,tasks=worker_library(tmp_path)

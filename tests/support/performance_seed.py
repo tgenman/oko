@@ -1,3 +1,6 @@
+from tests.support.storage_action import storage_action
+from tests.support.subscription_action import subscription_action
+from tests.support.job_claim import claim_job
 from tests.support.source import save_material
 """Deterministic temporary libraries for HTTP/browser performance acceptance."""
 from pathlib import Path
@@ -6,6 +9,7 @@ import json
 
 from tests.support.synthetic_material import material as Material
 from oko.processing.config import ProcessorConfig
+from oko.storage.transaction import transaction
 from tests.support.storage import Store
 from oko.subscriptions.subscriptions import Overrides
 from tests.support.library_templates import templates
@@ -17,22 +21,22 @@ def saved_library(root:Path, per_feed:int) -> dict[str,object]:
     from tests.support.collection_acceptance import discovered
     from tests.support.legacy_source import Publication
     from tests.support.source import publication_packet
-    from oko.storage.transaction import transaction
     from oko.subscriptions.subscriptions import AddFeed
 
     store=Store(root,lambda _:None)
     try:
         feeds=[]
         for index in range(4):
-            feeds.append(store.subscriptions.add_feed(AddFeed(url='https://fixture.test/feed/'+str(index),
+            feeds.append(subscription_action(store, 'add_feed', AddFeed(url='https://fixture.test/feed/'+str(index),
                 title=f'Synthetic {index}',folder=f'Folder {index}',verification='synthetic'))['id'])
-        store.subscriptions.update_settings('oko','global',Overrides(theses=False,prompt_filters='',processor='llamacpp'))
-        store.jobs.enqueue_discovery(feeds[0])
-        discovery=store.jobs.next_job(store.clock(),feeds=[feeds[0]])
+        subscription_action(store, 'update_settings', 'oko','global',Overrides(theses=False,prompt_filters='',processor='llamacpp'))
+        with transaction(store.db):
+            store.jobs.enqueue_discovery(feeds[0])
+        discovery=claim_job(store, store.clock(),feeds=[feeds[0]])
         assert discovery is not None
         discovered(store,[publication_packet(Publication('prototype','https://example.org/prototype',1),
             Material('Prototype','',captions='not_requested',description='Synthetic video'),needs_fetch=True)],'{}',discovery,feeds[0])
-        job=store.jobs.next_job(store.clock(),feeds=[feeds[0]])
+        job=claim_job(store, store.clock(),feeds=[feeds[0]])
         assert job is not None and job.kind=='fetch'
         save_material(store,job,Material('Prototype','Synthetic saved text.',captions='available'))
         prototype=store.db.execute('SELECT content FROM publications WHERE id=%s',(job.item,)).fetchone()[0]
@@ -49,14 +53,15 @@ def saved_library(root:Path, per_feed:int) -> dict[str,object]:
             store.db.execute('DELETE FROM publications WHERE id=%s',(job.item,))
             store.db.executemany("""INSERT INTO publications(id,url,platform,external_id,feed_id,published_at,discovered_at,title,content,status)
                 VALUES (%s,%s,'other_web',%s,%s,%s,%s,%s,%s::jsonb,'ready')""",rows)
-        store.configure_processor(ProcessorConfig(endpoint='http://localhost:9931',model='local:latest',local_execution=True))
-        store.subscriptions.update_settings('oko','global',Overrides(theses=False))
-        store.settings_changed()
+        storage_action(store, 'configure_processor', ProcessorConfig(endpoint='http://localhost:9931',model='local:latest',local_execution=True))
+        subscription_action(store, 'update_settings', 'oko','global',Overrides(theses=False))
+        storage_action(store, 'settings_changed')
         with transaction(store.db):
             for row in rows:
                 store.publications.reconcile(row[0])
-        store.processing.sync()
-        store.set_work_enabled(False)
+        with transaction(store.db):
+            store.processing.sync()
+        storage_action(store, 'set_work_enabled', False)
         count=store.db.execute("SELECT count(*) FROM publications WHERE content <> '{}'::jsonb").fetchone()[0]
         assert count==per_feed*4
     finally:
@@ -69,10 +74,11 @@ def seed(root:Path, per_feed:int, active:bool=False) -> dict[str,object]:
     if active:
         store = Store(root, lambda _:None)
         try:
-            store.subscriptions.update_settings('oko','global',Overrides(theses=True))
-            store.settings_changed()
-            store.processing.sync()
-            store.set_work_enabled(True)
+            subscription_action(store, 'update_settings', 'oko','global',Overrides(theses=True))
+            storage_action(store, 'settings_changed')
+            with transaction(store.db):
+                store.processing.sync()
+            storage_action(store, 'set_work_enabled', True)
         finally:
             store.db.close()
     return dict(result, active=active)

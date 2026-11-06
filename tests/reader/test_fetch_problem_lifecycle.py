@@ -1,5 +1,6 @@
+from tests.support.job_claim import claim_job, retry_job
 import json
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from oko.storage.transaction import transaction
 from tests.support.storage import Store
 
@@ -12,11 +13,11 @@ def test_fetch_failure_retry_and_finish_without_status_read(tmp_path,postgres_ur
             store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','other_web','article')")
             store.db.execute("UPDATE publications SET feed_id='feed' WHERE id='article'")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','article','running',1) RETURNING id").fetchone()[0]
-        store.jobs.retry(Job(job_id,'fetch','article',1),1,'failure',code='article-limit')
+        retry_job(store, Job(job_id,'fetch','article',1),1,'failure',code='article-limit')
         row=store.db.execute("SELECT id,body FROM reader_problems WHERE identity='job:article-limit:feed:fetch:article' AND finished IS NULL").fetchone()
         assert row and json.loads(row['body'])['objects']==[dict(kind='material',id='article')]
         with store.db: store.db.execute('UPDATE jobs SET next=0 WHERE id=%s',(job_id,))
-        job=store.jobs.next_job(1,feeds=['feed'])
+        job=claim_job(store, 1,feeds=['feed'])
         assert job and job.id==job_id
         assert json.loads(store.db.execute('SELECT body FROM reader_problems WHERE id=%s',(row['id'],)).fetchone()[0])['state']=='retrying'
         with transaction(store.db):store.jobs.finish(job)
@@ -56,7 +57,7 @@ def test_linked_fetch_failure_updates_all_owners_and_resolves_together(tmp_path,
             store.db.execute("UPDATE publications SET feed_id=CASE id WHEN 'root-x' THEN 'x' WHEN 'root-y' THEN 'y' END WHERE id IN ('root-x','root-y')")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('root-x','article'),('root-y','article')")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','article','running',1) RETURNING id").fetchone()[0]
-        store.jobs.retry(Job(job_id,'fetch','article',1),1,'failure',code='article-limit')
+        retry_job(store, Job(job_id,'fetch','article',1),1,'failure',code='article-limit')
         rows=store.db.execute("SELECT identity FROM reader_problems WHERE body::jsonb->>'fetch_job_id'=%s AND finished IS NULL ORDER BY identity",(str(job_id),)).fetchall()
         assert [row[0] for row in rows]==['job:article-limit:x:fetch:article','job:article-limit:y:fetch:article']
         with store.db:store.db.execute('UPDATE jobs SET status=\'running\' WHERE id=%s',(job_id,))

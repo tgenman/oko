@@ -1,3 +1,4 @@
+from tests.support.subscription_action import subscription_action
 import json
 import psycopg
 import pytest
@@ -51,7 +52,7 @@ def test_new_readers_and_writers_use_migrated_array_in_store_and_http(tmp_path,p
  store=Store(tmp_path,lambda _:None,database_url=postgres_database_url)
  try:
   assert next(f for f in store.subscriptions.feeds() if f['id']=='old')['original_urls']==['https://old.test/feed','https://old.test/feed']
-  created=store.subscriptions.add_feed(AddFeed(url='https://new.test/feed',title='New',folder='Folder',verification='synthetic'))
+  created=subscription_action(store, 'add_feed', AddFeed(url='https://new.test/feed',title='New',folder='Folder',verification='synthetic'))
   store.publications.configure_feed(created['id'])
   telegram=store.subscriptions.telegram.connect({'kind':'web','username':'synthetic','preview_url':'https://t.me/s/synthetic'},{'title':'Synthetic','username':'synthetic'},'https://t.me/synthetic','Folder',None,store.subscriptions)
   assert created['original_urls']==['https://new.test/feed']

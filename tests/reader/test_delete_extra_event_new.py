@@ -1,6 +1,6 @@
 from tests.support.storage import Store
 from oko.storage.transaction import transaction
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 
 
 def test_real_collection_outer_catch_persists_extra_delete_error(tmp_path,postgres_url,monkeypatch):
@@ -13,7 +13,7 @@ def test_real_collection_outer_catch_persists_extra_delete_error(tmp_path,postgr
             job_id=s.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('delete','p','running',1) RETURNING id").fetchone()[0]
         worker=collection_worker(tmp_path,s,object())
         def fail_delete(_):raise OSError('synthetic delete failure')
-        monkeypatch.setattr(s.jobs,'delete',fail_delete)
+        monkeypatch.setattr(s.publication_files,'delete',fail_delete)
         retry=s.jobs.retry;calls=[]
         def fail_first(*args,**kwargs):
             calls.append(kwargs.get('code'))

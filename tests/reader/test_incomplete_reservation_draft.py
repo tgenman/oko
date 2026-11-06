@@ -1,3 +1,4 @@
+from tests.support.youtube_action import youtube_action
 import json
 import pytest
 from tests.support.storage import Store
@@ -46,9 +47,10 @@ def test_feed_removal_after_deadline_does_not_restore_forgotten_material(tmp_pat
             store.db.execute("INSERT INTO publications(id,platform,external_id,content,discovered_at,status) VALUES ('p','youtube','p',%s,1,'pending_collection')",(raw,))
             store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
             save_keys(store.db,['p'])
-        store.youtube.blocked(100,900);clock[0]=1001
+        youtube_action(store, 'blocked', 100,900);clock[0]=1001
         seen=virtual_due_groups(store,clock[0]);assert len(seen)==1
-        store.remove_feed('f')
+        with transaction(store.db):
+            store.remove_feed('f')
         row=store.db.execute('SELECT body,finished FROM reader_problems WHERE id=%s',(seen[0]['id'],)).fetchone()
         assert row and row['finished'] is not None
         assert not any(o.get('id')=='p' for o in json.loads(row['body'])['objects'])

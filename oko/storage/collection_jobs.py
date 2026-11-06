@@ -11,7 +11,7 @@ from oko.collection.adapters import AdapterIssue, AdapterErrorKind
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 
 _TARGET = "kind IN ('discover','fetch','rebuild','filter','theses','download_media')"
 
@@ -51,12 +51,13 @@ def interrupt(store: 'Store', feeds: set[str] | None = None, *, backoff: bool = 
 
 
 def recover(store: 'Store') -> None:
-    with store.db:
-        interrupt(store)
-        for row in store.db.execute(f"SELECT id , retry_at FROM jobs WHERE status = 'pending' AND {_TARGET}").fetchall():
-            deadline = store.clock()+max(0,row['retry_at']-store.wall_clock()) if row['retry_at'] else 0
-            job_write(store.db, 'UPDATE jobs SET next = %s WHERE id = %s AND next IS DISTINCT FROM %s',
-                (deadline,row['id'],deadline))
+    if not store.db.transaction_depth:
+        raise RuntimeError('Job recovery requires an owning transaction')
+    interrupt(store)
+    for row in store.db.execute(f"SELECT id , retry_at FROM jobs WHERE status = 'pending' AND ({_TARGET} OR kind IN ('delete','feed-delete'))").fetchall():
+        deadline = store.clock()+max(0,row['retry_at']-store.wall_clock()) if row['retry_at'] else 0
+        job_write(store.db, 'UPDATE jobs SET next = %s WHERE id = %s AND next IS DISTINCT FROM %s',
+            (deadline,row['id'],deadline))
 
 
 def failure_status(issue: AdapterIssue) -> str:

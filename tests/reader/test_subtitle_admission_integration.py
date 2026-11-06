@@ -1,5 +1,6 @@
+from tests.support.youtube_action import youtube_action
 from oko.storage.transaction import transaction
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 
 
 def test_http_etag_stays_stable_when_admission_and_subtitle_materialize(tmp_path,postgres_url):
@@ -17,7 +18,7 @@ def test_http_etag_stays_stable_when_admission_and_subtitle_materialize(tmp_path
                 store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
                 store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','youtube:subtitles','x','f','pending_download')")
                 job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('download_media','m','running',1) RETURNING id").fetchone()[0]
-                store.youtube.blocked(100,20);store.jobs.defer_captions(Job(job,'download_media','m',1),100,10,'waiting')
+                youtube_action(store, 'blocked', 100,20);store.jobs.defer_captions(Job(job,'download_media','m',1),100,10,'waiting')
             app.state.host.execution.reader_advance=None
         client.portal.call(setup);clock[0]=1001
         before=client.get('/api/v3/status/details');assert before.status_code==200

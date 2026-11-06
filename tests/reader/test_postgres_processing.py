@@ -1,3 +1,5 @@
+from tests.support.storage_action import storage_action
+from tests.support.subscription_action import subscription_action
 from tests.support.publications import summary,filter_result,filter_state
 """Worker invariants on PostgreSQL: accepted output, restart and late completion."""
 from tests.support.cards import read_all_cards
@@ -59,7 +61,7 @@ def test_disabling_filter_keeps_ready_result_and_hiddenness_over_http(postgres_u
     try:
         asyncio.run(pass_worker(workers(execution, tasks)[0], tasks))
         assert saved(store, item)['filtered_content']['hidden'] is True
-        store.set_work_enabled(False)
+        storage_action(store, 'set_work_enabled', False)
     finally:
         store.db.close()
     with TestClient(create_app(tmp_path, token='test', api_only=True, database_url=postgres_url), headers=HEADERS) as client:
@@ -81,7 +83,7 @@ def test_http_disabling_filter_does_not_cancel_started_model_call(postgres_url, 
     from tests.support.reader import HEADERS, wait_for
 
     store, item, _, _ = worker_library(tmp_path, database_url=postgres_url)
-    store.set_work_enabled(False)
+    storage_action(store, 'set_work_enabled', False)
     store.db.close()
     started, release = threading.Event(), threading.Event()
     calls = []
@@ -114,9 +116,9 @@ def test_disabled_filter_without_a_result_is_reported_disabled_over_http(postgre
 
     store, item, _, _ = worker_library(tmp_path, database_url=postgres_url)
     try:
-        store.subscriptions.update_settings('oko', 'global', Overrides(filter_enabled=False))
-        store.settings_changed()
-        store.set_work_enabled(False)
+        subscription_action(store, 'update_settings', 'oko', 'global', Overrides(filter_enabled=False))
+        storage_action(store, 'settings_changed')
+        storage_action(store, 'set_work_enabled', False)
     finally:
         store.db.close()
     with TestClient(create_app(tmp_path, token='test', api_only=True, database_url=postgres_url), headers=HEADERS) as client:
@@ -136,7 +138,7 @@ def test_disabling_theses_keeps_ready_result_over_http(postgres_url, tmp_path):
         asyncio.run(pass_worker(workers(execution, tasks)[0], tasks))
         asyncio.run(pass_worker(workers(execution, tasks)[1], tasks))
         assert saved(store, item)['summarized_content']['points']
-        store.set_work_enabled(False)
+        storage_action(store, 'set_work_enabled', False)
     finally:
         store.db.close()
     with TestClient(create_app(tmp_path, token='test', api_only=True, database_url=postgres_url), headers=HEADERS) as client:
@@ -157,9 +159,9 @@ def test_disabled_theses_without_result_are_reported_disabled_over_http(postgres
 
     store, item, _, _ = worker_library(tmp_path, database_url=postgres_url)
     try:
-        store.subscriptions.update_settings('oko', 'global', Overrides(theses=False, filter_enabled=False))
-        store.settings_changed()
-        store.set_work_enabled(False)
+        subscription_action(store, 'update_settings', 'oko', 'global', Overrides(theses=False, filter_enabled=False))
+        storage_action(store, 'settings_changed')
+        storage_action(store, 'set_work_enabled', False)
     finally:
         store.db.close()
     with TestClient(create_app(tmp_path, token='test', api_only=True, database_url=postgres_url), headers=HEADERS) as client:
@@ -179,7 +181,7 @@ def test_http_rule_change_keeps_started_attempt(postgres_url, tmp_path):
     from tests.support.reader import HEADERS, wait_for
 
     store, item, _, _ = worker_library(tmp_path, database_url=postgres_url)
-    store.set_work_enabled(False)
+    storage_action(store, 'set_work_enabled', False)
     store.db.close()
     started, release = threading.Event(), threading.Event()
     requests = []
@@ -224,7 +226,7 @@ def test_http_processor_model_change_keeps_started_filter(postgres_url, tmp_path
     from tests.support.reader import HEADERS, wait_for
 
     store, item, _, _ = worker_library(tmp_path,database_url=postgres_url)
-    store.set_work_enabled(False)
+    storage_action(store, 'set_work_enabled', False)
     store.db.close()
     started, release = threading.Event(), threading.Event()
     attempts = []
@@ -266,10 +268,10 @@ def test_interrupted_attempt_uses_new_model_on_next_attempt(postgres_url, tmp_pa
 
     store, item, execution, tasks = worker_library(tmp_path, database_url=postgres_url)
     try:
-        store.subscriptions.update_feed('fixture', FeedPatch(public_ai=True))
-        store.subscriptions.update_settings('oko', 'global', Overrides(processor='codex'))
-        store.settings_changed()
-        store.configure_codex(CodexSettings.model_validate(configuration()))
+        subscription_action(store, 'update_feed', 'fixture', FeedPatch(public_ai=True))
+        subscription_action(store, 'update_settings', 'oko', 'global', Overrides(processor='codex'))
+        storage_action(store, 'settings_changed')
+        storage_action(store, 'configure_codex', CodexSettings.model_validate(configuration()))
         worker = workers(execution, tasks)[0]
         with store.jobs.transaction(lambda: True):
             worker.service.reconcile()
@@ -279,7 +281,7 @@ def test_interrupted_attempt_uses_new_model_on_next_attempt(postgres_url, tmp_pa
             assert prepared.input is not None
             store.jobs.save_execution(job, prepared.input.input_hash,
                 {'processor':'codex','model':'test-small','reasoning_effort':'low','fast':False})
-        store.configure_codex(CodexSettings.model_validate(configuration('test-large', 'high')))
+        storage_action(store, 'configure_codex', CodexSettings.model_validate(configuration('test-large', 'high')))
     finally:
         store.db.close()
     restarted = Store(tmp_path, lambda _: None, database_url=postgres_url)

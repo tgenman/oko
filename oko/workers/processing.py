@@ -7,7 +7,7 @@ import httpx
 from oko.execution import Execution
 from oko.workers.control import JobControl
 from oko.storage.store import Store
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from oko.storage.job_repository import JobRepository, JobRejected
 from oko.domain.processing import Kind, ProcessingInput
 from oko.services.processing import StaleInput
@@ -53,6 +53,8 @@ class ProcessingWorker:
             if self.tasks._ai or self.tasks._detached_ai:
                 return True
             if jobs.deleting():
+                return False
+            if not jobs.has_due_job(self.clock(), ai_only=True, processing_kind=self.kind):
                 return False
             with jobs.transaction(self.execution._live):
                 if not self.execution._live():
@@ -135,7 +137,7 @@ class ProcessingWorker:
                         return
                     with jobs.transaction(self.execution._live):
                         jobs.set_public_processor(job,not checked['local'],work.public_ai)
-                result=(await adapter.generate(work.request,jobs.workspace(job)) if isinstance(adapter,Codex) else await adapter.generate(work.request))
+                result=(await adapter.generate(work.request,store.publication_files.workspace(job.item)) if isinstance(adapter,Codex) else await adapter.generate(work.request))
             async with self.execution._actions:
                 if self.execution._store is not store or not self.execution._live():
                     return

@@ -153,6 +153,7 @@ def test_source_disabled_switch_cannot_continue_collecting(tmp_path: Path):
 
 def test_rss_saved_jobs_recover_after_failed_file_commit(tmp_path: Path):
     failed = False
+    offset = [0.0]
     def fault(point):
         nonlocal failed
         if point == 'after_file_move' and not failed:
@@ -164,9 +165,10 @@ def test_rss_saved_jobs_recover_after_failed_file_commit(tmp_path: Path):
         if request.url.path == '/article':
             return httpx.Response(200, text='<article>Текст<img src="/image.png"></article>')
         return httpx.Response(200, content=PNG, headers={'Content-Type': 'image/png'})
-    kwargs = dict(token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(response))
+    kwargs = dict(token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(response),
+                  clock=lambda:time.monotonic()+offset[0], wall_clock=lambda:time.time()+offset[0])
     with TestClient(create_app(tmp_path, fault=fault, **kwargs), headers=HEADERS) as client:
-        client.patch('/api/v3/settings/oko/global',json={'retry_initial_seconds':1,'retry_max_seconds':1})
+        client.patch('/api/v3/settings/oko/global',json={'retry_initial_seconds':60,'retry_max_seconds':60})
         import_feed(client)
         presence(client, 'test')
         for _ in range(100):
@@ -174,6 +176,7 @@ def test_rss_saved_jobs_recover_after_failed_file_commit(tmp_path: Path):
                 break
             time.sleep(.02)
         assert failed
+    offset[0] += 61
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
         presence(client, 'test')
         cards=wait_for(client,lambda:(cards if len(cards:=read_publications_for_cards(client, '/api/v3/cards'))==1 and collected(cards[0]) else None))

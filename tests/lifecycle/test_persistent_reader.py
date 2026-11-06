@@ -1,4 +1,5 @@
 """Persistent web execution and remembered authentication at reader HTTP."""
+from tests.support.storage_action import storage_action
 from pathlib import Path
 import time
 
@@ -72,7 +73,7 @@ def test_persistent_process_starts_disabled_and_reuses_external_address(tmp_path
 
     from tests.support.storage import Store
     seed = Store(tmp_path, lambda _: None)
-    seed.set_work_enabled(False)
+    storage_action(seed, 'set_work_enabled', False)
     seed.db.close()
     command = [sys.executable, '-m', 'tests.process_server', '--persistent', '--data', str(tmp_path),
                '--synthetic-source', '--no-browser', '--public-url', 'http://oko']

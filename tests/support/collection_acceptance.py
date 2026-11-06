@@ -1,7 +1,9 @@
 """Synchronous acceptance boundary for synthetic storage fixtures."""
+from oko.application.collection_effects import CollectionApplication
+from tests.support.job_claim import retry_job
 from typing import Any
 from tests.support.storage import Store
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from tests.support.legacy_source import Publication, Material
 from oko.storage.transaction import transaction
 from oko.storage.job_repository import JobRepository
@@ -13,7 +15,7 @@ def discovered(store: Store, publications: list[PublicationContent], cursor: str
         if not jobs.valid(job): return
         jobs.begin_collection(job)
         effects=store.discovery.accept(publications,cursor,feed,namespace,**options)
-        jobs.apply_collection(effects,job=job)
+        CollectionApplication(jobs,store.publications,store.processing).apply(effects,job=job)
         jobs.finish(job)
 
 def save(store: Store, job: Job, material: Material) -> None:
@@ -23,9 +25,9 @@ def save(store: Store, job: Job, material: Material) -> None:
         jobs.begin_collection(job)
         assert material.adapter_content is not None
         error,effects=store.collected_publication.accept_content(job.item,material.adapter_content)
-        jobs.apply_collection(effects,job=job)
+        CollectionApplication(jobs,store.publications,store.processing).apply(effects,job=job)
         if error:
-            store.jobs.retry(job,store.clock(),error.label,issue=error.adapter_issue or AdapterIssue(error.code or 'fetch-failed',error.label,AdapterErrorKind.temporary if error.retryable else AdapterErrorKind.permanent))
+            retry_job(store, job,store.clock(),error.label,issue=error.adapter_issue or AdapterIssue(error.code or 'fetch-failed',error.label,AdapterErrorKind.temporary if error.retryable else AdapterErrorKind.permanent))
         else: jobs.finish(job)
 
 
@@ -42,5 +44,5 @@ def running_collection_job(store: Store, kind: str, target: str, *, bind: bool =
 
 
 def apply_simulated_collection(store: Store, effects: Any, *, job: Job) -> None:
-    store.jobs.apply_collection(effects,job=job)
+    CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=job)
     store.jobs.finish(job)

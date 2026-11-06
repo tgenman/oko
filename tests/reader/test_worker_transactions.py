@@ -1,6 +1,10 @@
 """Real SQL failure boundaries for the three independent cron workers."""
+from oko.application.collection_effects import CollectionApplication
+from tests.support.storage_action import storage_action
+from tests.support.subscription_action import subscription_action
+from tests.support.job_claim import claim_job, retry_job
 from tests.support.collection_acceptance import apply_simulated_collection, running_collection_job
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 import asyncio
 import json
 from tests.support.storage import database
@@ -104,9 +108,9 @@ def test_other_feed_settings_do_not_change_publication_processing_after_restart(
     from oko.subscriptions.subscriptions import AddFeed, Overrides
     store, item, execution, tasks = worker_library(tmp_path)
     try:
-        second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other', title='Other', folder='Other', verification='synthetic'))['id']
+        second = subscription_action(store, 'add_feed', AddFeed(url='https://fixture.test/other', title='Other', folder='Other', verification='synthetic'))['id']
         with transaction(store.db):
-            store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=False,theses=True,prompt_theses='Other feed rules'))
+            subscription_action(store, 'update_settings', 'feed',second,Overrides(filter_enabled=False,theses=True,prompt_theses='Other feed rules'))
             store.processing.reconcile_accepted_item(item)
         asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
         assert store.db.execute("SELECT input_snapshot->>'feed_id' FROM jobs WHERE item=%s AND kind='filter'",(item,)).fetchone()[0]=='fixture'
@@ -128,9 +132,9 @@ def test_competing_workers_commit_one_shared_processing_context(tmp_path):
         calls = []
         store,item,execution,tasks = worker_library(tmp_path)
         try:
-            second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other',title='Other',folder='Other',verification='synthetic'))['id']
+            second = subscription_action(store, 'add_feed', AddFeed(url='https://fixture.test/other',title='Other',folder='Other',verification='synthetic'))['id']
             with transaction(store.db):
-                store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=False,theses=True))
+                subscription_action(store, 'update_settings', 'feed',second,Overrides(filter_enabled=False,theses=True))
                 store.processing.reconcile_accepted_item(item)
             filter_worker, summary_worker = workers(execution,tasks,transport(calls,theses=True))
             await asyncio.gather(filter_worker.tick(),summary_worker.tick())
@@ -158,11 +162,11 @@ def test_late_result_from_deleted_selected_feed_is_rejected(tmp_path):
             return native.handler(request)
         store,item,execution,tasks = worker_library(tmp_path)
         try:
-            second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other',title='Other',folder='Other',verification='synthetic'))['id']
+            second = subscription_action(store, 'add_feed', AddFeed(url='https://fixture.test/other',title='Other',folder='Other',verification='synthetic'))['id']
             with transaction(store.db):
                 store.db.execute('UPDATE publications SET feed_id=%s WHERE id=%s', (second,item))
-                store.subscriptions.update_settings('feed','fixture',Overrides(filter_enabled=False))
-                store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=True))
+                subscription_action(store, 'update_settings', 'feed','fixture',Overrides(filter_enabled=False))
+                subscription_action(store, 'update_settings', 'feed',second,Overrides(filter_enabled=True))
                 store.processing.reconcile_accepted_item(item)
             worker = workers(execution,tasks,httpx.MockTransport(model))[0]
             await worker.tick()
@@ -185,8 +189,8 @@ def test_processing_waits_when_publication_feed_disallows_processor(tmp_path):
     store, item, execution, tasks = worker_library(tmp_path)
     try:
         with transaction(store.db):
-            store.subscriptions.update_settings('feed','fixture',Overrides(processor='codex'))
-            store.settings_changed('feed','fixture')
+            subscription_action(store, 'update_settings', 'feed','fixture',Overrides(processor='codex'))
+            storage_action(store, 'settings_changed', 'feed','fixture')
             store.processing.reconcile_accepted_item(item)
         worker = workers(execution,tasks)[0]
         asyncio.run(pass_worker(worker,tasks))
@@ -194,8 +198,8 @@ def test_processing_waits_when_publication_feed_disallows_processor(tmp_path):
         assert job['reason_code'] == 'ai-permission'
         assert saved(store,item)['filtered_content'] == {}
         with transaction(store.db):
-            store.subscriptions.update_settings('feed','fixture',Overrides(processor='llamacpp'))
-            store.settings_changed('feed','fixture')
+            subscription_action(store, 'update_settings', 'feed','fixture',Overrides(processor='llamacpp'))
+            storage_action(store, 'settings_changed', 'feed','fixture')
             store.processing.reconcile_accepted_item(item)
         asyncio.run(pass_worker(worker,tasks))
         assert store.filters.read(item)['status'] == 'done'
@@ -249,12 +253,13 @@ def test_new_revision_does_not_shorten_source_wait(tmp_path):
         deadline=store.wall_clock()+120
         next_at=store.clock()+120
         store.db.execute("UPDATE jobs SET status = 'pending' , wait_scope = 'source:synthetic' , retry_at = %s , next = %s , reason_message = 'source wait' WHERE kind = 'filter'",(deadline,next_at))
-        store.subscriptions.update_feed('fixture',FeedPatch(importance='high'))
-        store.settings_changed('feed','fixture')
+        subscription_action(store, 'update_feed', 'fixture',FeedPatch(importance='high'))
+        storage_action(store, 'settings_changed', 'feed','fixture')
         worker.service.reconcile()
     row=store.db.execute("SELECT retry_at,next,wait_scope,reason_message FROM jobs WHERE kind='filter'").fetchone()
     assert tuple(row)==(deadline,next_at,'source:synthetic','source wait')
-    assert store.jobs.claim_processing('filter',store.clock()) is None
+    with transaction(store.db):
+        assert store.jobs.claim_processing('filter',store.clock()) is None
     store.db.close()
 
 
@@ -263,10 +268,10 @@ def test_linked_source_privacy_change_reconciles_parent_job_atomically(tmp_path)
     from oko.subscriptions.subscriptions import AddFeed, FeedPatch
     store, item, _, _ = worker_library(tmp_path)
     try:
-        other = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/linked-feed',title='Linked',folder='Other',verification='synthetic'))['id']
+        other = subscription_action(store, 'add_feed', AddFeed(url='https://fixture.test/linked-feed',title='Linked',folder='Other',verification='synthetic'))['id']
         with transaction(store.db):
-            store.subscriptions.update_feed('fixture',FeedPatch(public_ai=True))
-            store.subscriptions.update_feed(other,FeedPatch(public_ai=True))
+            subscription_action(store, 'update_feed', 'fixture',FeedPatch(public_ai=True))
+            subscription_action(store, 'update_feed', other,FeedPatch(public_ai=True))
             memberships.lock_graph(store.db)
             store.db.execute("""INSERT INTO publications(id,url,platform,external_id,status,content,title,discovered_at)
                 SELECT 'linked','https://example.org/linked','rss','linked','ready',content,title,discovered_at FROM publications WHERE id=%s""", (item,))
@@ -276,8 +281,8 @@ def test_linked_source_privacy_change_reconciles_parent_job_atomically(tmp_path)
         before = store.db.execute("SELECT generation,input_snapshot->>'input_hash' FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()[:]
         store.processing.background = True
         def change():
-            store.subscriptions.update_feed(other,FeedPatch(public_ai=False))
-            store.settings_changed('feed',other)
+            subscription_action(store, 'update_feed', other,FeedPatch(public_ai=False))
+            storage_action(store, 'settings_changed', 'feed',other)
             after = store.db.execute("SELECT generation,input_snapshot->>'input_hash' FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()
             assert tuple(after)==before
         with pytest.raises(ValueError, match='rollback'):
@@ -306,10 +311,10 @@ def test_discovery_page_and_continuation_roll_back_together(tmp_path):
                                    'page-two',continuation=30)
     store, _, _, _ = worker_library(tmp_path,fault=fault)
     try:
-        with store.db:
+        with transaction(store.db):
             store.db.execute("UPDATE feeds SET cursor='' WHERE id='fixture'")
             store.jobs.enqueue_discovery('fixture')
-        job=store.jobs.next_job(store.clock(),feeds=['fixture'])
+        job=claim_job(store, store.clock(),feeds=['fixture'])
         assert job and job.kind=='discover'
         worker=collection_worker(tmp_path,store,StructuredSource(Paginated()))
         asyncio.run(worker._execute(job))
@@ -346,7 +351,7 @@ def test_missing_subtitle_repair_is_rediscovered_after_restart(tmp_path):
 
 def test_failed_delete_problem_follows_job_without_status_read(tmp_path, postgres_url):
     import json
-    from oko.storage.job_types import Job
+    from oko.domain.job import Job
     from oko.storage.transaction import transaction
     from tests.support.storage import Store
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
@@ -358,27 +363,29 @@ def test_failed_delete_problem_follows_job_without_status_read(tmp_path, postgre
             return store.db.execute("SELECT id,body FROM reader_problems WHERE identity='job:delete:fixture:delete:item' AND finished IS NULL").fetchone()
         with pytest.raises(ValueError,match='rollback'):
             with transaction(store.db):
-                store.jobs.retry(job,1,'Ошибка удаления',code='delete')
+                retry_job(store, job,1,'Ошибка удаления',code='delete')
                 assert current() is not None
                 raise ValueError('rollback')
         assert current() is None
-        store.jobs.retry(job,1,'Ошибка удаления',code='delete')
+        retry_job(store, job,1,'Ошибка удаления',code='delete')
         problem=current()
         assert problem is not None
         assert not any(c['id']=='job:delete:fixture:delete:item' for c in store.problems.candidates(5))
         with store.db:
             store.db.execute("UPDATE jobs SET next=0 WHERE id=%s", (job.id,))
-        claimed=store.jobs.next_job(1,deleting_only=True)
+        claimed=claim_job(store, 1,deleting_only=True)
         assert claimed is not None and claimed.id==job.id
         assert json.loads(current()['body'])['state']=='retrying'
+        assert store.publication_files.delete(claimed.item) is True
         with pytest.raises(ValueError,match='finish rollback'):
             with transaction(store.db):
-                store.jobs.delete(claimed)
+                store.jobs.finish_delete(claimed)
                 assert current() is None
                 raise ValueError('finish rollback')
         assert current() is not None
         assert store.jobs.valid(claimed)
-        store.jobs.delete(claimed)
+        with transaction(store.db):
+            store.jobs.finish_delete(claimed)
         assert current() is None
         assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s',(problem['id'],)).fetchone()['outcome']=='resolved'
     finally:
@@ -414,7 +421,8 @@ def test_legacy_quote_migration_reconciles_saved_processing_after_restart(tmp_pa
         db.execute((Path(__file__).parents[2]/'oko/storage/postgres/103-publication-reader-blocks.sql').read_text())
     reopened=Store(tmp_path,lambda _:None)
     try:
-        reopened.processing.recover()
+        with transaction(reopened.db):
+            reopened.processing.recover()
         if case == 'header_only':
             assert reopened.filters.read(item)['status'] != 'done'
             assert reopened.processing.theses.read(item) is None
@@ -456,7 +464,8 @@ def test_legacy_linked_quote_copy_does_not_invalidate_parent_after_restart(tmp_p
         db.execute((Path(__file__).parents[2]/'oko/storage/postgres/103-publication-reader-blocks.sql').read_text())
     reopened=Store(tmp_path,lambda _:None)
     try:
-        reopened.processing.recover()
+        with transaction(reopened.db):
+            reopened.processing.recover()
         assert reopened.filters.read(item)['status'] == 'done'
         assert reopened.processing.theses.read(item) is not None
     finally:
@@ -481,7 +490,8 @@ def test_publication_title_wins_after_content_migration(tmp_path):
         db.execute((Path(__file__).parents[2]/'oko/storage/postgres/103-publication-reader-blocks.sql').read_text())
     reopened=Store(tmp_path,lambda _:None)
     try:
-        reopened.processing.recover()
+        with transaction(reopened.db):
+            reopened.processing.recover()
         assert reopened.db.execute('SELECT title FROM publications WHERE id=%s',(item,)).fetchone()[0]=='Title'
         assert reopened.filters.read(item)['status']=='done'
         assert reopened.processing.theses.read(item) is not None
@@ -518,7 +528,8 @@ def test_publication_linked_title_wins_after_content_migration(tmp_path):
         assert 'title' not in raw['extra']['_reader']
     reopened=Store(tmp_path,lambda _:None)
     try:
-        reopened.processing.recover()
+        with transaction(reopened.db):
+            reopened.processing.recover()
         assert reopened.filters.read(item)['status'] == 'done'
         assert reopened.processing.theses.read(item) is not None
     finally:
@@ -596,7 +607,7 @@ def test_collection_diagnostics_are_scoped_to_owning_transaction(tmp_path):
         with pytest.raises(TransactionAborted):
             with transaction(store.db):
                 with pytest.raises(RuntimeError,match='no capture'):
-                    store.jobs.apply_collection(effects,job=Job(0,'discover','fixture',0))
+                    CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=Job(0,'discover','fixture',0))
         assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/new'").fetchone() is None
     finally:
         store.db.close()
@@ -625,7 +636,7 @@ def test_collection_capture_does_not_outlive_failed_transaction_callback(tmp_pat
         with pytest.raises(TransactionAborted):
             with transaction(store.db):
                 with pytest.raises(RuntimeError,match='no capture'):
-                    store.jobs.apply_collection(effects,job=Job(0,'discover','fixture',0))
+                    CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=Job(0,'discover','fixture',0))
     finally:
         store.db.close()
 
@@ -663,7 +674,7 @@ def test_caught_collection_effect_failure_still_aborts_transaction(tmp_path):
                 effects=store.discovery.accept([publication_packet(Publication('failed','https://example.test/failed',100))],'failed-cursor','fixture')
                 fail[0]=True
                 try:
-                    store.jobs.apply_collection(effects,job=job)
+                    CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=job)
                 except RuntimeError as error:
                     assert str(error)=='synthetic effects failure'
         assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/failed'").fetchone() is None
@@ -688,9 +699,9 @@ def test_retrying_caught_effect_failure_cannot_commit_partial_transaction(tmp_pa
                 effects=store.discovery.accept([publication_packet(Publication('failed','https://example.test/retried',100))],'{}','fixture')
                 fail[0]=True
                 with pytest.raises(RuntimeError,match='synthetic effects failure'):
-                    store.jobs.apply_collection(effects,job=job)
+                    CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=job)
                 fail[0]=False
-                store.jobs.apply_collection(effects,job=job)
+                CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=job)
                 store.jobs.finish(job)
         assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/retried'").fetchone() is None
     finally:
@@ -729,7 +740,7 @@ def test_caught_discovery_conflict_cannot_commit_earlier_page_items(tmp_path):
 def test_collection_requires_original_job_outcome_before_commit(tmp_path, ending):
     from dataclasses import replace
     from tests.support.legacy_source import Publication
-    from oko.storage.job_types import Job
+    from oko.domain.job import Job
     from oko.storage.job_repository import JobRejected
     from tests.support.source import publication_packet
 
@@ -744,7 +755,7 @@ def test_collection_requires_original_job_outcome_before_commit(tmp_path, ending
             with transaction(store.db):
                 store.jobs.begin_collection(job)
                 effects=store.discovery.accept([publication_packet(Publication('new','https://example.test/job-outcome',100))],'changed','fixture')
-                store.jobs.apply_collection(effects,job=job)
+                CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=job)
                 if ending=='rejected':
                     with pytest.raises(JobRejected):
                         store.jobs.finish(replace(job,generation=job.generation+1))
@@ -793,7 +804,7 @@ def test_collection_rejects_job_for_another_operation_or_target(tmp_path, kind, 
                 correct=running_collection_job(store,'discover','fixture')
                 effects=store.discovery.accept([publication_packet(Publication('new','https://example.test/wrong-job',100))],'changed','fixture')
                 with pytest.raises(JobRejected,match='does not own this result'):
-                    store.jobs.apply_collection(effects,job=job)
+                    CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=job)
                 store.jobs.finish(job)
         assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/wrong-job'").fetchone() is None
     finally:
@@ -814,8 +825,8 @@ def test_retry_after_wrong_collection_job_cannot_commit(tmp_path):
                 correct=running_collection_job(store,'discover','fixture')
                 effects=store.discovery.accept([publication_packet(Publication('new','https://example.test/wrong-then-right',100))],'changed','fixture')
                 with pytest.raises(JobRejected):
-                    store.jobs.apply_collection(effects,job=wrong)
-                store.jobs.apply_collection(effects,job=correct)
+                    CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=wrong)
+                CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=correct)
                 store.jobs.finish(correct)
         assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/wrong-then-right'").fetchone() is None
     finally:
@@ -838,7 +849,7 @@ def test_collection_result_cannot_move_to_new_job_generation(tmp_path):
                 store.db.execute("UPDATE jobs SET generation=generation+1 WHERE id=%s",(job.id,))
                 replacement=replace(job,generation=job.generation+1)
                 with pytest.raises(JobRejected):
-                    store.jobs.apply_collection(effects,job=replacement)
+                    CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=replacement)
                 store.jobs.finish(replacement)
         assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/new-generation'").fetchone() is None
     finally:
@@ -857,7 +868,7 @@ def test_retry_after_rejected_collection_finish_cannot_commit(tmp_path):
             with transaction(store.db):
                 job=running_collection_job(store,'discover','fixture')
                 effects=store.discovery.accept([publication_packet(Publication('new','https://example.test/stale-finish',100))],'changed','fixture')
-                store.jobs.apply_collection(effects,job=job)
+                CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=job)
                 with pytest.raises(JobRejected):
                     store.jobs.finish(replace(job,generation=job.generation+1))
                 store.jobs.finish(job)
@@ -893,8 +904,8 @@ def test_collection_result_and_retry_outcome_commit_together(tmp_path):
         with transaction(store.db):
             job=running_collection_job(store,'discover','fixture')
             effects=store.discovery.accept([publication_packet(Publication('retry','https://example.test/retry',100))],'retry-cursor','fixture')
-            store.jobs.apply_collection(effects,job=job)
-            store.jobs.retry(job,store.clock(),'temporary failure',code='source-temporary')
+            CollectionApplication(store.jobs,store.publications,store.processing).apply(effects,job=job)
+            retry_job(store, job,store.clock(),'temporary failure',code='source-temporary')
         assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/retry'").fetchone()
         assert store.db.execute("SELECT cursor FROM feeds WHERE id='fixture'").fetchone()[0]=='retry-cursor'
         row=store.db.execute('SELECT status,generation,reason_message FROM jobs WHERE id=%s',(job.id,)).fetchone()

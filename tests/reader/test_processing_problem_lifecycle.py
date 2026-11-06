@@ -1,6 +1,9 @@
+from tests.support.storage_action import storage_action
+from tests.support.subscription_action import subscription_action
+from tests.support.job_claim import retry_job
 import json
 import pytest
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from oko.storage.transaction import transaction
 from tests.support.storage import Store
 
@@ -16,11 +19,11 @@ def test_processing_failure_and_finish_are_saved_without_status_read(tmp_path,po
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES (%s,'article','running',1) RETURNING id",(kind,)).fetchone()[0]
         with pytest.raises(ValueError,match='rollback'):
             with transaction(store.db):
-                store.jobs.retry(Job(job_id,kind,'article',1),1,'failure',code='model-invalid')
+                retry_job(store, Job(job_id,kind,'article',1),1,'failure',code='model-invalid')
                 assert store.db.execute("SELECT 1 FROM reader_problems WHERE body::jsonb->>'operation'=%s AND finished IS NULL",('producer:'+kind,)).fetchone()
                 raise ValueError('rollback')
         assert not store.db.execute("SELECT 1 FROM reader_problems WHERE body::jsonb->>'operation'=%s AND finished IS NULL",('producer:'+kind,)).fetchone()
-        store.jobs.retry(Job(job_id,kind,'article',1),1,'failure',code='model-invalid')
+        retry_job(store, Job(job_id,kind,'article',1),1,'failure',code='model-invalid')
         row=store.db.execute("SELECT id,body FROM reader_problems WHERE identity=%s AND finished IS NULL",('job:model-invalid:feed:'+kind+':article',)).fetchone()
         assert row and json.loads(row['body'])['objects']==[dict(kind='material',id='article')]
         with store.db:store.db.execute("UPDATE jobs SET status='running',generation=2 WHERE id=%s",(job_id,))
@@ -40,8 +43,8 @@ def test_settings_reconciliation_and_problem_roll_back_together(tmp_path,postgre
             before=store.db.execute("SELECT id,body,finished FROM reader_problems WHERE body::jsonb->>'processing_job_id'=%s AND finished IS NULL",(str(row['id']),)).fetchone()
         with pytest.raises(ValueError,match='rollback'):
             with transaction(store.db):
-                store.subscriptions.update_settings('feed','fixture',Overrides(filter_enabled=False))
-                store.settings_changed('feed','fixture')
+                subscription_action(store, 'update_settings', 'feed','fixture',Overrides(filter_enabled=False))
+                storage_action(store, 'settings_changed', 'feed','fixture')
                 assert store.db.execute('SELECT status FROM jobs WHERE id=%s',(row['id'],)).fetchone()[0]=='blocked'
                 raise ValueError('rollback')
         assert store.db.execute('SELECT status FROM jobs WHERE id=%s',(row['id'],)).fetchone()[0]=='pending'
@@ -58,8 +61,8 @@ def test_settings_reenable_blocked_processing_with_same_input(tmp_path,postgres_
         before=store.db.execute("SELECT id,input_snapshot FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()
         for enabled,expected in [(False,'blocked'),(True,'pending')]:
             with transaction(store.db):
-                store.subscriptions.update_settings('feed','fixture',Overrides(filter_enabled=enabled))
-                store.settings_changed('feed','fixture')
+                subscription_action(store, 'update_settings', 'feed','fixture',Overrides(filter_enabled=enabled))
+                storage_action(store, 'settings_changed', 'feed','fixture')
             after=store.db.execute('SELECT id,input_snapshot,status FROM jobs WHERE id=%s',(before['id'],)).fetchone()
             assert (after['id'],after['input_snapshot'],after['status'])==(before['id'],before['input_snapshot'],expected)
     finally:store.db.close()
@@ -92,7 +95,7 @@ def test_processing_retry_clears_previous_reason_without_shortening_source_wait(
     from tests.support.worker_library import worker_library
     store,item,_,_=worker_library(tmp_path,database_url=postgres_url)
     try:
-        with store.db:
+        with transaction(store.db):
             deadline=store.wall_clock()+3600
             row=store.db.execute("UPDATE jobs SET status='failed',generation=5,reason_code='source-wait',reason_message='old',wait_scope='source',retry_at=%s,next=123 WHERE kind='filter' AND item=%s RETURNING id",(deadline,item)).fetchone()
             assert row is not None

@@ -23,7 +23,7 @@ from oko.collection.telegram.http import TelegramHTTP
 from oko.collection.http import SourceHTTP
 from oko.storage.media import MediaOutput, MediaDownload
 from oko.storage.store import Store
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from oko.collection.telegram.contracts import TelegramBinding
 from oko.collection.youtube.source import LocalCaptions
 from oko.collection.contracts import CaptionsClient
@@ -39,6 +39,7 @@ from oko.services.discovery import DiscoveryService
 from oko.storage.collection_state import CollectionState
 from oko.storage.collection_publications import CollectionPublications
 from oko.services.media import MediaService
+from oko.application.collection_effects import CollectionApplication
 
 
 def collection_service(storage: Callable[[], Store]) -> CollectionService:
@@ -70,16 +71,17 @@ class CollectionWorker:
         self._captions_active: 'CaptionAttempt | None' = None
         self._started=False
         self._source_revision: int | None = None
+        self._prefer_cleanup = True
         self._dependency_feeds: list[str] = []
         self._source,self._clock,self._fault=source,clock,fault
         self._source_feed = source_feed
         self._telegram_http = TelegramHTTP(rss_transport, clock, wall_clock,
-            lambda group: self.require_store().jobs.telegram_http_state(group),
+            lambda group: self.require_store().source_waits.telegram_state(group),
             self._save_telegram_http_wait,
             lambda: self._live() and not self.jobs._cancelling, lambda: self.execution._epoch,
             lambda: self.service.telegram_http_delay())
         self._source_http=SourceHTTP(rss_transport,wall_clock,
-            lambda scope:self.require_store().jobs.source_http_until(scope),self._save_source_http_wait,
+            lambda scope:self.require_store().source_waits.source_until(scope),self._save_source_http_wait,
             lambda:self._live() and not self.jobs._cancelling,lambda:self.execution._epoch)
         self._collection = Sources(source, source_feed, rss_enabled, rss_transport,
                                    self._youtube_captions, self._youtube_history, self._telegram_http,self._source_http)
@@ -104,7 +106,10 @@ class CollectionWorker:
                 raise asyncio.CancelledError
             current=self.require_store()
             with current.jobs.transaction(self._live):
-                return current.jobs.source_http_wait(scope,server_delay)
+                delay=max(current.subscriptions.retry_settings()['initial_seconds'],server_delay or 0)
+                until=max(current.source_waits.source_until(scope),current.wall_clock()+delay)
+                current.source_waits.save_source(scope,until)
+                return until
 
     async def _save_telegram_http_wait(self, group: str, server_delay: float | None, generation: int) -> float:
         async with self.execution._actions:
@@ -112,7 +117,13 @@ class CollectionWorker:
                 raise SourceDeferred('Запрос Telegram прерван',code='source_unavailable')
             current=self.require_store()
             with current.jobs.transaction(self._live):
-                return current.jobs.telegram_http_wait(group,server_delay)
+                state=current.source_waits.telegram_state(group)
+                strikes=min(int(state.get('strikes',0))+1,7)
+                settings=current.subscriptions.retry_settings()
+                delay=max(float(min(settings['initial_seconds']*2**(strikes-1),settings['max_seconds'])),server_delay or 0)
+                until=max(float(state.get('until',0)),current.wall_clock()+delay)
+                current.source_waits.save_telegram(group,until,strikes)
+                return until
 
     def _live(self) -> bool:
         return self.execution._live()
@@ -121,14 +132,19 @@ class CollectionWorker:
         if not self.execution._store or self.service.source_revision()==self._source_revision:
             return
         current=self.execution._store
-        snapshot=self.service.configuration()
+        with current.jobs.transaction(self._live):
+            snapshot=self.service.configuration()
         self._dependency_feeds=snapshot.dependencies
         settings=[setting for setting in snapshot.settings if not (setting.feed==self._source_feed and self._source)]
         updates=self._collection.configure(settings)
-        for identity in updates.created:
-            current.jobs.enqueue_discovery(identity)
-        for identity,want_captions in updates.captions:
-            current.jobs.prepare_youtube(identity,want_captions)
+        if updates.created:
+            with current.jobs.transaction(self._live):
+                for identity in updates.created:
+                    current.jobs.enqueue_discovery(identity)
+        if updates.captions:
+            with current.jobs.transaction(self._live):
+                for identity,want_captions in updates.captions:
+                    current.jobs.prepare_youtube(identity,want_captions)
         self._telegram_bindings.clear()
         for setting in snapshot.settings:
             feed=setting.feed
@@ -204,7 +220,9 @@ class CollectionWorker:
                     return
                 feed = job.item if job.kind in ('discover', 'read') else self.service.feed(job.item)
                 if job.kind in ('discover','fetch'):
-                    self.jobs._collection_active[job.id] = _CollectionAttempt(job,feed,self._clock(),capture,current.jobs.collection_start(job,feed))
+                    with current.jobs.transaction(self._live):
+                        saved=current.jobs.collection_start(job,feed)
+                    self.jobs._collection_active[job.id] = _CollectionAttempt(job,feed,self._clock(),capture,saved)
                     if self.jobs.metrics:
                         from oko.observability import event
                         event('job_started', job_id=job.id, kind=job.kind)
@@ -252,7 +270,7 @@ class CollectionWorker:
                                 self.service.refresh_identity(feed, outcome.observation.identity.as_info())
                             current.jobs.begin_collection(job)
                             effects=self.discovery.accept(list(outcome.publications),outcome.cursor,feed,namespace,description=outcome.observation.description,successful=outcome.retry_error is None)
-                            current.jobs.apply_collection(effects,job=job)
+                            CollectionApplication(current.jobs,current.publications,current.processing).apply(effects,job=job)
                             current.jobs.checkpoint('collection_after_result')
                             current.jobs.finish(job)
                             current.jobs.checkpoint('collection_after_finish')
@@ -284,7 +302,7 @@ class CollectionWorker:
                                 self.service.refresh_identity(feed, observation.identity.as_info())
                             current.jobs.begin_collection(job)
                             collection_error,effects=self.service.collected_content(job.item,value)
-                            current.jobs.apply_collection(effects,job=job)
+                            CollectionApplication(current.jobs,current.publications,current.processing).apply(effects,job=job)
                             current.jobs.checkpoint('collection_after_result')
                             if collection_error:
                                 current.jobs.retry(job,self._clock(),collection_error.label,issue=collection_error.adapter_issue or AdapterIssue(collection_error.code or 'fetch-failed',collection_error.label,AdapterErrorKind.temporary if collection_error.retryable else AdapterErrorKind.permanent))
@@ -296,7 +314,8 @@ class CollectionWorker:
         except CaptionsDeferred:
             async with self.execution._actions:
                 if current and self.execution._store is current and not self.stopped:
-                    self._finish_collection(job,current)
+                    with current.jobs.transaction(lambda: not self.stopped):
+                        self._finish_collection(job,current)
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -319,7 +338,7 @@ class CollectionWorker:
                         with current.jobs.transaction(self._live):
                             current.jobs.retry(job,self._clock(),error.label,terminal=True,
                                 issue=error.adapter_issue or AdapterIssue('source-unavailable',error.label,AdapterErrorKind.unavailable))
-                            current.jobs.notify_publication_parents(job.item)
+                            current.publications.notify_parents(job.item)
                             self._finish_collection(job,current)
                         return
                     label = error.label if isinstance(error, SourceError) else str(error) if isinstance(error, (TelegramConflict, PublicationOwnershipConflict, PublicationIdentityConflict)) else 'Ошибка сбора'
@@ -341,9 +360,10 @@ class CollectionWorker:
                     with current.jobs.transaction(self._live):
                         current.jobs.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,code=code,
                             terminal=isinstance(error, SourceError) and not error.retryable or job.kind in ('discover','fetch') and (isinstance(error,ValueError) or Store.is_integrity_failure(error)),
-                            issue=error.adapter_issue if isinstance(error,SourceError) else None)
+                            issue=error.adapter_issue if isinstance(error,SourceError) else None,
+                            cleanup_backoff=job.kind in ('delete','feed-delete') and not (isinstance(error,SourceError) and not error.retryable))
                         if job.kind=='fetch':
-                            current.jobs.notify_publication_parents(job.item)
+                            current.publications.notify_parents(job.item)
                         if job.kind=='discover':
                             self.service.discovery_wait(feed,label,current.jobs.retry_at(job))
                         if isinstance(error, SourceError):
@@ -441,7 +461,7 @@ class CollectionWorker:
                     current.jobs.after_commit(lambda:committed.__setitem__(0,True))
                     current.jobs.begin_collection(job)
                     effects=repository.accept(job.item,tuple(replacements))
-                    current.jobs.apply_collection(effects,job=job)
+                    CollectionApplication(current.jobs,current.publications,current.processing).apply(effects,job=job)
                     current.jobs.finish(job)
                     for replacement in replacements:
                         current.jobs.after_commit(partial(current.publications.prune,replacement.identity))
@@ -532,7 +552,9 @@ class CollectionWorker:
             diagnostic_materials.set((owner,))
             diagnostic_source.set('Сбор · '+feed+' · download_media')
             capture_scope.set(secrets.token_hex(16))
-            self.jobs._collection_active[job.id]=_CollectionAttempt(job,feed,self._clock(),capture,current.jobs.collection_start(job,feed))
+            with current.jobs.transaction(self._live):
+                saved=current.jobs.collection_start(job,feed)
+            self.jobs._collection_active[job.id]=_CollectionAttempt(job,feed,self._clock(),capture,saved)
             if self.jobs.metrics:
                 from oko.observability import event
                 event('job_started', job_id=job.id, kind=job.kind)
@@ -592,7 +614,9 @@ class CollectionWorker:
     def initialize(self) -> None:
         if self.execution._store is not None and not self._started:
             self._collection_interval=self.service.startup(self._source is not None,self._source_feed)
-            if self._source:self.execution._store.jobs.enqueue_discovery(self._source_feed)
+            if self._source:
+                with self.execution._store.jobs.transaction(lambda: not self.stopped):
+                    self.execution._store.jobs.enqueue_discovery(self._source_feed)
             self._started=True
 
     async def run(self) -> None:
@@ -613,43 +637,50 @@ class CollectionWorker:
                 self.media.cleanup()
                 for retired,key in self.execution._store.jobs.retired_media_jobs():
                     if retired.id not in self.jobs._collection_active and self.media.retired_file_cleaned(key):
-                        self.execution._store.jobs.finish_retired_media_cleanup(retired,key)
+                        with self.execution._store.jobs.transaction(self._live):
+                            self.execution._store.jobs.finish_retired_media_cleanup(retired,key)
                 self._last_media_cleanup=now
             self._sync_sources()
             if now-self._last_collection >= self._collection_interval:
-                for feed in self._sources:
-                    self.execution._store.jobs.enqueue_discovery(feed)
+                with self.execution._store.jobs.transaction(self._live):
+                    for feed in self._sources:
+                        self.execution._store.jobs.enqueue_discovery(feed)
                 self._last_collection = now
-            state = self.execution._store.status()
             caption_feeds=self._collection.caption_feeds()
             for lane in ('common', 'media','captions'):
                 if lane=='captions' and not caption_feeds:
                     continue
                 media_lane=lane in ('media','captions')
                 task = self.jobs._lanes.get(lane)
-                if media_lane and task and not task.done() and lane in self.jobs._media_jobs and not self.execution._store.jobs.valid(self.jobs._media_jobs[lane]):
+                if task and not task.done() and lane in self.jobs._lane_jobs and not self.execution._store.jobs.valid(self.jobs._lane_jobs[lane]):
                     task.cancel()
                     self.jobs._detach_task(task)
                     del self.jobs._lanes[lane]
-                    self.jobs._media_jobs.pop(lane,None)
+                    self.jobs._lane_jobs.pop(lane,None)
                     task = None
                 if task and task.done():
                     if not task.cancelled():
                         await task
                     del self.jobs._lanes[lane]
-                    if media_lane:
-                        self.jobs._media_jobs.pop(lane,None)
+                    self.jobs._lane_jobs.pop(lane,None)
                 if lane in self.jobs._lanes:
                     continue
                 feeds = [feed for feed in self._sources if self._collection.publication_adapter(feed) is not None] if media_lane else [feed for feed in self._sources if self._lane(feed) == lane]
                 if lane=='captions':
                     feeds=caption_feeds
                 dependencies=self._dependency_feeds if lane in ('common','media') else []
-                job = self.execution._store.jobs.next_job(now, deleting_only=state['deleting'] or not (feeds or dependencies),
-                                           feeds=feeds, include_deletions=lane == 'common', media_only=media_lane,captions_only=lane=='captions',dependency_feeds=dependencies)
+                options: dict[str,Any]=dict(deleting_only=not (feeds or dependencies), feeds=feeds,
+                             include_deletions=lane == 'common', media_only=media_lane,
+                             captions_only=lane=='captions', dependency_feeds=dependencies,
+                             prefer_cleanup=self._prefer_cleanup)
+                if not self.execution._store.jobs.has_due_job(now,**options):
+                    continue
+                with self.execution._store.jobs.transaction(self._live):
+                    job = self.execution._store.jobs.next_job(now,**options)
                 if job:
-                    if media_lane:
-                        self.jobs._media_jobs[lane] = job
+                    if lane=='common':
+                        self._prefer_cleanup=not self._prefer_cleanup
+                    self.jobs._lane_jobs[lane] = job
                     if job.kind=='delete':
                         owner=self.execution._store.db.execute("SELECT payload->>'cleanup_feed' FROM jobs WHERE id=%s",(job.id,)).fetchone()
                         self.jobs._lane_feeds[lane]=owner[0] if owner and owner[0] else job.item

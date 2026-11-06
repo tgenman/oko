@@ -1,6 +1,7 @@
+from tests.support.job_claim import claim_job, retry_job
 import json
 import pytest
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from oko.storage.transaction import transaction
 from tests.support.storage import Store
 
@@ -17,14 +18,14 @@ def test_discover_failure_and_completion_are_saved_without_status_read(tmp_path,
             return store.db.execute('SELECT id,body FROM reader_problems WHERE identity=%s AND finished IS NULL',(identity,)).fetchone()
         with pytest.raises(ValueError,match='rollback'):
             with transaction(store.db):
-                store.jobs.retry(job,1,'source failed',code='source-connection')
+                retry_job(store, job,1,'source failed',code='source-connection')
                 assert current()
                 raise ValueError('rollback')
         assert current() is None
-        store.jobs.retry(job,1,'source failed',code='source-connection')
+        retry_job(store, job,1,'source failed',code='source-connection')
         prior=current(); assert prior
         with store.db: store.db.execute('UPDATE jobs SET next=0 WHERE id=%s',(job_id,))
-        claimed=store.jobs.next_job(1,feeds=['feed'])
+        claimed=claim_job(store, 1,feeds=['feed'])
         assert claimed and claimed.id==job_id
         assert json.loads(current()['body'])['state']=='retrying'
         with transaction(store.db): store.jobs.finish(claimed)

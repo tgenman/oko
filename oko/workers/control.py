@@ -3,14 +3,17 @@ from oko.collection.request_observation import Capture
 import asyncio
 from dataclasses import dataclass
 from collections.abc import Callable
+from contextlib import nullcontext
 from typing import Any, Literal, TYPE_CHECKING
 from oko.storage.store import Store
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from oko.diagnostics import Journal, record_caught
 from oko.execution import Execution
 from oko.storage.reader_facts import ReaderFacts
 from oko.storage.job_repository import JobRepository
 from oko.workers.processing_service import processing_service
+from oko.services.feed_refresh import FeedRefresh
+from oko.services.feed_deletion import FeedDeletion
 if TYPE_CHECKING:
     from oko.observability import Metrics
 
@@ -29,7 +32,7 @@ class JobControl:
         self._collection_active: dict[int, _CollectionAttempt] = {}
         self._ai: asyncio.Task[None] | None = None
         self._lanes: dict[str, asyncio.Task[None]] = {}
-        self._media_jobs: dict[str, Job] = {}
+        self._lane_jobs: dict[str, Job] = {}
         self._lane_feeds: dict[str, str] = {}
         self._ai_feed: str | None = None
         self._ai_job: Job | None = None
@@ -48,7 +51,9 @@ class JobControl:
 
     def invalidate(self, feeds: set[str] | None = None) -> None:
         if self._store:
-            with self._store.jobs.cancellation():
+            # Revocation remains possible even after new-work admission closes.
+            boundary = nullcontext() if self._store.db.transaction_depth else self._store.jobs.transaction(lambda: True)
+            with boundary:
                 for attempt in list(self._collection_active.values()):
                     if feeds is None or attempt.feed in feeds:
                         self._store.jobs.collection_interrupt(attempt.job, attempt.feed, attempt.saved, max(0., self._clock()-attempt.started))
@@ -77,9 +82,8 @@ class JobControl:
             ai_task = self._ai
             lanes = [lane for lane in self._lanes if feeds is None or self._lane_feeds.get(lane) in feeds]
             tasks = [self._lanes.pop(lane) for lane in lanes]
-            for media_lane in ('media','captions'):
-                if media_lane in lanes:
-                    self._media_jobs.pop(media_lane,None)
+            for lane in lanes:
+                self._lane_jobs.pop(lane,None)
             if self._ai and (feeds is None or self._ai_feed in feeds):
                 tasks.append(self._ai)
                 self._ai = None
@@ -133,22 +137,33 @@ class JobControl:
         feeds = ReaderFacts(lambda: current).deletion_feeds()
         if feeds:
             await self.cancel(feeds)
-        job = current.jobs.next_job(self._clock(), deleting_only=True)
+        with current.jobs.transaction(lambda: not self.execution.stopped):
+            job = current.jobs.next_job(self._clock(), deleting_only=True)
         while job:
             self._delete(job, current)
-            job = current.jobs.next_job(self._clock(), deleting_only=True)
+            with current.jobs.transaction(lambda: not self.execution.stopped):
+                job = current.jobs.next_job(self._clock(), deleting_only=True)
 
 
     def _delete(self, job: Job, current: Store) -> None:
         try:
             if job.kind == 'feed-delete':
-                current.jobs.finish_feed_deletion(job)
+                with current.jobs.transaction(lambda: True):
+                    if current.jobs.valid(job) and not FeedDeletion(current.jobs,current.publications,current.subscriptions).finish(job):
+                        current.jobs.retry(job, self._clock(), 'Ожидание очистки файлов', .1)
             else:
-                current.jobs.delete(job)
+                if current.jobs.valid(job):
+                    deleted = current.publication_files.delete(job.item)
+                    with current.jobs.transaction(lambda: True):
+                        if deleted:
+                            current.jobs.finish_delete(job)
+                        elif current.jobs.valid(job):
+                            current.jobs.retry(job, self._clock(), 'Ожидание завершения сохранения файла', .1)
         except Exception:
             record_caught('runtime._delete')
-            if current.jobs.valid(job):
-                current.jobs.retry(job, self._clock(), 'Ошибка удаления', code='delete')
+            with current.jobs.transaction(lambda: True):
+                if current.jobs.valid(job):
+                    current.jobs.retry(job, self._clock(), 'Ошибка удаления', code='delete', cleanup_backoff=True)
 
 
     def retry_material(self, identity: str) -> bool:
@@ -161,10 +176,14 @@ class JobControl:
         return self._retry_processing(identity,'theses')
 
     def refresh_feed(self, identity: str) -> None:
-        self.execution.require_store().jobs.refresh_feed(identity)
+        store=self.execution.require_store()
+        with store.jobs.transaction(self.execution._live):
+            FeedRefresh(store.media,store.subscriptions,store.jobs).refresh(identity)
 
     def enqueue_discovery(self, identity: str) -> None:
-        self.execution.require_store().jobs.enqueue_discovery(identity)
+        store=self.execution.require_store()
+        with store.jobs.transaction(self.execution._live):
+            store.jobs.enqueue_discovery(identity)
 
     def _retry_processing(self, identity: str, kind: Literal['filter','theses']) -> bool:
         store=self.execution.require_store()

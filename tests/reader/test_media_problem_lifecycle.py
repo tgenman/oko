@@ -1,7 +1,7 @@
 from tests.support.collection_acceptance import apply_simulated_collection, running_collection_job
 import json
 from oko.collection.adapters import AdapterIssue,AdapterErrorKind
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from oko.storage.transaction import transaction
 from tests.support.storage import Store, ensure_fixture
 
@@ -202,7 +202,7 @@ def test_restart_recovers_unavailable_media_without_optional_reason(tmp_path,pos
 def test_retired_job_cleanup_rejects_new_generation_or_restored_target(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
-        with store.db:
+        with transaction(store.db):
             store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','other_web','article')")
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('file','article','image:1','','image','pending_download')")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation,payload) VALUES ('download_media','file','cancelled',2,%s::jsonb) RETURNING id",(json.dumps({'retired_media_key':'media/article/file'}),)).fetchone()[0]

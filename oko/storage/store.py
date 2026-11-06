@@ -10,11 +10,11 @@ from pathlib import Path
 import shutil
 import time
 from collections.abc import Callable, Generator
-from contextlib import nullcontext
 from typing import Any
 
 from oko.storage.publications import Publications
 from oko.storage.media import MediaFiles
+from oko.storage.publication_files import PublicationFiles
 from oko.storage.reader_versions import ReaderVersions
 from oko.storage.source_configuration import changed as source_changed
 from oko.storage.reader_status import changed as status_changed
@@ -29,6 +29,7 @@ from oko.storage.subscriptions import SubscriptionRepository
 from oko.storage.job_writes import execute as job_write
 from oko.storage.transaction import begin_write, transaction
 from oko.storage.job_repository import JobRepository
+from oko.storage.source_waits import SourceWaits
 from oko.storage.collection_diagnostics import CollectionDiagnostics
 from oko.subscriptions.history import InitialHistory
 from oko.processing.config import ProcessorConfig
@@ -45,21 +46,21 @@ class Store:
         return isinstance(error, INTEGRITY_ERRORS)
 
     def connect_telegram(self, binding: dict[str,Any], info: dict[str,Any], source: str, folder: str, history: InitialHistory | None) -> dict[str,Any]:
-        boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
-        with boundary:
-            membership_graph.lock_graph(self.db)
-            result = self.subscriptions.telegram.connect(binding,info,source,folder,history,self.subscriptions)
-            self.problems.sync_codex_feed_added(result['id'], self.wall_clock())
-            return result
+        if not self.db.transaction_depth:
+            raise RuntimeError('Storage action requires an owning transaction')
+        membership_graph.lock_graph(self.db)
+        result = self.subscriptions.telegram.connect(binding,info,source,folder,history,self.subscriptions)
+        self.problems.sync_codex_feed_added(result['id'], self.wall_clock())
+        return result
 
     def change_telegram_access(self, feed: str, binding: dict[str,Any], info: dict[str,Any]) -> dict[str,Any]:
-        boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
-        with boundary:
-            begin_write(self.db)
-            membership_graph.lock_graph(self.db)
-            result=self.subscriptions.telegram.change_access(feed,binding,info,self.subscriptions)
-            self.publications.configure_feed(feed)
-            self.publications.changed_adapter(feed)
+        if not self.db.transaction_depth:
+            raise RuntimeError('Storage action requires an owning transaction')
+        begin_write(self.db)
+        membership_graph.lock_graph(self.db)
+        result=self.subscriptions.telegram.change_access(feed,binding,info,self.subscriptions)
+        self.publications.configure_feed(feed)
+        self.publications.changed_adapter(feed)
         return result
 
     def __init__(self, root: Path, fault: Callable[[str], None], *, wall_clock: Callable[[], float] = time.time, clock: Callable[[], float] = time.monotonic, database_url: str | None = None, defer_recovery: bool = False) -> None:
@@ -74,9 +75,11 @@ class Store:
             self.db = PostgresConnection(database_url, clock=clock, wall_clock=wall_clock)
             self.db.claim_store()
             self.jobs = JobRepository(self)
+            self.source_waits = SourceWaits(self.db)
             self.subscriptions = SubscriptionRepository(self.db, self.fault, wall_clock=self.wall_clock)
             self.publications = Publications(self)
             self.media = MediaFiles(self)
+            self.publication_files = PublicationFiles(self.root,self.media.active_paths,self.fault)
             self.collection_status = CollectionStatus(self.db, self.clock, self.wall_clock,self)
             self.filters = FilterResults(self)
             self.processing = ProcessingState(self)
@@ -111,7 +114,8 @@ class Store:
                         self.problems.sync_deletion(job_id,[],self.wall_clock())
             self.problems.recover_deletion_problems()
             self.problems.recover_deletion_extra_problems()
-            collection_jobs.recover(self)
+            with transaction(self.db):
+                collection_jobs.recover(self)
             self.problems.recover_discover_problems()
             self.problems.recover_fetch_problems()
             self.problems.recover_finished_foreign_fetch_deletions()
@@ -180,8 +184,11 @@ class Store:
             self.processing.recovering = True
             self._recovery: Generator[None,None,None] | None = self._recover_steps()
             if not defer_recovery:
-                while self.recover_step():
-                    pass
+                while True:
+                    with transaction(self.db):
+                        recovering = self.recover_step()
+                    if not recovering:
+                        break
         except BaseException:
             if hasattr(self, 'db'):
                 self.db.close()
@@ -241,44 +248,28 @@ class Store:
 
 
     def pause_history(self, feed: str, paused: bool) -> dict[str, Any]:
+        if not self.db.transaction_depth:
+            raise RuntimeError('Storage action requires an owning transaction')
         self.subscriptions.check_owner('feed', feed)
-        with self.db:
-            result=self.subscriptions.history.pause(feed, paused)
-            return result
+        result=self.subscriptions.history.pause(feed, paused)
+        return result
 
     def change_history(self, feed: str, selection: InitialHistory | None) -> dict[str, Any]:
+        if not self.db.transaction_depth:
+            raise RuntimeError('Storage action requires an owning transaction')
         self.subscriptions.check_owner('feed', feed)
         configured = next(f for f in self.subscriptions.feeds() if f['id'] == feed)
         if configured['transport'] not in ('rss', 'youtube') and not self.publications.feed(feed):
             raise ValueError('Догрузка доступна подключённому RSS/Atom или YouTube-фиду')
         if self.publications.feed(feed) and selection and selection.mode != 'count':
             raise ValueError('Догрузка YouTube поддерживает последние N видео')
-        with self.db:
-            result=self.subscriptions.history.start(feed, selection) if selection else self.subscriptions.history.cancel(feed)
-            return result
+        result=self.subscriptions.history.start(feed, selection) if selection else self.subscriptions.history.cancel(feed)
+        return result
 
 
     def cursor(self, feed: str) -> str | None:
         row=self.db.execute('SELECT cursor FROM feeds WHERE id = %s',(feed,)).fetchone()
         return str(row[0]) or None if row else None
-
-    def source_http_until(self, scope: str) -> float:
-        row=self.db.execute('SELECT value FROM state WHERE key = %s',('source-http:'+scope,)).fetchone()
-        return float(row[0]) if row else 0.
-
-    def source_http_wait(self, scope: str, until: float) -> None:
-        with self.db:
-            self.db.execute('INSERT INTO state VALUES ( %s , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value',
-                            ('source-http:'+scope,str(until)))
-
-    def telegram_http_state(self, group: str) -> dict[str, Any]:
-        row = self.db.execute('SELECT value FROM state WHERE key = %s', ('telegram-http:'+group,)).fetchone()
-        return json.loads(row[0]) if row else {}
-
-    def telegram_http_wait(self, group: str, state: dict[str, Any]) -> None:
-        with self.db:
-            self.db.execute('INSERT INTO state VALUES ( %s , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value',
-                            ('telegram-http:'+group, json.dumps(state)))
 
     def _has_unviewed(self, item: str) -> bool:
         return self.db.execute('SELECT 1 FROM publications WHERE id = %s',(item,)).fetchone() is not None
@@ -335,83 +326,84 @@ class Store:
         return self.viewed_set(self.reading.members(item))
 
     def viewed_set(self, members: list[str]) -> bool:
+        if not self.db.transaction_depth:
+            raise RuntimeError('Marking publications viewed requires an owning transaction')
         members = sorted(set(members))
-        with self.db:
-            membership_graph.lock_graph(self.db)
-            rows = {}
-            memberships: dict[str, list[str]] = {}
-            for start in range(0, len(members), 400):
-                batch = members[start:start+400]
-                marks = ','.join('%s' for _ in batch)
-                rows.update({row['id']: row for row in self.db.execute(
-                    f"SELECT i.id , COALESCE(i.content #> '{{extra,telegram,members}}','[]'::jsonb)::text AS members , {owner_expr('i')} AS feed_id FROM publications i WHERE i.id IN ( {marks} )", batch)})
-                for row in self.db.execute(f'SELECT i.id AS publication_id, i.feed_id FROM publications i WHERE i.feed_id IS NOT NULL AND i.id IN ( {marks} )', batch):
-                    memberships.setdefault(row['publication_id'], []).append(row['feed_id'])
-            if len(rows) != len(members):
-                return False
-            effects = CollectionDiagnostics()
-            publication_links.capture_root_deletion_problems(self,effects,set(members))
-            eligibility: dict[str, set[int]] = {}
-            for member, feeds in memberships.items():
-                for feed in feeds:
-                    eligibility.setdefault(feed, set()).update(json.loads(rows[member]['members']))
-            for feed, messages in eligibility.items():
-                self.subscriptions.details.record(feed, 'marked_read')
-            self.incomplete_draft.mark_materials(members)
-            self.problems.forget_materials(set(members), self.wall_clock())
-            # A single reachability pass sees the final remaining roots.
-            for start in range(0, len(members), 400):
-                batch = members[start:start+400]
-                marks = ','.join('%s' for _ in batch)
-                if self.db.execute(f"UPDATE history_members SET outcome = 'viewed' WHERE item IN ( {marks} ) AND outcome IN ( 'pending' , 'retrying' )", batch).rowcount:
-                    status_changed(self.db)
-                removed = membership_graph.remove(self.db,items=batch)
-                self.read_versions.memberships_changed(removed)
-            publication_links.prune(self, set(members),effects=effects)
-            self.processing.memberships_removed(members)
-            publication_links.notify_parents_many(self, set(members))
-            for item, row in rows.items():
-                if row['feed_id'] is not None:
-                    self._remember_cleanup_owner(item, row['feed_id'])
-            self.jobs.sync_captured_deletions(effects)
+        membership_graph.lock_graph(self.db)
+        rows = {}
+        memberships: dict[str, list[str]] = {}
+        for start in range(0, len(members), 400):
+            batch = members[start:start+400]
+            marks = ','.join('%s' for _ in batch)
+            rows.update({row['id']: row for row in self.db.execute(
+                f"SELECT i.id , COALESCE(i.content #> '{{extra,telegram,members}}','[]'::jsonb)::text AS members , {owner_expr('i')} AS feed_id FROM publications i WHERE i.id IN ( {marks} )", batch)})
+            for row in self.db.execute(f'SELECT i.id AS publication_id, i.feed_id FROM publications i WHERE i.feed_id IS NOT NULL AND i.id IN ( {marks} )', batch):
+                memberships.setdefault(row['publication_id'], []).append(row['feed_id'])
+        if len(rows) != len(members):
+            return False
+        effects = CollectionDiagnostics()
+        publication_links.capture_root_deletion_problems(self,effects,set(members))
+        eligibility: dict[str, set[int]] = {}
+        for member, feeds in memberships.items():
+            for feed in feeds:
+                eligibility.setdefault(feed, set()).update(json.loads(rows[member]['members']))
+        for feed, messages in eligibility.items():
+            self.subscriptions.details.record(feed, 'marked_read')
+        self.incomplete_draft.mark_materials(members)
+        self.problems.forget_materials(set(members), self.wall_clock())
+        # A single reachability pass sees the final remaining roots.
+        for start in range(0, len(members), 400):
+            batch = members[start:start+400]
+            marks = ','.join('%s' for _ in batch)
+            if self.db.execute(f"UPDATE history_members SET outcome = 'viewed' WHERE item IN ( {marks} ) AND outcome IN ( 'pending' , 'retrying' )", batch).rowcount:
+                status_changed(self.db)
+            removed = membership_graph.remove(self.db,items=batch)
+            self.read_versions.memberships_changed(removed)
+        publication_links.prune(self, set(members),effects=effects)
+        self.processing.memberships_removed(members)
+        publication_links.notify_parents_many(self, set(members))
+        for item, row in rows.items():
+            if row['feed_id'] is not None:
+                self._remember_cleanup_owner(item, row['feed_id'])
+        self.jobs.sync_captured_deletions(effects)
         self.processing.sync()
         self.db.after_commit(lambda: self.fault('after_viewed_commit'))
         return True
 
     def remove_feed(self, feed: str) -> None:
+        if not self.db.transaction_depth:
+            raise RuntimeError('Storage action requires an owning transaction')
         self.subscriptions.check_owner('feed', feed)
-        boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
-        with boundary:
-            membership_graph.lock_graph(self.db)
-            binding = self.subscriptions.telegram.binding(feed)
-            effects = CollectionDiagnostics()
-            if self.db.execute("UPDATE feeds SET connection = 'deleting' WHERE id = %s AND connection IS DISTINCT FROM 'deleting'", (feed,)).rowcount:
-                source_changed(self.db)
-            for row in self.db.execute("SELECT id FROM jobs WHERE kind='discover' AND (item=%s OR feed_id=%s) AND (reason_message IS NOT NULL OR reason_code IS NOT NULL)",(feed,feed)):
-                self.problems.sync_discover(row['id'],self.wall_clock())
-            shared=[r[0] for r in self.db.execute(f'SELECT p.id FROM ({owned_ids("= %s")}) owner JOIN publications p ON p.id=owner.id WHERE p.platform IS NOT NULL',(feed,feed))]
-            # NULL-platform legacy roots can also own a timed fetch projection.
-            # Capture only dependent timed jobs while the old graph still exists.
-            timed_fetch_items={row['item'] for row in self.db.execute("""SELECT DISTINCT j.item FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m
-                JOIN publication_links l ON l.source_publication_id=m.id
-                JOIN jobs j ON md5(j.item)=md5(l.target_publication_id) AND j.item=l.target_publication_id AND j.kind='fetch' AND j.fetch_youtube_sensitive
-                WHERE m.feed_id=%s
-                UNION SELECT j.item FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m JOIN jobs j ON md5(j.item)=md5(m.id) AND j.item=m.id AND j.kind='fetch' AND j.fetch_youtube_sensitive
-                WHERE m.feed_id=%s AND TRUE""",(feed,feed))}
-            if timed_fetch_items:publication_links.capture_fetch_problems(self,effects,timed_fetch_items)
-            self.incomplete_draft.mark_materials(sorted(set(shared)))
-            publication_links.capture_root_deletion_problems(self,effects,set(shared))
-            removed = membership_graph.remove(self.db,feed=feed)
-            self.read_versions.memberships_changed(removed)
-            publication_links.prune(self,set(shared),effects=effects)
-            for item in shared:
-                self._remember_cleanup_owner(item, feed)
-            items = [r[0] for r in self.db.execute(owned_ids('= %s'), (feed,feed))]
-            self.problems.forget_materials(set(items), self.wall_clock())
-            publication_links.capture_root_deletion_problems(self,effects,set(items))
-            self.processing.memberships_removed(removed)
-            publication_links.notify_parents_many(self, set(removed))
-            self.jobs.sync_captured_deletions(effects)
+        membership_graph.lock_graph(self.db)
+        binding = self.subscriptions.telegram.binding(feed)
+        effects = CollectionDiagnostics()
+        if self.db.execute("UPDATE feeds SET connection = 'deleting' WHERE id = %s AND connection IS DISTINCT FROM 'deleting'", (feed,)).rowcount:
+            source_changed(self.db)
+        for row in self.db.execute("SELECT id FROM jobs WHERE kind='discover' AND (item=%s OR feed_id=%s) AND (reason_message IS NOT NULL OR reason_code IS NOT NULL)",(feed,feed)):
+            self.problems.sync_discover(row['id'],self.wall_clock())
+        shared=[r[0] for r in self.db.execute(f'SELECT p.id FROM ({owned_ids("= %s")}) owner JOIN publications p ON p.id=owner.id WHERE p.platform IS NOT NULL',(feed,feed))]
+        # NULL-platform legacy roots can also own a timed fetch projection.
+        # Capture only dependent timed jobs while the old graph still exists.
+        timed_fetch_items={row['item'] for row in self.db.execute("""SELECT DISTINCT j.item FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m
+            JOIN publication_links l ON l.source_publication_id=m.id
+            JOIN jobs j ON md5(j.item)=md5(l.target_publication_id) AND j.item=l.target_publication_id AND j.kind='fetch' AND j.fetch_youtube_sensitive
+            WHERE m.feed_id=%s
+            UNION SELECT j.item FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m JOIN jobs j ON md5(j.item)=md5(m.id) AND j.item=m.id AND j.kind='fetch' AND j.fetch_youtube_sensitive
+            WHERE m.feed_id=%s AND TRUE""",(feed,feed))}
+        if timed_fetch_items:publication_links.capture_fetch_problems(self,effects,timed_fetch_items)
+        self.incomplete_draft.mark_materials(sorted(set(shared)))
+        publication_links.capture_root_deletion_problems(self,effects,set(shared))
+        removed = membership_graph.remove(self.db,feed=feed)
+        self.read_versions.memberships_changed(removed)
+        publication_links.prune(self,set(shared),effects=effects)
+        for item in shared:
+            self._remember_cleanup_owner(item, feed)
+        items = [r[0] for r in self.db.execute(owned_ids('= %s'), (feed,feed))]
+        self.problems.forget_materials(set(items), self.wall_clock())
+        publication_links.capture_root_deletion_problems(self,effects,set(items))
+        self.processing.memberships_removed(removed)
+        publication_links.notify_parents_many(self, set(removed))
+        self.jobs.sync_captured_deletions(effects)
         self.db.after_commit(lambda: self.fault('after_feed_delete_commit'))
 
     def _remember_cleanup_owner(self, item: str, feed: str) -> None:
@@ -451,26 +443,27 @@ class Store:
         return row is None or row['value'] != 'false'
 
     def set_work_enabled(self, enabled: bool) -> None:
-        with self.db:
-            self.db.execute("INSERT INTO state VALUES ( 'work-enabled' , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value", ('true' if enabled else 'false',))
+        if not self.db.transaction_depth:
+            raise RuntimeError('Configuration changes require an owning transaction')
+        self.db.execute("INSERT INTO state VALUES ( 'work-enabled' , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value", ('true' if enabled else 'false',))
 
     def codex_config(self) -> CodexSettings | None:
         value = self.subscriptions.settings.state_value('processor:codex')
         return CodexSettings.model_validate_json(value) if value else None
 
     def configure_codex(self, config: CodexSettings) -> None:
+        if not self.db.transaction_depth:
+            raise RuntimeError('Configuration changes require an owning transaction')
         # Future execution choice does not invalidate inputs or cancel work.
-        boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
-        with boundary:
-            membership_graph.lock_graph(self.db)
-            self.subscriptions.settings.set_state('processor:codex', config.model_dump_json())
-            ids=[row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE status='pending' AND reason_code='processor-config' AND payload::jsonb->>'preclaim_blocked'='true'")]
-            processor_previous=self.problems.prepare_processor_change(ids,self.wall_clock())
-            job_write(self.db, """UPDATE jobs SET status='pending',next=0,reason_message=NULL,reason_code=NULL,
-                payload=(payload-'preclaim_blocked')
-                WHERE status='pending' AND reason_code='processor-config' AND payload::jsonb->>'preclaim_blocked'='true'""")
-            self.problems.finish_processor_change(ids,processor_previous,self.wall_clock())
-            self.problems.sync_codex_choice(self.wall_clock())
+        membership_graph.lock_graph(self.db)
+        self.subscriptions.settings.set_state('processor:codex', config.model_dump_json())
+        ids=[row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE status='pending' AND reason_code='processor-config' AND payload::jsonb->>'preclaim_blocked'='true'")]
+        processor_previous=self.problems.prepare_processor_change(ids,self.wall_clock())
+        job_write(self.db, """UPDATE jobs SET status='pending',next=0,reason_message=NULL,reason_code=NULL,
+            payload=(payload-'preclaim_blocked')
+            WHERE status='pending' AND reason_code='processor-config' AND payload::jsonb->>'preclaim_blocked'='true'""")
+        self.problems.finish_processor_change(ids,processor_previous,self.wall_clock())
+        self.problems.sync_codex_choice(self.wall_clock())
 
     @reading_value
     def processor_config(self) -> ProcessorConfig | None:
@@ -478,13 +471,13 @@ class Store:
         return ProcessorConfig.model_validate_json(value) if value else None
 
     def configure_processor(self, config: ProcessorConfig) -> bool:
-        boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
-        with boundary:
-            membership_graph.lock_graph(self.db)
-            if self.processor_config() == config:
-                return False
-            self.subscriptions.settings.set_state('processor:llamacpp', config.model_dump_json())
-            self.settings_changed()
+        if not self.db.transaction_depth:
+            raise RuntimeError('Configuration changes require an owning transaction')
+        membership_graph.lock_graph(self.db)
+        if self.processor_config() == config:
+            return False
+        self.subscriptions.settings.set_state('processor:llamacpp', config.model_dump_json())
+        self.settings_changed()
         return True
 
     @reading_value
@@ -493,20 +486,21 @@ class Store:
         return max((int(value) for key in keys if (value := material_read.state(self.db,key)) is not None), default=0)
 
     def settings_changed(self, scope: str = 'oko', owner: str = 'global') -> None:
-        with self.db:
-            membership_graph.lock_graph(self.db)
-            row = self.db.execute("SELECT value FROM state WHERE key = 'settings-sequence'").fetchone()
-            sequence = max(int(row[0]) if row else 0, self.settings_version()) + 1
-            self.db.execute("INSERT INTO state VALUES ( 'settings-sequence' , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value", (str(sequence),))
-            if scope == 'oko':
-                keys = ['settings-version']
-            else:
-                query = 'SELECT id FROM feeds WHERE ' + ('id = %s' if scope == 'feed' else 'folder_id = %s')
-                keys = ['settings-version:' + row[0] for row in self.db.execute(query, (owner,))]
-            self.db.executemany('INSERT INTO state VALUES ( %s , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value', [(key, str(sequence)) for key in keys])
-            self.jobs.revoke_changed_running_inputs()
-            self.processing.invalidate(scope, owner)
-            self.problems.sync_codex_choice(self.wall_clock())
+        if not self.db.transaction_depth:
+            raise RuntimeError('Configuration changes require an owning transaction')
+        membership_graph.lock_graph(self.db)
+        row = self.db.execute("SELECT value FROM state WHERE key = 'settings-sequence'").fetchone()
+        sequence = max(int(row[0]) if row else 0, self.settings_version()) + 1
+        self.db.execute("INSERT INTO state VALUES ( 'settings-sequence' , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value", (str(sequence),))
+        if scope == 'oko':
+            keys = ['settings-version']
+        else:
+            query = 'SELECT id FROM feeds WHERE ' + ('id = %s' if scope == 'feed' else 'folder_id = %s')
+            keys = ['settings-version:' + row[0] for row in self.db.execute(query, (owner,))]
+        self.db.executemany('INSERT INTO state VALUES ( %s , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value', [(key, str(sequence)) for key in keys])
+        self.jobs.revoke_changed_running_inputs()
+        self.processing.invalidate(scope, owner)
+        self.problems.sync_codex_choice(self.wall_clock())
         self.processing.sync()
 
     @reading_value

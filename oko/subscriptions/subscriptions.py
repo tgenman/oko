@@ -22,8 +22,8 @@ class Overrides(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     feed_refresh_minutes: int | None = Field(default=None, ge=1, le=1440)
     telegram_http_rps: float | None = Field(default=None, ge=.1, le=10, allow_inf_nan=False)
-    retry_initial_seconds: int | None = Field(default=None, ge=1, le=86400)
-    retry_max_seconds: int | None = Field(default=None, ge=1, le=86400)
+    retry_initial_seconds: int | None = Field(default=None, ge=60, le=3600)
+    retry_max_seconds: int | None = Field(default=None, ge=60, le=3600)
     originals: bool | None = None
     theses: bool | None = None
     prompt_theses: str | None = Field(default=None, max_length=20000)

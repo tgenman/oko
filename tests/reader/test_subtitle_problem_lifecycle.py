@@ -1,6 +1,7 @@
+from tests.support.youtube_action import youtube_action
 from tests.support.storage import Store
 from oko.storage.transaction import transaction
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 
 
 def test_success_during_wait_cancels_future_occurrence(tmp_path,postgres_url):
@@ -10,7 +11,7 @@ def test_success_during_wait_cancels_future_occurrence(tmp_path,postgres_url):
             store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','youtube','p')")
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','youtube:subtitles','x','f','pending_download')")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('download_media','m','running',1) RETURNING id").fetchone()[0]
-            store.youtube.start(100)
+            youtube_action(store, 'start', 100)
             store.jobs.defer_captions(Job(job,'download_media','m',1),100,10,'waiting')
             assert store.db.execute('SELECT 1 FROM reader_problems WHERE subtitle_due IS NOT NULL').fetchone()
             claimed=store.jobs._claim(store.db.execute('SELECT * FROM jobs WHERE id=%s',(job,)).fetchone())
@@ -33,7 +34,7 @@ def test_timer_pause_and_reserved_episode_roll_back_atomically(tmp_path,postgres
         before=[tuple(row) for row in store.db.execute('SELECT id,identity,body,finished,subtitle_due FROM reader_problems ORDER BY id')]
         with pytest.raises(RuntimeError,match='rollback'):
             with transaction(store.db):
-                store.youtube.start(100)
+                youtube_action(store, 'start', 100)
                 assert store.db.execute('SELECT 1 FROM reader_problems WHERE subtitle_due IS NOT NULL').fetchone()
                 raise RuntimeError('rollback')
         assert [tuple(row) for row in store.db.execute('SELECT id,identity,body,finished,subtitle_due FROM reader_problems ORDER BY id')]==before
@@ -54,7 +55,7 @@ def test_event_owned_subtitle_etag_changes_exactly_at_deadline(tmp_path,postgres
                 store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','youtube','p')")
                 store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','youtube:subtitles','x','f','pending_download')")
                 job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('download_media','m','running',1) RETURNING id").fetchone()[0]
-                store.youtube.start(100)
+                youtube_action(store, 'start', 100)
                 store.jobs.defer_captions(Job(job,'download_media','m',1),100,10,'waiting')
             app.state.host.execution.reader_advance=None
         client.portal.call(setup)
@@ -79,7 +80,7 @@ def test_restart_after_deadline_preserves_reserved_virtual_id(tmp_path,postgres_
             store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','other_web','p')")
             store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','youtube:subtitles','x','f','pending_download')")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('download_media','m','running',1) RETURNING id").fetchone()[0]
-            store.youtube.start(100)
+            youtube_action(store, 'start', 100)
             store.jobs.defer_captions(Job(job,'download_media','m',1),100,10,'waiting')
             reserved=store.db.execute('SELECT id FROM reader_problems WHERE subtitle_due IS NOT NULL').fetchone()[0]
         store.db.close();clock[0]=111

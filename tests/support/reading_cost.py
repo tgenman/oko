@@ -1,3 +1,6 @@
+from tests.support.storage_action import storage_action
+from tests.support.subscription_action import subscription_action
+from tests.support.job_claim import claim_job
 from tests.support.collection_acceptance import discovered
 """Bound HTTP reading work independently of machine speed and background work."""
 from contextvars import ContextVar
@@ -7,6 +10,7 @@ from tests.support.legacy_source import Publication
 
 from tests.support.synthetic_material import material as Material
 from oko.storage.publication_owners import owner_expr, owned_ids
+from oko.storage.transaction import transaction
 from tests.support.storage import Store
 from oko.subscriptions.subscriptions import AddFeed
 from tests.support.app import create_app
@@ -34,18 +38,19 @@ def build_library(root, counts):
     try:
         feeds, items = [], []
         for index, count in enumerate(counts):
-            feed = store.subscriptions.add_feed(AddFeed(
+            feed = subscription_action(store, 'add_feed', AddFeed(
                 url='https://fixture.test/feed/'+str(index),
                 title=f'Synthetic {index}', folder=f'Folder {index}', verification='synthetic'))['id']
             feeds.append(feed)
-            store.jobs.enqueue_discovery(feed)
-            job = store.jobs.next_job(0, feeds=[feed])
+            with transaction(store.db):
+                store.jobs.enqueue_discovery(feed)
+            job = claim_job(store, 0, feeds=[feed])
             assert job is not None
             discovered(store,[publication_packet(Publication(str(n), f'https://example.org/{index}/{n}', n),
                               Material(f'Video {n}', '', captions='not_requested', description='Synthetic video'),needs_fetch=True)
                               for n in range(count)], '{}', job, feed)
             items.append(store.db.execute(owned_ids('= %s')+' ORDER BY id', (feed,feed)).fetchone()[0])
-        store.set_work_enabled(False)
+        storage_action(store, 'set_work_enabled', False)
     finally:
         store.db.close()
     return feeds, items

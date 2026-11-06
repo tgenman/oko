@@ -366,6 +366,7 @@ def test_invalid_model_output_does_not_become_a_result(tmp_path,invalid):
 def test_local_retry_records_the_model_actually_used_and_ready_result_survives_choice_change(tmp_path):
     from tests.support.models import model_transport
     root=publication_root(tmp_path)
+    offset=[0.0]
     selected=['local:latest']
     broken=[True]
     sent=[]
@@ -379,15 +380,17 @@ def test_local_retry_records_the_model_actually_used_and_ready_result_survives_c
                 return httpx.Response(503)
         return native.handler(request)
     source=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,'Useful text')])) )
-    with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,ai_transport=httpx.MockTransport(model)),headers=HEADERS) as client:
+    with TestClient(create_app(root,token='test',api_only=True,rss_transport=source,ai_transport=httpx.MockTransport(model),
+                               clock=lambda:time.monotonic()+offset[0],wall_clock=lambda:time.time()+offset[0]),headers=HEADERS) as client:
         configure_fast_web(client)
         client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':selected[0],'local_execution':True})
-        client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':'','retry_initial_seconds':1,'retry_max_seconds':1})
+        client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':'','retry_initial_seconds':60,'retry_max_seconds':60})
         client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
         card=wait_for(client,lambda:next((c for c in read_publications_for_cards(client, '/api/v3/cards') if reasons(c,'theses')),None))
         selected[0]='local:second'
         client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':selected[0],'local_execution':True})
         broken[0]=False
+        offset[0]+=61
         wait_for(client,lambda:summary(client.get('/api/v3/publication/'+card['id']).json()))
         metadata=stored(root,card['id'])['processing_metadata']
         assert metadata['summary']['model']==sent[-1]=='local:second'
@@ -780,6 +783,55 @@ def test_revoking_public_ai_interrupts_running_remote_filter_and_rejects_late_re
             release.set()
             wait_for(client,lambda:any(j['operation']=='filter' and j['status']!='running' for j in client.get('/api/v3/publication/'+card['id']).json()['jobs']))
             assert filter_result(client.get('/api/v3/publication/'+card['id']).json()) is None
+        finally:
+            release.set()
+
+
+def test_late_model_reply_cannot_change_recreated_publication(tmp_path):
+    import asyncio
+    import threading
+    entered,release,finished=threading.Event(),threading.Event(),threading.Event()
+    text=['Old text']
+    calls=[]
+
+    async def model(request):
+        if request.url.path!='/v1/chat/completions':
+            return model_transport([]).handler(request)
+        task=json.loads(json.loads(request.content)['messages'][1]['content'])
+        source=task['sources'][0]
+        calls.append(source['text'])
+        if len(calls)==1:
+            entered.set()
+            while not release.is_set():
+                try:
+                    await asyncio.sleep(.01)
+                except asyncio.CancelledError:
+                    pass
+            finished.set()
+        result={'points':[{'text':source['text'],'sources':[{'id':source['id'],'url':source['url']}]}]}
+        return httpx.Response(200,json={'choices':[{'finish_reason':'stop','message':{'role':'assistant','content':json.dumps(result)}}]})
+
+    source=httpx.MockTransport(lambda _:httpx.Response(200,text=page([(11,text[0])])))
+    with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=source,
+                               ai_transport=httpx.MockTransport(model)),headers=HEADERS) as client:
+        try:
+            configure_fast_web(client)
+            client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':True})
+            client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':''})
+            feed=client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'}).json()['feed_id']
+            old=wait_for(client,lambda:next((c for c in read_publications_for_cards(client,'/api/v3/cards') if c['content'].get('blocks') is not None),None))['id']
+            assert entered.wait(10)
+            assert client.post('/api/v3/materials/'+old+'/viewed').status_code==200
+            wait_for(client,lambda:client.get('/api/v3/publication/'+old).status_code==404)
+            text[0]='New text'
+            assert client.post('/api/v3/feeds/'+feed+'/history',json={'mode':'count','count':'1'}).status_code==200
+            fresh=wait_for(client,lambda:next((c for c in read_publications_for_cards(client,'/api/v3/cards') if c['id']!=old and 'New text' in body_text(c)),None))['id']
+            release.set()
+            assert finished.wait(10)
+            current=wait_for(client,lambda:(value if (value:=client.get('/api/v3/publication/'+fresh).json()) and summary(value) else None),timeout=20)
+            assert summary(current)['points'][0]['text']=='New text'
+            assert calls==['Old text','New text']
+            assert client.get('/api/v3/publication/'+old).status_code==404
         finally:
             release.set()
 

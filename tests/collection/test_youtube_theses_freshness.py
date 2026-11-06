@@ -1,7 +1,5 @@
 from tests.support.publications import summary,subtitle_text,loading,filter_state
 from tests.support.cards import read_all_cards
-from oko.collection.contracts import DiscoveryResult
-from tests.support.legacy_source import FetchResult
 from tests.support.presence import presence, close_presence
 import json
 import httpx
@@ -9,10 +7,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.support.app import create_app
-from tests.support.subscriptions import configured_sources
-from tests.support.legacy_source import Publication
-from tests.support.synthetic_material import material as Material
-from tests.support.storage import Store
 from tests.support.reader import HEADERS, wait_for
 from tests.support.models import model_transport
 from tests.support.youtube import PNG, VIDEO, feed_xml, subscribe
@@ -109,34 +103,31 @@ def test_metadata_updates_reuse_caption_theses_across_restart(tmp_path, prompt_f
         assert not (tmp_path / 'content' / material['id']).exists()
 
 
-@pytest.mark.skip(reason='Проверка пересчёта после ручной пересборки: задача #216')
 def test_changed_caption_text_requires_new_theses(tmp_path):
     class SavedCaptions:
-        changes = None
         text = 'First saved transcript'
 
-        async def discover(self, cursor):
-            return DiscoveryResult(tuple([Publication(VIDEO, 'https://www.youtube.com/watch?v=' + VIDEO, 1800000000)]), 'one')
+        async def fetch(self, video):
+            assert video == VIDEO
+            return self.text
 
-        async def fetch(self, publication):
-            return FetchResult(Material('Video', self.text, captions='available'))
-
-    # Synthetic revisions exercise text freshness without querying real subtitles.
-    configured_sources(tmp_path, [('https://www.youtube.com/feeds/videos.xml?channel_id=UC'+'a'*22, 'Video', 'Видео')])
-    with TestClient(create_app(tmp_path, token='test'), headers=HEADERS) as client:
-        feed = client.get('/api/v3/subscriptions').json()['feeds'][0]['id']
-    source, calls = SavedCaptions(), []
-    with TestClient(create_app(tmp_path, token='test', source=source, source_feed=feed,
-                               ai_transport=model_transport(calls)), headers=HEADERS) as client:
+    captions, calls = SavedCaptions(), []
+    with TestClient(create_app(tmp_path, token='test', rss_enabled=True, rss_transport=transport(),
+                               youtube_captions=captions, ai_transport=model_transport(calls)), headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp'})
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://127.0.0.1:8080',
                    'model': 'local:latest', 'local_execution': True})
+        subscribe(client)
         presence(client, 'reader')
         original = wait(client, lambda m: summary(m) and not loading(m))
-        source.text = 'Changed saved transcript'
-        client.post('/api/v3/collect')
-        wait(client, lambda m: summary(m) and m['text'] == source.text and not loading(m))
+        old_hash = original['processing_metadata']['summary']['input_hash']
+        captions.text = 'Changed saved transcript'
+        response = client.post('/api/v3/materials/' + original['id'] + '/rebuild')
+        assert response.status_code == 200, response.text
+        updated = wait(client, lambda m: summary(m) and not loading(m)
+                       and m['processing_metadata']['summary']['input_hash'] != old_hash)
         requests = [json.loads(json.loads(r.content)['messages'][1]['content'])
                     for r in calls if r.url.path == '/v1/chat/completions']
-        assert [r['sources'][0]['text'] for r in requests] == [subtitle_text(client,original), source.text]
+        assert [r['sources'][0]['text'] for r in requests] == ['First saved transcript', captions.text]
         assert requests[0]['sources'][0]['version'] != requests[1]['sources'][0]['version']
+        assert subtitle_text(client, updated) == captions.text

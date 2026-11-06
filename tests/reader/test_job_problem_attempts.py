@@ -1,9 +1,10 @@
+from tests.support.job_claim import claim_job, retry_job
 import json
 
 import pytest
 
 from oko.collection.adapters import AdapterErrorKind, AdapterIssue
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from oko.storage.transaction import transaction
 from tests.support.storage import Store
 
@@ -28,13 +29,13 @@ def test_failure_claim_and_stale_attempt_keep_one_problem(tmp_path, postgres_url
             if kind == 'download_media':
                 store.jobs.fail_media(old, issue)
             else:
-                store.jobs.retry(old, 1, 'failure', issue=issue)
+                retry_job(store, old, 1, 'failure', issue=issue)
         problem = store.db.execute("SELECT id,body FROM reader_problems WHERE body::jsonb->>'operation'=%s AND finished IS NULL", ('producer:' + kind,)).fetchone()
         assert problem
         with transaction(store.db):
             store.db.execute('UPDATE jobs SET next=0 WHERE id=%s', (job_id,))
         def claim():
-            return store.jobs.next_job(1, feeds=['feed'], media_only=kind == 'download_media',
+            return claim_job(store, 1, feeds=['feed'], media_only=kind == 'download_media',
                                        ai_only=kind in ('filter', 'theses'))
         with pytest.raises(RuntimeError, match='rollback'):
             with transaction(store.db):
@@ -51,7 +52,7 @@ def test_failure_claim_and_stale_attempt_keep_one_problem(tmp_path, postgres_url
             if kind == 'download_media':
                 store.jobs.fail_media(old, issue)
             else:
-                store.jobs.retry(old, 1, 'stale failure', issue=issue)
+                retry_job(store, old, 1, 'stale failure', issue=issue)
         assert store.db.execute('SELECT generation,status FROM jobs WHERE id=%s', (job_id,)).fetchone()[:] == (claimed.generation, 'running')
         assert store.db.execute('SELECT body FROM reader_problems WHERE id=%s', (problem['id'],)).fetchone()[0] == after['body']
     finally:

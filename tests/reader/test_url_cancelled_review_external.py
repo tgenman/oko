@@ -5,7 +5,7 @@ from tests.support.worker_library import worker_library,workers,pass_worker
 
 
 def test_cancelled_stays_cancelled_and_explicit_retry_replaces_stale_summary(tmp_path,postgres_url):
-    from oko.storage.job_types import Job
+    from oko.domain.job import Job
     store,item,execution,tasks=worker_library(tmp_path,database_url=postgres_url)
     try:
         asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))

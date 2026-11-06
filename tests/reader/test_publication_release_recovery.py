@@ -113,11 +113,38 @@ def test_rollback_after_new_writes_refuses_old_schema_without_deleting_data(post
         monkeypatch.setattr(deploy,'prepare',lambda *args,**kwargs:None)
         monkeypatch.setattr(deploy,'maintenance',lambda root:nullcontext())
         monkeypatch.setattr(deploy,'database_state',lambda root,current:dict(version=db.execute('SELECT max(version) FROM oko_schema_migrations').fetchone()[0]))
+        stopped=[]
+        monkeypatch.setattr(deploy,'stop',lambda root,current:stopped.append(current['sha']))
         with pytest.raises(ValueError,match='incompatible database schema'):
             deploy.change(tmp_path,None)
+        assert stopped==[new]
         assert db.execute("SELECT content->'blocks'->0->>'text' FROM publications WHERE id='new'").fetchone()==('New data',)
         assert media.read_bytes()==b'new synthetic bytes'
         assert json.loads((tmp_path/'release.json').read_text())['sha']==new
+
+
+@pytest.mark.parametrize('failure', ['prepare', 'database'])
+def test_rollback_freezes_writes_even_if_recovery_checks_fail(tmp_path,monkeypatch,failure):
+    from deployment import deploy
+    old,new='a'*40,'b'*40
+    (tmp_path/'release.json').write_text(json.dumps(release(new,120)))
+    (tmp_path/'previous-release.json').write_text(json.dumps(release(old,118)))
+    media=tmp_path/'new-file'
+    media.write_bytes(b'new synthetic bytes')
+    stopped=[]
+    monkeypatch.setattr(deploy,'maintenance',lambda root:nullcontext())
+    monkeypatch.setattr(deploy,'stop',lambda root,current:stopped.append(current['sha']))
+    def check(name):
+        assert stopped==[new]
+        if name==failure:
+            raise ValueError('synthetic '+name+' failure')
+    monkeypatch.setattr(deploy,'prepare',lambda *args,**kwargs:check('prepare'))
+    monkeypatch.setattr(deploy,'database_state',lambda *args:check('database'))
+    with pytest.raises(ValueError,match='synthetic '+failure+' failure'):
+        deploy.change(tmp_path,None)
+    assert stopped==[new]
+    assert media.read_bytes()==b'new synthetic bytes'
+    assert json.loads((tmp_path/'release.json').read_text())['sha']==new
 
 
 def test_failed_release_migration_rolls_back_every_pending_step(postgres_database_url,tmp_path):

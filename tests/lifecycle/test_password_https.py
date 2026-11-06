@@ -1,4 +1,5 @@
 """Real HTTPS proxy, verified test certificate, HTTP reader, and temporary credentials."""
+from tests.support.storage_action import storage_action
 import contextlib
 import http.server
 import json
@@ -66,7 +67,7 @@ def test_password_reader_behind_https_proxy(tmp_path: Path):
     thread.start()
     from tests.support.storage import Store
     seed = Store(tmp_path, lambda _: None)
-    seed.set_work_enabled(False)
+    storage_action(seed, 'set_work_enabled', False)
     seed.db.close()
     log_path = tmp_path / 'server.log'
     with log_path.open('w') as log:

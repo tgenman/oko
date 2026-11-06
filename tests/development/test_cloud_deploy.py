@@ -215,6 +215,9 @@ def test_pre_migration_backup_is_verified_before_schema_change(machine):
     assert rollback.returncode != 0
     assert 'incompatible database schema' in rollback.stderr
     assert json.loads((root / 'release.json').read_text())['sha'] == NEW
+    state=json.loads((root / 'synthetic-state.json').read_text())
+    assert state['reader'] is False and state['helper'] is False
+    assert state['schema']==4
 
 
 @pytest.mark.parametrize('failure', ['backup', 'migration'])

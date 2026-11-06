@@ -53,23 +53,25 @@ class SubscriptionRepository:
         return str(expect_row(self.db.execute('SELECT id FROM folders WHERE title = %s', (title,)).fetchone())[0])
 
     def rename_folder(self, identity: str, title: str) -> dict[str, Any]:
-        with self.db:
-            begin_write(self.db)
-            self.check_owner('folder', identity)
-            try:
-                self.db.execute('UPDATE folders SET title = %s WHERE id = %s', (title.strip(), identity))
-            except INTEGRITY_ERRORS:
-                raise FolderConflict('folder_name_conflict', 'A folder with this name already exists.') from None
+        if not self.db.transaction_depth:
+            raise RuntimeError('Subscription changes require an owning transaction')
+        begin_write(self.db)
+        self.check_owner('folder', identity)
+        try:
+            self.db.execute('UPDATE folders SET title = %s WHERE id = %s', (title.strip(), identity))
+        except INTEGRITY_ERRORS:
+            raise FolderConflict('folder_name_conflict', 'A folder with this name already exists.') from None
         return next(folder for folder in self.folders() if folder['id'] == identity)
 
     def remove_folder(self, identity: str) -> None:
-        with self.db:
-            begin_write(self.db)
-            self.check_owner('folder', identity)
-            if self.db.execute('SELECT 1 FROM feeds WHERE folder_id = %s LIMIT 1', (identity,)).fetchone():
-                raise FolderConflict('folder_not_empty', 'Move or delete all feeds before deleting this folder.')
-            self.clear_settings('folder', identity)
-            self.db.execute('DELETE FROM folders WHERE id = %s', (identity,))
+        if not self.db.transaction_depth:
+            raise RuntimeError('Subscription changes require an owning transaction')
+        begin_write(self.db)
+        self.check_owner('folder', identity)
+        if self.db.execute('SELECT 1 FROM feeds WHERE folder_id = %s LIMIT 1', (identity,)).fetchone():
+            raise FolderConflict('folder_not_empty', 'Move or delete all feeds before deleting this folder.')
+        self.clear_settings('folder', identity)
+        self.db.execute('DELETE FROM folders WHERE id = %s', (identity,))
 
     @reading_value
     def feeds(self, identity: str | None = None, *, folder: str | None = None, transport: str | None = None) -> list[dict[str, Any]]:
@@ -133,6 +135,8 @@ class SubscriptionRepository:
         return feed
 
     def add_feed(self, body: AddFeed) -> dict[str, Any]:
+        if not self.db.transaction_depth:
+            raise RuntimeError('Subscription changes require an owning transaction')
         identity, kind, connection = identify(body.url)
         if kind not in ('rss', 'youtube'):
             raise ValueError('Для Telegram используйте подключение Telegram-источника')
@@ -141,17 +145,16 @@ class SubscriptionRepository:
             return old
         title = body.title or urlsplit(body.url).hostname or 'RSS'
         identity_id = self.new_feed_id()
-        with self.db:
-            from oko.storage import memberships
-            memberships.lock_graph(self.db)
-            folder = self.ensure_folder(body.folder)
-            self.db.execute('INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport , public_ai ) VALUES ( %s , %s , %s , %s , %s , %s , %s , %s , %s )',
-                            (identity_id, identity, title, kind, folder, [body.url], connection, kind, kind == 'youtube'))
-            marker=getattr(self.db,'youtube_admission_feed_mark',None)
-            if marker is not None and kind=='youtube':marker(identity_id)
-            source_changed(self.db)
-            self.details.created(identity_id)
-            self.history.configure(identity_id, body.initial_history)
+        from oko.storage import memberships
+        memberships.lock_graph(self.db)
+        folder = self.ensure_folder(body.folder)
+        self.db.execute('INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport , public_ai ) VALUES ( %s , %s , %s , %s , %s , %s , %s , %s , %s )',
+                        (identity_id, identity, title, kind, folder, [body.url], connection, kind, kind == 'youtube'))
+        marker=getattr(self.db,'youtube_admission_feed_mark',None)
+        if marker is not None and kind=='youtube':marker(identity_id)
+        source_changed(self.db)
+        self.details.created(identity_id)
+        self.history.configure(identity_id, body.initial_history)
         return next(feed for feed in self.feeds() if feed['identity'] == identity)
 
     def new_feed_id(self) -> str:
@@ -170,6 +173,14 @@ class SubscriptionRepository:
 
     def feed_refresh_minutes(self) -> int:
         return int(self._settings('oko', 'global').get('feed_refresh_minutes', DEFAULT_FEED_REFRESH_MINUTES))
+
+    def resume_history(self, feed: str) -> None:
+        if not self.db.transaction_depth:
+            raise RuntimeError('History changes require an owning transaction')
+        memberships.lock_graph(self.db)
+        history=self.history.status(feed)
+        if history and not history.get('cancelled'):
+            self.history.pause(feed,False)
 
     def telegram_http_settings(self) -> dict[str, Any]:
         values = self._settings('oko', 'global')
@@ -248,26 +259,43 @@ class SubscriptionRepository:
         return result
 
     def update_settings(self, scope: str, owner: str, patch: Overrides) -> dict[str, Any]:
+        if not self.db.transaction_depth:
+            raise RuntimeError('Subscription changes require an owning transaction')
         self.check_owner(scope, owner)
         self.validate_retry_settings(patch.model_dump(exclude_unset=True))
-        with self.db:
-            if patch.model_fields_set & {'filter_enabled','prompt_filters','theses','prompt_theses','processor'}:
-                memberships.lock_graph(self.db)
-            before = self.settings.values(scope, owner)
-            self.settings.patch(scope, owner, patch.model_dump(exclude_unset=True))
-            after = self.settings.values(scope, owner)
-            if scope == 'feed' and before != after:
-                self.details.record(owner, 'modified')
+        if patch.model_fields_set & {'filter_enabled','prompt_filters','theses','prompt_theses','processor'}:
+            memberships.lock_graph(self.db)
+        before = self.settings.values(scope, owner)
+        self.settings.patch(scope, owner, patch.model_dump(exclude_unset=True))
+        after = self.settings.values(scope, owner)
+        if scope == 'feed' and before != after:
+            self.details.record(owner, 'modified')
         return self.effective(scope, owner)
 
     def clear_settings(self, scope: str, owner: str) -> None:
         self.settings.clear(scope, owner)
+
+    def remove_cleaned_feed(self, feed: str) -> bool:
+        if not self.db.transaction_depth:
+            raise RuntimeError('Feed cleanup requires an owning transaction')
+        for table in ('history_members','initial_history'):
+            deleted=self.db.execute(f'DELETE FROM {table} WHERE feed=%s',(feed,)).rowcount
+            if table=='initial_history' and deleted:source_changed(self.db)
+            if table=='history_members' and deleted:status_changed(self.db)
+        self.clear_settings('feed',feed)
+        self.db.execute('DELETE FROM state WHERE key=%s',('feed-status:'+feed,))
+        self.telegram.release(feed)
+        deleted=bool(self.db.execute('DELETE FROM feeds WHERE id=%s',(feed,)).rowcount)
+        if deleted:source_changed(self.db)
+        return deleted
 
     def youtube_theses(self, feed_id: str) -> bool:
         settings = self.effective('feed', feed_id, details=False)
         return bool(settings['feed']['kind'] == 'youtube' and (settings['feed']['importance'] == 'high' or settings['effective']['theses']['value']))
 
     def update_feed(self, feed_id: str, patch: FeedPatch) -> dict[str, Any]:
+        if not self.db.transaction_depth:
+            raise RuntimeError('Subscription changes require an owning transaction')
         self.check_owner('feed', feed_id)
         feed = next(f for f in self.feeds() if f['id'] == feed_id)
         values = patch.model_dump(exclude_unset=True)
@@ -291,27 +319,26 @@ class SubscriptionRepository:
             raise ValueError('YouTube-источник не распознан')
         if transport == 'rss' and feed['kind'] == 'youtube':
             raise ValueError('Для этого источника нет RSS-подключения')
-        with self.db:
-            if patch.model_fields_set & {'folder_id','new_folder','importance','public_ai','transport'}:
-                memberships.lock_graph(self.db)
-            if folder_title is not None:
-                begin_write(self.db)
-                if self.db.execute('SELECT 1 FROM folders WHERE title = %s', (folder_title,)).fetchone():
-                    raise ValueError('A folder with this name already exists.')
-                values['folder_id'] = self.ensure_folder(folder_title)
-            changed = any(feed.get(field) != value for field, value in values.items())
-            source_fields = ('folder_id','kind','identity','original_urls','connection','transport','importance',
-                             'initial_days','public_ai','read_history','auto_read','telegram_peer','telegram_account','telegram_username')
-            source_modified = any(field in source_fields and feed.get(field) != value for field,value in values.items())
-            for field, value in values.items():
-                self.db.execute(f'UPDATE feeds SET {field} = %s WHERE id = %s', (value, feed_id))
-            if 'transport' in values and values['transport'] != feed['transport']:
-                connection = 'ambiguous' if feed['kind'] == 'unresolved' and transport is None else 'needs_connection'
-                self.db.execute('UPDATE feeds SET connection = %s WHERE id = %s', (connection, feed_id))
-            if changed:
-                self.details.record(feed_id, 'modified')
-            if 'title' in values and feed.get('title') != values['title']:
-                status_changed(self.db)
-            if source_modified:
-                source_changed(self.db)
+        if patch.model_fields_set & {'folder_id','new_folder','importance','public_ai','transport'}:
+            memberships.lock_graph(self.db)
+        if folder_title is not None:
+            begin_write(self.db)
+            if self.db.execute('SELECT 1 FROM folders WHERE title = %s', (folder_title,)).fetchone():
+                raise ValueError('A folder with this name already exists.')
+            values['folder_id'] = self.ensure_folder(folder_title)
+        changed = any(feed.get(field) != value for field, value in values.items())
+        source_fields = ('folder_id','kind','identity','original_urls','connection','transport','importance',
+                         'initial_days','public_ai','read_history','auto_read','telegram_peer','telegram_account','telegram_username')
+        source_modified = any(field in source_fields and feed.get(field) != value for field,value in values.items())
+        for field, value in values.items():
+            self.db.execute(f'UPDATE feeds SET {field} = %s WHERE id = %s', (value, feed_id))
+        if 'transport' in values and values['transport'] != feed['transport']:
+            connection = 'ambiguous' if feed['kind'] == 'unresolved' and transport is None else 'needs_connection'
+            self.db.execute('UPDATE feeds SET connection = %s WHERE id = %s', (connection, feed_id))
+        if changed:
+            self.details.record(feed_id, 'modified')
+        if 'title' in values and feed.get('title') != values['title']:
+            status_changed(self.db)
+        if source_modified:
+            source_changed(self.db)
         return next(f for f in self.feeds() if f['id'] == feed_id)

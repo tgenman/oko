@@ -1,6 +1,9 @@
+from tests.support.youtube_action import youtube_action
+from tests.support.storage_action import storage_action
+from tests.support.job_claim import retry_job
 import json
 import pytest
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from oko.storage.transaction import transaction
 from tests.support.storage import Store
 
@@ -24,7 +27,7 @@ def test_processor_change_invalidates_http_etag_and_rollback_preserves_it(tmp_pa
             store=app.state.host.require_store()
             try:
                 with transaction(store.db):
-                    store.jobs.retry(Job(job_id,'read','feed',1),1,'missing',code='processor-config')
+                    retry_job(store, Job(job_id,'read','feed',1),1,'missing',code='processor-config')
                     raise RuntimeError('rollback')
             except RuntimeError:
                 pass
@@ -32,7 +35,7 @@ def test_processor_change_invalidates_http_etag_and_rollback_preserves_it(tmp_pa
         assert client.get('/api/v3/status/details',headers={'If-None-Match':etag}).status_code==304
         def retry():
             store=app.state.host.require_store()
-            store.jobs.retry(Job(job_id,'read','feed',1),1,'missing',code='processor-config')
+            retry_job(store, Job(job_id,'read','feed',1),1,'missing',code='processor-config')
         client.portal.call(retry)
         updated=client.get('/api/v3/status/details',headers={'If-None-Match':etag})
         assert updated.status_code==200 and updated.headers['etag']!=etag
@@ -52,9 +55,9 @@ def test_configure_codex_closes_last_preclaim_problem_before_status_get(tmp_path
     try:
         with store.db:
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation,payload) VALUES ('read','feed','running',1,%s) RETURNING id",(json.dumps({'preclaim_blocked':True}),)).fetchone()[0]
-        store.jobs.retry(Job(job_id,'read','feed',1),1,'missing',code='processor-config')
+        retry_job(store, Job(job_id,'read','feed',1),1,'missing',code='processor-config')
         choice=CodexChoice(model='synthetic',reasoning_effort='low',fast=False)
-        store.configure_codex(CodexSettings(filter=choice,theses=choice))
+        storage_action(store, 'configure_codex', CodexSettings(filter=choice,theses=choice))
         assert not store.db.execute("SELECT 1 FROM reader_problems WHERE identity='processor:configuration' AND finished IS NULL").fetchone()
     finally:store.db.close()
 
@@ -67,9 +70,10 @@ def test_mark_viewed_through_store_closes_processor_without_status_get(tmp_path,
             store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('item','rss','item')")
             store.db.execute("UPDATE publications SET feed_id='feed' WHERE id='item'")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('filter','item','running',1) RETURNING id").fetchone()[0]
-        store.jobs.retry(Job(job_id,'filter','item',1),1,'missing',code='processor-config')
+        retry_job(store, Job(job_id,'filter','item',1),1,'missing',code='processor-config')
         row=store.db.execute("SELECT id FROM reader_problems WHERE identity='processor:configuration' AND finished IS NULL").fetchone()
-        assert store.viewed_set(['item'])
+        with transaction(store.db):
+            assert store.viewed_set(['item'])
         assert not store.db.execute('SELECT 1 FROM reader_problems WHERE id=%s AND finished IS NULL',(row[0],)).fetchone()
     finally:store.db.close()
 
@@ -87,8 +91,8 @@ def test_http_etag_after_caption_deadline_without_host_tick(tmp_path,postgres_ur
                 store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','youtube','p')")
                 store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','youtube:subtitles','synthetic','captions','pending')")
                 job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('download_media','m','running',1) RETURNING id").fetchone()[0]
-            store.jobs.retry(Job(job_id,'download_media','m',1),1,'missing',code='processor-config')
-            store.youtube.blocked(clock[0],900)
+            retry_job(store, Job(job_id,'download_media','m',1),1,'missing',code='processor-config')
+            youtube_action(store, 'blocked', clock[0],900)
             app.state.host.execution.reader_advance=None
         client.portal.call(setup)
         paused=client.get('/api/v3/status/details')

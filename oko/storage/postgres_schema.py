@@ -133,4 +133,5 @@ MIGRATIONS = (
               (Path(__file__).parent / 'postgres' / 'prelude-duplicate-external-media.sql').read_text(), 108, 108),
     Migration(123, 'empty-manifest-bookkeeping', (Path(__file__).parent / 'postgres' / '123-empty-manifest-bookkeeping.sql').read_text(),
               (Path(__file__).parent / 'postgres' / 'prelude-empty-manifest-bookkeeping.sql').read_text(), 113, 113),
+    Migration(124, 'retry-delay-bounds', (Path(__file__).parent / 'postgres' / '124-retry-delay-bounds.sql').read_text()),
 )

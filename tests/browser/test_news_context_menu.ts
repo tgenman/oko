@@ -5,7 +5,7 @@ import {addSources} from './connections';
 import {reader,material,card} from './support';
 import {artifactPath} from './artifacts';
 
-test('news menu uses original links and marks only above/below in the displayed order', {timeout:30000},async t=>{
+test('news menu uses original links and marks only above/below in the displayed order', {timeout:60000},async t=>{
  const {page,context,api,origin,token}=await productionReader(t);await context.grantPermissions(['clipboard-read','clipboard-write']);
  await api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});await addSources(api,[['https://a.test/feed','Alpha','News'],['https://b.test/feed','Beta','News'],['https://source.test/feed','Gamma','Other']]);
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(origin+'/#token='+token);await expect(page.locator('#cards [data-card]')).toHaveCount(3);

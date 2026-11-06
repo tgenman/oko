@@ -1,3 +1,4 @@
+from tests.support.job_claim import claim_job
 from oko.storage.publication_owners import owner_expr
 from tests.support.storage import analyze
 from tests.support.collection_acceptance import discovered
@@ -61,10 +62,13 @@ def background_evidence():
       def cost(call):
        queries=[];s.db.set_trace_callback(queries.append);call();s.db.set_trace_callback(None);return len(queries)
       idle=cost(s.processing.sync)
-      viewed=cost(lambda:s.viewed(items[0]))
+      def mark_viewed():
+       from oko.storage.transaction import transaction
+       with transaction(s.db):s.viewed(items[0])
+      viewed=cost(mark_viewed)
 
       with s.db:s.db.execute("UPDATE jobs SET status = 'pending' , next = 0 WHERE kind = 'discover' AND item = %s",(feeds[0],))
-      job=s.jobs.next_job(s.clock(),feeds=[feeds[0]],include_deletions=False)
+      job=claim_job(s, s.clock(),feeds=[feeds[0]],include_deletions=False)
       assert job and job.kind=='discover'
       changed=cost(lambda:discovered(s,[publication_packet(Publication('new','https://example.org/new',999,teaser=Material('New','',captions='not_requested')))],'{}',job,feeds[0]))
       output['background'].append(dict(total=count*4,idle_processing_sql=idle,viewed_store_sql=viewed,new_publication_transaction_sql=changed))

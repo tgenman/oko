@@ -4,7 +4,7 @@ import math
 from types import SimpleNamespace
 import pytest
 from oko.storage.transaction import transaction
-from oko.storage.job_types import Job
+from oko.domain.job import Job
 from oko.workers.collection import CaptionAttempt,CaptionsDeferred
 from tests.support.storage import Store
 
