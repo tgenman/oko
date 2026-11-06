@@ -130,8 +130,10 @@ class CollectionWorker:
             with current.jobs.transaction(self._live):
                 for identity in updates.created:
                     current.jobs.enqueue_discovery(identity)
-        for identity,want_captions in updates.captions:
-            current.jobs.prepare_youtube(identity,want_captions)
+        if updates.captions:
+            with current.jobs.transaction(self._live):
+                for identity,want_captions in updates.captions:
+                    current.jobs.prepare_youtube(identity,want_captions)
         self._telegram_bindings.clear()
         for setting in snapshot.settings:
             feed=setting.feed
@@ -601,7 +603,7 @@ class CollectionWorker:
         if self.execution._store is not None and not self._started:
             self._collection_interval=self.service.startup(self._source is not None,self._source_feed)
             if self._source:
-                with self.execution._store.jobs.transaction(self._live):
+                with self.execution._store.jobs.transaction(lambda: not self.stopped):
                     self.execution._store.jobs.enqueue_discovery(self._source_feed)
             self._started=True
 
