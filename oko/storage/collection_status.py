@@ -1,5 +1,5 @@
 """Durable, bounded collection attempts; independent of processing and read sync."""
-from oko.storage.database import Database, Row
+from oko.storage.database import Connection, Row
 from collections.abc import Callable
 from datetime import datetime, timezone
 import json
@@ -20,7 +20,7 @@ def clipped(value: str, limit: int) -> tuple[str, bool]:
 
 
 class CollectionStatus:
-    def __init__(self, db: Database, clock: Callable[[], float], wall: Callable[[], float], store: 'Store') -> None:
+    def __init__(self, db: Connection, clock: Callable[[], float], wall: Callable[[], float], store: 'Store') -> None:
         self.db, self.clock, self.wall, self.store = db, clock, wall, store
 
     def read(self, job: int) -> dict[str, Any]:
@@ -28,12 +28,13 @@ class CollectionStatus:
         return dict(row[0]) if row and row[0] is not None else {}
 
     def start(self, job: Any, feed: str) -> dict[str, Any]:
+        if not self.db.transaction_depth:
+            raise RuntimeError('Collection attempt requires an owning transaction')
         previous = self.read(job.id)
         data = dict(operation_id=f'{job.kind}:{job.item}', attempt_id=f'{job.id}:{job.generation}', kind=job.kind,
                     started_at=self.wall(), finished_at=None, elapsed_seconds=0.,
                     last_error=previous.get('last_error'))
-        with self.db:
-            self._write(job.id, feed, data)
+        self._write(job.id, feed, data)
         return data
 
     def _write(self, job: int, feed: str, data: dict[str, Any]) -> None:
@@ -57,6 +58,8 @@ class CollectionStatus:
         if mark is not None and changed['previous_feed']!=feed:mark(changed['kind'],changed['item'],job)
 
     def finish(self, job: Any, feed: str, data: dict[str, Any], elapsed: float, observation: dict[str, Any]) -> None:
+        if not self.db.transaction_depth:
+            raise RuntimeError('Collection attempt requires an owning transaction')
         row = self.db.execute('SELECT * FROM jobs WHERE id = %s', (job.id,)).fetchone()
         if row is None or row['generation'] != job.generation:
             return
@@ -78,24 +81,23 @@ class CollectionStatus:
         elif row['status'] == 'done':
             if data.get('last_error'):
                 data['last_error']['resolved'] = True
-        with self.db:
-            self._write(job.id, feed, data)
-            result_row = self.db.execute('SELECT last_collection_result FROM feeds WHERE id = %s', (feed,)).fetchone()
-            if result_row is None:
-                raise LookupError('Collection feed no longer exists')
-            result = dict(result_row[0])
-            if completed:
-                result.update(success_at=self.wall(), duration=data['elapsed_seconds'])
-            if data.get('last_error') and (not result.get('last_error') or data['last_error']['occurred_at'] >= result['last_error']['occurred_at']):
-                result['last_error'] = data['last_error']
-            if completed and result.get('last_error'):
-                # Only a retry of the same operation resolves its error.
-                if result['last_error']['operation_id'] == data['operation_id']:
-                    result['last_error']['resolved'] = True
-            self.db.execute('UPDATE feeds SET last_collection_result=%s::jsonb WHERE id=%s', (json.dumps(result), feed))
-            # Completed operations need only the single latest per-feed result.
-            self.db.execute("UPDATE jobs SET feed_id=NULL, collection_attempt=NULL WHERE status='done' AND (reason_message IS NULL OR (kind='download_media' AND reason_code='subtitles_absent')) AND feed_id=%s AND collection_attempt IS NOT NULL", (feed,))
-            self._bound(feed)
+        self._write(job.id, feed, data)
+        result_row = self.db.execute('SELECT last_collection_result FROM feeds WHERE id = %s', (feed,)).fetchone()
+        if result_row is None:
+            raise LookupError('Collection feed no longer exists')
+        result = dict(result_row[0])
+        if completed:
+            result.update(success_at=self.wall(), duration=data['elapsed_seconds'])
+        if data.get('last_error') and (not result.get('last_error') or data['last_error']['occurred_at'] >= result['last_error']['occurred_at']):
+            result['last_error'] = data['last_error']
+        if completed and result.get('last_error'):
+            # Only a retry of the same operation resolves its error.
+            if result['last_error']['operation_id'] == data['operation_id']:
+                result['last_error']['resolved'] = True
+        self.db.execute('UPDATE feeds SET last_collection_result=%s::jsonb WHERE id=%s', (json.dumps(result), feed))
+        # Completed operations need only the single latest per-feed result.
+        self.db.execute("UPDATE jobs SET feed_id=NULL, collection_attempt=NULL WHERE status='done' AND (reason_message IS NULL OR (kind='download_media' AND reason_code='subtitles_absent')) AND feed_id=%s AND collection_attempt IS NOT NULL", (feed,))
+        self._bound(feed)
 
     def _bound(self, feed: str) -> None:
         rows = self.db.execute('SELECT id, collection_attempt FROM jobs WHERE feed_id=%s AND collection_attempt IS NOT NULL', (feed,)).fetchall()
