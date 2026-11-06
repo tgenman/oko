@@ -9,6 +9,7 @@ import json
 
 from tests.support.synthetic_material import material as Material
 from oko.processing.config import ProcessorConfig
+from oko.storage.transaction import transaction
 from tests.support.storage import Store
 from oko.subscriptions.subscriptions import Overrides
 from tests.support.library_templates import templates
@@ -20,7 +21,6 @@ def saved_library(root:Path, per_feed:int) -> dict[str,object]:
     from tests.support.collection_acceptance import discovered
     from tests.support.legacy_source import Publication
     from tests.support.source import publication_packet
-    from oko.storage.transaction import transaction
     from oko.subscriptions.subscriptions import AddFeed
 
     store=Store(root,lambda _:None)
