@@ -56,7 +56,7 @@ test('tree uses publication counts, alphabetical feeds and compact local icons',
   await r.page.clock.install();
   await r.start([material('one',{feed_id:'a',title:'Альфа'}),material('two',{feed_id:'b',title:'Бета'})]);
   await r.page.evaluate(()=>{
-   readerTransport.replies.set('/api/v3/navigation',{body:{total:45,folders:[{id:'f',title:'Наука',count:45,feeds:[window.readerFixtures.navigationFeed({id:'a',title:'Альфа — очень длинное название синтетического YouTube-канала',kind:'youtube',count:25}),window.readerFixtures.navigationFeed({id:'b',title:'Бета',kind:'telegram',telegram_access:'unconfigured',connection:'needs_connection',count:20}),window.readerFixtures.navigationFeed({id:'c',title:'Вести'})]},{id:'empty',title:'Пустая',count:0,feeds:[]}]}});
+   readerTransport.replies.set('/api/v3/navigation',{body:{total:45,folders:[{id:'empty',title:'Пустая',count:0,feeds:[]},{id:'f',title:'Наука',count:45,feeds:[window.readerFixtures.navigationFeed({id:'c',title:'Вести'}),window.readerFixtures.navigationFeed({id:'a',title:'Альфа — очень длинное название синтетического YouTube-канала',kind:'youtube',count:25}),window.readerFixtures.navigationFeed({id:'b',title:'Бета',kind:'telegram',telegram_access:'unconfigured',connection:'needs_connection',count:20}),]}]}});
    const page=readerTransport.replies.get('/api/v3/cards')!.body!;
    readerTransport.replies.set('/api/v3/cards?sort=newest&folder=f',{body:page});
    readerTransport.replies.set('/api/v3/cards?sort=newest&folder=f&show_hidden=true',{body:page});
@@ -65,6 +65,7 @@ test('tree uses publication counts, alphabetical feeds and compact local icons',
   await r.page.locator('#read-feeds-toggle').click();
   await expect(r.page.locator('[data-folder="empty"] .tree-count')).toHaveText('');
   await expect(r.page.locator('[data-feed]')).toHaveCount(3);
+  expect(await r.page.locator('#folders [data-folder]').evaluateAll(ns=>ns.map(n=>n.dataset.folder))).toEqual(['f','empty']);
   expect(await r.page.locator('[data-feed]').evaluateAll(ns=>ns.map(n=>n.dataset.feed))).toEqual(['a','b','c']);
   await r.page.locator('[data-folder="f"]').click();
   await expect(r.page.locator('#count')).toHaveText('2');
