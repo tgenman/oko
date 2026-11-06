@@ -248,18 +248,21 @@ def change(root, release, *, token=None):
     if rollback:
         release = read_manifest(root / 'previous-release.json')
     validate(release)
-    prepare(root, release, token, cached=rollback and token is None)
+    if not rollback:
+        prepare(root, release, token)
     with maintenance(root):
         current = read_manifest(root / 'release.json')
         if current != original:
             raise ValueError('Installed release changed during preparation')
+        if rollback and release != current:
+            # A rollback is a recovery action: freeze new writes before even
+            # checking the old artifacts or the database compatibility.
+            stop(root, current)
+            prepare(root, release, token, cached=token is None)
         database = database_state(root, current)
         version = database['version']
         if version > release['schema']['maximum'] or (rollback and version < release['schema']['minimum']):
             if rollback:
-                # Preserve all writes made after the upgrade for an explicit
-                # forward fix or a coordinated backwards migration.
-                stop(root, current)
                 raise ValueError('Rollback blocked by incompatible database schema; writes stopped, preserve data and choose forward repair or a backward migration')
             raise ValueError('Deploy blocked by incompatible database schema; explicit recovery required')
         if release == current:
@@ -283,7 +286,8 @@ def change(root, release, *, token=None):
                        schema_version=version, database_schema=database['schema'], migrated=False,
                        rolled_back=False, timestamp=time.time())
         try:
-            stop(root, current)
+            if not rollback:
+                stop(root, current)
             if version < release['schema']['minimum']:
                 receipt['backup'] = migration_backup(root)
                 migrate(root, release)
