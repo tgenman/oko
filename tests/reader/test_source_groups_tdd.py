@@ -1,4 +1,4 @@
-from tests.support.job_claim import claim_job
+from tests.support.job_claim import claim_job, retry_job
 import pytest
 from tests.support.storage import Store
 
@@ -16,7 +16,7 @@ def test_job_events_create_and_finish_source_occurrence_without_get(kind,tmp_pat
             if kind=='download_media':store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('m','p','image','x','file','unavailable')")
             item='m' if kind=='download_media' else 'f' if kind=='feed-delete' else 'p'
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES (%s,%s,'running',1) RETURNING id",(kind,item)).fetchone()[0]
-        store.jobs.retry(Job(job,kind,item,1),1,'failure',code='source-network')
+        retry_job(store, Job(job,kind,item,1),1,'failure',code='source-network')
         row=store.db.execute("SELECT id FROM reader_problems WHERE body::jsonb->>'source_group_identity'=%s AND finished IS NULL",('job:source-network:f:'+kind,)).fetchone()
         assert row
         with transaction(store.db):store.db.execute("UPDATE jobs SET status='running' WHERE id=%s",(job,))
@@ -35,7 +35,7 @@ def test_source_failure_and_group_rollback_together(tmp_path,postgres_url):
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','p','running',1) RETURNING id").fetchone()[0]
         with pytest.raises(RuntimeError,match='rollback'):
             with transaction(store.db):
-                store.jobs.retry(Job(job,'fetch','p',1),1,'failure',code='source-network')
+                retry_job(store, Job(job,'fetch','p',1),1,'failure',code='source-network')
                 assert store.db.execute("SELECT 1 FROM reader_problems WHERE body::jsonb->>'source_group_identity' IS NOT NULL AND finished IS NULL").fetchone()
                 raise RuntimeError('rollback')
         assert store.db.execute('SELECT status FROM jobs WHERE id=%s',(job,)).fetchone()[0]=='running'
@@ -53,13 +53,13 @@ def test_source_failure_changes_group_after_retry_claim(tmp_path,postgres_url):
             store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','other_web','p')")
             store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','p','running',1) RETURNING id").fetchone()[0]
-        store.jobs.retry(Job(job_id,'fetch','p',1),1,'offline',code='source-network')
+        retry_job(store, Job(job_id,'fetch','p',1),1,'offline',code='source-network')
         old=store.db.execute("SELECT id FROM reader_problems WHERE body::jsonb->>'source_group_identity'='job:source-network:f:fetch' AND finished IS NULL").fetchone()[0]
         with transaction(store.db):store.db.execute('UPDATE jobs SET next=0 WHERE id=%s',(job_id,))
         claimed=claim_job(store, 1,feeds=['f'])
         assert claimed
         assert store.db.execute("SELECT body::jsonb->>'state' FROM reader_problems WHERE id=%s",(old,)).fetchone()[0]=='retrying'
-        store.jobs.retry(claimed,1,'access changed',code='source-reconnect')
+        retry_job(store, claimed,1,'access changed',code='source-reconnect')
         assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s',(old,)).fetchone()[0] is not None
         assert store.db.execute("SELECT 1 FROM reader_problems WHERE body::jsonb->>'source_group_identity'='job:source-reconnect:f:fetch' AND finished IS NULL").fetchone()
     finally:store.db.close()
@@ -75,7 +75,7 @@ def test_removing_one_of_two_source_roots_finishes_only_its_group(tmp_path,postg
             store.db.execute("UPDATE publications SET feed_id=CASE id WHEN 'ra' THEN 'a' WHEN 'rb' THEN 'b' END WHERE id IN ('ra','rb')")
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES ('ra','p'),('rb','p')")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','p','running',1) RETURNING id").fetchone()[0]
-        store.jobs.retry(Job(job,'fetch','p',1),1,'failure',code='source-network')
+        retry_job(store, Job(job,'fetch','p',1),1,'failure',code='source-network')
         a=store.db.execute("SELECT id FROM reader_problems WHERE body::jsonb->>'source_group_identity'='job:source-network:a:fetch' AND finished IS NULL").fetchone()[0]
         b=store.db.execute("SELECT id FROM reader_problems WHERE body::jsonb->>'source_group_identity'='job:source-network:b:fetch' AND finished IS NULL").fetchone()[0]
         store.remove_feed('a')
@@ -136,7 +136,7 @@ def test_manual_feed_refresh_resolves_old_source_problem_and_keeps_wait(tmp_path
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','p','running',1) RETURNING id").fetchone()[0]
         deadline=datetime.fromtimestamp(store.wall_clock(),timezone.utc)+timedelta(hours=1)
         issue=AdapterIssue('source-network','Temporary limitation',AdapterErrorKind.source_wait,scope='feed:f',retry_at=deadline)
-        store.jobs.retry(Job(job,'fetch','p',1),1,issue.message,issue=issue)
+        retry_job(store, Job(job,'fetch','p',1),1,issue.message,issue=issue)
         old=store.db.execute("SELECT id FROM reader_problems WHERE body::jsonb->>'source_group_identity'='job:source-network:f:fetch' AND finished IS NULL").fetchone()
         assert old
         with transaction(store.db):

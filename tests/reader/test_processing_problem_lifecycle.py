@@ -1,3 +1,4 @@
+from tests.support.job_claim import retry_job
 import json
 import pytest
 from oko.storage.job_types import Job
@@ -16,11 +17,11 @@ def test_processing_failure_and_finish_are_saved_without_status_read(tmp_path,po
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES (%s,'article','running',1) RETURNING id",(kind,)).fetchone()[0]
         with pytest.raises(ValueError,match='rollback'):
             with transaction(store.db):
-                store.jobs.retry(Job(job_id,kind,'article',1),1,'failure',code='model-invalid')
+                retry_job(store, Job(job_id,kind,'article',1),1,'failure',code='model-invalid')
                 assert store.db.execute("SELECT 1 FROM reader_problems WHERE body::jsonb->>'operation'=%s AND finished IS NULL",('producer:'+kind,)).fetchone()
                 raise ValueError('rollback')
         assert not store.db.execute("SELECT 1 FROM reader_problems WHERE body::jsonb->>'operation'=%s AND finished IS NULL",('producer:'+kind,)).fetchone()
-        store.jobs.retry(Job(job_id,kind,'article',1),1,'failure',code='model-invalid')
+        retry_job(store, Job(job_id,kind,'article',1),1,'failure',code='model-invalid')
         row=store.db.execute("SELECT id,body FROM reader_problems WHERE identity=%s AND finished IS NULL",('job:model-invalid:feed:'+kind+':article',)).fetchone()
         assert row and json.loads(row['body'])['objects']==[dict(kind='material',id='article')]
         with store.db:store.db.execute("UPDATE jobs SET status='running',generation=2 WHERE id=%s",(job_id,))

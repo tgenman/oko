@@ -1,3 +1,4 @@
+from tests.support.job_claim import retry_job
 import json
 import pytest
 from tests.support.storage import Store
@@ -24,10 +25,10 @@ def test_processor_failure_suppresses_then_restores_incomplete_atomically(tmp_pa
             claim=store.jobs._claim(store.db.execute('SELECT * FROM jobs WHERE id=%s',(job,)).fetchone())
         with pytest.raises(RuntimeError):
             with transaction(store.db):
-                store.jobs.retry(claim,100,'unavailable',code='processor-config')
+                retry_job(store, claim,100,'unavailable',code='processor-config')
                 raise RuntimeError('rollback')
         assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s',(old,)).fetchone()[0] is None
-        with measure_reads(store.db) as work, transaction(store.db):store.jobs.retry(claim,100,'unavailable',code='processor-config')
+        with measure_reads(store.db) as work, transaction(store.db):retry_job(store, claim,100,'unavailable',code='processor-config')
         assert work.rows<2000,work
         assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s',(old,)).fetchone()[0] is not None
         assert store.db.execute("SELECT 1 FROM reader_problems WHERE body::jsonb->>'code'='processor-config' AND finished IS NULL").fetchone()

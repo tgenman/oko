@@ -1,5 +1,5 @@
 """Real SQL failure boundaries for the three independent cron workers."""
-from tests.support.job_claim import claim_job
+from tests.support.job_claim import claim_job, retry_job
 from tests.support.collection_acceptance import apply_simulated_collection, running_collection_job
 from oko.storage.job_types import Job
 import asyncio
@@ -360,11 +360,11 @@ def test_failed_delete_problem_follows_job_without_status_read(tmp_path, postgre
             return store.db.execute("SELECT id,body FROM reader_problems WHERE identity='job:delete:fixture:delete:item' AND finished IS NULL").fetchone()
         with pytest.raises(ValueError,match='rollback'):
             with transaction(store.db):
-                store.jobs.retry(job,1,'Ошибка удаления',code='delete')
+                retry_job(store, job,1,'Ошибка удаления',code='delete')
                 assert current() is not None
                 raise ValueError('rollback')
         assert current() is None
-        store.jobs.retry(job,1,'Ошибка удаления',code='delete')
+        retry_job(store, job,1,'Ошибка удаления',code='delete')
         problem=current()
         assert problem is not None
         assert not any(c['id']=='job:delete:fixture:delete:item' for c in store.problems.candidates(5))
@@ -373,14 +373,16 @@ def test_failed_delete_problem_follows_job_without_status_read(tmp_path, postgre
         claimed=claim_job(store, 1,deleting_only=True)
         assert claimed is not None and claimed.id==job.id
         assert json.loads(current()['body'])['state']=='retrying'
+        assert store.jobs.delete_files(claimed) is True
         with pytest.raises(ValueError,match='finish rollback'):
             with transaction(store.db):
-                store.jobs.delete(claimed)
+                store.jobs.finish_delete(claimed)
                 assert current() is None
                 raise ValueError('finish rollback')
         assert current() is not None
         assert store.jobs.valid(claimed)
-        store.jobs.delete(claimed)
+        with transaction(store.db):
+            store.jobs.finish_delete(claimed)
         assert current() is None
         assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s',(problem['id'],)).fetchone()['outcome']=='resolved'
     finally:
@@ -896,7 +898,7 @@ def test_collection_result_and_retry_outcome_commit_together(tmp_path):
             job=running_collection_job(store,'discover','fixture')
             effects=store.discovery.accept([publication_packet(Publication('retry','https://example.test/retry',100))],'retry-cursor','fixture')
             store.jobs.apply_collection(effects,job=job)
-            store.jobs.retry(job,store.clock(),'temporary failure',code='source-temporary')
+            retry_job(store, job,store.clock(),'temporary failure',code='source-temporary')
         assert store.db.execute("SELECT 1 FROM publications WHERE external_id='https://example.test/retry'").fetchone()
         assert store.db.execute("SELECT cursor FROM feeds WHERE id='fixture'").fetchone()[0]=='retry-cursor'
         row=store.db.execute('SELECT status,generation,reason_message FROM jobs WHERE id=%s',(job.id,)).fetchone()

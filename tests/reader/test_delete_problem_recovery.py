@@ -1,4 +1,4 @@
-from tests.support.job_claim import claim_job
+from tests.support.job_claim import claim_job, retry_job
 import json
 import pytest
 from oko.storage.job_types import Job
@@ -12,7 +12,7 @@ def test_delete_problem_event_get_is_read_only_and_finish_rollback(tmp_path,post
         with store.db:
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('delete','item','running',1) RETURNING id").fetchone()[0]
         job=Job(job_id,'delete','item',1)
-        store.jobs.retry(job,1,'error',code='delete')
+        retry_job(store, job,1,'error',code='delete')
         identity='job:delete:item:delete:item'
         before=store.db.execute('SELECT id,xmin::text,body FROM reader_problems WHERE identity=%s AND finished IS NULL',(identity,)).fetchone()
         assert before and not any(p['id']==identity for p in store.problems.candidates(2))
@@ -20,9 +20,10 @@ def test_delete_problem_event_get_is_read_only_and_finish_rollback(tmp_path,post
         assert store.db.execute('SELECT id,xmin::text,body FROM reader_problems WHERE identity=%s AND finished IS NULL',(identity,)).fetchone()==before
         with store.db:store.db.execute('UPDATE jobs SET next=0 WHERE id=%s',(job_id,))
         claimed=claim_job(store, 1,deleting_only=True)
+        assert claimed and store.jobs.delete_files(claimed) is True
         with pytest.raises(RuntimeError):
             with transaction(store.db):
-                store.jobs.delete(claimed)
+                store.jobs.finish_delete(claimed)
                 raise RuntimeError('rollback')
         assert store.db.execute('SELECT id FROM reader_problems WHERE identity=%s AND finished IS NULL',(identity,)).fetchone()[0]==before['id']
     finally:store.db.close()
