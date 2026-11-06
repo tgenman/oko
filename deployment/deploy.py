@@ -260,7 +260,8 @@ def change(root, release, *, token=None):
                 # Preserve all writes made after the upgrade for an explicit
                 # forward fix or a coordinated backwards migration.
                 stop(root, current)
-            raise ValueError('Rollback/deploy blocked by incompatible database schema; explicit restore required')
+                raise ValueError('Rollback blocked by incompatible database schema; writes stopped, preserve data and choose forward repair or a backward migration')
+            raise ValueError('Deploy blocked by incompatible database schema; explicit recovery required')
         if release == current:
             health(root, release)
             return dict(success=True, already_installed=True, sha=release['sha'], image=release['image'],
