@@ -1,4 +1,5 @@
 import type {Page} from 'playwright';
+import {expect} from 'playwright/test';
 const sections = {theses:'Reading',prompt_theses:'Prompts',prompt_filters:'Filtering',processor:'Processor'};
 const titles = {theses:'Publication Summaries',prompt_theses:'Summary Prompt',prompt_filters:'Filtering Rules',processor:'Processor'};
 async function settingsHome(page: Page) {
@@ -17,8 +18,11 @@ async function modelPage(page: Page, title = 'llama.cpp') {
   await page.locator('[data-settings-target="' + (title === 'Codex' ? 'codex' : 'llamacpp') + '"]').click();
 }
 async function feedOptions(page: Page) {
-  if (await page.locator('[data-settings-page=feed-connection]').isVisible()) return;
+  const connection=page.locator('[data-settings-page=feed-connection]');
+  const link=page.getByRole('button',{name:'Connection and Options',exact:true});
+  await expect.poll(async()=>await connection.isVisible() || await link.isVisible() || await page.locator('dialog[open] .settings-back').isVisible()).toBe(true);
+  if (await connection.isVisible()) return;
   await settingsHome(page);
-  await page.getByRole('button',{name:'Connection and Options',exact:true}).click();
+  await link.click();
 }
 export {editSetting, settingsHome, modelPage, feedOptions};
