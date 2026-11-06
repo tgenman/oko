@@ -121,7 +121,8 @@ class CollectionWorker:
         if not self.execution._store or self.service.source_revision()==self._source_revision:
             return
         current=self.execution._store
-        snapshot=self.service.configuration()
+        with current.jobs.transaction(self._live):
+            snapshot=self.service.configuration()
         self._dependency_feeds=snapshot.dependencies
         settings=[setting for setting in snapshot.settings if not (setting.feed==self._source_feed and self._source)]
         updates=self._collection.configure(settings)

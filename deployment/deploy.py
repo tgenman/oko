@@ -256,6 +256,10 @@ def change(root, release, *, token=None):
         database = database_state(root, current)
         version = database['version']
         if version > release['schema']['maximum'] or (rollback and version < release['schema']['minimum']):
+            if rollback:
+                # Preserve all writes made after the upgrade for an explicit
+                # forward fix or a coordinated backwards migration.
+                stop(root, current)
             raise ValueError('Rollback/deploy blocked by incompatible database schema; explicit restore required')
         if release == current:
             health(root, release)

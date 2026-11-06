@@ -39,6 +39,8 @@ def configured_sources(root: Path,rows, *, history=True):
         if not history:
             with store.db:
                 store.db.execute('DELETE FROM initial_history')
-        store.publications.sync_feeds([feed['id'] for feed in store.subscriptions.feeds()])
+        from oko.storage.transaction import transaction
+        with transaction(store.db):
+            store.publications.sync_feeds([feed['id'] for feed in store.subscriptions.feeds()])
     finally:
         store.db.close()

@@ -113,8 +113,11 @@ def test_rollback_after_new_writes_refuses_old_schema_without_deleting_data(post
         monkeypatch.setattr(deploy,'prepare',lambda *args,**kwargs:None)
         monkeypatch.setattr(deploy,'maintenance',lambda root:nullcontext())
         monkeypatch.setattr(deploy,'database_state',lambda root,current:dict(version=db.execute('SELECT max(version) FROM oko_schema_migrations').fetchone()[0]))
+        stopped=[]
+        monkeypatch.setattr(deploy,'stop',lambda root,current:stopped.append(current['sha']))
         with pytest.raises(ValueError,match='incompatible database schema'):
             deploy.change(tmp_path,None)
+        assert stopped==[new]
         assert db.execute("SELECT content->'blocks'->0->>'text' FROM publications WHERE id='new'").fetchone()==('New data',)
         assert media.read_bytes()==b'new synthetic bytes'
         assert json.loads((tmp_path/'release.json').read_text())['sha']==new
