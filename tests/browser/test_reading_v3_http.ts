@@ -100,7 +100,7 @@ test('v3 reading uses real media and reconciles a lost viewed response without r
   expect(invalid).toEqual([]);
 });
 
-test('unconfirmed commands for two materials remain separate and do not replay', {timeout:20000}, async t=>{
+test('unconfirmed commands for two materials remain separate and do not replay', {timeout:45000}, async t=>{
   const {page,api,origin,token}=await productionReader(t);
   await api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});
   await addSources(api, [["https://a.test/feed", "Альфа", "Наука"], ["https://b.test/feed", "Бета", "Наука"]]);

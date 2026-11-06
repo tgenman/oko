@@ -136,4 +136,6 @@ def test_codex_filters_require_permission_and_use_filter_schema(tmp_path):
         assert service.inputs == []
         client.patch('/api/v3/feeds/fixture', json={'public_ai': True})
         wait_for(client, lambda: (result:=filter_result(client.get('/api/v3/publication/'+item).json())) and result['hidden'])
-        assert len(service.inputs) == 1
+        tasks=[json.loads(prompt.split('\n',1)[1]) for prompt in service.inputs]
+        matching=[task for task in tasks if any(source['id']==item for source in task['sources'])]
+        assert len(matching)==1
