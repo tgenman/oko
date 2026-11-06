@@ -214,6 +214,8 @@ def test_migration_cannot_run_while_reader_owns_the_schema(postgres_url, tmp_pat
     from oko.storage.postgres_migrations import migrate
     from oko.storage.postgres_schema import MIGRATIONS
     reader = Store(tmp_path, lambda _: None, database_url=postgres_url)
+    assert isinstance(reader.db, PostgresConnection)
+    backend = reader.db._db.info.backend_pid
     with psycopg.connect(postgres_url, autocommit=True) as migrator:
         try:
             with pytest.raises(RuntimeError, match='another reader or migration'):
@@ -221,7 +223,46 @@ def test_migration_cannot_run_while_reader_owns_the_schema(postgres_url, tmp_pat
             assert reader.work_enabled() is False
         finally:
             reader.db.close()
+        assert not migrator.execute("SELECT 1 FROM pg_locks WHERE pid=%s AND locktype='advisory'",(backend,)).fetchone()
         migrate(migrator, MIGRATIONS)
+
+
+def test_close_waits_for_connection_owner_before_releasing_schema(postgres_url,tmp_path):
+    import threading
+    import psycopg
+    from tests.support.storage import Store
+    from oko.storage.postgres_migrations import migrate
+    from oko.storage.postgres_schema import MIGRATIONS
+
+    reader=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    held,release,closed=threading.Event(),threading.Event(),threading.Event()
+
+    def use_connection():
+        with reader.db.access_lock:
+            held.set()
+            assert release.wait(10)
+
+    def close_connection():
+        reader.db.close()
+        closed.set()
+
+    owner=threading.Thread(target=use_connection)
+    closer=threading.Thread(target=close_connection)
+    try:
+        owner.start()
+        assert held.wait(10)
+        closer.start()
+        assert not closed.wait(.2)
+        with psycopg.connect(postgres_url,autocommit=True) as migrator:
+            with pytest.raises(RuntimeError,match='another reader or migration'):
+                migrate(migrator,MIGRATIONS)
+            release.set()
+            assert closed.wait(10)
+            migrate(migrator,MIGRATIONS)
+    finally:
+        release.set()
+        owner.join(timeout=10)
+        if closer.ident is not None:closer.join(timeout=10)
 
 
 def test_read_snapshot_is_consistent_and_rejects_writes(database):

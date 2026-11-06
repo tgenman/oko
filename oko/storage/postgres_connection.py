@@ -293,21 +293,26 @@ class PostgresConnection:
         return False
 
     def close(self) -> None:
-        try:
+        with self.access_lock:
             try:
-                if self._db.info.transaction_status != TransactionStatus.UNKNOWN:
-                    if self._db.info.transaction_status != TransactionStatus.IDLE:
-                        self._db.rollback()
-                    # Finish removing dependencies before another connection
-                    # drops the owning schema; socket close alone is asynchronous.
-                    self._db.execute('DROP VIEW IF EXISTS pg_temp.oko_incomplete_facts')
+                try:
+                    if self._db.info.transaction_status != TransactionStatus.UNKNOWN:
+                        if self._db.info.transaction_status != TransactionStatus.IDLE:
+                            self._db.rollback()
+                        # Finish removing dependencies before another connection
+                        # drops the owning schema; socket close alone is asynchronous.
+                        self._db.execute('DROP VIEW IF EXISTS pg_temp.oko_incomplete_facts')
+                        # Explicitly release schema and Store leases while the
+                        # connection is still alive. A socket close can return
+                        # before PostgreSQL has processed its EOF.
+                        self._db.execute('SELECT pg_advisory_unlock_all()')
+                finally:
+                    self._db.close()
             finally:
-                self._db.close()
-        finally:
-            callbacks, self.rollback_callbacks = self.rollback_callbacks, []
-            self.commit_callbacks.clear()
-            self.before_commit = None
-            self.membership_feeds.clear()
-            self.membership_folders.clear()
-            for callback in reversed(callbacks):
-                callback()
+                callbacks, self.rollback_callbacks = self.rollback_callbacks, []
+                self.commit_callbacks.clear()
+                self.before_commit = None
+                self.membership_feeds.clear()
+                self.membership_folders.clear()
+                for callback in reversed(callbacks):
+                    callback()
