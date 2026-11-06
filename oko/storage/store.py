@@ -45,21 +45,21 @@ class Store:
         return isinstance(error, INTEGRITY_ERRORS)
 
     def connect_telegram(self, binding: dict[str,Any], info: dict[str,Any], source: str, folder: str, history: InitialHistory | None) -> dict[str,Any]:
-        boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
-        with boundary:
-            membership_graph.lock_graph(self.db)
-            result = self.subscriptions.telegram.connect(binding,info,source,folder,history,self.subscriptions)
-            self.problems.sync_codex_feed_added(result['id'], self.wall_clock())
-            return result
+        if not self.db.transaction_depth:
+            raise RuntimeError('Storage action requires an owning transaction')
+        membership_graph.lock_graph(self.db)
+        result = self.subscriptions.telegram.connect(binding,info,source,folder,history,self.subscriptions)
+        self.problems.sync_codex_feed_added(result['id'], self.wall_clock())
+        return result
 
     def change_telegram_access(self, feed: str, binding: dict[str,Any], info: dict[str,Any]) -> dict[str,Any]:
-        boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
-        with boundary:
-            begin_write(self.db)
-            membership_graph.lock_graph(self.db)
-            result=self.subscriptions.telegram.change_access(feed,binding,info,self.subscriptions)
-            self.publications.configure_feed(feed)
-            self.publications.changed_adapter(feed)
+        if not self.db.transaction_depth:
+            raise RuntimeError('Storage action requires an owning transaction')
+        begin_write(self.db)
+        membership_graph.lock_graph(self.db)
+        result=self.subscriptions.telegram.change_access(feed,binding,info,self.subscriptions)
+        self.publications.configure_feed(feed)
+        self.publications.changed_adapter(feed)
         return result
 
     def __init__(self, root: Path, fault: Callable[[str], None], *, wall_clock: Callable[[], float] = time.time, clock: Callable[[], float] = time.monotonic, database_url: str | None = None, defer_recovery: bool = False) -> None:
@@ -241,21 +241,23 @@ class Store:
 
 
     def pause_history(self, feed: str, paused: bool) -> dict[str, Any]:
+        if not self.db.transaction_depth:
+            raise RuntimeError('Storage action requires an owning transaction')
         self.subscriptions.check_owner('feed', feed)
-        with self.db:
-            result=self.subscriptions.history.pause(feed, paused)
-            return result
+        result=self.subscriptions.history.pause(feed, paused)
+        return result
 
     def change_history(self, feed: str, selection: InitialHistory | None) -> dict[str, Any]:
+        if not self.db.transaction_depth:
+            raise RuntimeError('Storage action requires an owning transaction')
         self.subscriptions.check_owner('feed', feed)
         configured = next(f for f in self.subscriptions.feeds() if f['id'] == feed)
         if configured['transport'] not in ('rss', 'youtube') and not self.publications.feed(feed):
             raise ValueError('Догрузка доступна подключённому RSS/Atom или YouTube-фиду')
         if self.publications.feed(feed) and selection and selection.mode != 'count':
             raise ValueError('Догрузка YouTube поддерживает последние N видео')
-        with self.db:
-            result=self.subscriptions.history.start(feed, selection) if selection else self.subscriptions.history.cancel(feed)
-            return result
+        result=self.subscriptions.history.start(feed, selection) if selection else self.subscriptions.history.cancel(feed)
+        return result
 
 
     def cursor(self, feed: str) -> str | None:
@@ -267,18 +269,20 @@ class Store:
         return float(row[0]) if row else 0.
 
     def source_http_wait(self, scope: str, until: float) -> None:
-        with self.db:
-            self.db.execute('INSERT INTO state VALUES ( %s , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value',
-                            ('source-http:'+scope,str(until)))
+        if not self.db.transaction_depth:
+            raise RuntimeError('Storage action requires an owning transaction')
+        self.db.execute('INSERT INTO state VALUES ( %s , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value',
+                        ('source-http:'+scope,str(until)))
 
     def telegram_http_state(self, group: str) -> dict[str, Any]:
         row = self.db.execute('SELECT value FROM state WHERE key = %s', ('telegram-http:'+group,)).fetchone()
         return json.loads(row[0]) if row else {}
 
     def telegram_http_wait(self, group: str, state: dict[str, Any]) -> None:
-        with self.db:
-            self.db.execute('INSERT INTO state VALUES ( %s , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value',
-                            ('telegram-http:'+group, json.dumps(state)))
+        if not self.db.transaction_depth:
+            raise RuntimeError('Storage action requires an owning transaction')
+        self.db.execute('INSERT INTO state VALUES ( %s , %s ) ON CONFLICT ( key ) DO UPDATE SET value = excluded . value',
+                        ('telegram-http:'+group, json.dumps(state)))
 
     def _has_unviewed(self, item: str) -> bool:
         return self.db.execute('SELECT 1 FROM publications WHERE id = %s',(item,)).fetchone() is not None
@@ -380,39 +384,39 @@ class Store:
         return True
 
     def remove_feed(self, feed: str) -> None:
+        if not self.db.transaction_depth:
+            raise RuntimeError('Storage action requires an owning transaction')
         self.subscriptions.check_owner('feed', feed)
-        boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
-        with boundary:
-            membership_graph.lock_graph(self.db)
-            binding = self.subscriptions.telegram.binding(feed)
-            effects = CollectionDiagnostics()
-            if self.db.execute("UPDATE feeds SET connection = 'deleting' WHERE id = %s AND connection IS DISTINCT FROM 'deleting'", (feed,)).rowcount:
-                source_changed(self.db)
-            for row in self.db.execute("SELECT id FROM jobs WHERE kind='discover' AND (item=%s OR feed_id=%s) AND (reason_message IS NOT NULL OR reason_code IS NOT NULL)",(feed,feed)):
-                self.problems.sync_discover(row['id'],self.wall_clock())
-            shared=[r[0] for r in self.db.execute(f'SELECT p.id FROM ({owned_ids("= %s")}) owner JOIN publications p ON p.id=owner.id WHERE p.platform IS NOT NULL',(feed,feed))]
-            # NULL-platform legacy roots can also own a timed fetch projection.
-            # Capture only dependent timed jobs while the old graph still exists.
-            timed_fetch_items={row['item'] for row in self.db.execute("""SELECT DISTINCT j.item FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m
-                JOIN publication_links l ON l.source_publication_id=m.id
-                JOIN jobs j ON md5(j.item)=md5(l.target_publication_id) AND j.item=l.target_publication_id AND j.kind='fetch' AND j.fetch_youtube_sensitive
-                WHERE m.feed_id=%s
-                UNION SELECT j.item FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m JOIN jobs j ON md5(j.item)=md5(m.id) AND j.item=m.id AND j.kind='fetch' AND j.fetch_youtube_sensitive
-                WHERE m.feed_id=%s AND TRUE""",(feed,feed))}
-            if timed_fetch_items:publication_links.capture_fetch_problems(self,effects,timed_fetch_items)
-            self.incomplete_draft.mark_materials(sorted(set(shared)))
-            publication_links.capture_root_deletion_problems(self,effects,set(shared))
-            removed = membership_graph.remove(self.db,feed=feed)
-            self.read_versions.memberships_changed(removed)
-            publication_links.prune(self,set(shared),effects=effects)
-            for item in shared:
-                self._remember_cleanup_owner(item, feed)
-            items = [r[0] for r in self.db.execute(owned_ids('= %s'), (feed,feed))]
-            self.problems.forget_materials(set(items), self.wall_clock())
-            publication_links.capture_root_deletion_problems(self,effects,set(items))
-            self.processing.memberships_removed(removed)
-            publication_links.notify_parents_many(self, set(removed))
-            self.jobs.sync_captured_deletions(effects)
+        membership_graph.lock_graph(self.db)
+        binding = self.subscriptions.telegram.binding(feed)
+        effects = CollectionDiagnostics()
+        if self.db.execute("UPDATE feeds SET connection = 'deleting' WHERE id = %s AND connection IS DISTINCT FROM 'deleting'", (feed,)).rowcount:
+            source_changed(self.db)
+        for row in self.db.execute("SELECT id FROM jobs WHERE kind='discover' AND (item=%s OR feed_id=%s) AND (reason_message IS NOT NULL OR reason_code IS NOT NULL)",(feed,feed)):
+            self.problems.sync_discover(row['id'],self.wall_clock())
+        shared=[r[0] for r in self.db.execute(f'SELECT p.id FROM ({owned_ids("= %s")}) owner JOIN publications p ON p.id=owner.id WHERE p.platform IS NOT NULL',(feed,feed))]
+        # NULL-platform legacy roots can also own a timed fetch projection.
+        # Capture only dependent timed jobs while the old graph still exists.
+        timed_fetch_items={row['item'] for row in self.db.execute("""SELECT DISTINCT j.item FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m
+            JOIN publication_links l ON l.source_publication_id=m.id
+            JOIN jobs j ON md5(j.item)=md5(l.target_publication_id) AND j.item=l.target_publication_id AND j.kind='fetch' AND j.fetch_youtube_sensitive
+            WHERE m.feed_id=%s
+            UNION SELECT j.item FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m JOIN jobs j ON md5(j.item)=md5(m.id) AND j.item=m.id AND j.kind='fetch' AND j.fetch_youtube_sensitive
+            WHERE m.feed_id=%s AND TRUE""",(feed,feed))}
+        if timed_fetch_items:publication_links.capture_fetch_problems(self,effects,timed_fetch_items)
+        self.incomplete_draft.mark_materials(sorted(set(shared)))
+        publication_links.capture_root_deletion_problems(self,effects,set(shared))
+        removed = membership_graph.remove(self.db,feed=feed)
+        self.read_versions.memberships_changed(removed)
+        publication_links.prune(self,set(shared),effects=effects)
+        for item in shared:
+            self._remember_cleanup_owner(item, feed)
+        items = [r[0] for r in self.db.execute(owned_ids('= %s'), (feed,feed))]
+        self.problems.forget_materials(set(items), self.wall_clock())
+        publication_links.capture_root_deletion_problems(self,effects,set(items))
+        self.processing.memberships_removed(removed)
+        publication_links.notify_parents_many(self, set(removed))
+        self.jobs.sync_captured_deletions(effects)
         self.db.after_commit(lambda: self.fault('after_feed_delete_commit'))
 
     def _remember_cleanup_owner(self, item: str, feed: str) -> None:
