@@ -20,7 +20,7 @@ export function useLongPress(){
     if(press.current!==current||end.pointerId!==id)return;
     window.removeEventListener('pointerdown',current.other);window.removeEventListener('pointerup',current.finish);window.removeEventListener('pointercancel',current.finish);window.clearTimeout(current.timer);
     if(!current.opened){clear();return;}
-    window.requestAnimationFrame(()=>{if(document.activeElement===target||document.activeElement===document.body)document.querySelector<HTMLElement>('#news-context-menu [role=menuitem]:not(:disabled),#feed-context-menu [role=menuitem]:not(:disabled),#folder-context-menu [role=menuitem]:not(:disabled)')?.focus({preventScroll:true});});
+    window.requestAnimationFrame(()=>{const menu=document.querySelector<HTMLElement>('#news-context-menu,#feed-context-menu,#folder-context-menu');if(press.current===current&&menu&&!menu.contains(document.activeElement))menu.querySelector<HTMLElement>('[role=menuitem]:not(:disabled)')?.focus({preventScroll:true});});
     current.timer=window.setTimeout(()=>{if(press.current===current)clear();},1000);
    };
    press.current=current;window.addEventListener('pointerdown',current.other);window.addEventListener('pointerup',current.finish);window.addEventListener('pointercancel',current.finish);
