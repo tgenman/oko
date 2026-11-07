@@ -21,11 +21,11 @@ from oko.storage.history_publication import loaded as history_loaded
 class DiscoveryRepository:
     def __init__(self, *, db: Connection, publications: Publications, subscriptions: SubscriptionRepository,
                  versions: ReaderVersions, effects: CollectionEffectCapture,
-                 root: Path,
+                 root: Path, unviewed: Callable[[list[str]],None],
                  clock: Callable[[], float], fault: Callable[[str], None]) -> None:
         self._db, self._publications, self._subscriptions = db, publications, subscriptions
         self._versions, self._effects = versions, effects
-        self._root, self._clock, self._fault = root, clock, fault
+        self._root, self._clock, self._fault, self._unviewed = root, clock, fault, unviewed
 
     def accept(self,publications: Sequence[PublicationContent],cursor: str,feed: str,namespace: str = '',*,description: str | None = None,successful: bool = True) -> CollectionEffects:
         try:
@@ -108,8 +108,7 @@ class DiscoveryRepository:
         if not stale_history and (envelope or 'history_enroll' in selection):
             if saved_selection.get('restore_unread') and history_items:
                 enrolled_before={row[0] for row in self._db.execute('SELECT item FROM history_members WHERE feed=%s AND item=ANY(%s)',(feed,history_items))}
-                changed=self._db.execute('UPDATE publications SET viewed=false WHERE viewed AND id=ANY(%s) RETURNING id',([item for item in history_items if item not in enrolled_before],)).fetchall()
-                self._versions.memberships_changed([row['id'] for row in changed])
+                self._unviewed([item for item in history_items if item not in enrolled_before])
             self._subscriptions.history.enroll(feed,history_items,envelope.selection.scan_complete if envelope else selection['scan_complete'])
             if envelope:
                 self._subscriptions.history.telegram_state(feed,envelope.selection)

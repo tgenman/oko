@@ -34,6 +34,7 @@ test('production HTTP reader keeps folder/feed membership, previews, theses and 
   await page.locator(`[data-feed="${empty!.id}"]`).click();
   await expect(page.locator('#cards button')).toHaveCount(0);
   await expect(page.locator('#list-status')).toHaveText('No items');
+  await page.locator('#read-feeds-toggle').click();
   await page.locator(`[data-folder="${folder!.id}"]`).click();
   await expect(page.locator('#count-label')).toHaveText('2');
   await expect(page.locator(`[data-folder="${folder!.id}"] .tree-count`)).toHaveText('2');

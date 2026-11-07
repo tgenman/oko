@@ -3,7 +3,7 @@ import pytest
 from tests.support.storage import Store
 
 
-@pytest.mark.parametrize('kind',['fetch','download_media','filter','theses','delete','feed-delete'])
+@pytest.mark.parametrize('kind',['fetch','download_media','filter','theses'])
 def test_job_events_create_and_finish_source_occurrence_without_get(kind,tmp_path,postgres_url):
     from oko.domain.job import Job
     from oko.storage.transaction import transaction
@@ -65,7 +65,7 @@ def test_source_failure_changes_group_after_retry_claim(tmp_path,postgres_url):
     finally:store.db.close()
 
 
-def test_removing_one_of_two_source_roots_finishes_only_its_group(tmp_path,postgres_url):
+def test_removing_one_of_two_source_roots_keeps_both_saved_groups(tmp_path,postgres_url):
     from oko.storage.transaction import transaction
     from oko.domain.job import Job
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
@@ -81,7 +81,7 @@ def test_removing_one_of_two_source_roots_finishes_only_its_group(tmp_path,postg
         b=store.db.execute("SELECT id FROM reader_problems WHERE body::jsonb->>'source_group_identity'='job:source-network:b:fetch' AND finished IS NULL").fetchone()[0]
         with transaction(store.db):
             store.remove_feed('a')
-        assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s',(a,)).fetchone()[0] is not None
+        assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s',(a,)).fetchone()[0] is None
         assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s',(b,)).fetchone()[0] is None
     finally:store.db.close()
 

@@ -150,7 +150,7 @@ def test_competing_workers_commit_one_shared_processing_context(tmp_path):
     asyncio.run(scenario())
 
 
-def test_late_result_from_deleted_selected_feed_is_rejected(tmp_path):
+def test_late_result_from_deleted_selected_feed_is_saved(tmp_path):
     from oko.subscriptions.subscriptions import AddFeed, Overrides
     async def scenario():
         entered, release = asyncio.Event(), asyncio.Event()
@@ -174,11 +174,10 @@ def test_late_result_from_deleted_selected_feed_is_rejected(tmp_path):
             assert store.db.execute("SELECT input_snapshot->>'feed_id' FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()[0]==second
             with transaction(store.db):
                 store.remove_feed(second)
-                store.jobs.remove_feed(second,{item})
             release.set()
             await tasks._ai
-            assert store.db.execute('SELECT 1 FROM publications WHERE id=%s',(item,)).fetchone() is None
-            assert store.db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()[0]=='cancelled'
+            assert store.db.execute('SELECT 1 FROM publications WHERE id=%s',(item,)).fetchone() is not None
+            assert store.db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()[0]=='done'
         finally:
             store.db.close()
     asyncio.run(scenario())

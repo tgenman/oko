@@ -730,3 +730,47 @@ def test_unview_keeps_stale_summary_while_new_summary_is_running(tmp_path):
             wait_for(client,lambda: not client.get(url).json()['processing_metadata']['summary']['stale'])
         finally:
             release.set()
+
+
+def test_restored_history_keeps_stale_summary_until_new_result(tmp_path):
+    import asyncio
+    import httpx
+    from threading import Event
+    from tests.support.codex import CodexService,configure_codex
+    from tests.support.reader import wait_for
+    from tests.support.rss import import_feed,rss,wait_cards as wait_rss_cards
+
+    hold,started,release=[False],Event(),Event()
+    class Model(CodexService):
+        async def complete(self,prompt,schema,directory,choice):
+            if hold[0]:
+                started.set()
+                await asyncio.to_thread(release.wait,30)
+            return await super().complete(prompt,schema,directory,choice)
+    def response(request):
+        return httpx.Response(200,text=rss() if request.url.path=='/feed' else '<article>Saved article</article>')
+    app=create_app(tmp_path,token='test-token',rss_enabled=True,codex_client=Model(),rss_transport=httpx.MockTransport(response))
+    with TestClient(app,headers={'Authorization':'Bearer test-token'}) as client:
+        try:
+            feed=import_feed(client)
+            presence(client,'reader')
+            item=wait_rss_cards(client)[0]['id']
+            configure_codex(client)
+            client.patch('/api/v3/feeds/'+feed['id'],json={'public_ai':True})
+            client.patch('/api/v3/settings/oko/global',json={'theses':True})
+            url='/api/v3/publication/'+item
+            before=wait_for(client,lambda: value if (value:=client.get(url).json())['summarized_content'].get('points') else None)
+            client.post('/api/v3/cards/read',json={'ids':[item]})
+            client.patch('/api/v3/settings/oko/global',json={'prompt_theses':'A changed instruction'})
+            assert client.delete('/api/v3/feeds/'+feed['id']).status_code==200
+            hold[0]=True
+            restored=import_feed(client)
+            assert restored['id']==feed['id']
+            assert started.wait(10)
+            pending=client.get(url).json()
+            assert pending['summarized_content']==before['summarized_content']
+            assert pending['processing_metadata']['summary']['stale'] is True
+            release.set()
+            wait_for(client,lambda:not client.get(url).json()['processing_metadata']['summary']['stale'])
+        finally:
+            release.set()

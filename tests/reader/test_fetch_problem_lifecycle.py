@@ -39,8 +39,8 @@ def test_owner_removal_and_problem_change_rollback_together(tmp_path,postgres_ur
         with pytest.raises(ValueError,match='rollback'):
             with transaction(store.db):
                 store.remove_feed('a')
-                assert store.db.execute("SELECT feed_id FROM publications WHERE id='article'").fetchone() is None
-                assert store.db.execute("SELECT 1 FROM jobs WHERE kind='delete' AND item='article'").fetchone() is not None
+                assert store.db.execute("SELECT feed_id FROM publications WHERE id='article'").fetchone()[0]=='a'
+                assert store.db.execute("SELECT deleted FROM feeds WHERE id='a'").fetchone()[0]
                 raise ValueError('rollback')
         after=store.db.execute("SELECT id,body FROM reader_problems WHERE identity='job:article-limit:a:fetch:article' AND finished IS NULL").fetchone()
         assert tuple(after)==tuple(before)

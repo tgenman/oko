@@ -24,7 +24,7 @@ def test_early_unblock_closes_same_occurrence_and_rollback_restores(tmp_path,pos
     finally:store.db.close()
 
 
-def test_viewed_during_pause_never_restores_forgotten_object(tmp_path,postgres_url):
+def test_viewed_during_pause_keeps_affected_object(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
@@ -37,6 +37,5 @@ def test_viewed_during_pause_never_restores_forgotten_object(tmp_path,postgres_u
         assert json.loads(current(store)['body'])['objects']==[dict(kind='material',id='p')]
         with transaction(store.db):
             assert store.viewed_set(['p'])
-        for row in store.db.execute("SELECT body FROM reader_problems WHERE body::jsonb->>'code'='youtube-admission'"):
-            assert all(o.get('id')!='p' for o in json.loads(row['body'])['objects'])
+        assert json.loads(current(store)['body'])['objects']==[dict(kind='material',id='p')]
     finally:store.db.close()

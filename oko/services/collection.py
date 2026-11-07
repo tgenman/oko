@@ -12,6 +12,7 @@ from oko.services.access import repository_access
 
 class PublicationFacts(Protocol):
     def unviewed(self, item: str) -> bool: ...
+    def saved_reference(self, reference: ExternalReference) -> bool: ...
     def feedless(self, item: str) -> bool: ...
     def reference(self, item: str) -> ExternalReference | None: ...
     def feed(self, item: str) -> str: ...
@@ -57,6 +58,10 @@ class CollectionService:
     @repository_access
     def current(self, item: str, revision: str) -> bool:
         return self._publications().unviewed(item) and self._sources().publication_revision(item) == revision
+
+    @repository_access
+    def saved_reference(self, reference: ExternalReference) -> bool:
+        return self._publications().saved_reference(reference)
 
     @repository_access
     def feedless(self, item: str) -> bool:

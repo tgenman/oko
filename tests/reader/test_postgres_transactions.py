@@ -73,8 +73,7 @@ def test_projection_failure_rolls_back_data_and_jobs(database):
         db.before_commit = None
 
 
-@pytest.mark.parametrize('delete_fault', [False, True])
-def test_reader_http_collection_media_settings_viewed_and_restart(postgres_url, tmp_path, delete_fault):
+def test_reader_http_collection_media_settings_viewed_and_restart(postgres_url, tmp_path):
     import time
     import httpx
     from fastapi.testclient import TestClient
@@ -138,22 +137,15 @@ def test_reader_http_collection_media_settings_viewed_and_restart(postgres_url, 
         assert restored.status_code == 200, restored.text
         assert restarted.get('/api/v3/status/details').headers['X-Oko-Storage-Id'] == storage_id
         assert restarted.get('/api/v3/subscriptions').json()['folders'][0]['title'] == 'Renamed library'
-        fail_delete[0] = delete_fault
         viewed = restarted.post('/api/v3/materials/' + item + '/viewed')
         assert viewed.status_code == 200, viewed.text
-        if delete_fault:
-            wait_for(restarted, lambda: bool(failed_deletions))
         assert read_all_cards(restarted, '/api/v3/cards') == []
-        assert restarted.get('/api/v3/publication/' + item).status_code == 404
-    if delete_fault:
-        fail_delete[0] = False
-        offset[0] += 61
-        with TestClient(app(), headers=HEADERS) as recovered:
-            # Oko remains powered off; an explicit replay resumes its retained cleanup.
-            assert recovered.post('/api/v3/materials/' + item + '/viewed').status_code == 200
-            wait_for(recovered, lambda: not any(path.is_file() for path in (tmp_path / 'media').rglob('*')))
-            assert recovered.get(media).status_code == 404
-            assert read_all_cards(recovered, '/api/v3/cards') == []
+        assert restarted.get('/api/v3/publication/' + item).status_code == 200
+        assert restarted.get(media).content == PNG
+    with TestClient(app(), headers=HEADERS) as recovered:
+        assert recovered.get('/api/v3/publication/' + item).status_code == 200
+        assert recovered.get(media).content == PNG
+        assert read_all_cards(recovered, '/api/v3/cards') == []
 
 
 def test_reader_role_needs_no_schema_ownership_or_migration_credentials(postgres_url, tmp_path):

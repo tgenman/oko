@@ -1164,7 +1164,7 @@ def test_viewed_cleanup_migration_preserves_job_after_removing_publication(conne
         db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('old','rss','old',1)")
         db.execute("INSERT INTO jobs(kind,item,status,payload,reason_code,reason_message) VALUES ('delete','old','pending','{\"cleanup_feed\":\"feed\"}','delete','temporary')")
         db.execute("INSERT INTO jobs(kind,item,status) VALUES ('fetch','old','running')")
-        migrate(db,MIGRATIONS)
+        migrate(db,MIGRATIONS[:118])
         assert db.execute("SELECT 1 FROM publications WHERE id='old'").fetchone() is None
         assert db.execute("SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='publications' AND column_name='viewed'").fetchone() is None
         assert db.execute("SELECT status,payload->>'cleanup_feed',reason_message FROM jobs WHERE kind='delete' AND item='old'").fetchone()==('pending','feed','temporary')

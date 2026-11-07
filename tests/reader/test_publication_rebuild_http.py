@@ -149,7 +149,8 @@ def test_rebuild_shared_article_preserves_other_publication_results(tmp_path):
             hold_model[0]=False
             model_release.set()
             assert after['summarized_content']==before['summarized_content']
-            assert after['processing_metadata']==before['processing_metadata']
+            assert after['processing_metadata']['summary']['input_hash']==before['processing_metadata']['summary']['input_hash']
+            assert after['processing_metadata']['summary']['stale'] is True
             assert after['status']==before['status']
             assert len([r for r in calls if r.url.path=='/v1/chat/completions'])<=model_count+2
         finally:
@@ -159,7 +160,8 @@ def test_rebuild_shared_article_preserves_other_publication_results(tmp_path):
         after=client.get('/api/v3/publication/'+b).json()
         assert 'New shared article' in str(after['linked_publications'])
         assert after['summarized_content']==before['summarized_content']
-        assert after['processing_metadata']==before['processing_metadata']
+        assert after['processing_metadata']['summary']['input_hash']==before['processing_metadata']['summary']['input_hash']
+        assert after['processing_metadata']['summary']['stale'] is True
 
 
 def test_viewed_while_rebuilding_accepts_late_file(tmp_path):
@@ -190,61 +192,6 @@ def test_viewed_while_rebuilding_accepts_late_file(tmp_path):
         finally:
             release.set()
 
-
-def test_late_rebuild_cannot_replace_recreated_publication(tmp_path):
-    from tests.support.models import model_transport
-    phase=[0]
-    model_calls=[]
-    started,release,finished=threading.Event(),threading.Event(),threading.Event()
-
-    async def source(request):
-        if request.url.host=='cdn.example':
-            attempt=phase[0]
-            if attempt==1:
-                started.set()
-                while not release.is_set():
-                    try:
-                        await asyncio.sleep(.01)
-                    except asyncio.CancelledError:
-                        pass  # A remote server may answer despite cancellation.
-                finished.set()
-            return httpx.Response(200,content=f'image-{attempt}'.encode(),headers={'content-type':'image/jpeg'})
-        photo='<a class="tgme_widget_message_photo_wrap" style="background-image:url(\'https://cdn.example/image.jpg\')"></a>'
-        return httpx.Response(200,text=page([(11,f'Text {phase[0]}'+photo)]))
-
-    with TestClient(create_app(tmp_path,token='test',api_only=True,rss_transport=httpx.MockTransport(source),
-                               ai_transport=model_transport(model_calls)),headers=HEADERS) as client:
-        try:
-            configure_fast_web(client)
-            client.put('/api/v3/processors/llamacpp',json={'endpoint':'http://localhost:9931','model':'local:latest','local_execution':True})
-            client.patch('/api/v3/settings/oko/global',json={'processor':'llamacpp','theses':True,'prompt_filters':''})
-            connected=client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'})
-            feed=connected.json()['feed_id']
-            old_id=settled(client,timeout=15)[0]['id']
-            phase[0]=1
-            assert client.post('/api/v3/materials/'+old_id+'/rebuild').status_code==200
-            assert started.wait(10)
-            assert client.post('/api/v3/materials/'+old_id+'/viewed').status_code==200
-            wait_for(client,lambda:client.get('/api/v3/publication/'+old_id).status_code==404,timeout=15)
-            phase[0]=2
-            response=client.post('/api/v3/feeds/'+feed+'/history',json={'mode':'count','count':'1'})
-            assert response.status_code==200,response.text
-            fresh=settled(client,timeout=15)[0]
-            assert fresh['id']!=old_id
-            current=client.get('/api/v3/publication/'+fresh['id']).json()
-            assert body_text(current)=='Text 2'
-            media_url=next(m['url'] for m in current['media'] if m['url'])
-            assert client.get(media_url).content==b'image-2'
-            wait_for(client,lambda:client.get('/api/v3/publication/'+fresh['id']).json()['summarized_content'].get('points'),timeout=15)
-            release.set()
-            assert finished.wait(10)
-            wait_for(client,lambda:not (tmp_path/'staging'/old_id).exists(),timeout=15)
-            latest=client.get('/api/v3/publication/'+fresh['id']).json()
-            assert body_text(latest)=='Text 2'
-            assert client.get(media_url).content==b'image-2'
-            assert client.get('/api/v3/publication/'+old_id).status_code==404
-        finally:
-            release.set()
 
 
 def test_rebuild_reuses_results_only_when_its_input_is_unchanged(tmp_path):

@@ -4,7 +4,7 @@ import {test} from 'node:test';
 import {expect} from 'playwright/test';
 import {productionReader} from './http-reader.ts';
 
-test('real HTTP settings load three YouTube materials and can rediscover a viewed publication on a second selection', {timeout:60000}, async t=>{
+test('real HTTP settings load three YouTube materials and preserves a viewed publication on a second selection', {timeout:60000}, async t=>{
   const {page,api,origin,token}=await productionReader(t);
   const errors: string[]=[]; page.on('pageerror',error=>errors.push(error.message));
   await api('settings/oko/global','PATCH',{theses:false});
@@ -46,6 +46,7 @@ test('real HTTP settings load three YouTube materials and can rediscover a viewe
     return [value.state==='absent'?null:value.selection.mode==='count'?value.selection.count:null,value.state];
   },{timeout:20000}).toEqual(['2', 'complete']);
   const finalHistory=await history();expect(finalHistory.state!=='absent'&&finalHistory.progress.viewed).toBe(0);
-  expect(((await api('cards')).items).length).toBe(3); // Retain the third card and rediscover the viewed one in the new window.
+  expect(((await api('cards')).items).length).toBe(2);
+  const shown=await page.request.get(origin+'/api/v3/cards?show_read=true',{headers:{Authorization:'Bearer '+token}});expect((await shown.json()).items.length).toBe(3);
   expect(errors).toEqual([]);
 });

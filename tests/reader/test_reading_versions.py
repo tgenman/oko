@@ -20,7 +20,7 @@ def test_publication_etag_survives_restart_and_viewed_is_explicit(tmp_path):
             previous = current
     with TestClient(traced_app(tmp_path), headers=HEADERS) as client:
         assert client.post('/api/v3/materials/'+items[0]+'/viewed').status_code == 200
-        assert client.get('/api/v3/publication/'+items[0], headers={'If-None-Match':previous[0]}).status_code == 404
+        assert client.get('/api/v3/publication/'+items[0], headers={'If-None-Match':previous[0]}).status_code == 304
 
 
 def test_noop_write_and_other_folder_leave_publication_etag_unchanged(tmp_path):
@@ -61,7 +61,7 @@ def test_failed_viewed_write_keeps_the_card_page_unchanged(tmp_path):
             db=app.state.host.require_store().db
             with db.access_lock:
                 db._db.execute("CREATE FUNCTION pg_temp.reject_page_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic write failure'; END $$")
-                db._db.execute('CREATE TRIGGER synthetic_page_failure BEFORE UPDATE OF feed_id ON publications FOR EACH ROW EXECUTE FUNCTION pg_temp.reject_page_delete()')
+                db._db.execute('CREATE TRIGGER synthetic_page_failure BEFORE UPDATE OF viewed ON publications FOR EACH ROW EXECUTE FUNCTION pg_temp.reject_page_delete()')
         def remove():
             db=app.state.host.require_store().db
             with db.access_lock:

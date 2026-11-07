@@ -15,7 +15,7 @@ def test_viewed_id_list_rolls_back_on_database_failure_and_can_be_repeated(tmp_p
             store=app.state.host.require_store()
             with store.db.access_lock:
                 store.db._db.execute("CREATE FUNCTION pg_temp.reject_card_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic write failure'; END $$")
-                store.db._db.execute('CREATE TRIGGER synthetic_card_failure BEFORE UPDATE OF feed_id ON publications FOR EACH ROW EXECUTE FUNCTION pg_temp.reject_card_delete()')
+                store.db._db.execute('CREATE TRIGGER synthetic_card_failure BEFORE UPDATE OF viewed ON publications FOR EACH ROW EXECUTE FUNCTION pg_temp.reject_card_delete()')
         def remove_failure():
             store=app.state.host.require_store()
             with store.db.access_lock:

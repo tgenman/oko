@@ -72,18 +72,9 @@ def test_http_viewed_succeeds_with_malformed_action_without_unsafe_recovery(tmp_
         assert status.status_code==200,status.text
         p=next(p for p in status.json()['problems']['current'] if p['id']=='bad-problem')
         assert p['affected']==[] and p['recovery']==[]
-        assert item not in status.text and 'synthetic-retained' not in status.text
+        assert 'synthetic-retained' not in status.text
         assert client.post('/api/v3/problems/bad-problem/abandon').status_code in (400,404,409)
         with psycopg.connect(postgres_url,autocommit=True) as db:
             assert json.loads(db.execute("SELECT body FROM reader_problems WHERE id='bad-problem'").fetchone()[0])==body
             assert json.loads(db.execute("SELECT body FROM reader_action_results WHERE id='bad-receipt'").fetchone()[0])==body
-            assert db.execute('SELECT count(*) FROM publications WHERE id=%s AND feed_id IS NOT NULL',(item,)).fetchone()[0]==0
-        import time
-        deadline=time.monotonic()+10
-        while time.monotonic()<deadline:
-            with psycopg.connect(postgres_url,autocommit=True) as db:
-                if not db.execute('SELECT 1 FROM publications WHERE id=%s',(item,)).fetchone():
-                    break
-            time.sleep(.05)
-        else:
-            pytest.fail('Viewed publication was not physically removed')
+            assert db.execute('SELECT viewed FROM publications WHERE id=%s',(item,)).fetchone()[0] is True

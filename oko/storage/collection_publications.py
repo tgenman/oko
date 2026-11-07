@@ -15,6 +15,10 @@ class CollectionPublications:
     def unviewed(self, item: str) -> bool:
         return self._store._has_unviewed(item)
 
+    def saved_reference(self, reference: ExternalReference) -> bool:
+        row=self._store.db.execute('SELECT content FROM publications WHERE platform=%s AND external_id=%s AND url=%s',(reference.key.platform.value,reference.key.external_id,reference.url)).fetchone()
+        return bool(row and 'blocks' in row['content'])
+
     def feedless(self, item: str) -> bool:
         return publication_links.feedless(self._store, item)
 

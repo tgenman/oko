@@ -170,7 +170,7 @@ class Store:
             effects = CollectionEffectCapture(self)
             self.discovery = DiscoveryRepository(db=self.db, publications=self.publications, subscriptions=self.subscriptions,
                 versions=self.read_versions, effects=effects,
-                root=self.root, clock=self.wall_clock, fault=self.fault)
+                root=self.root, unviewed=self.unviewed_set, clock=self.wall_clock, fault=self.fault)
             self.collected_publication = CollectedPublicationRepository(db=self.db, root=self.root,
                 publications=self.publications, media=self.media, capture=effects,
                 collection_history=self.collection_history, fault=self.fault)

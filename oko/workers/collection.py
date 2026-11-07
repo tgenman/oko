@@ -404,8 +404,7 @@ class CollectionWorker:
             async def reuse_saved(child: ExternalReference) -> bool:
                 async with self.execution._actions:
                     if not admitted():return False
-                    row=current.db.execute("SELECT content FROM publications WHERE platform=%s AND external_id=%s AND url=%s",(child.key.platform.value,child.key.external_id,child.url)).fetchone()
-                    return bool(row and 'blocks' in row['content'])
+                    return self.service.saved_reference(child)
             staged=await collect(adapter,self._collection.article_adapter(),reference,staging,admitted,active,reuse_saved)
             if staged[0].value.metadata.reference.key!=reference.key:
                 raise ValueError('Rebuild returned another publication identity')
