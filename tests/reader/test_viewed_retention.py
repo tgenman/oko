@@ -581,7 +581,7 @@ def test_viewed_reload_preserves_stale_theses_without_automatic_reprocessing(tmp
         configure_codex(client)
         assert client.patch('/api/v3/feeds/' + feed['id'], json={'public_ai': True}).status_code == 200
         assert client.patch('/api/v3/settings/oko/global', json={'theses': True}).status_code == 200
-        result = wait_for(client, lambda: client.get(url).json()['summarized_content']['points'])
+        result = wait_for(client, lambda: client.get(url).json()['summarized_content'].get('points'))
         calls = len(model.inputs)
         assert client.post('/api/v3/cards/read', json={'ids': [card['id']]}).status_code == 204
         text[0] = 'Updated synthetic text'
@@ -591,7 +591,7 @@ def test_viewed_reload_preserves_stale_theses_without_automatic_reprocessing(tmp
         assert updated['processing_metadata']['summary']['stale'] is True
         assert len(model.inputs) == calls
         assert client.post('/api/v3/materials/' + card['id'] + '/regenerate').status_code == 200
-        regenerated = wait_for(client, lambda: (value if (value := client.get(url).json())['summarized_content']['points'] and not value['processing_metadata']['summary']['stale'] else None))
+        regenerated = wait_for(client, lambda: (value if (value := client.get(url).json())['summarized_content'].get('points') and not value['processing_metadata']['summary']['stale'] else None))
         assert regenerated['summarized_content']['points'] is not None
         assert len(model.inputs) == calls + 1
 
