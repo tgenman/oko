@@ -441,3 +441,24 @@ test('HTTP 404 after opening retains the already displayed publication',async()=
   expect(r.errors).toEqual([]);
  }finally{await r.close();}
 });
+
+
+test('stale filter keeps its reason and current processing error visible',async()=>{
+ const r=await reader();try{
+  const item=material('stale',{
+   filtered_content:{hidden:true,reason:'Реклама',removed:[],blocks:[]},
+   summarized_content:{points:[{text:'Saved summary',source_publication_ids:['stale']}]},
+   processing_metadata:{filter:{stale:true},summary:{stale:true}},
+   jobs:[{operation:'filter',object_id:'stale',status:'failed',reason_code:'model_error',reason_message:'Synthetic filter failure',retry_at:null},{operation:'theses',object_id:'stale',status:'failed',reason_code:'model_error',reason_message:'Synthetic summary failure',retry_at:null}],
+  });
+  await r.start([item]);await r.page.locator('[data-card="stale"]').click();
+  await expect(r.page.locator('#filter-status')).toContainText('Filter out of date');
+  await expect(r.page.locator('#filter-status')).toContainText('Реклама');
+  await expect(r.page.locator('#filter-status')).toContainText('Synthetic filter failure');
+  await expect(r.page.locator('#filter-retry')).toBeVisible();
+  await expect(r.page.locator('#ai-status')).toContainText('Summary out of date');
+  await expect(r.page.locator('#ai-status')).toContainText('Synthetic summary failure');
+  await expect(r.page.locator('#theses')).toContainText('Saved summary');
+  expect(r.errors).toEqual([]);
+ }finally{await r.close();}
+});

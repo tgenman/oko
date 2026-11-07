@@ -14,6 +14,7 @@ test('touch hold opens card, feed and folder menus without selecting them', {tim
    if(kind==='native')await row.dispatchEvent('contextmenu',{bubbles:true,cancelable:true,clientX:x,clientY:y});
    if(kind==='move')await c.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x+40,y}]});
    await r.page.waitForTimeout(kind==='tap'?80:700);
+   if(kind==='hold'&&selector==='[data-card=\"a\"]')await r.page.locator('#all-folders').focus();
    await c.send('Input.dispatchTouchEvent',{type:kind==='cancel'?'touchCancel':'touchEnd',touchPoints:[]});
   };
   await touch('[data-card="a"]','hold');await expect(r.page.locator('#news-context-menu')).toBeVisible();
