@@ -124,20 +124,20 @@ class JobRepository:
             raise
 
     def _finish(self, job: Job, *, reason_code: str | None, reason_message: str | None) -> None:
-        if job.kind not in ('read','discover','feed-delete'):memberships.lock_graph(self.store.db)
+        if job.kind not in ('read','discover'):memberships.lock_graph(self.store.db)
         processor_previous=self.store.problems.processor_history_before_finish(job.id,self.store.wall_clock())
         from oko.storage.fetch_job_problems import previous_candidates as managed_candidates
         previous_fetch=managed_candidates(self.store,job.id,self.store.wall_clock()) if job.kind=='fetch' else []
         from oko.storage.media_job_problems import previous_candidates as media_candidates
         previous_media=media_candidates(self.store,job.id,self.store.wall_clock()) if job.kind=='download_media' else []
         discover_before = self.store.db.execute("SELECT reason_code,reason_message FROM jobs WHERE id=%s AND kind='discover'",(job.id,)).fetchone() if job.kind=='discover' else None
-        changed=job_write(self.store.db, "UPDATE jobs SET status = 'done' , reason_code = NULL , source_event_owned = false , manual_once = false , retry_at = NULL , retry_delay = 0 , wait_scope = NULL WHERE id = %s AND generation = %s AND status = 'running' AND kind = %s AND item = %s AND CASE WHEN kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND reason_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING OLD.reason_message AS previous_error, OLD.reason_code AS previous_code",
+        changed=job_write(self.store.db, "UPDATE jobs SET status = 'done' , reason_code = NULL , source_event_owned = false , manual_once = false , retry_at = NULL , retry_delay = 0 , wait_scope = NULL WHERE id = %s AND generation = %s AND status = 'running' AND kind = %s AND item = %s AND CASE WHEN kind IN ('fetch','download_media','filter','theses') AND reason_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING OLD.reason_message AS previous_error, OLD.reason_code AS previous_code",
             (job.id,job.generation,job.kind,job.item)).fetchone()
         if changed is None:
             raise JobRejected('Attempt no longer owns this job')
         job_write(self.store.db, 'UPDATE jobs SET reason_code=%s,reason_message=%s WHERE id=%s', (reason_code,reason_message,job.id))
         self.store.problems.finish_processor_change([job.id],processor_previous,self.store.wall_clock())
-        if job.kind in ('fetch','download_media','filter','theses','delete','feed-delete') and (changed['previous_code'] or '').startswith('source-'):
+        if job.kind in ('fetch','download_media','filter','theses') and (changed['previous_code'] or '').startswith('source-'):
             from oko.storage import source_groups
             source_groups.sync(self.store,job.kind,source_groups.job_keys(self.store,job.id,changed['previous_code']),self.store.wall_clock(),evidence=source_groups.job_evidence_many(self.store,[(job.id,changed['previous_code'])]))
         if job.kind=='fetch' and previous_fetch:
@@ -405,7 +405,7 @@ class JobRepository:
             self.store.publications.status(job.item)
 
     def cancel(self, job: Job) -> None:
-        if job.kind not in ('read','discover','feed-delete'):memberships.lock_graph(self.store.db)
+        if job.kind not in ('read','discover'):memberships.lock_graph(self.store.db)
         from oko.storage.fetch_job_problems import previous_candidates as managed_candidates
         previous=managed_candidates(self.store,job.id,self.store.wall_clock()) if job.kind=='fetch' else []
         from oko.storage.media_job_problems import previous_candidates as media_candidates
@@ -413,9 +413,9 @@ class JobRepository:
         processor_previous=self.store.problems.prepare_processor_change([job.id],self.store.wall_clock())
         from oko.storage.processing_job_problems import managed_candidates as processing_candidates
         previous_processing=processing_candidates(self.store,job.id,self.store.wall_clock()) if job.kind in ('filter','theses') else []
-        changed=job_write(self.store.db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 WHERE id = %s AND generation = %s AND status = 'running' AND CASE WHEN kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND reason_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING OLD.reason_code AS previous_code",(job.id,job.generation)).fetchone()
+        changed=job_write(self.store.db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 WHERE id = %s AND generation = %s AND status = 'running' AND CASE WHEN kind IN ('fetch','download_media','filter','theses') AND reason_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING OLD.reason_code AS previous_code",(job.id,job.generation)).fetchone()
         if changed:self.store.problems.finish_processor_change([job.id],processor_previous,self.store.wall_clock())
-        if changed and job.kind in ('fetch','download_media','filter','theses','delete','feed-delete') and (changed['previous_code'] or '').startswith('source-'):
+        if changed and job.kind in ('fetch','download_media','filter','theses') and (changed['previous_code'] or '').startswith('source-'):
             from oko.storage import source_groups
             complete=source_groups.sync(self.store,job.kind,source_groups.job_keys(self.store,job.id,changed['previous_code']),self.store.wall_clock(),evidence=source_groups.job_evidence_many(self.store,[(job.id,changed['previous_code'])]))
             job_write(self.store.db,"UPDATE jobs SET source_event_owned=(%s=1) AND status IN ('pending','running','failed','unavailable','blocked') WHERE id=%s",(complete,job.id))
@@ -426,7 +426,7 @@ class JobRepository:
         if changed:self.store.incomplete_draft.mark_job(job.kind,job.item,job.id)
 
     def block(self, job: Job) -> None:
-        if job.kind in ('fetch','download_media','filter','theses','delete','feed-delete'):
+        if job.kind in ('fetch','download_media','filter','theses'):
             from oko.storage import memberships
             memberships.lock_graph(self.store.db)
         from oko.storage.fetch_job_problems import previous_candidates as managed_candidates
@@ -435,8 +435,8 @@ class JobRepository:
         previous_media=media_candidates(self.store,job.id,self.store.wall_clock()) if job.kind=='download_media' else []
         from oko.storage.processing_job_problems import managed_candidates as processing_candidates
         previous_processing=processing_candidates(self.store,job.id,self.store.wall_clock()) if job.kind in ('filter','theses') else []
-        changed=job_write(self.store.db, "UPDATE jobs SET status = 'blocked' WHERE id = %s AND generation = %s AND status = 'running' AND CASE WHEN kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND reason_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING OLD.reason_code AS previous_code", (job.id, job.generation)).fetchone()
-        if changed and job.kind in ('fetch','download_media','filter','theses','delete','feed-delete') and (changed['previous_code'] or '').startswith('source-'):
+        changed=job_write(self.store.db, "UPDATE jobs SET status = 'blocked' WHERE id = %s AND generation = %s AND status = 'running' AND CASE WHEN kind IN ('fetch','download_media','filter','theses') AND reason_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING OLD.reason_code AS previous_code", (job.id, job.generation)).fetchone()
+        if changed and job.kind in ('fetch','download_media','filter','theses') and (changed['previous_code'] or '').startswith('source-'):
             from oko.storage import source_groups
             complete=source_groups.sync(self.store,job.kind,source_groups.job_keys(self.store,job.id,changed['previous_code']),self.store.wall_clock(),evidence=source_groups.job_evidence_many(self.store,[(job.id,changed['previous_code'])]))
             job_write(self.store.db,"UPDATE jobs SET source_event_owned=(%s=1) AND status IN ('pending','running','failed','unavailable','blocked') WHERE id=%s",(complete,job.id))
@@ -677,7 +677,7 @@ class JobRepository:
         if not row:
             return None
         sequence_value=None
-        if row['kind'] in ('fetch','download_media','filter','theses','delete','feed-delete'):
+        if row['kind'] in ('fetch','download_media','filter','theses'):
             from oko.storage import memberships
             memberships.lock_graph(self.store.db)
             current=self.store.db.execute("SELECT jobs.*,(SELECT value FROM state WHERE key='job-dispatch-generation') AS dispatch_sequence FROM jobs WHERE id=%s",(row['id'],)).fetchone()
@@ -688,7 +688,7 @@ class JobRepository:
         from oko.storage import individual_job_problems
         with individual_job_problems.claim(self.store, row):
             # Keep dispatch generations monotonic even when every old job was removed.
-            if row['kind'] not in ('fetch','download_media','filter','theses','delete','feed-delete'):
+            if row['kind'] not in ('fetch','download_media','filter','theses'):
                 sequence = self.store.db.execute("SELECT value FROM state WHERE key = 'job-dispatch-generation'").fetchone()
                 sequence_value=sequence[0] if sequence else None
             generation = max(row['generation'], int(sequence_value) if sequence_value is not None else 0) + 1
@@ -699,17 +699,17 @@ class JobRepository:
         return Job(current['id'], current['kind'], current['item'], current['generation'])
 
 
-    def retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None, terminal: bool = False, issue: AdapterIssue | None = None, cleanup_backoff: bool = False) -> None:
+    def retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None, terminal: bool = False, issue: AdapterIssue | None = None) -> None:
         if not self.store.db.transaction_depth:
             raise RuntimeError('Job retry requires an owning transaction')
         try:
-            self._retry(job,now,error,delay,code=code,terminal=terminal,issue=issue,cleanup_backoff=cleanup_backoff)
+            self._retry(job,now,error,delay,code=code,terminal=terminal,issue=issue)
         except BaseException:
             if self.store.db.transaction_depth:
                 self.store.db.transaction_failed = True
             raise
 
-    def _retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None, terminal: bool = False, issue: AdapterIssue | None = None, cleanup_backoff: bool = False) -> None:
+    def _retry(self, job: Job, now: float, error: str, delay: float = 1, *, code: str | None = None, terminal: bool = False, issue: AdapterIssue | None = None) -> None:
         if job.kind in ('discover','fetch','rebuild','filter','theses'):
             valid=self.valid(job)
             collection_jobs.fail(self.store,job,issue or AdapterIssue(code or 'collection-failed',error,
@@ -718,22 +718,12 @@ class JobRepository:
             if valid and not self.valid(job):self._complete_collection_outcome(job)
             return
         memberships.lock_graph(self.store.db)
-        retry_at = None
-        if cleanup_backoff:
-            if job.kind not in ('delete','feed-delete') or terminal:
-                raise ValueError('Cleanup backoff requires a temporary cleanup failure')
-            row=self.store.db.execute('SELECT retry_delay FROM jobs WHERE id=%s AND generation=%s AND status=\'running\'',(job.id,job.generation)).fetchone()
-            if row is None:
-                return
-            settings=self.store.subscriptions.retry_settings()
-            delay=min(settings['max_seconds'],max(settings['initial_seconds'],row['retry_delay']*2))
-            retry_at=self.store.wall_clock()+delay
-        processor_previous=self.store.problems.prepare_processor_change([job.id],self.store.wall_clock(),source_lock=job.kind in ('download_media','delete','feed-delete') and (code or '').startswith('source-'))
+        processor_previous=self.store.problems.prepare_processor_change([job.id],self.store.wall_clock(),source_lock=job.kind == 'download_media' and (code or '').startswith('source-'))
         from oko.storage.media_job_problems import previous_candidates as media_candidates
         previous_media=media_candidates(self.store,job.id,self.store.wall_clock()) if job.kind=='download_media' else []
-        changed = job_write(self.store.db, "UPDATE jobs SET status = %s , next = %s , reason_message = %s , reason_code = %s , retry_at = CASE WHEN %s = 1 THEN %s ELSE retry_at END , retry_delay = CASE WHEN %s = 1 THEN %s ELSE retry_delay END WHERE id = %s AND generation = %s AND status = 'running' AND CASE WHEN kind IN ('download_media','delete','feed-delete') AND (reason_code LIKE 'source-%%' OR %s LIKE 'source-%%') THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING OLD.reason_code AS previous_code",
-            ('failed' if terminal else 'pending',0 if code=='ai-permission' else now+delay,error,code or job.kind,cleanup_backoff,retry_at,cleanup_backoff,delay,job.id,job.generation,code or job.kind)).fetchone()
-        if changed and job.kind in ('download_media','delete','feed-delete') and ((changed['previous_code'] or '').startswith('source-') or (code or '').startswith('source-')):
+        changed = job_write(self.store.db, "UPDATE jobs SET status = %s , next = %s , reason_message = %s , reason_code = %s WHERE id = %s AND generation = %s AND status = 'running' AND CASE WHEN kind IN ('download_media') AND (reason_code LIKE 'source-%%' OR %s LIKE 'source-%%') THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING OLD.reason_code AS previous_code",
+            ('failed' if terminal else 'pending',0 if code=='ai-permission' else now+delay,error,code or job.kind,job.id,job.generation,code or job.kind)).fetchone()
+        if changed and job.kind == 'download_media' and ((changed['previous_code'] or '').startswith('source-') or (code or '').startswith('source-')):
             from oko.storage import source_groups
             source_old_keys=source_groups.job_keys(self.store,job.id,changed['previous_code']) if (changed['previous_code'] or '').startswith('source-') else set()
             complete=source_groups.sync(self.store,job.kind,source_old_keys | source_groups.job_keys(self.store,job.id),self.store.wall_clock(),evidence=source_groups.job_evidence_many(self.store,[(job.id,changed['previous_code'])]))
@@ -763,7 +753,7 @@ class JobRepository:
             if row['reason_message'] is not None or row['reason_code'] is not None:self.store.problems.sync_discover(row['id'],self.store.wall_clock())
         collection_jobs.interrupt(self.store,feeds,backoff=False)
         changed=job_write(self.store.db, f"UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status='pending', generation=generation+1 WHERE {selection} RETURNING id,kind,item,reason_message,reason_code", params).fetchall()
-        source_ids=[row['id'] for row in changed if row['kind'] in ('fetch','download_media','filter','theses','delete','feed-delete') and (row['reason_code'] or '').startswith('source-')]
+        source_ids=[row['id'] for row in changed if row['kind'] in ('fetch','download_media','filter','theses') and (row['reason_code'] or '').startswith('source-')]
         if source_ids:source_groups.sync_jobs(self.store,source_ids,self.store.wall_clock())
         for row in changed:
             self.store.incomplete_draft.mark_job(row['kind'],row['item'],row['id'])
@@ -865,7 +855,7 @@ class JobRepository:
         processor_previous=self.store.problems.prepare_processor_change([job.id],self.store.wall_clock())
         from oko.storage.media_job_problems import previous_candidates
         subtitle_previous=previous_candidates(self.store,job.id,self.store.wall_clock())
-        changed=job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , next = %s , reason_code = NULL , reason_message = %s WHERE id = %s AND generation = %s AND status = 'running' AND CASE WHEN kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND reason_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING id,OLD.reason_code AS previous_code",(now+max(.05,delay),reason,job.id,job.generation)).fetchone()
+        changed=job_write(self.store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = 'pending' , next = %s , reason_code = NULL , reason_message = %s WHERE id = %s AND generation = %s AND status = 'running' AND CASE WHEN kind IN ('fetch','download_media','filter','theses') AND reason_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING id,OLD.reason_code AS previous_code",(now+max(.05,delay),reason,job.id,job.generation)).fetchone()
         if changed and (changed['previous_code'] or '').startswith('source-'):
             from oko.storage import source_groups
             source_groups.sync_changed_rows(self.store,[changed],self.store.wall_clock())

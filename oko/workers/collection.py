@@ -356,8 +356,7 @@ class CollectionWorker:
                     with current.jobs.transaction(self._live):
                         current.jobs.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,code=code,
                             terminal=isinstance(error, SourceError) and not error.retryable or job.kind in ('discover','fetch') and (isinstance(error,ValueError) or Store.is_integrity_failure(error)),
-                            issue=error.adapter_issue if isinstance(error,SourceError) else None,
-                            cleanup_backoff=job.kind in ('delete','feed-delete') and not (isinstance(error,SourceError) and not error.retryable))
+                            issue=error.adapter_issue if isinstance(error,SourceError) else None)
                         if job.kind=='fetch':
                             current.publications.notify_parents(job.item)
                         if job.kind=='discover':

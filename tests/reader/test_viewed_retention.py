@@ -683,7 +683,7 @@ def test_viewed_summary_is_preserved_and_marked_stale_after_settings_change(tmp_
         client.patch('/api/v3/feeds/fixture',json={'public_ai':True})
         client.patch('/api/v3/settings/oko/global',json={'theses':True})
         url='/api/v3/publication/'+item
-        before=wait_for(client,lambda: value if (value:=client.get(url).json())['summarized_content']['points'] else None)
+        before=wait_for(client,lambda: value if (value:=client.get(url).json())['summarized_content'].get('points') else None)
         client.post('/api/v3/cards/read',json={'ids':[item]})
         calls=len(model.inputs)
         client.patch('/api/v3/settings/oko/global',json={'prompt_theses':'A changed instruction'})
@@ -717,7 +717,7 @@ def test_unview_keeps_stale_summary_while_new_summary_is_running(tmp_path):
             client.patch('/api/v3/feeds/fixture',json={'public_ai':True})
             client.patch('/api/v3/settings/oko/global',json={'theses':True})
             url='/api/v3/publication/'+item
-            previous=wait_for(client,lambda: value if (value:=client.get(url).json())['summarized_content']['points'] else None)
+            previous=wait_for(client,lambda: value if (value:=client.get(url).json())['summarized_content'].get('points') else None)
             client.post('/api/v3/cards/read',json={'ids':[item]})
             client.patch('/api/v3/settings/oko/global',json={'prompt_theses':'A changed instruction'})
             hold[0]=True

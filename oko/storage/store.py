@@ -10,7 +10,7 @@ from pathlib import Path
 import shutil
 import time
 from collections.abc import Callable, Generator
-from typing import Any
+from typing import Any, Literal
 
 from oko.storage.publications import Publications
 from oko.storage.media import MediaFiles
@@ -342,11 +342,12 @@ class Store:
         from oko.storage import processing_input
         membership_graph.lock_graph(self.db)
         selected=self.db.execute("SELECT p.id,p.processing_metadata FROM publications p JOIN feeds f ON f.id=p.feed_id WHERE NOT f.deleted AND p.viewed AND p.id=ANY(%s)",(sorted(set(identities)),)).fetchall()
-        stale: dict[str,list[str]]={}
+        stale: dict[str,list[Literal['filter','theses']]]={}
         for row in selected:
             projected=ReaderFacts(lambda:self).unified_publication(row['id'])['processing_metadata']
             metadata=json.loads(row['processing_metadata'])
-            for section,kind in (('filter','filter'),('summary','theses')):
+            stages: tuple[tuple[str,Literal['filter','theses']],...]=(('filter','filter'),('summary','theses'))
+            for section,kind in stages:
                 if projected.get(section,{}).get('stale'):
                     metadata[section]['preserve_stale']=True
                     stale.setdefault(row['id'],[]).append(kind)
