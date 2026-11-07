@@ -43,11 +43,9 @@ test('opened publication shows variant B with avatar and wrapping long feed and 
   await r.page.evaluate(avatarUrl=>{const nav=readerTransport.replies.get('/api/v3/navigation')!.body!;Object.assign(nav.folders[0].feeds[0],{avatar_url:avatarUrl,title:'Переименованный канал'});},avatarUrl);
   await expect(avatar).toHaveJSProperty('naturalWidth',64);
   await expect(r.page.locator('#material-feed-title')).toHaveText('Переименованный канал');
-  const retainedAvatar=await avatar.getAttribute('src');
   await r.page.evaluate(()=>{const nav=readerTransport.replies.get('/api/v3/navigation')!.body!;nav.folders[0].feeds=nav.folders[0].feeds.filter(entry=>entry.id!=='feed');});
   await expect(r.page.locator('[data-feed="feed"]')).toHaveCount(0);
-  await expect(r.page.locator('#material-feed-title')).toHaveText('Переименованный канал');
-  await expect(avatar).toHaveAttribute('src',retainedAvatar!);
+  await expect(r.page.locator('#material')).toBeHidden();
   expect(r.errors).toEqual([]);
  }finally{await r.close();}
 });
@@ -120,7 +118,7 @@ async function videoFixture(page: Page) {
 }
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jL1sAAAAASUVORK5CYII=';
 
-test('viewing retains loaded media and playback, rejects late media and switching releases URLs', async () => {
+test('viewing keeps playback and late media available, switching releases URLs', async () => {
   const r = await reader();
   try {
     await r.start([material('A', {media: [
@@ -149,14 +147,14 @@ test('viewing retains loaded media and playback, rejects late media and switchin
     });
     await r.page.evaluate(() => readerTransport.replies.set('POST /api/v3/materials/A/viewed', {body:{ok:true},next:[['/api/v3/cards',{body:window.readerFixtures.cardPage(readerTransport.replies.get('/api/v3/cards')!.body!.items.filter(card=>card.id==='B'))}]]}));
     await r.page.getByRole('button', {name: 'Mark as Read', exact: true}).click();
-    await expect(r.page.locator('#material-retained')).toBeVisible();
+    await expect(r.page.locator('#material-retained')).toBeHidden();
     assert.equal(await r.page.evaluate(() => !testVideo.paused && testVideo.hasAttribute('src')), true);
     assert.equal(await r.page.evaluate(() => browserResources.created.length), 2);
     assert.deepEqual(await r.page.evaluate(() => browserResources.revoked), []);
     await r.page.evaluate(() => readerTransport.release('/api/v3/materials/A/media/media-2.webm', 'late circle'));
     await settle(r.page);
-    await expect(r.page.locator('#images video')).toHaveCount(1);
-    assert.equal(await r.page.evaluate(() => browserResources.created.length), 2);
+    await expect(r.page.locator('#images video')).toHaveCount(2);
+    assert.equal(await r.page.evaluate(() => browserResources.created.length), 3);
     await r.page.locator('[data-card="B"]').click();
     await expect(r.page.locator('#text')).toHaveText('Текст B');
     assert.equal(await r.page.evaluate(() => testVideo.paused && !testVideo.hasAttribute('src')), true);
@@ -165,7 +163,7 @@ test('viewing retains loaded media and playback, rejects late media and switchin
   } finally {await r.close();}
 });
 
-test('viewing a publication in another tab closes its pending opening but preserves unrelated folder', async () => {
+test('viewing in another tab keeps a pending opening and preserves unrelated folder', async () => {
   const r = await reader();
   try {
     const source = material('source');
@@ -179,10 +177,10 @@ test('viewing a publication in another tab closes its pending opening but preser
     await expect(otherTab.locator('#text')).toHaveText('Текст source');
     await otherTab.evaluate(() => readerTransport.replies.set('POST /api/v3/materials/source/viewed', {body:{ok:true},next:[['/api/v3/cards',{body:window.readerFixtures.cardPage([])}]]}));
     await otherTab.getByRole('button', {name: 'Mark as Read', exact: true}).click();
-    await expect(r.page.locator('#empty')).toHaveText('Select an item');
+    await expect(r.page.locator('#empty')).toHaveText('Loading item…');
     await r.page.evaluate(body => readerTransport.release('/api/v3/publication/source', body), source);
     await settle(r.page);
-    await expect(r.page.locator('#empty')).toHaveText('Select an item');
+    await expect(r.page.locator('#text')).toHaveText('Текст source');
     await r.page.locator('[data-card="other"]').click();
     await expect(r.page.locator('#text')).toHaveText('Текст other');
     await otherTab.evaluate(() => { const channel = new BroadcastChannel('oko-reader'); channel.postMessage({kind: 'folder-viewed', folder: 'f'}); channel.close(); });

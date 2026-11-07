@@ -63,7 +63,7 @@ Schema 2020-12, включая форматы. `null` и `false` считают�
 
 ## Единственный API v3
 
-64 предметных операций обслуживается через `/api/v3`. Прежние unversioned `/api` и `/api/...` после Host/Origin/bearer проверок возвращают `410 api_version_removed`; команды не исполняются, перенаправлений и SPA fallback нет. Переходные SDK/DTO v2, их генерация и `baseline.json` удалены. Исторический semantic mapping сохранён в [дизайне перехода](../.scratch/independent-api/contract-design.md), а текущий контракт — единственный источник wire-моделей.
+Предметные операции обслуживаются через `/api/v3`. Прежние unversioned `/api` и `/api/...` после Host/Origin/bearer проверок возвращают `410 api_version_removed`; команды не исполняются, перенаправлений и SPA fallback нет. Переходные SDK/DTO v2, их генерация и `baseline.json` удалены. Исторический semantic mapping сохранён в [дизайне перехода](../.scratch/independent-api/contract-design.md), а текущий контракт — единственный источник wire-моделей.
 
 `oko/reader/snapshots.py` валидирует внутренние снимки Store/Runtime, текущего пайплайна. Это не HTTP-контракт и не второй API. На границе используются только generated v3 models. Неизвестный сохранённый context команды возвращает outcome=unknown; удалённые действия не исполняются.
 
@@ -117,7 +117,7 @@ Description относится к внешнему источнику. Откр�
 `200 state: unavailable`. Уточнение схемы сохраняет фактические ответы сервера,
 включая статусы, предметные коды и receipts команд.
 
-Для карточек используются [GET /api/v3/cards и POST /api/v3/cards/read](../docs/architecture/cards-http-design.md). Список выдаётся порциями и проверяется по ETag; просмотр принимает явные ID. Публикацию открывает `GET /api/v3/publication/{item}`.
+Для карточек используются `GET /api/v3/cards`, `POST /api/v3/cards/read` и `POST /api/v3/cards/unread`. Список выдаётся порциями и проверяется по ETag; `show_read` и `show_hidden` независимо управляют показом. Отметки принимают явные ID и сохраняют публикации. `GET /api/v3/publication/{item}` возвращает также признак устаревания результатов обработки.
 
 ## Единый ответ открытой публикации
 

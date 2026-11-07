@@ -54,10 +54,9 @@ class ReaderApplication:
         self._rss_transport, self._ai_transport = rss_transport, ai_transport
         self._telegram_http, self._codex_client = telegram_http, codex
         self.stop, self.admission_changed, self.set_power = stop, admission_changed, set_power
-        self._cancel, self._drain_deletions = jobs.cancel, jobs._drain_deletions
+        self._cancel = jobs.cancel
         self._feed_checks: dict[str, str] = {}
         self._last_problems: dict[str, Any] = dict(current=[], recent=[], count=0, updated_at=wall_clock())
-        self._viewed_ids: list[str] = []
         self._codex_status = codex_status()
         self._collection_instance = secrets.token_hex(16)
         self._collection_revision = 0
@@ -114,12 +113,6 @@ class ReaderApplication:
     def require_store(self) -> Store:
         return self.execution.require_store()
 
-    def material_was_viewed(self, identity: str) -> bool:
-        if self._store:
-            return self.queries.was_viewed(identity)
-        return identity in self._viewed_ids
-
-
     def collection_snapshot(self, feed_id: str | None = None) -> dict[str, Any]:
         current = self.require_store()
         feeds = self.queries.feeds(feed_id)
@@ -154,20 +147,18 @@ class ReaderApplication:
     def _status(self) -> dict[str, Any]:
         state: dict[str, Any] = {}
         state['youtube'] = self.youtube_status() if self._store and not self.stopped else None
-        if self._store and not self.stopped:
-            self._viewed_ids = self.queries.viewed_ids()
         state['problems'] = self._last_problems
         if self._error:
             state['problems'] = dict(current=[dict(id='runtime:storage',code='storage-unavailable',operation='producer:storage',section='action',title='Хранилище недоступно',
                 consequence='Сбор и обработка остановлены.',next_step='Проверьте доступность хранилища; состояние не сбрасывается.',
                 objects=[],action=None,created_at=self._wall_clock(),next_at=None,state='current',finished_at=None,outcome=None)],recent=[],count=1,updated_at=self._wall_clock())
-        state['viewed_ids'] = self._viewed_ids
         source_states = self._store.source_statuses() if self._store else []
         names = {f['id']: f['title'] for f in self._store.subscriptions.feeds()} if self._store else {}
-        source_states = [dict(s, title=names.get(s['feed_id'], s['feed_id']), changes=self._source_description(s['feed_id'])) for s in source_states if s['feed_id'] in self._sources]
+        active_sources = [identity for identity in self._sources if identity in names]
+        source_states = [dict(s, title=names[s['feed_id']], changes=self._source_description(s['feed_id'])) for s in source_states if s['feed_id'] in active_sources]
         return dict(**state, initial_histories=[dict(feed_id=f['id'], **f['initial_history']) for f in self._store.subscriptions.feeds() if f['initial_history']] if self._store else [], sources=source_states, error=self._error,
-                    ready_sources=self._store.ready_sources(list(self._sources)) if self._store and not self.stopped else 0,
-                    total_sources=len(self._sources))
+                    ready_sources=self._store.ready_sources(active_sources) if self._store and not self.stopped else 0,
+                    total_sources=len(active_sources))
 
 
     async def action_started(self, identity: str, context: dict[str, Any], *, restart: bool = False, expected_identity: str | None = None) -> None:
@@ -259,11 +250,7 @@ class ReaderApplication:
         async with self._actions:
             current = self.require_store()
             with transaction(current.db):
-                members = self.reading.viewed(item)
-                self.jobs.reconcile_cleanup()
-            if self.diagnostics:
-                self.diagnostics.forget_materials(members)
-            await self._drain_deletions(current)
+                self.reading.viewed(item)
 
 
     async def viewed_many(self, identities: list[str]) -> None:
@@ -271,13 +258,20 @@ class ReaderApplication:
         async with self._actions:
             current = self.require_store()
             with transaction(current.db):
-                members = self.reading.viewed_many(identities)
-                if members:
-                    self.jobs.reconcile_cleanup()
-            if self.diagnostics and members:
-                self.diagnostics.forget_materials(members)
-            if members:
-                await self._drain_deletions(current)
+                self.reading.viewed_many(identities)
+
+    async def unviewed_many(self, identities: list[str]) -> None:
+        """Restore the reading state of saved publications without replacing them."""
+        async with self._actions:
+            current = self.require_store()
+            with transaction(current.db):
+                for identity in set(identities):
+                    if self.queries.result_stale(identity, 'filter'):
+                        current.db.execute("UPDATE publications SET processing_metadata=jsonb_set(processing_metadata::jsonb, '{filter,preserve_stale}', 'true'::jsonb)::text WHERE id=%s", (identity,))
+                current.set_processor_viewed(sorted(set(identities)), False)
+                for identity in set(identities):
+                    current.processing.reconcile_accepted_item(identity)
+            current.processing.sync()
 
 
     def _completion_preview(self, folder: str, current: Store, scope: Literal['folder', 'feed'] = 'folder') -> dict[str, Any]:
@@ -302,14 +296,8 @@ class ReaderApplication:
         async with self._actions:
             current = self.require_store()
             with transaction(current.db):
-                members = self.reading.complete(folder, token, scope)
-                self.jobs.reconcile_cleanup()
+                self.reading.complete(folder, token, scope)
             self.reading.accepted(folder, token, scope)
-            if self.diagnostics and members:
-                self.diagnostics.forget_materials(members)
-            await self._drain_deletions(current)
-            if current.status()['deleting']:
-                raise ActionError('unavailable', 'Удаление не завершено. Око повторит попытку; ошибка видна в статусе.')
 
 
     async def pause_history(self, identity: str, paused: bool) -> dict[str, Any]:
@@ -594,8 +582,9 @@ class ReaderApplication:
             if not self._live():
                 raise ActionError('conflict', 'Откройте читатель для подключения', expected=True)
             duplicates = self.connections.owners([(kind, str(address))])
-            if any(identity!=feed_id for identity in duplicates):
-                raise TelegramConflict('duplicate_source', self.connections.duplicates(duplicates), 'Источник уже подключён')
+            active_duplicates = [identity for identity in duplicates if current.db.execute('SELECT 1 FROM feeds WHERE id=%s AND NOT deleted', (identity,)).fetchone()]
+            if any(identity!=feed_id for identity in active_duplicates):
+                raise TelegramConflict('duplicate_source', self.connections.duplicates(active_duplicates), 'Источник уже подключён')
             previous=self.queries.binding(feed_id) if feed_id else None
             if feed_id and not previous:
                 raise TelegramConflict('access_immutable',dict(feed_id=feed_id),'Фид не найден или не имеет привязки Telegram')
@@ -635,16 +624,8 @@ class ReaderApplication:
     async def remove_feed(self, identity: str) -> None:
         async with self._actions:
             current = self.require_store()
-            members = self.queries.feed_members(identity)
             with transaction(current.db):
                 self.subscriptions.remove_feed(identity)
-                self.jobs.remove_feed(identity,members)
-                self.jobs.invalidate({identity})
-            if self.diagnostics:
-                self.diagnostics.forget_materials(members)
-            await self.jobs.cancel({identity}, invalidate=False)
-            self._sources.pop(identity, None)
-            self._telegram_bindings.pop(identity, None)
 
 
     def _clean_collection(self, value: Any) -> Any:

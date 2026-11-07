@@ -53,6 +53,59 @@ test('hide read hides folders without unviewed feeds even when selected', {timeo
  expect((await api('v3/subscriptions')).feeds).toHaveLength(2);
 });
 
+test('show read reveals viewed publications and hide read hides them again', {timeout:25000}, async t=>{
+ const {page,api,origin,token}=await productionReader(t);
+ await api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});
+ await addSources(api, [['https://a.test/feed','Альфа','Новости']]);
+ await page.goto(origin+'/#token='+token);
+ const cards=page.locator('#cards button'), toggle=page.locator('#read-feeds-toggle');
+ await expect(cards).toHaveCount(1);
+ await cards.first().click();
+ await expect(page.locator('#text')).toContainText('Открылась библиотека');
+ await page.locator('#viewed').click();
+ await expect(cards).toHaveCount(0);
+ await toggle.click();
+ await expect(cards).toHaveCount(1);
+ await expect(cards.first()).toContainText('Read');
+ await page.screenshot({path:artifactPath('viewed-card.png')});
+ await cards.first().click({button:'right'});
+ await page.getByRole('menuitem',{name:'Mark as Unread'}).click();
+ await expect(cards.first()).not.toContainText('Read');
+ await toggle.click();
+ await expect(cards).toHaveCount(1);
+});
+
+test('deleting a feed closes its open publication until the feed is restored', {timeout:25000}, async t=>{
+ const {page,api,origin,token}=await productionReader(t);
+ await api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});
+ const catalog=await addSources(api, [['https://a.test/feed','Альфа','Новости']]);
+ const feed=catalog.feeds.find(value=>value.title==='Альфа')!;
+ await page.goto(origin+'/#token='+token);
+ await page.locator('#cards button').first().click();
+ await expect(page.locator('#text')).toContainText('Открылась библиотека');
+ await api(`feeds/${feed.id}`,'DELETE');
+ await expect(page.locator('#cards button')).toHaveCount(0);
+ await expect(page.locator('#material')).toBeHidden();
+});
+
+test('late opening cannot show a publication after its feed is deleted', {timeout:25000}, async t=>{
+ const {page,api,origin,token}=await productionReader(t);
+ await api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});
+ const catalog=await addSources(api, [['https://a.test/feed','Альфа','Новости']]);
+ const feed=catalog.feeds.find(value=>value.title==='Альфа')!;
+ await page.goto(origin+'/#token='+token);
+ let release!:()=>void,started!:()=>void,finished!:()=>void;
+ const waiting=new Promise<void>(resolve=>release=resolve),received=new Promise<void>(resolve=>started=resolve),delivered=new Promise<void>(resolve=>finished=resolve);
+ await page.route('**/api/v3/publication/*', async route=>{const response=await route.fetch();started();await waiting;await route.fulfill({response}).catch(()=>{});finished();});
+ await page.locator('#cards button').first().click();
+ await received;
+ await api(`feeds/${feed.id}`,'DELETE');
+ await expect(page.locator('#cards button')).toHaveCount(0);
+ release();
+ await delivered;
+ await expect(page.locator('#material')).toBeHidden();
+});
+
 test('v3 reading uses real media and reconciles a lost viewed response without replay', {timeout:25000}, async t=>{
   const {page,api,origin,token}=await productionReader(t);
   await api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});

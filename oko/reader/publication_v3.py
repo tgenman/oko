@@ -62,8 +62,8 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
             value: dict[str, Any] = dict(id=material.id, title=material.title, feed_id=material.feed_id,
                 published_at=project.timestamp(material.published).root if material.published_known is not False else None,
                 source_url=material.url, source=source.model_dump(mode='json'),
-                filter=dict(state=filter_status, result=filter_result, error=filter_message if filter_status=='error' else None),
-                theses=dict(state=summary_status, result=summary_result, error=ai.error if ai and summary_status=='error' else None))
+                filter=dict(state=filter_status, result=filter_result, error=filter_message if filter_status=='error' else None, stale=current.result_stale(item,'filter')),
+                theses=dict(state=summary_status, result=summary_result, error=ai.error if ai and summary_status=='error' else None, stale=current.result_stale(item,'theses')))
             value['availability'] = 'available' if material.complete else 'pending'
             content: dict[str, Any] = {'loading': material.loading is not False}
             if material.complete:
@@ -97,7 +97,7 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
             changed=content.get('changed',False),source_deleted=content.get('source_deleted',False),
             linked_content=content.get('linked_content'),reply_preview=content.get('reply_preview'),
             post_web_unavailable=content.get('post_web_unavailable',False),external_attachments=content.get('external_attachments',[]),
-            filter=dict(state=filtered['state'],result=dict(**f,text=content.get('display_text',original)) if f else None,error=filtered['error']),
+            filter=dict(state=filtered['state'],result=dict(**f,text=content.get('display_text',original)) if f else None,error=filtered['error'],stale=filtered['stale']),
             theses=summarized,
             media=media)
         body=wire.PublicationResponse.model_validate(body).model_dump(mode='json')

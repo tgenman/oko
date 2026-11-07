@@ -135,7 +135,7 @@ def test_refresh_resumes_partial_history_error_and_collects_new_rss_publications
         assert {c['title'] for c in read_all_cards(client, '/api/v3/cards')} >= {'Video 60','Video 59','Video 58'}
 
 
-def test_stop_then_new_selection_can_rediscover_viewed_and_retains_saved_materials(tmp_path):
+def test_stop_then_new_selection_keeps_viewed_and_saved_materials(tmp_path):
     history, requests = HistoryFixture(), []
     with reader(tmp_path, history, requests) as client:
         feed = import_channel(client)
@@ -154,6 +154,31 @@ def test_stop_then_new_selection_can_rediscover_viewed_and_retains_saved_materia
         progress = wait_history(client, feed, lambda h: h['state'] == 'complete')
         assert progress['progress']['available'] == 2 and progress['progress']['viewed'] == 0
         restored=read_all_cards(client, '/api/v3/cards')
-        assert len(restored) == 4
-        assert {card['source_url'].split('=')[-1] for card in restored} == {video(n) for n in range(57,61)}
+        assert len(restored) == 3
+        assert {card['source_url'].split('=')[-1] for card in restored} == {video(n) for n in range(57,60)}
+        assert any(card['id']==viewed['id'] and card['viewed'] for card in read_all_cards(client, '/api/v3/cards?show_read=true'))
         assert [count for _,count in history.calls][-2:]==[1,2]
+
+
+def test_restoring_channel_marks_only_selected_history_unviewed(tmp_path):
+    from tests.support.subscriptions import add_source
+
+    history, requests = HistoryFixture(), []
+    url = f'https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL}'
+    with reader(tmp_path, history, requests) as client:
+        feed = import_channel(client)
+        presence(client, 'history')
+        assert client.post('/api/v3/feeds/' + feed + '/history', json={'mode':'count','count':'3'}).status_code == 200
+        wait_history(client, feed, lambda h: h['state'] == 'complete')
+        cards = read_all_cards(client, '/api/v3/cards')
+        selected = [card for card in cards if card['source_url'].endswith(video(60)) or card['source_url'].endswith(video(59))]
+        assert len(selected) == 2
+        assert client.post('/api/v3/cards/read', json={'ids':[card['id'] for card in selected]}).status_code == 204
+        assert client.delete('/api/v3/feeds/' + feed).status_code == 200
+        restored = add_source(client, url, 'Channel', 'Other', count=1)
+        assert restored['id'] == feed
+        wait_history(client, feed, lambda h: h['state'] == 'complete')
+        cards = read_all_cards(client, '/api/v3/cards')
+        assert {card['source_url'].split('=')[-1] for card in cards} == {video(60), video(58)}
+        all_cards = read_all_cards(client, '/api/v3/cards?show_read=true')
+        assert next(card for card in all_cards if card['source_url'].endswith(video(59)))['viewed'] is True

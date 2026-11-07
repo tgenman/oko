@@ -103,7 +103,7 @@ def test_lost_successful_reply_is_reconciled_and_only_failed_draft_can_be_abando
         assert result['recent'][0]['outcome'] == 'irrelevant'
 
 
-def test_viewing_removes_scoped_diagnostic_content_from_server_and_disk(tmp_path):
+def test_viewing_keeps_scoped_diagnostic_content_on_server_and_disk(tmp_path):
     from tests.support.synthetic_source import SyntheticSource
     from tests.support.reader import setup_reader
     with TestClient(create_app(tmp_path, token='test', source=SyntheticSource()), headers=HEADERS) as client:
@@ -112,5 +112,5 @@ def test_viewing_removes_scoped_diagnostic_content_from_server_and_disk(tmp_path
         assert client.post('/api/v3/diagnostics',json={'source':'material','message':title,'material_ids':[item]}).status_code==200
         assert title in client.get('/api/v3/diagnostics').text
         assert client.post('/api/v3/materials/'+item+'/viewed').status_code==200
-        assert title not in client.get('/api/v3/diagnostics').text
-        assert title not in (tmp_path/'debug.json').read_text()
+        assert title in client.get('/api/v3/diagnostics').text
+        assert title in (tmp_path/'debug.json').read_text()

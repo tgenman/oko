@@ -78,24 +78,19 @@ class ReadingQueries:
         return self._facts.material_feeds(identities)
 
     @repository_access
+    def hidden_problem_objects(self, materials: set[str], feeds: set[str]) -> tuple[set[str], set[str]]:
+        db = self._storage().db
+        hidden_materials = {row['id'] for row in db.execute('SELECT p.id FROM publications p JOIN feeds f ON f.id=p.feed_id WHERE f.deleted AND p.id=ANY(%s)', (sorted(materials),))} if materials else set()
+        hidden_feeds = {row['id'] for row in db.execute('SELECT id FROM feeds WHERE deleted AND id=ANY(%s)', (sorted(feeds),))} if feeds else set()
+        return hidden_materials, hidden_feeds
+
+    @repository_access
     def linked_preview(self, identity: str) -> dict[str, Any] | None:
         return self._facts.linked_preview(identity)
 
     @repository_access
-    def was_viewed(self, identity: str) -> bool:
-        return self._facts.was_viewed(identity)
-
-    @repository_access
-    def viewed_ids(self) -> list[str]:
-        return self._facts.viewed_ids()
-
-    @repository_access
     def feed_members(self, identity: str) -> set[str]:
         return self._facts.feed_members(identity)
-
-    @repository_access
-    def deletion_feeds(self) -> set[str]:
-        return self._facts.deletion_feeds()
 
     @repository_access
     def feeds(self, identity: str | None = None, *, folder: str | None = None) -> list[dict[str, Any]]:
@@ -160,6 +155,20 @@ class ReadingQueries:
     @repository_access
     def provenance(self, identity: str, kind: str) -> dict[str, Any] | None:
         return self._storage().publications.provenance(identity, kind)
+
+    @repository_access
+    def result_stale(self, identity: str, kind: str) -> bool:
+        import json
+        from oko.storage import material_read
+        store = self._storage()
+        row = material_read.item(store.db, identity)
+        if row is None:
+            return False
+        metadata = json.loads(row['processing_metadata']).get('filter' if kind == 'filter' else 'summary', {})
+        if not metadata or not (row['viewed'] or metadata.get('preserve_stale')):
+            return False
+        signature = store.filters.signature(identity) if kind == 'filter' else store.processing.theses.signature(identity)
+        return bool(metadata.get('signature') != signature or metadata.get('source_url_stale') or metadata.get('source_title_stale'))
 
     @repository_access
     def original(self, identity: str) -> tuple[dict[str, Any], str]:

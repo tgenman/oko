@@ -104,4 +104,6 @@ MIGRATIONS = (
     Migration(97, 'normalize-publication-titles', (Path(__file__).parent / 'postgres' / '097-normalize-publication-titles.sql').read_text()),
     Migration(98, 'publication-identity-date', (Path(__file__).parent / 'postgres' / '098-publication-identity-date.sql').read_text()),
     Migration(99, 'retire-demo-source', (Path(__file__).parent / 'postgres' / '099-retire-demo-source.sql').read_text()),
+    Migration(100, 'soft-deleted-feeds', (Path(__file__).parent / 'postgres' / '100-soft-deleted-feeds.sql').read_text()),
+    Migration(101, 'single-publication-feed', (Path(__file__).parent / 'postgres' / '101-single-publication-feed.sql').read_text()),
 )

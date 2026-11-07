@@ -138,6 +138,11 @@ class TelegramAccess:
             claims = self.claims(info)
             duplicates = self.conflicts(claims, info.get('peer'))
             if duplicates:
+                deleted = [row[0] for row in self.db.execute('SELECT id FROM feeds WHERE deleted AND id=ANY(%s)', (duplicates,))]
+                if len(duplicates) == 1 and deleted == duplicates:
+                    from oko.subscriptions.history import InitialHistory
+                    restored: dict[str, Any] = subscriptions.restore_feed(duplicates[0], folder, history or InitialHistory())
+                    return restored
                 raise TelegramConflict('duplicate_source', self.duplicates(duplicates), 'Источник уже подключён')
             identity = subscriptions.new_feed_id()
             folder_id = subscriptions.ensure_folder(folder)

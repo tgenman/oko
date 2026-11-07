@@ -69,7 +69,7 @@ class ProcessingState:
             yield
 
     def invalidate(self, scope: str = 'oko', owner: str = 'global') -> None:
-        query = 'SELECT DISTINCT i . id FROM publications i JOIN feed_publications m ON m . publication_id = i . id JOIN feeds f ON f . id = m . feed_id WHERE i . viewed = 0'
+        query = 'SELECT i.id FROM publications i JOIN feeds f ON f.id=i.feed_id WHERE i.viewed=0'
         params: tuple[str, ...] = ()
         if scope in ('feed', 'folder'):
             condition = 'f.id=%s' if scope=='feed' else 'f.folder_id=%s'
@@ -77,45 +77,12 @@ class ProcessingState:
             # A linked source's privacy participates in its parent's AI input.
             query += """ UNION SELECT DISTINCT parent.id FROM publications parent
                 JOIN publication_links l ON l.source_publication_id=parent.id
-                JOIN feed_publications m ON m.publication_id=l.target_publication_id
-                JOIN feeds f ON f.id=m.feed_id WHERE parent.viewed=0 AND """ + condition
+                JOIN publications linked ON linked.id=l.target_publication_id
+                JOIN feeds f ON f.id=linked.feed_id WHERE parent.viewed=0 AND """ + condition
             params = (owner,owner)
         items = [row[0] for row in self.store.db.execute(query, params).fetchall()]
         from oko.storage.processing_batch import reconcile_settings
         reconcile_settings(self.store,items)
-
-    def memberships_removed(self, identities: list[str]) -> None:
-        """Reconcile surviving owners and revoke own AI work when none remain."""
-        from oko.storage import memberships
-        memberships.lock_graph(self.store.db)
-        ordered = sorted(set(identities))
-        for start in range(0,len(ordered),400):
-            batch = ordered[start:start+400]
-            rows = self.store.db.execute("""SELECT i.id,EXISTS(SELECT 1 FROM feed_publications m
-                WHERE m.publication_id=i.id) AS has_owner FROM publications i WHERE i.id=ANY(%s)""", (batch,)).fetchall()
-            feedless = [row['id'] for row in rows if not row['has_owner']]
-            if feedless:
-                processor_affected=[row['id'] for row in self.store.db.execute("SELECT id FROM jobs WHERE kind IN ('filter','theses') AND item=ANY(%s) AND (processor_visible OR problem_code='processor-config')",(feedless,))]
-                processor_previous=self.store.problems.prepare_processor_change(processor_affected,self.store.wall_clock())
-                stage_affected=[row['id'] for row in self.store.db.execute("SELECT id FROM jobs WHERE kind IN ('filter','theses') AND item=ANY(%s) AND problem_code IS NOT NULL AND problem_code<>'' AND problem_code NOT LIKE 'source-%%'",(feedless,))]
-                stage_previous=self.store.problems.saved_processing_candidates(stage_affected)
-                job_write(self.store.db, """UPDATE jobs SET status='cancelled',generation=generation+1,
-                    input_snapshot=NULL,error=NULL,problem_code=NULL WHERE item=ANY(%s) AND kind IN ('filter','theses')
-                    AND (status IS DISTINCT FROM 'cancelled' OR input_snapshot IS NOT NULL OR error IS NOT NULL OR problem_code IS NOT NULL)""", (feedless,))
-                if processor_affected:
-                    self.store.problems.finish_processor_change(processor_affected,processor_previous,self.store.wall_clock())
-                self.store.db.execute("""UPDATE publications SET filtered_content='{}',summarized_content='{}',
-                    processing_metadata=(processing_metadata::jsonb-'filter'-'summary'-'_pass'-'_revision'-'_revision_input')::text,
-                    status=CASE WHEN viewed=0 THEN 'ready' ELSE status END WHERE id=ANY(%s)
-                    AND (filtered_content IS DISTINCT FROM '{}' OR summarized_content IS DISTINCT FROM '{}'
-                         OR processing_metadata::jsonb ?| ARRAY['filter','summary','_pass','_revision','_revision_input']
-                         OR (viewed=0 AND status IS DISTINCT FROM 'ready'))""", (feedless,))
-                self.store.incomplete_draft.mark_materials(feedless)
-                for job_id,candidates in stage_previous.items():
-                    self.store.problems.sync_processing_problem(job_id,candidates,self.store.wall_clock())
-            for row in rows:
-                if row['has_owner']:
-                    self.reconcile_accepted_item(row['id'])
 
     def repair(self, item: str) -> None:
         """A read can discover missing bytes without writing inside its snapshot."""

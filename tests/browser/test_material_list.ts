@@ -40,7 +40,7 @@ test('keyboard focus does not open content and viewing focuses next without open
   await expect(r.page.locator('[data-card="two"]')).toHaveCount(0);
   await expect(r.page.locator('[data-card="three"]')).toBeFocused();
   await expect(r.page.locator('#text')).toHaveText('Текст two');
-  await expect(r.page.locator('#material-retained')).toBeVisible();
+  await expect(r.page.locator('#material-retained')).toBeHidden();
   await r.page.keyboard.press('Enter');
   await expect(r.page.locator('#title')).toHaveText('three');
   await openReading(r.page);await r.page.locator('#viewed').click();

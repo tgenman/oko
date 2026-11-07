@@ -12,7 +12,7 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
         p.viewed,coalesce(root.id,j.item) AS affected, f.kind AS feed_kind
         FROM jobs j LEFT JOIN publications p ON p.id=j.item
         LEFT JOIN publication_links link ON link.target_publication_id=p.id
-        LEFT JOIN publications root ON root.id=link.source_publication_id AND root.viewed=0
+        LEFT JOIN publications root ON root.id=link.source_publication_id
         LEFT JOIN feeds f ON f.id=coalesce({owner_expr('p')},{owner_expr('root')},j.feed_id)
         WHERE j.id=ANY(%s) AND j.kind IN ('filter','theses') AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL) ORDER BY j.id,root.id""",(job_ids,)).fetchall()
     results: dict[tuple[int,str],dict[str,Any]]={}
@@ -22,7 +22,7 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
         code=row['problem_code']
         explicit_code=bool(code)
         if row['status'] not in ('pending','running','failed','unavailable','blocked'):continue
-        if code in ('codex-choice','ai-permission','youtube-admission','processor-config') or row['viewed']:continue
+        if code in ('codex-choice','ai-permission','youtube-admission','processor-config'):continue
         code=code or 'work-'+row['kind']
         feed=row['owner'] or row['item'] or ''
         if not include_suppressed and code in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'):

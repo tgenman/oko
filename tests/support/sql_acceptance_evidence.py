@@ -25,8 +25,7 @@ def archive_evidence():
     with TemporaryDirectory() as d:
      s=Store(Path(d),lambda _:None);ensure_fixture(s.db)
      with s.db:
-      s.db.executemany("INSERT INTO publications ( id , external_id, platform, published_at , viewed ) VALUES ( %s , %s , 'rss', %s , %s )",[(f'archive-{n}',f'archive-{n}',n,int(n>=100)) for n in range(20000)])
-      s.db.executemany("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) SELECT 'fixture',id,true,viewed=0 FROM publications WHERE id=%s", [(f'archive-{n}',) for n in range(20000)])
+      s.db.executemany("INSERT INTO publications ( id , external_id, platform, published_at , viewed, feed_id ) VALUES ( %s , %s , 'rss', %s , %s, 'fixture' )",[(f'archive-{n}',f'archive-{n}',n,int(n>=100)) for n in range(20000)])
       s.db.executemany("INSERT INTO jobs ( kind , item , status ) VALUES ( 'fetch' , %s , 'done' )",[(f'archive-{n}',) for n in range(20000)])
       s.db.executemany("INSERT INTO history_members ( feed , item ) VALUES ( 'fixture' , %s )",[(f'archive-{n}',) for n in range(20000)])
       s.db.execute("INSERT INTO jobs(kind,item) VALUES ('filter','pending')")

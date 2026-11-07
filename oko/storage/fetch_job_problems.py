@@ -12,7 +12,7 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
         p.viewed,coalesce(root.id,j.item) AS affected, f.kind AS feed_kind
         FROM jobs j LEFT JOIN publications p ON p.id=j.item
         LEFT JOIN publication_links link ON link.target_publication_id=p.id
-        LEFT JOIN publications root ON root.id=link.source_publication_id AND root.viewed=0
+        LEFT JOIN publications root ON root.id=link.source_publication_id
         LEFT JOIN feeds f ON f.id=coalesce({owner_expr('p')},{owner_expr('root')},j.feed_id)
         WHERE j.id=ANY(%s) AND j.kind='fetch' AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL) ORDER BY j.id,root.id""",(job_ids,)).fetchall()
     youtube_jobs={row['id'] for row in rows if row['feed_kind']=='youtube'}
@@ -31,7 +31,7 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
             continue  # Preserve an unaddressable legacy Job rather than inventing a material ID.
         code=row['problem_code']
         if row['status'] not in ('pending','running','failed','unavailable','blocked') and not (row['status']=='done' and code and row['error']):continue
-        if code in ('codex-choice','ai-permission','youtube-admission','processor-config') or row['viewed']:continue
+        if code in ('codex-choice','ai-permission','youtube-admission','processor-config'):continue
         if not include_youtube and code is None and row['feed_kind']=='youtube' and store.youtube.ready_at()>now:continue
         code=code or 'work-fetch'
         feed=row['owner'] or row['item'] or ''

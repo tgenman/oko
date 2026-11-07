@@ -15,7 +15,7 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
         FROM jobs j LEFT JOIN media_files m ON m.id=j.item LEFT JOIN publications p ON p.id=m.publication_id
         LEFT JOIN publications legacy_item ON legacy_item.id=j.item AND (j.problem_code IS NULL OR j.problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) AND m.resource_key IS DISTINCT FROM 'youtube:subtitles'
         LEFT JOIN publication_links link ON link.target_publication_id=coalesce(legacy_item.id,p.id)
-        LEFT JOIN publications root ON root.id=link.source_publication_id AND root.viewed=0
+        LEFT JOIN publications root ON root.id=link.source_publication_id
         LEFT JOIN feeds f ON f.id=coalesce({owner_expr('p')},{owner_expr('root')},j.feed_id)
         WHERE j.id=ANY(%s) AND j.kind='download_media'{subtitle_filter} AND {error_filter} ORDER BY j.id,root.id""",(job_ids,)).fetchall()
     results: dict[tuple[int,str],dict[str,Any]]={}
@@ -25,7 +25,7 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
             continue  # Preserve an unaddressable legacy Job rather than inventing a material ID.
         code=row['problem_code']
         if row['status'] not in ('pending','running','failed','unavailable','blocked') and not (include_completed and row['status']=='done' and row['error'] is None and row['problem_code'] is None):continue
-        if code in ('codex-choice','ai-permission','youtube-admission','processor-config') or row['viewed']:continue
+        if code in ('codex-choice','ai-permission','youtube-admission','processor-config'):continue
         code=code or 'work-download_media'
         feed=row['owner'] or row['item'] or ''
         if not include_suppressed and code in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'):

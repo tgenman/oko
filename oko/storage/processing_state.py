@@ -17,16 +17,16 @@ class ProcessingRepository:
     def __init__(self, store: 'Store') -> None:
         self.store=store
 
-    def candidates(self, kind: Kind, *, item: str) -> list[tuple[str,str | None]]:
+    def candidates(self, kind: Kind, *, item: str, include_viewed: bool = False) -> list[tuple[str,str | None]]:
         # Reconciliation is publication-owned; there is no stage queue to scan.
-        query = "SELECT i.id FROM publications i WHERE i.id=%s AND i.viewed=0 AND i.platform IS NOT NULL AND EXISTS (SELECT 1 FROM feed_publications m WHERE m.publication_id=i.id AND m.is_primary) AND i.complete=1"
-        parameters: tuple[str | int, ...] = (item,)
+        query = "SELECT i.id FROM publications i WHERE i.id=%s AND (i.viewed=0 OR %s=1) AND i.platform IS NOT NULL AND i.feed_id IS NOT NULL AND i.complete=1"
+        parameters: tuple[str | int, ...] = (item, include_viewed)
         rows=self.store.db.execute(query,parameters).fetchall()
         operation=self.store.filters if kind=='filter' else self.store.processing.theses
         return [(row[0],operation.signature(row[0])) for row in rows]
 
     def prepare(self, item: str, kind: Kind) -> ProcessingPreparation:
-        row=self.store.db.execute(f"SELECT i.*, {owner_expr('i')} AS feed_id FROM publications i WHERE i.id = %s AND i.viewed = 0",(item,)).fetchone()
+        row=self.store.db.execute(f"SELECT i.*, {owner_expr('i')} AS feed_id FROM publications i WHERE i.id = %s",(item,)).fetchone()
         if row is None or row['feed_id'] is None:return ProcessingPreparation('disabled',reason='not_eligible')
         enabled = publication_input.stage_enabled(self.store, item, kind)
         if not enabled:return ProcessingPreparation('disabled',reason='stage_disabled')
@@ -60,6 +60,9 @@ class ProcessingRepository:
             self.store.publications.accept_result(value.item,value.kind,value.signature,result.model_dump(),origin)
 
     def satisfied(self, item: str, kind: Kind) -> bool:
+        row = self.store.db.execute('SELECT processing_metadata FROM publications WHERE id=%s', (item,)).fetchone()
+        if kind == 'filter' and row and json.loads(row[0]).get('filter', {}).get('preserve_stale'):
+            return False
         return self.store.filters.read(item)['status']=='done' if kind=='filter' else self.store.processing.theses.read(item) is not None
 
     def processor_config(self) -> ProcessorConfig | None:

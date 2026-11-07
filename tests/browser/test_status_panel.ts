@@ -79,7 +79,7 @@ test('expanded completion stays in place until collapsed and new problems do not
   } finally {await r.close();}
 });
 
-test('viewing in another tab removes expanded and stale problem references',async()=>{
+test('viewing in another tab retains problem references',async()=>{
   const r=await reader();
   try {
     await r.start([material('one')]);const other=await r.context.newPage();await r.start([material('one')],other);
@@ -88,10 +88,10 @@ test('viewing in another tab removes expanded and stale problem references',asyn
     await openReading(other);await other.locator('#cards button').click();
     await other.evaluate(()=>readerTransport.replies.set('POST /api/v3/materials/one/viewed',{body:{ok:true},next:[['/api/v3/cards',{body:window.readerFixtures.cardPage([])}]]}));
     await other.getByRole('button',{name:'Mark as Read',exact:true}).click();
-    await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 0');
-    await expect(r.page.locator('#status-panel')).not.toContainText('Заголовок удаляемого материала');
+    await expect(r.page.locator('#status-toggle')).toHaveText('Problems · 1');
+    await expect(r.page.locator('#status-panel')).toContainText('one');
     await status(r,[problem]);
-    await expect(r.page.locator('.status-object')).toHaveCount(0);
+    await expect(r.page.locator('.status-object')).toHaveCount(1);
     expect(r.errors).toEqual([]);
   } finally {await r.close();}
 });

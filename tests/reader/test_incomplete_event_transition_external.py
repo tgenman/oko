@@ -9,7 +9,7 @@ def seed(store,status):
         store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
         content=json.dumps({'extra':{'_reader':{'full':False,'reason':'partial'}}})
         store.db.execute("INSERT INTO publications(id,platform,external_id,url,published_at,viewed,complete,content,incomplete_class) VALUES ('p','rss','p','https://p.test',1,0,1,%s,0)",(content,))
-        store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','p',true)")
+        store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
         job=store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code,generation) VALUES ('fetch','p',%s,NULL,NULL,1) RETURNING id",(status,)).fetchone()[0]
         from oko.storage.incomplete_group_draft import save_keys
         save_keys(store.db,['p'])

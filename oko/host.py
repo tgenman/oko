@@ -105,9 +105,6 @@ class Host:
             self.execution._store = Store(self._root, self._fault, wall_clock=self._wall_clock, clock=self._clock, database_url=self._database_url, defer_recovery=True)
             self.execution.enabled = self.execution._store.work_enabled()
             self.collection.initialize()
-            viewed = {row['id'] for row in self.execution._store.db.execute('SELECT id FROM publications WHERE viewed=1')}
-            if viewed and self.execution.diagnostics:
-                self.execution.diagnostics.forget_materials(viewed)
         except (*DATABASE_ERRORS,OSError,ValueError) as error:
             record_caught('runtime.run')
             self.execution._error = str(error) if str(error).startswith('Telegram:') else 'Хранилище недоступно или повреждено. Состояние сохранено; сбор остановлен.'

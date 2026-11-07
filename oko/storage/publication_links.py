@@ -34,7 +34,6 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
         FROM publication_links l WHERE l.source_publication_id=%s""",(item,)).fetchall()
     previous={row['target_publication_id'] for row in previous_rows}
     source_targets={row['target_publication_id'] for row in previous_rows if row['source_problem']}
-    capture_deletion_problems(store,effects,previous)
     capture_fetch_problems(store,effects,previous)
     capture_media_problems(store,effects,previous)
     keys=sorted({(ref.key.platform.value,ref.key.external_id) for ref in references if (ref.key.platform.value,ref.key.external_id)!=(owner['platform'],owner['external_id'])})
@@ -57,7 +56,7 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
     for ref in references:
         if (ref.key.platform.value,ref.key.external_id)==(owner['platform'],owner['external_id']):
             continue
-        row=store.db.execute(f"SELECT i.*, {owner_expr('i')} AS feed_id, (SELECT j.id FROM jobs j WHERE j.kind='delete' AND j.item=i.id AND (j.error IS NOT NULL OR j.problem_code IS NOT NULL)) AS delete_problem_job, (SELECT j.id FROM jobs j WHERE j.kind='fetch' AND j.item=i.id AND ((j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config')))) AS fetch_problem_job, (EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=i.id AND (((m.resource_key='youtube:subtitles' OR j.media_null_owned) AND j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%'))) OR EXISTS (SELECT 1 FROM jobs j WHERE j.kind='download_media' AND j.item=i.id AND ((j.media_null_owned AND j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.identity_event_owned AND j.problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'))))) AS media_problem_exists, EXISTS (SELECT 1 FROM jobs j WHERE j.kind IN ('filter','theses') AND j.item=i.id AND (((j.problem_code='' OR (j.problem_code IS NULL AND j.error IS NOT NULL))) OR (j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('processor-config','ai-permission','codex-choice','youtube-admission')))) AS processing_problem_exists FROM publications i WHERE i.platform = %s AND i.external_id = %s",
+        row=store.db.execute(f"SELECT i.*, {owner_expr('i')} AS feed_id, (SELECT j.id FROM jobs j WHERE j.kind='fetch' AND j.item=i.id AND ((j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config')))) AS fetch_problem_job, (EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=i.id AND (((m.resource_key='youtube:subtitles' OR j.media_null_owned) AND j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%'))) OR EXISTS (SELECT 1 FROM jobs j WHERE j.kind='download_media' AND j.item=i.id AND ((j.media_null_owned AND j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.identity_event_owned AND j.problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'))))) AS media_problem_exists, EXISTS (SELECT 1 FROM jobs j WHERE j.kind IN ('filter','theses') AND j.item=i.id AND (((j.problem_code='' OR (j.problem_code IS NULL AND j.error IS NOT NULL))) OR (j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('processor-config','ai-permission','codex-choice','youtube-admission')))) AS processing_problem_exists FROM publications i WHERE i.platform = %s AND i.external_id = %s",
                              (ref.key.platform.value,ref.key.external_id)).fetchone()
         if row is None:
             identity=str(uuid4())
@@ -78,10 +77,6 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
                 if any(candidate.get('fetch_youtube_event') for candidate in prior):
                     prior=previous_candidates(store,row['fetch_problem_job'],store.wall_clock())
                 if prior:effects.fetch_problems_before[row['fetch_problem_job']]=prior
-            if identity not in effects.delete_problems_checked:
-                if row['delete_problem_job'] is not None:
-                    effects.delete_problem_ids_before[identity] = store.problems.deletion_problem_ids(row['delete_problem_job'],store.wall_clock())
-                effects.delete_problems_checked.add(identity)
             if row['url']!=ref.url:
                 raise ValueError('Conflicting linked publication identity')
             if row['viewed'] and row['feed_id'] is None:
@@ -92,7 +87,6 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
         targets.append(identity)
     store.db.execute('DELETE FROM publication_links WHERE source_publication_id = %s',(item,))
     store.db.executemany('INSERT INTO publication_links VALUES ( %s , %s ) ON CONFLICT DO NOTHING',[(item,target) for target in targets])
-    prune(store,previous-set(targets),effects=effects)
     changed=previous!=set(targets)
     if changed and store.problems.processor_jobs_for_materials(sorted(previous | set(targets))):
         status_changed(store.db)
@@ -179,14 +173,6 @@ def capture_fetch_problems(store: 'Store', effects: CollectionEffects, items: se
             if candidates or (row['problem_code'] is None and row['error'] is not None):effects.fetch_problems_before[row['id']]=candidates
 
 
-def capture_deletion_problems(store: 'Store', effects: CollectionEffects, items: set[str]) -> None:
-    missing = sorted(items - effects.delete_problems_checked)
-    effects.delete_problems_checked.update(missing)
-    for start in range(0,len(missing),400):
-        for row in store.db.execute("SELECT id,item FROM jobs WHERE kind='delete' AND item=ANY(%s) AND (error IS NOT NULL OR problem_code IS NOT NULL)", (missing[start:start+400],)):
-            effects.delete_problem_ids_before[row['item']] = store.problems.deletion_problem_ids(row['id'],store.wall_clock())
-
-
 def capture_source_groups(store: 'Store', effects: CollectionEffects, roots: set[str], *, kinds: tuple[str,...]=('fetch','download_media','filter','theses','delete','feed-delete')) -> None:
     from oko.storage import source_groups
     ordered=sorted(roots)
@@ -207,84 +193,6 @@ def capture_source_groups(store: 'Store', effects: CollectionEffects, roots: set
             effects.source_groups_before.update(source_groups.job_keys_many(store,group))
             evidence=source_groups.job_evidence_many(store,[(job_id,None) for job_id in group])
             for key,objects in evidence.items():effects.source_evidence_before.setdefault(key,set()).update(objects)
-
-
-def capture_root_deletion_problems(store: 'Store', effects: CollectionEffects, roots: set[str]) -> None:
-    ordered = sorted(roots)
-    for start in range(0,len(ordered),400):
-        batch = ordered[start:start+400]
-        capture_deletion_problems(store,effects,set(batch))
-        capture_fetch_problems(store,effects,set(batch))
-        capture_media_problems(store,effects,set(batch))
-        capture_processing_problems(store,effects,set(batch))
-        capture_source_groups(store,effects,set(batch))
-        processing_children=store.db.execute("""SELECT DISTINCT j.item FROM unnest(%s::text[]) root(id)
-            CROSS JOIN LATERAL (SELECT target_publication_id FROM publication_links WHERE source_publication_id=root.id OFFSET 0) link
-            CROSS JOIN LATERAL (SELECT item FROM jobs j WHERE j.kind IN ('filter','theses') AND j.item=link.target_publication_id AND (((j.problem_code='' OR (j.problem_code IS NULL AND j.error IS NOT NULL))) OR (j.problem_code IS NOT NULL AND j.problem_code<>'' AND j.problem_code NOT LIKE 'source-%%')) OFFSET 0) j""",(batch,)).fetchall()
-        capture_processing_problems(store,effects,{row['item'] for row in processing_children})
-        media_children=store.db.execute("""SELECT DISTINCT m.publication_id FROM unnest(%s::text[]) root(id)
-            CROSS JOIN LATERAL (SELECT target_publication_id FROM publication_links WHERE source_publication_id=root.id OFFSET 0) link
-            CROSS JOIN LATERAL (SELECT id,publication_id,resource_key FROM media_files WHERE publication_id=link.target_publication_id OFFSET 0) m
-            CROSS JOIN LATERAL (SELECT id FROM jobs j WHERE j.kind='download_media' AND j.item=m.id AND (((m.resource_key='youtube:subtitles' OR j.media_null_owned) AND j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%')) OFFSET 0) j""",(batch,)).fetchall()
-        capture_media_problems(store,effects,{row['publication_id'] for row in media_children})
-        collision_children=store.db.execute("""SELECT DISTINCT j.item FROM unnest(%s::text[]) root(id)
-            JOIN publication_links l ON l.source_publication_id=root.id
-            JOIN jobs j ON j.kind='download_media' AND j.item=l.target_publication_id
-            WHERE ((j.media_null_owned AND j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.identity_event_owned AND j.problem_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')))""",(batch,)).fetchall()
-        capture_media_problems(store,effects,{row['item'] for row in collision_children})
-        fetch_children=store.db.execute("""SELECT DISTINCT j.item FROM unnest(%s::text[]) root(id)
-            CROSS JOIN LATERAL (SELECT target_publication_id FROM publication_links WHERE source_publication_id=root.id OFFSET 0) link
-            CROSS JOIN LATERAL (SELECT item FROM jobs j WHERE kind='fetch' AND item=link.target_publication_id AND ((j.problem_code IS NULL AND j.error IS NOT NULL) OR (j.problem_code IS NOT NULL AND j.problem_code NOT LIKE 'source-%%' AND j.problem_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config'))) OFFSET 0) j""",(batch,)).fetchall()
-        capture_fetch_problems(store,effects,{row['item'] for row in fetch_children})
-        # Keep the selected roots as the outer relation: unrelated links and
-        # unrelated failed Jobs must not turn this into a library-wide join.
-        rows = store.db.execute("""SELECT DISTINCT j.id,j.item FROM unnest(%s::text[]) root(id)
-            CROSS JOIN LATERAL (SELECT target_publication_id FROM publication_links
-                WHERE source_publication_id=root.id ORDER BY target_publication_id OFFSET 0) link
-            CROSS JOIN LATERAL (SELECT id,item FROM jobs WHERE kind='delete' AND item=link.target_publication_id
-                AND (error IS NOT NULL OR problem_code IS NOT NULL) OFFSET 0) j""",(batch,))
-        for row in rows:
-            if row['item'] not in effects.delete_problems_checked:
-                effects.delete_problems_checked.add(row['item'])
-                effects.delete_problem_ids_before[row['item']] = store.problems.deletion_problem_ids(row['id'],store.wall_clock())
-
-
-def prune(store: 'Store', candidates: set[str], *, effects: CollectionEffects | None = None) -> None:
-    if not candidates:
-        return
-    memberships.lock_graph(store.db)
-    rows=store.db.execute('''WITH RECURSIVE component(id) AS (
-        SELECT id FROM publications WHERE id=ANY(%s)
-        UNION
-        SELECT edge.id FROM component c CROSS JOIN LATERAL (
-            SELECT target_publication_id AS id FROM publication_links WHERE source_publication_id=c.id
-            UNION ALL
-            SELECT source_publication_id AS id FROM publication_links WHERE target_publication_id=c.id
-        ) edge
-    ), needed(id) AS (
-        SELECT root.id FROM component c CROSS JOIN LATERAL (
-            SELECT i.id FROM publications i WHERE i.id=c.id AND i.viewed=0
-                AND EXISTS (SELECT 1 FROM feed_publications f WHERE f.publication_id=i.id) OFFSET 0
-        ) root
-        UNION
-        SELECT edge.id FROM needed n CROSS JOIN LATERAL (
-            SELECT target_publication_id AS id FROM publication_links WHERE source_publication_id=n.id OFFSET 0
-        ) edge
-    )
-    SELECT candidate.id FROM component c CROSS JOIN LATERAL (
-        SELECT i.id FROM publications i WHERE i.id=c.id AND i.platform IS NOT NULL AND i.viewed=0 OFFSET 0
-    ) candidate WHERE NOT EXISTS (SELECT 1 FROM needed n WHERE n.id=candidate.id)''', (sorted(candidates),)).fetchall()
-    items = [row['id'] for row in rows]
-    if effects is not None:
-        capture_root_deletion_problems(store,effects,set(items))
-    store.publications.forget_many(items,effects=effects)
-    for start in range(0, len(items), 400):
-        batch = items[start:start+400]
-        marks = ','.join('%s' for _ in batch)
-        store.publications.set_source_deleted(batch, False)
-        store.jobs.forget_input('filter', batch)
-        store.jobs.forget_input('theses', batch)
-        store.set_processor_viewed(batch,True)
 
 
 def project_header(store: 'Store', item: str, header: dict[str,Any]) -> dict[str,Any]:

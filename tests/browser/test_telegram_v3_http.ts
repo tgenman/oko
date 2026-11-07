@@ -36,14 +36,14 @@ test('real HTTP Telegram web: connection, duplicate, local removal and fresh re-
  await page.screenshot({path:artifactPath('telegram-duplicate-mobile.png')});
  await page.locator('#telegram-duplicate-close').click();await page.locator('#add-close').click();
  await page.locator('#feeds-open').click();await page.locator('#feed-tree [data-owner="feed/'+old+'"]').click();await feedOptions(page);
- await page.locator('#feed-delete').click();await expect(page.locator('#feed-delete-confirm')).toContainText('will not be deleted or marked as read');
+ await page.locator('#feed-delete').click();await expect(page.locator('#feed-delete-confirm')).toContainText('saved content, media, results and settings will remain');
  await page.screenshot({path:artifactPath('telegram-delete-mobile.png')});
  await page.locator('#feed-delete-confirm-action').click();
  await expect(page.locator('#feed-tree [data-owner="feed/'+old+'"]')).toHaveCount(0);
  await page.locator('#feeds-close').click();await page.locator('#add-open').click();await page.locator('#add-telegram-tab').click();
  await page.locator('#telegram-peer').fill('@fixture');
  const again=page.waitForResponse(r=>r.url().endsWith('/api/v3/telegram/connect')&&r.request().method()==='POST');await chooseFolder();await page.locator('#telegram-add').click();
- expect((await (await again).json()).feed_id).not.toBe(old);
+ expect((await (await again).json()).feed_id).toBe(old);
  await expect(page.locator('#feeds-dialog')).toBeVisible();await page.locator('#feeds-close').click();
 
 });

@@ -44,10 +44,11 @@ class SummaryResults:
     @reading_value
     def read(self,item: str) -> dict[str,Any] | None:
         row=material_read.item(self.store.db,item)
-        metadata=json.loads(row['processing_metadata']).get('summary',{}) if row else {}
-        if not metadata or metadata.get('signature')!=self.signature(item) or metadata.get('source_url_stale') or metadata.get('source_title_stale'):
+        if row is None:
             return None
-        assert row is not None
+        metadata=json.loads(row['processing_metadata']).get('summary',{})
+        if not metadata or (not row['viewed'] and (metadata.get('signature')!=self.signature(item) or metadata.get('source_url_stale') or metadata.get('source_title_stale'))):
+            return None
         result=json.loads(row['summarized_content'])
         identities={identity for point in result['points'] for identity in point['source_publication_ids']}
         urls={identity:record['url'] for identity in identities if (record:=material_read.item(self.store.db,identity)) is not None}

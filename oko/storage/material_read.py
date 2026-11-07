@@ -112,10 +112,10 @@ def material_inputs(db: Database, identities: set[str], *, include_subtitles: bo
             value.children[row['reader_source']].append(row)
             value.related_items[row['id']] = row
         value.memberships.update({identity: [] for identity in batch})
-        for row in db.execute('SELECT publication_id,feed_id FROM feed_publications WHERE publication_id=ANY(%s) ORDER BY publication_id,is_primary DESC,feed_id', (batch,)):
-            value.memberships[row['publication_id']].append(row['feed_id'])
+        for row in db.execute('SELECT id,feed_id FROM publications WHERE id=ANY(%s) AND feed_id IS NOT NULL', (batch,)):
+            value.memberships[row['id']].append(row['feed_id'])
         value.owners.update({identity: set() for identity in batch})
-        for row in db.execute('SELECT m . publication_id AS reader_source , m . feed_id FROM feed_publications m WHERE m . publication_id = ANY ( %s ) UNION SELECT l . source_publication_id AS reader_source , m . feed_id FROM publication_links l JOIN feed_publications m ON m . publication_id = l . target_publication_id WHERE l . source_publication_id = ANY ( %s )', (batch, batch)):
+        for row in db.execute('SELECT p.id AS reader_source,p.feed_id FROM publications p WHERE p.id=ANY(%s) AND p.feed_id IS NOT NULL UNION SELECT l.source_publication_id AS reader_source,p.feed_id FROM publication_links l JOIN publications p ON p.id=l.target_publication_id WHERE l.source_publication_id=ANY(%s) AND p.feed_id IS NOT NULL', (batch, batch)):
             value.owners[row['reader_source']].add(row['feed_id'])
     feeds = sorted({r['feed_id'] for r in value.items.values() if r['feed_id'] is not None}
                    | {feed for owners in value.owners.values() for feed in owners})

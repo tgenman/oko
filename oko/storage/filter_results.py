@@ -22,14 +22,14 @@ class FilterResults:
     @reading_value
     def read(self,item: str) -> dict[str,Any]:
         signature=self.signature(item)
-        if not signature:
-            return dict(status='off',hidden=False,reason='',removed=[])
         row=material_read.item(self.store.db,item)
         metadata=json.loads(row['processing_metadata']).get('filter',{}) if row else {}
-        if row is not None and metadata.get('signature')==signature and not metadata.get('source_url_stale') and not metadata.get('source_title_stale'):
+        if row is not None and metadata and (row['viewed'] or metadata.get('preserve_stale') or metadata.get('signature')==signature and not metadata.get('source_url_stale') and not metadata.get('source_title_stale')):
             result=json.loads(row['filtered_content'])
             return dict(status='done',hidden=result.get('hidden',False),
                         reason=result['reason'],removed=[part['text'] for part in result['removed']],error=None)
+        if not signature:
+            return dict(status='off',hidden=False,reason='',removed=[])
         job=material_read.jobs(self.store.db,item).get('filter')
         enabled = publication_input.stage_enabled(self.store, item, 'filter')
         if not enabled and (not job or job['status'] != 'running'):

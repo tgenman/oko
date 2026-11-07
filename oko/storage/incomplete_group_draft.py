@@ -105,12 +105,12 @@ def known_incomplete_materials(store: Any, roots: list[str]) -> set[str]:
     return known
 
 def group_candidates(store: Any, keys: list[str], now: float, sticky: set[str] | None = None) -> dict[str,dict[str,Any]]:
-    rows=store.db.execute('''SELECT p.id,p.content,p.incomplete_group_key,m.feed_id,f.kind AS feed_kind,j.status AS fetch_status,j.problem_code AS fetch_code,
+    rows=store.db.execute('''SELECT p.id,p.content,p.incomplete_group_key,p.feed_id,f.kind AS feed_kind,j.status AS fetch_status,j.problem_code AS fetch_code,
           EXISTS (SELECT 1 FROM media_files file JOIN jobs mj ON mj.kind='download_media' AND mj.item=file.id
                   WHERE file.publication_id=p.id AND mj.status IN ('pending','running') AND mj.error IS NULL AND mj.problem_code IS NULL) AS media_waiting,
           CASE WHEN p.platform='youtube' THEN EXISTS(SELECT 1 FROM media_files file JOIN jobs mj ON mj.kind='download_media' AND mj.item=file.id
                   WHERE file.publication_id=p.id AND file.resource_key='youtube:subtitles' AND mj.status='pending' AND mj.problem_code IS NULL) ELSE FALSE END AS caption_waiting
-        FROM publications p JOIN feed_publications m ON m.publication_id=p.id AND m.is_primary JOIN feeds f ON f.id=m.feed_id
+        FROM publications p JOIN feeds f ON f.id=p.feed_id
         LEFT JOIN jobs j ON j.kind='fetch' AND j.item=p.id WHERE p.incomplete_group_key COLLATE "C"=ANY(%s) AND p.viewed=0 AND p.complete=1 AND NOT p.source_deleted
         ORDER BY p.incomplete_group_key,p.id''',(keys,)).fetchall()
     if not rows:return {}

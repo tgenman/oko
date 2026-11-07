@@ -87,29 +87,6 @@ def processing_feed(store: 'Store', item: str, kind: str | None = None) -> str:
     row = material_read.item(store.db, item)
     if row is None:
         raise ValueError('Publication not found')
-    chosen = json.loads(row['processing_metadata']).get('_pass', {}).get('feed_id')
-    inputs = material_read.current(store.db)
-    cached = inputs.memberships.get(item) if inputs is not None else None
-    if isinstance(chosen, str):
-        belongs = chosen == row['feed_id'] or (chosen in cached if cached is not None else bool(store.db.execute(
-            'SELECT 1 FROM feed_publications WHERE feed_id=%s AND publication_id=%s', (chosen,item)).fetchone()))
-        if belongs:
-            return chosen
-    if kind in ('filter','theses'):
-        owners = cached if cached is not None else [r[0] for r in store.db.execute(
-            'SELECT feed_id FROM feed_publications WHERE publication_id=%s ORDER BY is_primary DESC,feed_id', (item,)).fetchall()]
-        if len(owners)>1:
-            candidates = []
-            for feed in owners:
-                values = store.subscriptions.effective('feed',feed,details=False)['effective']
-                filtering = bool(values['filter_enabled']['value'] and values['prompt_filters']['value'].strip())
-                if kind=='filter' and filtering or kind=='theses' and values['theses']['value'] and not filtering:
-                    candidates.append(str(feed))
-            for feed in candidates:
-                if can_start(store,item,feed):
-                    return feed
-            if candidates:
-                return candidates[0]
     return store.item_feed(item)
 
 
@@ -129,7 +106,7 @@ def live_settings(store: 'Store', item: str, feed: str | None = None) -> dict[st
     current=store.subscriptions.effective('feed',feed,details=False)
     allowed=current['feed']['public_ai']
     inputs = material_read.current(store.db)
-    owners = inputs.owners[item] if inputs is not None and item in inputs.owners else {row[0] for row in store.db.execute('SELECT DISTINCT m . feed_id FROM feed_publications m WHERE m . publication_id = %s OR m . publication_id IN ( SELECT target_publication_id FROM publication_links WHERE source_publication_id = %s )',(item,item))}
+    owners = inputs.owners[item] if inputs is not None and item in inputs.owners else {row[0] for row in store.db.execute('SELECT feed_id FROM publications WHERE feed_id IS NOT NULL AND (id = %s OR id IN (SELECT target_publication_id FROM publication_links WHERE source_publication_id = %s))',(item,item))}
     for owner in owners:
         allowed=allowed and store.subscriptions.effective('feed',owner,details=False)['feed']['public_ai']
     rules=dict(feed_id=feed,public_ai=allowed,importance=current['feed']['importance'],values={key:value['value'] for key,value in current['effective'].items() if key in ('prompt_filters','theses','prompt_theses','processor')})
@@ -157,7 +134,7 @@ def settings(store: 'Store', item: str) -> dict[str, Any]:
 
 def signature(store: 'Store', item: str, kind: str) -> str | None:
     row=material_read.item(store.db,item)
-    if not row or row['viewed'] or row['feed_id'] is None or not row['complete'] or row['content']=='{}':
+    if not row or row['feed_id'] is None or not row['complete'] or row['content']=='{}':
         return None
     feed=processing_feed(store,item,kind)
     current=store.subscriptions.effective('feed',feed,details=False)

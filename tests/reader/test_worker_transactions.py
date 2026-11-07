@@ -96,13 +96,12 @@ def test_claim_and_saved_context_are_one_transaction_and_survive_restart(tmp_pat
     reopened.db.close()
 
 
-def test_shared_filter_winner_keeps_its_feed_for_summary_after_restart(tmp_path):
+def test_unrelated_feed_rules_do_not_change_owner_after_restart(tmp_path):
     from oko.subscriptions.subscriptions import AddFeed, Overrides
     store, item, execution, tasks = worker_library(tmp_path)
     try:
         second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other', title='Other', folder='Other', verification='synthetic'))['id']
         with transaction(store.db):
-            store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
             store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=False,theses=True,prompt_theses='Other feed rules'))
             store.processing.reconcile_accepted_item(item)
         asyncio.run(pass_worker(workers(execution,tasks)[0],tasks))
@@ -119,7 +118,7 @@ def test_shared_filter_winner_keeps_its_feed_for_summary_after_restart(tmp_path)
         store.db.close()
 
 
-def test_competing_workers_commit_one_shared_processing_context(tmp_path):
+def test_competing_workers_commit_one_processing_context(tmp_path):
     from oko.subscriptions.subscriptions import AddFeed, Overrides
     async def scenario():
         calls = []
@@ -127,7 +126,6 @@ def test_competing_workers_commit_one_shared_processing_context(tmp_path):
         try:
             second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other',title='Other',folder='Other',verification='synthetic'))['id']
             with transaction(store.db):
-                store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
                 store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=False,theses=True))
                 store.processing.reconcile_accepted_item(item)
             filter_worker, summary_worker = workers(execution,tasks,transport(calls,theses=True))
@@ -135,7 +133,7 @@ def test_competing_workers_commit_one_shared_processing_context(tmp_path):
             if tasks._ai:
                 await tasks._ai
             chosen = saved(store,item)['processing_metadata']['_pass']['feed_id']
-            assert chosen in ('fixture',second)
+            assert chosen == 'fixture'
             assert len([call for call in calls if call.url.path=='/v1/chat/completions']) == 1
             completed = store.db.execute("SELECT kind,input_snapshot->>'feed_id' AS feed FROM jobs WHERE item=%s AND kind IN ('filter','theses') AND status='done'", (item,)).fetchall()
             assert len(completed)==1 and completed[0]['feed']==chosen
@@ -144,7 +142,7 @@ def test_competing_workers_commit_one_shared_processing_context(tmp_path):
     asyncio.run(scenario())
 
 
-def test_late_result_from_deleted_selected_feed_is_rejected(tmp_path):
+def test_late_result_from_deleted_feed_is_accepted(tmp_path):
     from oko.subscriptions.subscriptions import AddFeed, Overrides
     async def scenario():
         entered, release = asyncio.Event(), asyncio.Event()
@@ -156,49 +154,42 @@ def test_late_result_from_deleted_selected_feed_is_rejected(tmp_path):
             return native.handler(request)
         store,item,execution,tasks = worker_library(tmp_path)
         try:
-            second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other',title='Other',folder='Other',verification='synthetic'))['id']
             with transaction(store.db):
-                store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
-                store.subscriptions.update_settings('feed','fixture',Overrides(filter_enabled=False))
-                store.subscriptions.update_settings('feed',second,Overrides(filter_enabled=True))
+                store.subscriptions.update_settings('feed','fixture',Overrides(filter_enabled=True))
                 store.processing.reconcile_accepted_item(item)
             worker = workers(execution,tasks,httpx.MockTransport(model))[0]
             await worker.tick()
             await asyncio.wait_for(entered.wait(),2)
-            assert saved(store,item)['processing_metadata']['_pass']['feed_id'] == second
+            assert saved(store,item)['processing_metadata']['_pass']['feed_id'] == 'fixture'
             with transaction(store.db):
-                store.remove_feed(second)
-                store.jobs.remove_feed(second,{item})
+                store.remove_feed('fixture')
             release.set()
             await tasks._ai
             result = saved(store,item)
-            assert result['filtered_content'] == {}
-            assert result['processing_metadata'].get('_pass',{}).get('feed_id') != second
+            assert result['filtered_content'] != {}
+            assert result['processing_metadata'].get('_pass',{}).get('feed_id') == 'fixture'
         finally:
             store.db.close()
     asyncio.run(scenario())
 
 
-def test_no_feed_is_chosen_when_every_candidate_is_disallowed(tmp_path):
-    from oko.subscriptions.subscriptions import AddFeed, Overrides
+def test_processing_requires_permission_from_the_publication_feed(tmp_path):
+    from oko.subscriptions.subscriptions import Overrides
+    from oko.storage.processing_input import can_start
     store, item, _, _ = worker_library(tmp_path)
     try:
-        second = store.subscriptions.add_feed(AddFeed(url='https://fixture.test/other', title='Other', folder='Other', verification='synthetic'))['id']
         with transaction(store.db):
-            store.db.execute('INSERT INTO feed_publications(feed_id,publication_id) VALUES (%s,%s)', (second,item))
             store.subscriptions.update_settings('feed','fixture',Overrides(processor='codex'))
-            store.subscriptions.update_settings('feed',second,Overrides(processor='codex'))
             store.processing.reconcile_accepted_item(item)
         with transaction(store.db):
-            assert store.jobs.claim_processing('filter',store.clock()) is None
-            assert not saved(store,item)['processing_metadata'].get('_pass')
+            assert not can_start(store,item,'fixture')
         with transaction(store.db):
-            store.subscriptions.update_settings('feed',second,Overrides(processor='llamacpp'))
-            store.settings_changed('feed',second)
+            store.subscriptions.update_settings('feed','fixture',Overrides(processor='llamacpp'))
+            store.settings_changed('feed','fixture')
             store.processing.reconcile_accepted_item(item)
             job = store.jobs.claim_processing('filter',store.clock())
             assert job is not None
-            assert saved(store,item)['processing_metadata']['_pass']['feed_id'] == second
+            assert saved(store,item)['feed_id'] == 'fixture'
     finally:
         store.db.close()
 
@@ -270,7 +261,7 @@ def test_linked_source_privacy_change_reconciles_parent_job_atomically(tmp_path)
             memberships.lock_graph(store.db)
             store.db.execute("""INSERT INTO publications(id,url,platform,external_id,complete,content,title,discovered_at)
                 SELECT 'linked','https://example.org/linked','rss','linked',1,content,title,discovered_at FROM publications WHERE id=%s""", (item,))
-            memberships.add(store.db,other,'linked')
+            memberships.add(store.db,other,'linked',created=True)
             store.db.execute("INSERT INTO publication_links(source_publication_id,target_publication_id) VALUES (%s,'linked')", (item,))
             store.processing.reconcile_accepted_item(item)
         before = store.db.execute("SELECT generation,input_snapshot->>'signature' FROM jobs WHERE kind='filter' AND item=%s", (item,)).fetchone()[:]
@@ -338,48 +329,6 @@ def test_missing_subtitle_repair_is_rediscovered_after_restart(tmp_path):
         store = Store(tmp_path, lambda _: None)
         assert store.db.execute("SELECT status FROM media_files WHERE id='missing-caption'").fetchone()[0] == 'pending_download'
         assert store.db.execute("SELECT status FROM jobs WHERE kind='download_media' AND item='missing-caption'").fetchone()[0] == 'pending'
-    finally:
-        store.db.close()
-
-
-def test_failed_delete_problem_follows_job_without_status_read(tmp_path, postgres_url):
-    import json
-    from oko.storage.job_types import Job
-    from oko.storage.transaction import transaction
-    from tests.support.storage import Store
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    try:
-        with store.db:
-            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('item','rss','item',1)")
-            row=store.db.execute("INSERT INTO jobs(kind,item,status,generation,payload) VALUES ('delete','item','running',1,%s) RETURNING id", (json.dumps({'cleanup_feed':'fixture'}),)).fetchone()
-        job=Job(row['id'],'delete','item',1)
-        def current():
-            return store.db.execute("SELECT id,body FROM reader_problems WHERE identity='job:delete:fixture:delete:item' AND finished IS NULL").fetchone()
-        with pytest.raises(ValueError,match='rollback'):
-            with transaction(store.db):
-                store.jobs.retry(job,1,'Ошибка удаления',code='delete')
-                assert current() is not None
-                raise ValueError('rollback')
-        assert current() is None
-        store.jobs.retry(job,1,'Ошибка удаления',code='delete')
-        problem=current()
-        assert problem is not None
-        assert not any(c['id']=='job:delete:fixture:delete:item' for c in store.problems.candidates(5))
-        with store.db:
-            store.db.execute("UPDATE jobs SET next=0 WHERE id=%s", (job.id,))
-        claimed=store.jobs.next_job(1,deleting_only=True)
-        assert claimed is not None and claimed.id==job.id
-        assert json.loads(current()['body'])['state']=='retrying'
-        with pytest.raises(ValueError,match='finish rollback'):
-            with transaction(store.db):
-                store.jobs.delete(claimed)
-                assert current() is None
-                raise ValueError('finish rollback')
-        assert current() is not None
-        assert store.jobs.valid(claimed)
-        store.jobs.delete(claimed)
-        assert current() is None
-        assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s',(problem['id'],)).fetchone()['outcome']=='resolved'
     finally:
         store.db.close()
 

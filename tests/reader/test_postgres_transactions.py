@@ -136,17 +136,16 @@ def test_reader_http_collection_media_settings_viewed_and_restart(postgres_url, 
         fail_delete[0] = delete_fault
         viewed = restarted.post('/api/v3/materials/' + item + '/viewed')
         assert viewed.status_code == 200, viewed.text
-        if delete_fault:
-            wait_for(restarted, lambda: bool(failed_deletions))
+        assert not failed_deletions
         assert read_all_cards(restarted, '/api/v3/cards') == []
-        assert restarted.get('/api/v3/publication/' + item).status_code == 404
+        assert restarted.get('/api/v3/publication/' + item).status_code == 200
+        assert restarted.get(media).content == PNG
     if delete_fault:
         fail_delete[0] = False
         with TestClient(app(), headers=HEADERS) as recovered:
-            # Oko remains powered off; an explicit replay resumes its retained cleanup.
+            # Oko remains powered off; a repeated mark keeps saved data intact.
             assert recovered.post('/api/v3/materials/' + item + '/viewed').status_code == 200
-            wait_for(recovered, lambda: not any(path.is_file() for path in (tmp_path / 'media').rglob('*')))
-            assert recovered.get(media).status_code == 404
+            assert recovered.get(media).content == PNG
             assert read_all_cards(recovered, '/api/v3/cards') == []
 
 

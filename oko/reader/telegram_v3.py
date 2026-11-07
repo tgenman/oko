@@ -56,6 +56,6 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
             except LookupError:
                 raise ApiError(404, wire.ErrorEnvelope(wire.ResourceNotFoundError(code='resource_not_found', message='Фид не найден',
                     details=wire.ResourceNotFoundErrorDetails(resource=wire.AffectedResource(wire.FeedResource(kind='feed', feed_id=wire.FeedId(identity)))), diagnostic_id=None, command_id=wire.CommandId(request.state.command_id)))) from None
-            return wire.RemoveFeedResult(feed_id=wire.FeedId(identity), state='deleting')
+            return wire.RemoveFeedResult(feed_id=wire.FeedId(identity), state='deleted')
 
     app.include_router(router)

@@ -61,7 +61,6 @@ class Journal:
         self.path = root / 'debug.json'
         self.secret = secret
         self.records: list[dict[str, Any]] = []
-        self.forgotten_materials: set[str] = set()
         self.persistence_error = ''
         try:
             if self.path.exists():
@@ -92,8 +91,6 @@ class Journal:
              timestamp: str, *, count: int = 1, first: str | None = None,
              streams: dict[str, int] | None = None, stream_id: str = '', sequence: int = 0,
              material_ids: list[str] | None = None) -> str:
-        if self.forgotten_materials.intersection(material_ids or []):
-            return ''
         source, message, stack = self.clean(source), self.clean(message), self.clean(stack)
         stream_id = self.clean(stream_id)
         streams = {self.clean(sender): latest for sender, latest in (streams or {}).items()}
@@ -152,12 +149,6 @@ class Journal:
             self.records = previous
             return False
         return True
-
-    def forget_materials(self, members: set[str]) -> None:
-        self.forgotten_materials.update(members)
-        # Legacy entries have no scope: retaining them could retain viewed content.
-        self.records = [row for row in self.records if 'material_ids' in row and not members.intersection(row['material_ids'])]
-        self.flush()
 
     def capture(self, error: BaseException, source: str) -> str | None:
         if isinstance(error, (asyncio.CancelledError, SourceDeleted)) or getattr(error, 'diagnostic_skip', False):

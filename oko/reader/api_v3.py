@@ -115,7 +115,7 @@ def register(app: FastAPI, runtime: ReaderApplication, wall_clock: Callable[[], 
                     completed=None if entries else 0,
                     total=None if entries else 0)
             summary = {key:value[key] for key in ('api_version','runtime_state','lifetime','work_allowed','active_client_sessions',
-                'sources','diagnostic_count','diagnostic_persistence_error','viewed_ids')}
+                'sources','diagnostic_count','diagnostic_persistence_error')}
             summary.update(enabled=runtime.enabled,collection=progress('collecting'),processing=progress('processing'),
                 problems=[dict(id=problem['id'],message=problem['message'],
                     feed_id=next((ref['feed_id'] for ref in problem['affected'] if ref['kind']=='feed'),None))
@@ -147,7 +147,20 @@ def register(app: FastAPI, runtime: ReaderApplication, wall_clock: Callable[[], 
         current = runtime.queries if runtime.has_storage and not runtime.stopped else None
         bindings = {identity: wire.TelegramAccess.model_validate(binding) for identity, binding in snapshot.bindings.items()}
         identities = {obj.id for p in [*old.problems.current, *old.problems.recent] for obj in p.objects if obj.kind == 'material'} if isinstance(old.problems, facts.ProblemSnapshot) else set()
+        feed_ids = {obj.id for p in [*old.problems.current, *old.problems.recent] for obj in p.objects if obj.kind == 'feed'} if isinstance(old.problems, facts.ProblemSnapshot) else set()
         material_feeds = current.material_feeds(identities) if current else {}
+        hidden_materials, hidden_feeds = current.hidden_problem_objects(identities, feed_ids) if current else (set(), set())
+        problems = old.problems
+        if isinstance(problems, facts.ProblemSnapshot) and (hidden_materials or hidden_feeds):
+            def visible(entries: list[facts.Problem]) -> list[facts.Problem]:
+                result = []
+                for entry in entries:
+                    objects = [obj for obj in entry.objects if not (obj.kind == 'material' and obj.id in hidden_materials or obj.kind == 'feed' and obj.id in hidden_feeds)]
+                    if entry.objects and not objects:
+                        continue
+                    result.append(entry.model_copy(update={'objects': objects}))
+                return result
+            problems = problems.model_copy(update={'current': visible(problems.current), 'recent': visible(problems.recent)})
         policy = wire.ExplicitLifetimePolicy(kind='explicit')
         return wire.RuntimeStatus(api_version='3.0.0', runtime_state='stopped' if runtime.stopped else 'unavailable' if old.error else 'disabled' if not runtime.enabled else 'running',
             lifetime=wire.LifetimePolicy(policy), work_allowed=runtime._live(), active_client_sessions=0,
@@ -160,9 +173,8 @@ def register(app: FastAPI, runtime: ReaderApplication, wall_clock: Callable[[], 
             ready_sources=old.ready_sources, total_sources=old.total_sources,
             youtube=project.youtube(old.youtube if isinstance(old.youtube, facts.YouTube) else None),
             initial_histories=[project.history(value) for value in old.initial_histories] if isinstance(old.initial_histories, list) else [],
-            problems=project.problems(old.problems,bindings,material_feeds,set(old.viewed_ids) if isinstance(old.viewed_ids,list) else set()) if isinstance(old.problems, facts.ProblemSnapshot) else wire.ProblemSnapshot(current=[], recent=[], count=0, updated_at=timestamp(wall_clock())),
-            diagnostic_count=len(journal.records), diagnostic_persistence_error=journal.persistence_error or None,
-            viewed_ids=[wire.MaterialId(value) for value in old.viewed_ids] if isinstance(old.viewed_ids, list) else [])
+            problems=project.problems(problems,bindings,material_feeds,hidden_materials) if isinstance(problems, facts.ProblemSnapshot) else wire.ProblemSnapshot(current=[], recent=[], count=0, updated_at=timestamp(wall_clock())),
+            diagnostic_count=len(journal.records), diagnostic_persistence_error=journal.persistence_error or None)
 
     from oko.reader import publication_v3
     publication_v3.register(app,runtime)

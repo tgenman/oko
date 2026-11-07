@@ -135,6 +135,10 @@ export type CardListItem = {
      */
     source_url: SourceUrl | null;
     title: string;
+    /**
+     * Whether the publication has been marked viewed.
+     */
+    viewed?: boolean;
 };
 
 export type CardPage = {
@@ -1909,6 +1913,10 @@ export type PublicationResponse = {
             removed: Array<string>;
             text: string;
         } | null;
+        /**
+         * Saved result was produced for an earlier input.
+         */
+        stale?: boolean;
         state: 'disabled' | 'pending' | 'processing' | 'ready' | 'error';
     };
     id: MaterialId;
@@ -1935,6 +1943,10 @@ export type PublicationResponse = {
             provenance: Provenance;
             references: Array<Array<PublicationReference>>;
         } | null;
+        /**
+         * Saved result was produced for an earlier input.
+         */
+        stale?: boolean;
         state: 'disabled' | 'pending' | 'processing' | 'ready' | 'error';
     };
     title: string;
@@ -2201,7 +2213,6 @@ export type RuntimeStatus = {
     runtime_state: 'running' | 'disabled' | 'stopping' | 'stopped' | 'unavailable';
     sources: Array<SourceState>;
     total_sources: number;
-    viewed_ids: Array<MaterialId>;
     work: Array<WorkEntry>;
     work_allowed: boolean;
     youtube: YouTubeState;
@@ -2378,7 +2389,6 @@ export type StatusSummary = {
     processing: StatusProgress;
     runtime_state: 'running' | 'disabled' | 'stopping' | 'stopped' | 'unavailable';
     sources: Array<SourceState>;
-    viewed_ids: Array<MaterialId>;
     work_allowed: boolean;
 };
 
@@ -2830,6 +2840,10 @@ export type CardsData = {
          * Scalar duplicates and unknown query keys return 422. Boolean text is exactly true or false.
          */
         show_hidden?: boolean;
+        /**
+         * Include viewed publications. Scalar duplicates return 422; boolean text is exactly true or false.
+         */
+        show_read?: boolean;
         limit?: number;
         cursor?: MaterialId;
     };
@@ -2906,6 +2920,43 @@ export type ReadCardsResponses = {
 };
 
 export type ReadCardsResponse = ReadCardsResponses[keyof ReadCardsResponses];
+
+export type UnreadCardsData = {
+    body: CardReadRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v3/cards/unread';
+};
+
+export type UnreadCardsErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type UnreadCardsError = UnreadCardsErrors[keyof UnreadCardsErrors];
+
+export type UnreadCardsResponses = {
+    /**
+     * The selected cards have been marked unviewed.
+     */
+    204: void;
+};
+
+export type UnreadCardsResponse = UnreadCardsResponses[keyof UnreadCardsResponses];
 
 export type CreateClientSessionData = {
     body?: never;
@@ -3707,7 +3758,7 @@ export type RemoveFeedError = RemoveFeedErrors[keyof RemoveFeedErrors];
 
 export type RemoveFeedResponses = {
     /**
-     * Prohibit work and remove the local subscription, content, versions, media, processing, settings and jobs through resumable cleanup. Deleting remains visible in the catalogue; repeats return current progress. No viewed, Telegram leave/delete/read ack. Claims remain reserved until completion; re-add gets a new ID.
+     * Feed hidden and retained; its saved publications can be restored by adding the source again.
      */
     200: RemoveFeedResult;
 };

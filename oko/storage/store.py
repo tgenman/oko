@@ -113,22 +113,15 @@ class Store:
                 (root / name).mkdir(exist_ok=True)
             with self.db:
                 collection_jobs.interrupt(self)
-                running_delete = [row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE kind IN ('delete','feed-delete') AND status='running' AND (error IS NOT NULL OR problem_code IS NOT NULL) AND (deletion_extra_owned OR coalesce(nullif(problem_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))")]
                 running_source=[row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE status='running' AND kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code LIKE 'source-%%'")]
                 job_write(self.db, "UPDATE jobs SET status='pending', generation=generation+1 WHERE status='running'")
                 if running_source:
                     from oko.storage import source_groups
                     source_groups.sync_jobs(self,running_source,self.wall_clock())
                 job_write(self.db, "UPDATE jobs SET next = 0 WHERE status = 'pending' AND next IS DISTINCT FROM 0")
-                if self.db.execute("SELECT 1 FROM state WHERE key='delete-problems-recovered-v1'").fetchone():
-                    for job_id in running_delete:
-                        self.problems.sync_deletion(job_id,[],self.wall_clock())
-            self.problems.recover_deletion_problems()
-            self.problems.recover_deletion_extra_problems()
             collection_jobs.recover(self)
             self.problems.recover_discover_problems()
             self.problems.recover_fetch_problems()
-            self.problems.recover_finished_foreign_fetch_deletions()
             self.problems.recover_fetch_null()
             self.problems.recover_youtube_null_fetch()
             self.problems.recover_fetch_identity_unconfirmed()
@@ -277,7 +270,13 @@ class Store:
             completed_links: set[str] = set()
             envelope=HistoryEnvelope.decode(cursor,adapter='web') if namespace=='telegram-web' else None
             selection=json.loads(cursor) if not envelope and self.subscriptions.history.status(feed) else {}
+            history_row=self.db.execute('SELECT selection FROM initial_history WHERE feed=%s', (feed,)).fetchone()
+            history_selection=json.loads(history_row['selection']) if history_row else {}
+            result_run=envelope.position.get('run') if envelope else selection.get('run')
+            stale_history=bool(history_selection.get('restore_unread') and result_run and result_run != history_selection.get('run'))
             enrolled=set(envelope.selection.enrolled_ids) if envelope else set(selection.get('history_enroll',[]))
+            if stale_history:
+                enrolled.clear()
             ordered=source_order
             known={ExternalKey(platform,row['external_id']):row['source_order'] for platform in {key.platform for key in ordered}
                 for row in self.db.execute('SELECT external_id , source_order FROM publications WHERE platform = %s AND source_order IS NOT NULL AND external_id = ANY(%s)',
@@ -300,12 +299,6 @@ class Store:
                         effects.source_groups_before.update(source_groups.job_keys_many(self,group))
                         evidence=source_groups.job_evidence_many(self,[(job_id,None) for job_id in group])
                         for key,objects in evidence.items():effects.source_evidence_before.setdefault(key,set()).update(objects)
-                if item not in effects.delete_problems_checked:
-                    if plan.delete_problem_job is not None:
-                        effects.delete_problem_ids_before[item] = self.problems.deletion_problem_ids(plan.delete_problem_job,self.wall_clock())
-                    effects.delete_problems_checked.add(item)
-                if plan.delete_problem_children:
-                    publication_links.capture_deletion_problems(self,effects,set(plan.delete_problem_children))
                 if plan.fetch_problem_job is not None and plan.fetch_problem_job not in effects.fetch_problems_checked:
                     from oko.storage.fetch_job_problems import managed_candidates,previous_candidates
                     effects.fetch_problems_checked.add(plan.fetch_problem_job)
@@ -328,9 +321,10 @@ class Store:
                 if publication.adapter_reference is None:
                     raise ValueError('Adapter did not return a publication external key')
                 ref = publication.adapter_reference
-                item_status_changed |= bool(self.db.execute('INSERT INTO publications (id, url, members, platform, external_id, published_at, discovered_at) VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING',
+                created = bool(self.db.execute('INSERT INTO publications (id, url, members, platform, external_id, published_at, discovered_at) VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING',
                     (item, publication.url, json.dumps(publication.members), ref.key.platform.value, ref.key.external_id, publication.published if publication.published_known else None, self.wall_clock())).rowcount)
-                membership=membership_graph.add(self.db,feed,item)
+                item_status_changed |= created
+                membership=membership_graph.add(self.db,feed,item,created=created)
                 if membership:
                     added_memberships.append(item)
                     saved_items.add(item)
@@ -370,7 +364,11 @@ class Store:
             if item_status_changed:
                 status_changed(self.db)
             self.read_versions.memberships_changed(added_memberships)
-            if envelope or 'history_enroll' in selection:
+            if not stale_history and (envelope or 'history_enroll' in selection):
+                restoring = self.db.execute("SELECT selection::jsonb->>'restore_unread' = 'true' FROM initial_history WHERE feed=%s", (feed,)).fetchone()
+                if restoring and restoring[0] and history_items:
+                    previously_enrolled = {row[0] for row in self.db.execute('SELECT item FROM history_members WHERE feed=%s AND item=ANY(%s)', (feed, history_items))}
+                    membership_graph.set_viewed(self.db, [item for item in history_items if item not in previously_enrolled], False)
                 self.subscriptions.history.enroll(feed,history_items,envelope.selection.scan_complete if envelope else selection['scan_complete'])
                 if envelope:
                     self.subscriptions.history.telegram_state(feed,envelope.selection)
@@ -380,7 +378,7 @@ class Store:
                         self.subscriptions.history.failed(item,unavailable=True)
                     elif row['complete']:
                         self.subscriptions.history.saved(item,bool(self.original(item)[0].get('full')))
-            if selection:
+            if selection and not stale_history:
                 self.subscriptions.history.discovery_state(feed,selection)
             for item in saved_items:
                 self.processing.reconcile_accepted_item(item)
@@ -432,6 +430,9 @@ class Store:
     def _has_unviewed(self, item: str) -> bool:
         return self.db.execute('SELECT 1 FROM publications WHERE id = %s AND viewed = 0',(item,)).fetchone() is not None
 
+    def _has_publication(self, item: str) -> bool:
+        return self.db.execute('SELECT 1 FROM publications WHERE id = %s',(item,)).fetchone() is not None
+
 
     @reading_value
     def item_feed(self, item: str) -> str:
@@ -442,7 +443,7 @@ class Store:
         if row is None:
             raise LookupError('Publication not found')
         if row['feed_id'] is None:
-            root=self.db.execute(f"SELECT {owner_expr('i')} AS feed_id FROM publication_links l JOIN publications i ON i.id=l.source_publication_id WHERE l.target_publication_id = %s AND i.viewed = 0 AND {owner_expr('i')} IS NOT NULL ORDER BY i.id LIMIT 1",(item,)).fetchone()
+            root=self.db.execute(f"SELECT {owner_expr('i')} AS feed_id FROM publication_links l JOIN publications i ON i.id=l.source_publication_id WHERE l.target_publication_id = %s AND {owner_expr('i')} IS NOT NULL ORDER BY i.id LIMIT 1",(item,)).fetchone()
             if root:
                 return str(root[0])
             return ''
@@ -470,7 +471,7 @@ class Store:
 
 
     def publication(self, item: str) -> Publication | None:
-        row = self.db.execute('SELECT * FROM publications WHERE id = %s AND viewed = 0', (item,)).fetchone()
+        row = self.db.execute('SELECT * FROM publications WHERE id = %s', (item,)).fetchone()
         if row:
             header, text = self.publications.original(item) if row['complete'] else ({},'')
             reference=ExternalReference(ExternalKey(Platform(row['platform']),row['external_id']),row['url'])
@@ -482,7 +483,7 @@ class Store:
 
     def collect_material(self, item: str, material: Material, *, manual: bool = False) -> tuple[SourceError | None,CollectionEffects]:
         effects=CollectionEffects()
-        if not self._has_unviewed(item):
+        if not self._has_publication(item):
             return None,effects
         if material.source_manifest and material.source_manifest.post_web_unavailable:
             media=[dict(row) for row in self.db.execute('SELECT * FROM media_files WHERE publication_id = %s',(item,))]
@@ -530,7 +531,7 @@ class Store:
         self.fault('after_file_move')
         with self.db:
             membership_graph.lock_graph(self.db)
-            if not self._has_unviewed(item):
+            if not self._has_publication(item):
                 return None,effects
             if material.adapter_content and material.adapter_content.metadata.reference.key.platform==Platform.telegram:
                 self.publications.identify(item,material.adapter_content.metadata.reference)
@@ -578,114 +579,28 @@ class Store:
             self.problems.finish_processor_change(affected,previous,self.wall_clock(),removed_outcome='irrelevant' if viewed else 'resolved')
 
     def viewed(self, item: str) -> bool:
-        if self.db.execute("SELECT 1 FROM jobs WHERE kind = 'delete' AND item = %s",(item,)).fetchone():
-            return True
         return self.viewed_set(self.reading.members(item))
 
     def viewed_set(self, members: list[str]) -> bool:
         members = sorted(set(members))
         with self.db:
             membership_graph.lock_graph(self.db)
-            rows = {}
-            memberships: dict[str, list[str]] = {}
-            for start in range(0, len(members), 400):
-                batch = members[start:start+400]
-                marks = ','.join('%s' for _ in batch)
-                rows.update({row['id']: row for row in self.db.execute(
-                    f'SELECT i.id , i.members , {owner_expr("i")} AS feed_id FROM publications i WHERE i.id IN ( {marks} )', batch)})
-                for row in self.db.execute(f'SELECT m . publication_id , m . feed_id FROM feed_publications m JOIN publications i ON i . id = m . publication_id WHERE i . viewed = 0 AND m . publication_id IN ( {marks} )', batch):
-                    memberships.setdefault(row['publication_id'], []).append(row['feed_id'])
+            rows = self.db.execute('SELECT id FROM publications WHERE id=ANY(%s)', (members,)).fetchall()
             if len(rows) != len(members):
                 return False
-            effects = CollectionEffects()
-            publication_links.capture_root_deletion_problems(self,effects,set(members))
-            eligibility: dict[str, set[int]] = {}
-            for member, feeds in memberships.items():
-                for feed in feeds:
-                    eligibility.setdefault(feed, set()).update(json.loads(rows[member]['members']))
-            for feed, messages in eligibility.items():
+            feeds = {row['feed_id'] for row in self.db.execute('SELECT DISTINCT feed_id FROM publications WHERE id=ANY(%s) AND viewed=0 AND feed_id IS NOT NULL', (members,))}
+            membership_graph.set_viewed(self.db, members, True)
+            for feed in feeds:
                 self.subscriptions.details.record(feed, 'marked_read')
-            self.incomplete_draft.mark_materials(members)
-            self.problems.forget_materials(set(members), self.wall_clock())
-            # A single reachability pass sees the final remaining roots.
-            for start in range(0, len(members), 400):
-                batch = members[start:start+400]
-                marks = ','.join('%s' for _ in batch)
-                if self.db.execute(f"UPDATE history_members SET outcome = 'viewed' WHERE item IN ( {marks} ) AND outcome IN ( 'pending' , 'retrying' )", batch).rowcount:
-                    status_changed(self.db)
-                removed = membership_graph.remove(self.db,items=batch)
-                self.read_versions.memberships_changed(removed)
-            publication_links.prune(self, set(members),effects=effects)
-            self.processing.memberships_removed(members)
-            publication_links.notify_parents_many(self, set(members))
-            for item, row in rows.items():
-                if row['feed_id'] is not None:
-                    self._remember_cleanup_owner(item, row['feed_id'])
-            self.jobs.sync_captured_deletions(effects)
-        self.processing.sync()
-        self.db.after_commit(lambda: self.fault('after_viewed_commit'))
         return True
 
     def remove_feed(self, feed: str) -> None:
         self.subscriptions.check_owner('feed', feed)
-        boundary = nullcontext() if self.db.transaction_depth else transaction(self.db)
-        with boundary:
+        with self.db:
             membership_graph.lock_graph(self.db)
-            binding = self.subscriptions.telegram.binding(feed)
-            effects = CollectionEffects()
-            selected = [r[0] for r in self.db.execute("""SELECT i.id FROM feed_publications m JOIN publications i ON i.id=m.publication_id
-                WHERE m.feed_id=%s AND i.processing_metadata::jsonb->'_pass'->>'feed_id'=%s""", (feed,feed))]
-            if selected:
-                publication_links.capture_processing_problems(self,effects,set(selected))
-                affected=[row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE item=ANY(%s) AND kind IN ('filter','theses') AND status!='done' AND (processor_visible OR problem_code='processor-config')",(selected,))]
-                previous=self.problems.prepare_processor_change(affected,self.wall_clock())
-                job_write(self.db, """UPDATE jobs SET status='cancelled',generation=generation+1,input_snapshot=NULL
-                    WHERE item=ANY(%s) AND kind IN ('filter','theses') AND status!='done'""", (selected,))
-                if affected:self.problems.finish_processor_change(affected,previous,self.wall_clock(),removed_outcome='irrelevant')
-                self.db.execute("UPDATE publications SET processing_metadata=(processing_metadata::jsonb-'_pass')::text WHERE id=ANY(%s)", (selected,))
-            if self.db.execute("UPDATE feeds SET connection = 'deleting' WHERE id = %s AND connection IS DISTINCT FROM 'deleting'", (feed,)).rowcount:
-                source_changed(self.db)
-            for row in self.db.execute("SELECT id FROM jobs WHERE kind='discover' AND (item=%s OR feed_id=%s) AND (error IS NOT NULL OR problem_code IS NOT NULL)",(feed,feed)):
-                self.problems.sync_discover(row['id'],self.wall_clock())
-            shared=[r[0] for r in self.db.execute(f'SELECT p.id FROM ({owned_ids("= %s")}) owner JOIN publications p ON p.id=owner.id WHERE p.platform IS NOT NULL',(feed,feed))]
-            # NULL-platform legacy roots can also own a timed fetch projection.
-            # Capture only dependent timed jobs while the old graph still exists.
-            timed_fetch_items={row['item'] for row in self.db.execute("""SELECT DISTINCT j.item FROM feed_publications m
-                JOIN publication_links l ON l.source_publication_id=m.publication_id
-                JOIN jobs j ON md5(j.item)=md5(l.target_publication_id) AND j.item=l.target_publication_id AND j.kind='fetch' AND j.fetch_youtube_sensitive
-                WHERE m.feed_id=%s AND m.is_primary
-                UNION SELECT j.item FROM feed_publications m JOIN jobs j ON md5(j.item)=md5(m.publication_id) AND j.item=m.publication_id AND j.kind='fetch' AND j.fetch_youtube_sensitive
-                WHERE m.feed_id=%s AND m.is_primary""",(feed,feed))}
-            if timed_fetch_items:publication_links.capture_fetch_problems(self,effects,timed_fetch_items)
-            self.incomplete_draft.mark_materials(sorted(set(shared) | set(selected)))
-            publication_links.capture_root_deletion_problems(self,effects,set(shared))
-            removed = membership_graph.remove(self.db,feed=feed)
-            self.read_versions.memberships_changed(removed)
-            publication_links.prune(self,set(shared),effects=effects)
-            for item in shared:
-                self._remember_cleanup_owner(item, feed)
-            items = [r[0] for r in self.db.execute(owned_ids('= %s'), (feed,feed))]
-            self.problems.forget_materials(set(items), self.wall_clock())
-            publication_links.capture_root_deletion_problems(self,effects,set(items))
-            for item in items:
-                self.filters.forget(item)
-                self.publications.set_source_deleted([item], False)
-                if self.publications.owns(item):
-                    self.publications.forget(item,effects=effects)
-                self.jobs.forget_input('theses', [item])
-                # This is local cleanup, not viewed(): never create read eligibility.
-                self.set_processor_viewed([item],True)
-            self.processing.memberships_removed(removed)
-            publication_links.notify_parents_many(self, set(removed))
-            self.jobs.sync_captured_deletions(effects)
-        self.db.after_commit(lambda: self.fault('after_feed_delete_commit'))
-
-    def _remember_cleanup_owner(self, item: str, feed: str) -> None:
-        job_write(self.db, """INSERT INTO jobs(kind,item,payload)
-            SELECT 'delete',id,jsonb_build_object('cleanup_feed',%s::text) FROM publications WHERE id=%s AND viewed=1
-            ON CONFLICT(kind,item) DO UPDATE SET payload=jsonb_set(jobs.payload,'{cleanup_feed}',to_jsonb(%s::text))""", (feed,item,feed))
-
-
+            self.db.execute('UPDATE feeds SET deleted = true WHERE id = %s', (feed,))
+            job_write(self.db, "UPDATE jobs SET status='cancelled', generation=generation+1 WHERE kind='discover' AND item=%s AND status='pending'", (feed,))
+            source_changed(self.db)
     @reading_value
     def original(self, item: str) -> tuple[dict[str, Any], str]:
         own=material_read.item(self.db,item)
@@ -705,7 +620,8 @@ class Store:
     def material(self, item: str) -> dict[str, Any] | None:
         from oko.storage import material_read
         row = material_read.item(self.db,item)
-        material = self.saved_publication(row) if row and not row['viewed'] and row['feed_id'] is not None else None
+        active = row and row['feed_id'] is not None and self.db.execute('SELECT 1 FROM feeds WHERE id=%s AND NOT deleted', (row['feed_id'],)).fetchone()
+        material = self.saved_publication(row) if row and active else None
         if material and material['complete']:
             display = material['text']
             filtered = material['filter']
@@ -784,18 +700,18 @@ class Store:
                 UNION SELECT id FROM jobs WHERE problem_code IS NOT NULL OR error IS NOT NULL)"""
         rows = self.db.execute(f"SELECT jobs . kind , jobs . status , jobs . problem_code , count ( * ) AS count , CASE WHEN jobs . kind IN ( 'discover' , 'feed-delete' ) THEN NULLIF ( jobs . item , '' ) WHEN jobs . kind = 'download_media' THEN ( SELECT {owner_expr('i')} FROM media_files m JOIN publications i ON i . id = m . publication_id WHERE m . id = jobs . item ) ELSE {owner_expr('items')} END AS feed , min ( jobs . next ) AS next , sum ( CASE WHEN jobs . error IS NOT NULL THEN 1 ELSE 0 END ) AS errors FROM jobs LEFT JOIN publications items ON items . id = jobs . item WHERE {condition} GROUP BY jobs . kind , jobs . status , jobs . problem_code , feed ORDER BY min ( jobs . id )").fetchall()
         now, wall = self.clock(), self.wall_clock()
+        feed_ids = sorted({row['feed'] for row in rows if row['feed']})
+        deleted = {row['id'] for row in self.db.execute('SELECT id FROM feeds WHERE deleted AND id=ANY(%s)', (feed_ids,))} if feed_ids else set()
         return [WorkSummary(row['kind'],row['status'],row['feed'],row['count'],
                     row['problem_code'] or (row['kind']+'-failed' if row['errors'] else None),
                     retry_time(row['next'],now,wall) if row['status']=='pending' and row['errors'] and row['next'] else None)
-                for row in rows]
+                for row in rows if row['feed'] not in deleted]
 
     def status(self) -> dict[str, Any]:
-        rows = self.db.execute("SELECT kind , status , error , count ( * ) AS count FROM jobs WHERE status IN ( 'pending' , 'running' ) OR error IS NOT NULL GROUP BY kind , status , error").fetchall()
-        # The durable feed sweep is deletion work, not a new public job kind.
-        jobs = [dict(r, kind='delete' if r['kind'] == 'feed-delete' else r['kind']) for r in rows]
+        rows = self.db.execute("SELECT kind , status , error , count ( * ) AS count FROM jobs WHERE kind NOT IN ('delete','feed-delete') AND (status IN ('pending','running') OR error IS NOT NULL) GROUP BY kind , status , error").fetchall()
+        jobs = [dict(r) for r in rows]
         errors = sorted({r['error'] for r in rows if r['error']})
-        pending_deletes = any(r['kind'] in ('delete', 'feed-delete') and r['status'] != 'done' for r in rows)
-        return dict(jobs=jobs, errors=errors, deleting=pending_deletes)
+        return dict(jobs=jobs, errors=errors, deleting=False)
 
 
     def work_enabled(self) -> bool:

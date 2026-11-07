@@ -66,14 +66,15 @@ class SubscriptionRepository:
         with self.db:
             begin_write(self.db)
             self.check_owner('folder', identity)
-            if self.db.execute('SELECT 1 FROM feeds WHERE folder_id = %s LIMIT 1', (identity,)).fetchone():
+            if self.db.execute('SELECT 1 FROM feeds WHERE folder_id = %s AND NOT deleted LIMIT 1', (identity,)).fetchone():
                 raise FolderConflict('folder_not_empty', 'Move or delete all feeds before deleting this folder.')
+            self.db.execute('UPDATE feeds SET folder_id = NULL WHERE folder_id = %s AND deleted', (identity,))
             self.clear_settings('folder', identity)
             self.db.execute('DELETE FROM folders WHERE id = %s', (identity,))
 
     @reading_value
-    def feeds(self, identity: str | None = None, *, folder: str | None = None, transport: str | None = None) -> list[dict[str, Any]]:
-        conditions, parameters = [], []
+    def feeds(self, identity: str | None = None, *, folder: str | None = None, transport: str | None = None, include_deleted: bool = False) -> list[dict[str, Any]]:
+        conditions, parameters = ([] if include_deleted else ['NOT deleted']), []
         if identity is not None:
             conditions.append('id = %s')
             parameters.append(identity)
@@ -139,10 +140,12 @@ class SubscriptionRepository:
         old = self.existing_feed(body.url)
         if old:
             return old
+        deleted = self.db.execute('SELECT id FROM feeds WHERE identity = %s AND deleted', (identity,)).fetchone()
+        if deleted:
+            return self.restore_feed(deleted['id'], body.folder, body.initial_history)
         title = body.title or urlsplit(body.url).hostname or 'RSS'
         identity_id = self.new_feed_id()
         with self.db:
-            from oko.storage import memberships
             memberships.lock_graph(self.db)
             folder = self.ensure_folder(body.folder)
             self.db.execute('INSERT INTO feeds ( id , identity , title , kind , folder_id , original_urls , connection , transport , public_ai ) VALUES ( %s , %s , %s , %s , %s , %s , %s , %s , %s )',
@@ -153,6 +156,20 @@ class SubscriptionRepository:
             self.details.created(identity_id)
             self.history.configure(identity_id, body.initial_history)
         return next(feed for feed in self.feeds() if feed['identity'] == identity)
+
+    def restore_feed(self, identity: str, folder: str, history: Any) -> dict[str, Any]:
+        with self.db:
+            memberships.lock_graph(self.db)
+            folder_id = self.ensure_folder(folder)
+            if not self.db.execute('UPDATE feeds SET deleted = false, folder_id = %s WHERE id = %s AND deleted', (folder_id, identity)).rowcount:
+                raise ValueError('Фид уже восстановлен')
+            self.db.execute('UPDATE initial_history SET scan_complete = 1 WHERE feed = %s', (identity,))
+            self.history.start(identity, history, restore=True)
+            self.db.execute("UPDATE initial_history SET selection = jsonb_set(selection::jsonb, '{restore_unread}', 'true'::jsonb)::text WHERE feed = %s", (identity,))
+            self.db.execute("UPDATE jobs SET payload=jsonb_set(payload::jsonb, '{restore_discover}', 'true'::jsonb) WHERE kind='discover' AND item=%s AND status='running'", (identity,))
+            self.db.execute("UPDATE jobs SET status='pending', next=0, retry_at=NULL, error=NULL, problem_code=NULL WHERE kind='discover' AND item=%s AND status IN ('done','cancelled','failed','unavailable')", (identity,))
+            source_changed(self.db)
+        return self.feeds(identity)[0]
 
     def new_feed_id(self) -> str:
         return str(uuid4())

@@ -7,9 +7,8 @@ from typing import Any, Literal, TYPE_CHECKING
 from oko.collection.contracts import Source
 from oko.storage.store import Store
 from oko.storage.job_types import Job
-from oko.diagnostics import Journal, record_caught
+from oko.diagnostics import Journal
 from oko.execution import Execution
-from oko.services.queries import ReadingQueries
 from oko.storage.job_repository import JobRepository
 from oko.services.processing import ProcessingService
 if TYPE_CHECKING:
@@ -130,28 +129,6 @@ class JobControl:
         task.add_done_callback(completed)
 
 
-    async def _drain_deletions(self, current: Store) -> None:
-        feeds = ReadingQueries(lambda: current).deletion_feeds()
-        if feeds:
-            await self.cancel(feeds)
-        job = current.jobs.next_job(self._clock(), deleting_only=True)
-        while job:
-            self._delete(job, current)
-            job = current.jobs.next_job(self._clock(), deleting_only=True)
-
-
-    def _delete(self, job: Job, current: Store) -> None:
-        try:
-            if job.kind == 'feed-delete':
-                current.jobs.finish_feed_deletion(job)
-            else:
-                current.jobs.delete(job)
-        except Exception:
-            record_caught('runtime._delete')
-            if current.jobs.valid(job):
-                current.jobs.retry(job, self._clock(), 'Ошибка удаления', code='delete')
-
-
     def retry_material(self, identity: str) -> bool:
         return self.execution.require_store().jobs.retry_material(identity)
 
@@ -172,7 +149,7 @@ class JobControl:
         service=ProcessingService(self.execution.require_store)
         repository=JobRepository(store)
         store.processing.reconcile_item(identity)
-        repository.reconcile(kind,service.candidates(kind,item=identity))
+        repository.reconcile(kind,service.candidates(kind,item=identity,include_viewed=True))
         if not service.regenerate(identity,kind):
             return True
         accepted = repository.retry_processing(identity,kind)
@@ -186,9 +163,6 @@ class JobControl:
 
     def change_adapter(self, feed: str) -> None:
         self.execution.require_store().jobs.change_adapter(feed)
-
-    def remove_feed(self, feed: str, members: set[str]) -> None:
-        self.execution.require_store().jobs.remove_feed(feed,members)
 
     def cancel_history(self, feed: str) -> None:
         self.execution.require_store().jobs.cancel_history(feed)

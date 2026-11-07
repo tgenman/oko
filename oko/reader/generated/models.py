@@ -1413,6 +1413,9 @@ class CardListItem(WireModel):
         ..., description="Null only when a damaged publication has no valid source URL."
     )
     title: StrictStr
+    viewed: StrictBool = Field(
+        default=False, description="Whether the publication has been marked viewed."
+    )
 
 
 class CardPage(WireModel):
@@ -2137,6 +2140,9 @@ class Filter(WireModel):
     model_config = ConfigDict(extra="forbid")
     error: StrictStr | None
     result: Result | None
+    stale: StrictBool = Field(
+        default=False, description="Saved result was produced for an earlier input."
+    )
     state: Literal["disabled", "pending", "processing", "ready", "error"]
 
 
@@ -2151,6 +2157,9 @@ class Theses(WireModel):
     model_config = ConfigDict(extra="forbid")
     error: StrictStr | None
     result: Result1 | None
+    stale: StrictBool = Field(
+        default=False, description="Saved result was produced for an earlier input."
+    )
     state: Literal["disabled", "pending", "processing", "ready", "error"]
 
 
@@ -2345,7 +2354,6 @@ class StatusSummary(WireModel):
     processing: StatusProgress
     runtime_state: Literal["running", "disabled", "stopping", "stopped", "unavailable"]
     sources: list[SourceState]
-    viewed_ids: list[MaterialId]
     work_allowed: StrictBool
 
 
@@ -3759,7 +3767,6 @@ class RuntimeStatus(WireModel):
     runtime_state: Literal["running", "disabled", "stopping", "stopped", "unavailable"]
     sources: list[SourceState]
     total_sources: StrictInt = Field(..., ge=0, le=9007199254740991)
-    viewed_ids: list[MaterialId]
     work: list[WorkEntry]
     work_allowed: StrictBool
     youtube: YouTubeState

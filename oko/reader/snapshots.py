@@ -322,7 +322,6 @@ class Status(WireModel):
     ready_sources: StrictInt = Field(..., title='Ready Sources')
     sources: list[SourceStatus] = Field(..., title='Sources')
     total_sources: StrictInt = Field(..., title='Total Sources')
-    viewed_ids: list[StrictStr] | MISSING = Field(default=MISSING, title='Viewed Ids')
     youtube: YouTube | None | MISSING = MISSING
 
 class SubscriptionFeed(WireModel):

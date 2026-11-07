@@ -94,6 +94,7 @@ export class MenusOwner {
     if(this.selected===path)this.selected=null;
     if(this.currentPath===path){this.navigationRevision++;this.operations.invalidate();this.currentPath=null;this.page='home';this.stack=[];for(const callback of this.onPageChange)callback('owner-change');}
   }
+  restoredFeed(id:string){this.removedFeeds.delete(id);}
   async removeFeed(feed:{id:string},propagate=false){
     if(this.deletions.has(feed.id)||this.stopped)return;
     const context=this.operations.capture();this.deletions.add(feed.id);this.changed();

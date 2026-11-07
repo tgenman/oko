@@ -28,8 +28,6 @@ def register(app: FastAPI, runtime: ReaderApplication, journal: Journal) -> None
     @router.post('/api/v3/diagnostics', response_model=wire.DiagnosticReceipt)
     async def report(body: wire.ClientDiagnosticEvent) -> wire.DiagnosticReceipt:
         value = BrowserError.model_validate(body.model_dump(mode='json', exclude_unset=True))
-        if any(runtime.material_was_viewed(identity) for identity in value.material_ids):
-            return wire.DiagnosticReceipt(wire.DiagnosticIgnored(state='ignored', reason='material_viewed'))
         group = journal.add(value.source, value.message, value.traceback, error_type=value.error_type,
                             location=value.location, event_id=value.event_id,
                             timestamp=value.occurred_at.isoformat() if value.occurred_at else None,

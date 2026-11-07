@@ -16,7 +16,7 @@ def test_status_deadline_virtual_and_tick_keep_ids_etag_and_body(tmp_path,postgr
                 store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
                 raw=json.dumps({'extra':{'_reader':{'full':False,'reason':'partial'}}})
                 store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('a','youtube','a',0,1,%s,0),('b','youtube','b',0,1,%s,0)",(raw,raw))
-                store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','a',true),('f','b',true)")
+                store.db.execute("UPDATE publications SET feed_id='f' WHERE id IN ('a','b')")
                 save_keys(store.db,['a','b'])
             store.youtube.blocked(clock[0],900)
             app.state.host.execution.reader_advance=None
@@ -52,7 +52,7 @@ def test_due_group_closure_keeps_id_and_etag_before_and_after_tick(tmp_path,post
                 store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
                 raw=json.dumps({'extra':{'_reader':{'full':False}}})
                 store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,complete,content,incomplete_class) VALUES ('a','youtube','a',0,1,%s,0)",(raw,))
-                store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary) VALUES ('f','a',true)")
+                store.db.execute("UPDATE publications SET feed_id='f' WHERE id='a'")
                 store.db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('fetch','a','failed','bad',NULL)")
                 save_keys(store.db,['a']);store.incomplete_draft.mark(['a'])
             store.youtube.start(clock[0]);app.state.host.execution.reader_advance=None

@@ -23,7 +23,7 @@ class CollectionState:
 
     def configuration(self) -> SourceConfiguration:
         store=self.store
-        feeds=store.subscriptions.feeds()
+        feeds=store.subscriptions.feeds(include_deleted=True)
         bindings=store.subscriptions.telegram.bindings()
         settings=[]
         dependencies=[]
@@ -78,5 +78,5 @@ class CollectionState:
 
     def publication_revision(self, item: str) -> str:
         from oko.storage.processing_input import digest
-        row=self.store.db.execute("SELECT i . platform , i . external_id , i . url , i . members , i . feed_id , f . adapter , coalesce ( i.content::jsonb#>>'{extra,_collection_revision}' , i.content::jsonb#>>'{extra,_input_hash}' ) FROM publications i LEFT JOIN feeds f ON f . id = i . feed_id WHERE i . id = %s AND i . viewed = 0".replace('i . feed_id', owner_expr('i')),(item,)).fetchone()
+        row=self.store.db.execute("SELECT i . platform , i . external_id , i . url , i . members , i . feed_id , f . adapter , coalesce ( i.content::jsonb#>>'{extra,_collection_revision}' , i.content::jsonb#>>'{extra,_input_hash}' ) FROM publications i LEFT JOIN feeds f ON f . id = i . feed_id WHERE i . id = %s".replace('i . feed_id', owner_expr('i')),(item,)).fetchone()
         return digest(list(row) if row else None)

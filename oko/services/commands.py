@@ -5,7 +5,6 @@ from collections.abc import Callable
 from typing import Any
 from oko.domain.errors import ActionError
 from oko.storage.store import Store
-from oko.storage.reader_facts import ReaderFacts
 
 class CommandJournal:
     def __init__(self, repository: Callable[[], Store], clock: Callable[[], float]) -> None:
@@ -25,9 +24,6 @@ class CommandJournal:
 
     @repository_access
     def report(self, identity: str, context: dict[str, Any], result: str) -> str:
-        facts = ReaderFacts(self._storage)
-        if any(obj['kind'] == 'material' and facts.was_viewed(obj['id']) for obj in context['objects']):
-            context, result = dict(context, objects=[]), 'abandoned'
         return self._storage().problems.report_action(identity, context, result, self._clock())
 
     @repository_access

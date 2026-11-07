@@ -29,7 +29,7 @@ class CollectionService:
 
     @repository_access
     def current(self, item: str, revision: str) -> bool:
-        return self._storage()._has_unviewed(item) and self.revision(item)==revision
+        return self._storage()._has_publication(item) and self.revision(item)==revision
 
     @repository_access
     def feedless(self, item: str) -> bool:

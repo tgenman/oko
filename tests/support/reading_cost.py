@@ -44,7 +44,7 @@ def build_library(root, counts):
             discovered(store,[publication_packet(Publication(str(n), f'https://example.org/{index}/{n}', n),
                               Material(f'Video {n}', '', captions='not_requested', description='Synthetic video'),needs_fetch=True)
                               for n in range(count)], '{}', job, feed)
-            items.append(store.db.execute(owned_ids('= %s')+' ORDER BY id', (feed,feed)).fetchone()[0])
+            items.append(store.db.execute(owned_ids('= %s')+' ORDER BY id', (feed,)).fetchone()[0])
         store.set_work_enabled(False)
     finally:
         store.db.close()

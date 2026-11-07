@@ -35,7 +35,7 @@ class ReaderFacts:
             j.status AS fetch_status,CASE WHEN j.status='pending' AND j.next>%s THEN j.next END AS fetch_deadline,
             media.loading AS media_loading,media.deadline AS media_deadline,linked.children
             FROM publications i
-            LEFT JOIN LATERAL (SELECT m.feed_id FROM feed_publications m WHERE m.publication_id=i.id AND m.is_primary LIMIT 1) owner ON true
+            LEFT JOIN LATERAL (SELECT i.feed_id) owner ON true
             LEFT JOIN feeds f ON f.id=owner.feed_id
             LEFT JOIN jobs j ON j.kind='fetch' AND j.item=i.id
             LEFT JOIN LATERAL (SELECT coalesce(bool_or(mj.status='running' OR (mj.status='pending' AND mj.next<=%s)),false) AS loading,
@@ -61,22 +61,11 @@ class ReaderFacts:
         return (bytes(row['image']), row['mime']) if row else None
 
     def material_feeds(self, identities: set[str]) -> dict[str, str]:
-        return {row['id']: row['feed_id'] for row in self.storage().db.execute(f"SELECT i.id , {owner_expr('i')} AS feed_id FROM publications i WHERE i.viewed = 0 AND i.id IN ( {','.join(('%s' for _ in identities))} )", tuple(identities))} if identities else {}
+        return {row['id']: row['feed_id'] for row in self.storage().db.execute(f"SELECT i.id , {owner_expr('i')} AS feed_id FROM publications i WHERE i.feed_id IS NOT NULL AND i.id IN ( {','.join(('%s' for _ in identities))} )", tuple(identities))} if identities else {}
 
     def linked_preview(self, identity: str) -> dict[str, Any] | None:
         store=self.storage()
         return publication_links.reading(store,identity,store.publications.original(identity)[1])
 
-    def was_viewed(self, identity: str) -> bool:
-        row=self.storage().db.execute('SELECT viewed FROM publications WHERE id = %s', (identity,)).fetchone()
-        return row is None or bool(row['viewed'])
-
-    def viewed_ids(self) -> list[str]:
-        return [row['id'] for row in self.storage().db.execute('SELECT id FROM publications WHERE viewed = 1')]
-
     def feed_members(self, identity: str) -> set[str]:
-        return {row[0] for row in self.storage().db.execute(f'''SELECT publication_id FROM feed_publications WHERE feed_id=%s
-            UNION SELECT id FROM ({owned_ids('= %s')}) owner''', (identity,identity,identity))}
-
-    def deletion_feeds(self) -> set[str]:
-        return {row[0] for row in self.storage().db.execute(f"SELECT DISTINCT {owner_expr('i')} AS feed_id FROM publications i WHERE i.id IN ( SELECT item FROM jobs WHERE kind = 'delete' AND status != 'done' )")}
+        return {row[0] for row in self.storage().db.execute('SELECT id FROM publications WHERE feed_id=%s', (identity,))}

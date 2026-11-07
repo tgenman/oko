@@ -65,7 +65,7 @@ test('tabs recover missed reading changes and reconcile a local viewed action', 
   await expect(other.locator('#cards button')).toHaveCount(0);
 });
 
-test('viewed in another tab deletes server content while the loaded tab retains its text and media until reload',{timeout:25000},async t=>{
+test('viewed in another tab keeps server content and loaded media',{timeout:25000},async t=>{
   const {page,context,api,origin,token}=await productionReader(t);
   await api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});
   await addSources(api,[['https://a.test/feed','Alpha','Folder']]);
@@ -74,7 +74,7 @@ test('viewed in another tab deletes server content while the loaded tab retains 
   await page.locator('#cards button').click();await expect(page.locator('#text')).toContainText('Открылась библиотека');await expect(page.locator('#images img')).toHaveAttribute('src',/^blob:/);
   const text=await page.locator('#text').textContent(),image=await page.locator('#images img').getAttribute('src');
   const other=await context.newPage();await other.goto(origin+'/#token='+token);await expect(other.locator('#cards button')).toHaveCount(1);await other.locator('#cards button').click();await expect(other.locator('#text')).toHaveText(text!);await other.locator('#viewed').click();
-  await expect(page.locator('#cards button')).toHaveCount(0);await expect(page.locator('#material-retained')).toBeVisible();await expect(page.locator('#text')).toHaveText(text!);await expect(page.locator('#images img')).toHaveAttribute('src',image!);await expect(page.locator('#viewed')).toBeDisabled();
-  const response=await page.request.get(origin+'/api/v3/publication/'+id,{headers:{Authorization:'Bearer '+token}});assert.equal(response.status(),404);
+  await expect(page.locator('#cards button')).toHaveCount(0);await expect(page.locator('#material-retained')).toBeHidden();await expect(page.locator('#text')).toHaveText(text!);await expect(page.locator('#images img')).toHaveAttribute('src',image!);
+  const response=await page.request.get(origin+'/api/v3/publication/'+id,{headers:{Authorization:'Bearer '+token}});assert.equal(response.status(),200);
   await page.reload();await expect(page.locator('#cards button')).toHaveCount(0);await expect(page.locator('#material')).toBeHidden();
 });

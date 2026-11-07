@@ -50,8 +50,6 @@ class ProcessingWorker:
                 self.tasks._ai_job=None
             if self.tasks._ai or self.tasks._detached_ai:
                 return True
-            if jobs.deleting():
-                return False
             with jobs.transaction(self.execution._live):
                 if not self.execution._live():
                     return False

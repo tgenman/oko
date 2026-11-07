@@ -174,10 +174,6 @@ class CollectionWorker:
                 current = self.execution._store
                 if not current or not current.jobs.valid(job) or not self._live():
                     return
-                if job.kind in ('delete', 'feed-delete'):
-                    diagnostic_source.set('Удаление · ' + job.item)
-                    self.jobs._delete(job, current)
-                    return
                 feed = job.item if job.kind in ('discover', 'read') else self.service.feed(job.item)
                 if job.kind in ('discover','fetch'):
                     self.jobs._collection_active[job.id] = _CollectionAttempt(job,feed,self._clock(),capture,current.jobs.collection_start(job,feed))
@@ -215,6 +211,9 @@ class CollectionWorker:
                             current.jobs.apply_collection(effects)
                             current.jobs.checkpoint('collection_after_result')
                             current.jobs.finish(job)
+                            rescan=current.db.execute("UPDATE jobs SET payload=payload-'restore_discover' WHERE id=%s AND payload->>'restore_discover'='true' RETURNING id", (job.id,)).fetchone()
+                            if rescan:
+                                current.jobs.enqueue_discovery(feed)
                             current.jobs.checkpoint('collection_after_finish')
                             self._finish_collection(job, current, collection_error)
                             if outcome.continuation is not None:
@@ -432,7 +431,6 @@ class CollectionWorker:
                 for feed in self._sources:
                     self.execution._store.jobs.enqueue_discovery(feed)
                 self._last_collection = now
-            state = self.execution._store.status()
             caption_feeds=self._collection.caption_feeds()
             for lane in ('common', 'media','captions'):
                 if lane=='captions' and not caption_feeds:
@@ -457,7 +455,7 @@ class CollectionWorker:
                 if lane=='captions':
                     feeds=caption_feeds
                 dependencies=self._dependency_feeds if lane in ('common','media') else []
-                job = self.execution._store.jobs.next_job(now, deleting_only=state['deleting'] or not (feeds or dependencies),
+                job = self.execution._store.jobs.next_job(now, deleting_only=not (feeds or dependencies),
                                            feeds=feeds, include_deletions=lane == 'common', media_only=media_lane,captions_only=lane=='captions',dependency_feeds=dependencies)
                 if job:
                     if media_lane:

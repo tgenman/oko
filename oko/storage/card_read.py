@@ -43,7 +43,7 @@ def _preview_source(store: 'Store', identity: str) -> tuple[dict[str, Any], str]
 
 def card(store: 'Store', identity: str) -> dict[str, Any] | None:
     row = material_read.item(store.db, identity)
-    if row is None or row['viewed']:
+    if row is None:
         return None
     if 'reader_hidden' in row.keys():
         hidden=bool(row['reader_hidden'])
@@ -51,7 +51,7 @@ def card(store: 'Store', identity: str) -> dict[str, Any] | None:
         hidden=row['status']=='filter_out'
     result: dict[str, Any] = dict(id=identity,feed_id=row['feed_id'],title='Материал загружается',
         published_at=row['published_at'],
-        source_url=row['url'],loading=True,changed=False,preview_url=None,hidden=hidden,
+        source_url=row['url'],loading=True,changed=False,preview_url=None,hidden=hidden,viewed=bool(row['viewed']),
         post_web_unavailable=False,external_attachment_kinds=[])
 
     if not row['complete']:

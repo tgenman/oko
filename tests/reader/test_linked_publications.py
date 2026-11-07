@@ -55,7 +55,7 @@ def test_rss_article_is_fetched_separately_and_does_not_become_a_feed_card(tmp_p
                 row=db.execute(f"SELECT {owner_expr('i')} AS feed_id,i.platform,i.status,i.content FROM publications i WHERE i.id = %s",(linked,)).fetchone()
                 assert row[:3]==(None,'other_web','ready')
                 assert 'Article body' in json.loads(row[3])['blocks'][0]['text']
-                assert not db.execute('SELECT 1 FROM feed_publications WHERE publication_id = %s',(linked,)).fetchone()
+                assert db.execute('SELECT feed_id FROM publications WHERE id = %s',(linked,)).fetchone()[0] is None
                 assert db.execute('SELECT COUNT(*) FROM publications').fetchone()[0]==2
             media_release.set()
             complete=wait_for(client,lambda:(m if (m := client.get('/api/v3/publication/'+card['id']).json()) and any(media['role'] == 'attachment' for media in m['media']) else None))
@@ -110,7 +110,7 @@ def test_article_arrival_reprocesses_root_and_keeps_actual_source_references(tmp
             release.set()
 
 
-def test_shared_article_survives_one_root_then_disappears_after_the_last_link(tmp_path):
+def test_shared_article_survives_when_all_roots_are_viewed(tmp_path):
     from tests.support.storage import database
     from tests.support.reader import wait_for
     from tests.support.subscriptions import add_source
@@ -135,8 +135,8 @@ def test_shared_article_survives_one_root_then_disappears_after_the_last_link(tm
         client.post('/api/v3/materials/'+cards[1]['id']+'/viewed')
         with database(root) as db:
             row=db.execute('SELECT viewed , content FROM publications WHERE id = %s',(article,)).fetchone()
-            assert row is None or row==(1,'{}')
-            assert not db.execute('SELECT 1 FROM publication_links WHERE target_publication_id = %s',(article,)).fetchone()
+            assert row is not None and 'Shared article' in row['content']
+            assert db.execute('SELECT 1 FROM publication_links WHERE target_publication_id = %s',(article,)).fetchone()
 
 
 def test_unavailable_article_keeps_excerpt_and_root_retry_fetches_it_again(tmp_path):
@@ -162,7 +162,7 @@ def test_unavailable_article_keeps_excerpt_and_root_retry_fetches_it_again(tmp_p
         wait_for(client,lambda:'Retrieved article' in client.get('/api/v3/publication/'+card['id']).json()['text'])
 
 
-def test_late_article_response_is_discarded_after_its_last_root_is_read(tmp_path):
+def test_late_article_response_is_saved_after_its_root_is_viewed(tmp_path):
     import asyncio
     import threading
     from tests.support.storage import database
@@ -190,11 +190,11 @@ def test_late_article_response_is_discarded_after_its_last_root_is_read(tmp_path
             client.post('/api/v3/materials/'+card['id']+'/viewed')
             release.set()
             assert returned.wait(3)
-            wait_for(client,lambda:client.get('/api/v3/status/details').json()['work']==[{'phase':'idle'}])
+            wait_for(client,lambda:'Late article must not survive' in client.get('/api/v3/publication/'+card['id']).json()['text'])
             assert read_all_cards(client, '/api/v3/cards')==[]
             with database(root) as db:
-                assert not db.execute('SELECT 1 FROM publication_links').fetchone()
-                assert not db.execute("SELECT 1 FROM publications WHERE content LIKE '%Late article must not survive%'").fetchone()
+                assert db.execute('SELECT 1 FROM publication_links').fetchone()
+                assert db.execute("SELECT 1 FROM publications WHERE content LIKE '%Late article must not survive%'").fetchone()
                 assert not db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND status IN ('pending','running')").fetchone()
         finally:
             release.set()

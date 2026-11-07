@@ -41,6 +41,9 @@ test('real HTTP settings load three YouTube materials and can rediscover a viewe
     return [value.state==='absent'?null:value.selection.mode==='count'?value.selection.count:null,value.state];
   }).toEqual(['2', 'complete']);
   const finalHistory=await history();expect(finalHistory.state!=='absent'&&finalHistory.progress.viewed).toBe(0);
-  expect(((await api('cards')).items).length).toBe(3); // Retain the third card and rediscover the viewed one in the new window.
+  expect(((await api('cards')).items).length).toBe(2);
+  await page.locator('#feeds-close').click();
+  await page.locator('#read-feeds-toggle').click();
+  await expect(page.locator('#cards button')).toHaveCount(3);
   expect(errors).toEqual([]);
 });

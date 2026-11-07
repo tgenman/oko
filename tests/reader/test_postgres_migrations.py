@@ -91,7 +91,7 @@ def test_native_library_constraints_and_persistent_job_identity(connections):
         with db.transaction():
             db.execute("INSERT INTO feeds(id,platform,external_id) VALUES ('first','rss','https://source.test'),('second','rss','https://other.test')")
             db.execute("INSERT INTO publications(id,platform,external_id,published_at) VALUES ('article','rss','https://source.test/article',1792870000.123456)")
-            db.execute("INSERT INTO feed_publications VALUES ('first','article'),('second','article')")
+            db.execute("UPDATE publications SET feed_id='first' WHERE id='article'")
             db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status,size_bytes) VALUES ('media','article','image','https://media.test/image','image','pending',5000000000)")
             first_job = db.execute("INSERT INTO jobs(kind,item) VALUES ('fetch','article') RETURNING id").fetchone()[0]
         with pytest.raises(psycopg.errors.UniqueViolation), db.transaction():
@@ -103,7 +103,7 @@ def test_native_library_constraints_and_persistent_job_identity(connections):
         assert second_job > first_job
         assert restarted.execute("SELECT published_at FROM publications WHERE id='article'").fetchone()[0] == 1792870000.123456
         assert restarted.execute("SELECT size_bytes FROM media_files WHERE id='media'").fetchone()[0] == 5000000000
-        assert restarted.execute("SELECT count(*) FROM feed_publications WHERE publication_id='article'").fetchone()[0] == 2
+        assert restarted.execute("SELECT feed_id FROM publications WHERE id='article'").fetchone()[0] == 'first'
 
 
 def test_job_execution_settings_rejects_incomplete_snapshots(connections):
@@ -439,7 +439,7 @@ def test_retired_demo_preserves_publications_and_normalizes_discovery_target(con
         db.execute("INSERT INTO jobs(kind,item,status,error,problem_code) VALUES ('discover','','failed','saved error','source-error')")
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT kind,transport,connection FROM feeds WHERE id='demo'").fetchone() == ('unresolved',None,'needs_connection')
-        assert db.execute("SELECT publication_id FROM feed_publications WHERE feed_id='demo'").fetchall() == [('p',)]
+        assert db.execute("SELECT id FROM publications WHERE feed_id='demo'").fetchall() == [('p',)]
         assert db.execute("SELECT title FROM publications WHERE id='p'").fetchone() == ('Saved',)
         assert db.execute("SELECT item,status,error,problem_code FROM jobs WHERE kind='discover'").fetchone() == ('demo','failed','saved error','source-error')
 
@@ -505,3 +505,46 @@ def test_retired_demo_rejects_conflicting_saved_attempt_owner(connections):
             migrate(db, MIGRATIONS)
         verify(db, MIGRATIONS[:98])
         assert db.execute("SELECT item,feed_id FROM jobs WHERE kind='discover'").fetchone() == ('','other-feed')
+
+
+def test_viewed_retention_migration_stops_legacy_cleanup_and_preserves_owners(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:99])
+        db.execute("INSERT INTO folders(id,title,position) VALUES ('f','Folder',0)")
+        db.execute("INSERT INTO feeds(id,identity,title,kind,folder_id,connection,transport,original_urls) VALUES ('active','rss:a','A','rss','f','connected','rss',ARRAY['https://a.test/feed']),('removed','rss:b','B','rss','f','deleting','rss',ARRAY['https://b.test/feed'])")
+        db.execute("INSERT INTO publications(id,platform,external_id,title,url,discovered_at,viewed,complete) VALUES ('viewed','rss','a','A','https://a.test/1',1,1,1),('removed-item','rss','b','B','https://b.test/1',1,1,1)")
+        db.execute("INSERT INTO jobs(kind,item,status,payload,error,problem_code) VALUES ('delete','viewed','pending','{\"cleanup_feed\":\"active\"}',NULL,NULL),('delete','removed-item','failed','{\"cleanup_feed\":\"removed\"}','old cleanup error','delete'),('feed-delete','removed','pending','{}',NULL,NULL)")
+        db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('cleanup-problem','cleanup-problem','background',%s,1)", (json.dumps({'operation':'producer:delete','code':'delete'}),))
+        migrate(db, MIGRATIONS[:100])
+        assert db.execute("SELECT id,deleted FROM feeds ORDER BY id").fetchall() == [('active', False), ('removed', True)]
+        assert db.execute("SELECT feed_id,publication_id FROM feed_publications ORDER BY feed_id").fetchall() == [('active','viewed'),('removed','removed-item')]
+        assert db.execute("SELECT kind,item,status FROM jobs WHERE kind IN ('delete','feed-delete') ORDER BY kind,item").fetchall() == [('delete','removed-item','cancelled'),('delete','viewed','cancelled'),('feed-delete','removed','cancelled')]
+        assert db.execute("SELECT id,complete FROM publications ORDER BY id").fetchall() == [('removed-item',0),('viewed',0)]
+        assert db.execute("SELECT error,problem_code FROM jobs WHERE kind='delete' AND item='removed-item'").fetchone() == (None,None)
+        assert db.execute("SELECT outcome FROM reader_problems WHERE id='cleanup-problem'").fetchone() == ('irrelevant',)
+
+
+def test_single_feed_migration_rejects_conflicting_memberships_without_changes(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:100])
+        db.execute("INSERT INTO feeds(id,identity) VALUES ('a','a'),('b','b')")
+        db.execute("INSERT INTO publications(id,platform,external_id,discovered_at) VALUES ('p','rss','https://example.test/p',1)")
+        db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('a','p',true,true),('b','p',false,true)")
+        with pytest.raises(psycopg.errors.RaiseException, match='multiple feeds'):
+            migrate(db, MIGRATIONS)
+        verify(db, MIGRATIONS[:100])
+        assert db.execute("SELECT feed_id FROM feed_publications WHERE publication_id='p' ORDER BY feed_id").fetchall() == [('a',),('b',)]
+
+
+def test_single_feed_migration_preserves_owner_and_feedless_articles(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:100])
+        db.execute("INSERT INTO feeds(id,identity) VALUES ('a','a')")
+        db.execute("INSERT INTO publications(id,platform,external_id,discovered_at) VALUES ('p','rss','https://example.test/p',1),('article','other_web','https://example.test/article',1)")
+        db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('a','p',true,true)")
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT id,feed_id FROM publications ORDER BY id").fetchall() == [('article',None),('p','a')]
+        assert db.execute("SELECT to_regclass('feed_publications')").fetchone() == (None,)

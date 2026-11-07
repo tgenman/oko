@@ -59,18 +59,18 @@ def test_configure_codex_closes_last_preclaim_problem_before_status_get(tmp_path
     finally:store.db.close()
 
 
-def test_mark_viewed_through_store_closes_processor_without_status_get(tmp_path,postgres_url):
+def test_mark_viewed_keeps_processor_problem_without_status_get(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,members) VALUES ('item','rss','item',0,'[]')")
-            store.db.execute("INSERT INTO feed_publications(feed_id,publication_id,is_primary,is_unviewed) VALUES ('feed','item',true,true)")
+            store.db.execute("UPDATE publications SET feed_id='feed' WHERE id='item'")
             job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('filter','item','running',1) RETURNING id").fetchone()[0]
         store.jobs.retry(Job(job_id,'filter','item',1),1,'missing',code='processor-config')
         row=store.db.execute("SELECT id FROM reader_problems WHERE identity='processor:configuration' AND finished IS NULL").fetchone()
         assert store.viewed_set(['item'])
-        assert not store.db.execute('SELECT 1 FROM reader_problems WHERE id=%s AND finished IS NULL',(row[0],)).fetchone()
+        assert store.db.execute('SELECT 1 FROM reader_problems WHERE id=%s AND finished IS NULL',(row[0],)).fetchone()
     finally:store.db.close()
 
 

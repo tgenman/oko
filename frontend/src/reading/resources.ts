@@ -3,9 +3,9 @@ import type {CardListItem, CollectionTarget, NavigationResponse, RuntimeStatus, 
 import type {ReaderApi} from '../api/reader';
 import type {Navigation} from './tree';
 
-export type ReadingListOptions = {target:CollectionTarget;sort:'newest'|'oldest';show_hidden:boolean};
+export type ReadingListOptions = {target:CollectionTarget;sort:'newest'|'oldest';show_hidden:boolean;show_read?:boolean};
 export type CardView = CardListItem & {folder_id:string;feed_title:string};
-export const listIdentity = (options:ReadingListOptions) => JSON.stringify([options.target.scope,options.target.scope==='feed'?options.target.feed_id:options.target.scope==='folder'?options.target.folder_id:'',options.sort,options.show_hidden]);
+export const listIdentity = (options:ReadingListOptions) => JSON.stringify([options.target.scope,options.target.scope==='feed'?options.target.feed_id:options.target.scope==='folder'?options.target.folder_id:'',options.sort,options.show_hidden,!!options.show_read]);
 
 type Reply<T>={data?:T;error?:unknown;response?:Response};
 function accepted<T>(reply:Reply<T>):T|undefined {
