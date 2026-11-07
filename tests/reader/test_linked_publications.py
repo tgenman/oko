@@ -111,7 +111,7 @@ def test_article_arrival_reprocesses_root_and_keeps_actual_source_references(tmp
             release.set()
 
 
-def test_shared_article_survives_one_root_then_disappears_after_the_last_link(tmp_path):
+def test_shared_article_survives_when_both_roots_are_viewed(tmp_path):
     from tests.support.storage import database
     from tests.support.reader import wait_for
     from tests.support.subscriptions import add_source
@@ -119,7 +119,7 @@ def test_shared_article_survives_one_root_then_disappears_after_the_last_link(tm
     def response(request):
         if request.url.host=='web.example':
             return httpx.Response(200,text='<article>Shared article</article>')
-        return httpx.Response(200,text='<rss><channel><item><guid>same-guid</guid><link>https://web.example/shared</link><description>Own excerpt</description></item></channel></rss>')
+        return httpx.Response(200,text=f'<rss><channel><item><guid>{request.url.path}</guid><link>https://web.example/shared</link><description>Own excerpt</description></item></channel></rss>')
     with TestClient(create_app(root,token='test-token',api_only=True,rss_enabled=True,
                               rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
         for name in ('first','second'):
@@ -135,8 +135,8 @@ def test_shared_article_survives_one_root_then_disappears_after_the_last_link(tm
         assert 'Shared article' in body_text(client.get('/api/v3/publication/'+cards[1]['id']).json())
         client.post('/api/v3/materials/'+cards[1]['id']+'/viewed')
         with database(root) as db:
-            assert db.execute('SELECT 1 FROM publications WHERE id = %s',(article,)).fetchone() is None
-            assert not db.execute('SELECT 1 FROM publication_links WHERE target_publication_id = %s',(article,)).fetchone()
+            assert db.execute('SELECT 1 FROM publications WHERE id = %s',(article,)).fetchone() is not None
+            assert db.execute('SELECT count(*) FROM publication_links WHERE target_publication_id = %s',(article,)).fetchone()[0]==2
 
 
 def test_unavailable_article_keeps_excerpt_and_root_retry_fetches_it_again(tmp_path):
@@ -162,7 +162,7 @@ def test_unavailable_article_keeps_excerpt_and_root_retry_fetches_it_again(tmp_p
         wait_for(client,lambda:'Retrieved article' in body_text(client.get('/api/v3/publication/'+card['id']).json()))
 
 
-def test_late_article_response_is_discarded_after_its_last_root_is_read(tmp_path):
+def test_late_article_response_is_saved_after_its_last_root_is_read(tmp_path):
     import asyncio
     import threading
     from tests.support.storage import database
@@ -193,8 +193,8 @@ def test_late_article_response_is_discarded_after_its_last_root_is_read(tmp_path
             wait_for(client,lambda:client.get('/api/v3/status/details').json()['work']==[{'phase':'idle'}])
             assert read_all_cards(client, '/api/v3/cards')==[]
             with database(root) as db:
-                assert not db.execute('SELECT 1 FROM publication_links').fetchone()
-                assert not db.execute("SELECT 1 FROM publications WHERE content::text LIKE '%Late article must not survive%'").fetchone()
+                assert db.execute('SELECT 1 FROM publication_links').fetchone()
+                assert db.execute("SELECT 1 FROM publications WHERE content::text LIKE '%Late article must not survive%'").fetchone()
                 assert not db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND status IN ('pending','running')").fetchone()
         finally:
             release.set()

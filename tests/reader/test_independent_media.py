@@ -73,7 +73,7 @@ def test_partial_text_is_readable_while_new_photo_download_is_held(tmp_path):
             release.set()
 
 
-def test_viewed_cancels_a_media_job_and_rejects_its_late_file(tmp_path):
+def test_viewed_media_job_saves_its_late_file(tmp_path):
     root = publication_root(tmp_path)
     started, release = threading.Event(), threading.Event()
     async def response(request):
@@ -99,8 +99,9 @@ def test_viewed_cancels_a_media_job_and_rejects_its_late_file(tmp_path):
             assert client.post('/api/v3/materials/'+item+'/viewed').status_code == 200
             release.set()
             wait_for(client, lambda: client.get('/api/v3/status/details').json()['work']==[{'phase':'idle'}])
-            assert client.get('/api/v3/publication/'+item).status_code == 404
-            assert not any(b'late-private-photo' in path.read_bytes() for path in root.rglob('*') if path.is_file())
+            retained=client.get('/api/v3/publication/'+item).json()
+            media=next(m['url'] for m in retained['media'] if m['url'])
+            assert client.get(media).content==b'late-private-photo'
         finally:
             release.set()
 

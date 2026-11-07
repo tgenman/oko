@@ -15,7 +15,7 @@ HEADERS = {'Authorization': 'Bearer test-token'}
 PNG = bytes.fromhex('89504e470d0a1a0a') + b'local-image'
 
 
-def test_rss_article_images_are_local_and_viewing_removes_the_copy(tmp_path: Path):
+def test_rss_article_images_remain_local_after_viewing(tmp_path: Path):
     def response(request):
         if request.url.path == '/feed':
             return httpx.Response(200, text=rss(), headers={'Content-Type': 'application/rss+xml'})
@@ -33,8 +33,7 @@ def test_rss_article_images_are_local_and_viewing_removes_the_copy(tmp_path: Pat
         image = [media['url'] for media in [media for media in material['media'] if media['url'] is not None] if media['kind']=='image'][0]
         assert client.get(image).content == PNG
         assert client.post('/api/v3/materials/' + card['id'] + '/viewed').status_code == 200
-        assert client.get(image).status_code == 404
-        assert not list((tmp_path / 'content').rglob('*.png'))
+        assert client.get(image).content == PNG
 
 
 def test_incomplete_article_can_be_retried_without_losing_excerpt(tmp_path: Path):
@@ -133,7 +132,7 @@ def test_retry_missing_image_preserves_local_text_and_cleans_old_assets(tmp_path
         card = wait_for(client,lambda:next((c for c in read_publications_for_cards(client, '/api/v3/cards') if len([m for m in [media for media in c['media'] if media['url'] is not None] if m['kind']=='image'])==2),None))
         assert collected(card) and len([media for media in [media for media in card['media'] if media['url'] is not None] if media['kind']=='image']) == 2
         client.post('/api/v3/materials/' + card['id'] + '/viewed')
-        assert all(client.get(url).status_code == 404 for url in [media['url'] for media in [media for media in card['media'] if media['url'] is not None] if media['kind']=='image'])
+        assert all(client.get(url).content == PNG for url in [media['url'] for media in [media for media in card['media'] if media['url'] is not None] if media['kind']=='image'])
 
 
 def test_source_disabled_switch_cannot_continue_collecting(tmp_path: Path):
@@ -186,7 +185,7 @@ def test_rss_saved_jobs_recover_after_failed_file_commit(tmp_path: Path):
         assert not [path for path in (tmp_path/'staging').rglob('*') if path.is_file()]
 
 
-def test_rss_viewed_during_image_download_blocks_late_result(tmp_path: Path):
+def test_rss_viewed_during_image_download_keeps_late_result(tmp_path: Path):
     import asyncio
     import threading
     downloading = threading.Event()
@@ -210,10 +209,11 @@ def test_rss_viewed_during_image_download_blocks_late_result(tmp_path: Path):
         item = read_all_cards(client, '/api/v3/cards')[0]['id']
         assert client.post('/api/v3/materials/' + item + '/viewed').status_code == 200
         released.set()
-        time.sleep(.1)
-        assert client.get('/api/v3/publication/' + item).status_code == 404
-        assert not (tmp_path / 'content' / item).exists()
-        assert not (tmp_path / 'staging' / item).exists()
+        def downloaded():
+            value=client.get('/api/v3/publication/'+item).json()
+            return value if any(m['url'] and client.get(m['url']).content==PNG for m in value['media']) else None
+        assert wait_for(client,downloaded)['id']==item
+        assert not read_all_cards(client,'/api/v3/cards')
 
 
 def test_url_identity_normalizes_default_port_and_fragment_without_guid(tmp_path: Path):
