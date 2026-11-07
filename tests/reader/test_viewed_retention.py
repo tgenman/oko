@@ -440,13 +440,16 @@ def test_viewed_publication_keeps_downloaded_media_accessible(tmp_path):
     app = create_app(tmp_path, token='test-token', api_only=True, rss_transport=httpx.MockTransport(response))
     with TestClient(app, headers={'Authorization': 'Bearer test-token'}) as client:
         configure_fast_web(client)
-        assert client.post('/api/v3/telegram/connect', json={'source_locator': '@fixture', 'folder': 'Inbox'}).status_code == 200
+        connected=client.post('/api/v3/telegram/connect', json={'source_locator': '@fixture', 'folder': 'Inbox'})
+        assert connected.status_code == 200
         card = settled(client)[0]
         publication = client.get('/api/v3/publication/' + card['id']).json()
         url = next(media['url'] for media in publication['media'] if media['url'])
         assert client.get(url).content == b'synthetic-image'
         assert client.post('/api/v3/cards/read', json={'ids': [card['id']]}).status_code == 204
         assert client.get(url).content == b'synthetic-image'
+        assert client.delete('/api/v3/feeds/'+connected.json()['feed_id']).status_code == 200
+        assert client.get(url).status_code == 404
 
 
 def test_media_download_started_before_viewing_completes(tmp_path):

@@ -181,7 +181,7 @@ class ReadingQueries:
 
     @repository_access
     def media_file(self, identity: str, name: str) -> tuple[Path, str] | None:
-        return self._media().file(identity, name)
+        return self._media().visible_file(identity, name)
 
     @repository_access
     def content_version(self, identity: str) -> str:

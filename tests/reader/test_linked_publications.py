@@ -198,3 +198,29 @@ def test_late_article_response_is_saved_after_its_last_root_is_read(tmp_path):
                 assert not db.execute("SELECT 1 FROM jobs WHERE kind='fetch' AND status IN ('pending','running')").fetchone()
         finally:
             release.set()
+
+
+def test_linked_media_is_visible_only_while_a_root_feed_is_active(tmp_path):
+    from tests.support.reader import wait_for
+    from tests.support.subscriptions import add_source
+    root=publication_root(tmp_path)
+    def response(request):
+        if request.url.host=='web.example':
+            if request.url.path=='/photo.png':return httpx.Response(200,content=b'saved-image',headers={'content-type':'image/png'})
+            return httpx.Response(200,text='<article>Shared<img src="/photo.png"></article>')
+        return httpx.Response(200,text=f'<rss><channel><item><guid>{request.url.path}</guid><link>https://web.example/shared</link><description>Excerpt</description></item></channel></rss>')
+    with TestClient(create_app(root,token='test-token',api_only=True,rss_enabled=True,rss_transport=httpx.MockTransport(response)),headers=HEADERS) as client:
+        first=add_source(client,'https://source.test/first','first','News')
+        second=add_source(client,'https://source.test/second','second','News')
+        presence(client,'reader')
+        card=wait_cards(client,2)[0]
+        url='/api/v3/publication/'+card['id']
+        def media_url():
+            value=client.get(url).json()
+            return next((media['url'] for media in value['media'] if media['url']),None)
+        media=wait_for(client,media_url)
+        assert client.get(media).content==b'saved-image'
+        assert client.delete('/api/v3/feeds/'+first['id']).status_code==200
+        assert client.get(media).content==b'saved-image'
+        assert client.delete('/api/v3/feeds/'+second['id']).status_code==200
+        assert client.get(media).status_code==404
