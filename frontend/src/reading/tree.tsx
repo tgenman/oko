@@ -26,7 +26,7 @@ export function FeedAvatar({url,fetchMedia,kind}:{url:string;fetchMedia:MediaFet
 function Title({title,kind,count,avatar,fetchMedia,completed=false}:{title:string;kind:string;count?:number;avatar?:string;fetchMedia?:MediaFetch;completed?:boolean}) {return <>{avatar&&fetchMedia?<FeedAvatar url={avatar} fetchMedia={fetchMedia} kind={kind}/>:<SourceIcon kind={kind}/> }<span className="tree-title">{title}{completed&&<small className="feed-completed-label">All Read</small>}</span>{count!==undefined&&<span className="tree-count">{count||''}</span>}</>;}
 const byTitle=(a:{title:string;id:string},b:{title:string;id:string})=>a.title.localeCompare(b.title,undefined,{sensitivity:'base'})||a.id.localeCompare(b.id);
 const feedIcon=(feed:Navigation['feeds'][number])=>['youtube','telegram'].includes(feed.kind)?feed.kind:'rss';
-export function createReadingTree({readerApi,onSelect,onFeedSettings,onFeedMenu,onFolderMenu,onWarning,fetchMedia}:{readerApi:ReaderApi;fetchMedia:MediaFetch;onSelect:(selection:Selection,reason:'user'|'reconcile')=>void;onFolderMenu:(folder:Navigation['folders'][number],catalog:Navigation,x:number,y:number,trigger:HTMLElement)=>void;onFeedMenu:(feed:Navigation['feeds'][number],folders:Navigation['folders'],x:number,y:number,trigger:HTMLElement)=>void;onFeedSettings:(id:string,trigger:HTMLElement)=>void;onWarning:()=>void}) {
+export function createReadingTree({readerApi,onSelect,onFeedSettings,onFeedMenu,onFolderMenu,onWarning,onShowRead,fetchMedia}:{readerApi:ReaderApi;fetchMedia:MediaFetch;onSelect:(selection:Selection,reason:'user'|'reconcile')=>void;onFolderMenu:(folder:Navigation['folders'][number],catalog:Navigation,x:number,y:number,trigger:HTMLElement)=>void;onFeedMenu:(feed:Navigation['feeds'][number],folders:Navigation['folders'],x:number,y:number,trigger:HTMLElement)=>void;onFeedSettings:(id:string,trigger:HTMLElement)=>void;onWarning:()=>void;onShowRead:()=>void}) {
   let collapsed:Record<string,boolean>={};
   try {const value:unknown=JSON.parse(saved('oko-reading-collapsed','{}'));if(value&&typeof value==='object'&&!Array.isArray(value))collapsed=value as Record<string,boolean>;}catch{}
   const store=createStore({catalog:{folders:[],feeds:[],count:0} as Navigation,sources:[] as SourceState[],selection:{kind:'all',id:null} as Selection,collapsed,showRead:saved('oko-reading-show-read','false')==='true',width:Number(saved('oko-reading-width','280'))||280});
@@ -39,7 +39,7 @@ export function createReadingTree({readerApi,onSelect,onFeedSettings,onFeedMenu,
     const completed=catalog.feeds.filter(feed=>!feed.has_unviewed).length;
     const visible=catalog.feeds.filter(feed=>showRead||feed.has_unviewed||selection.kind==='feed'&&selection.id===feed.id).sort(byTitle);
     const folders=catalog.folders.filter(folder=>showRead||catalog.feeds.some(feed=>feed.folder_id===folder.id&&feed.has_unviewed)).sort(byTitle);
-    const toggleRead=()=>{save('oko-reading-show-read',String(!showRead));store.set({...store.get(),showRead:!showRead});};
+    const toggleRead=()=>{save('oko-reading-show-read',String(!showRead));store.set({...store.get(),showRead:!showRead});onShowRead();};
     useLayoutEffect(()=>{host('reading-nav').parentElement!.style.setProperty('--sidebar-width',width+'px');host('sidebar-resize').setAttribute('aria-valuenow',String(width));},[width]);
     useLayoutEffect(()=>{
       const divider=host('sidebar-resize');
@@ -57,6 +57,7 @@ export function createReadingTree({readerApi,onSelect,onFeedSettings,onFeedMenu,
   mountSurface(host('reading-nav'),<Tree/>);resize(store.get().width);
   return {
     get selection(){return store.get().selection;},
+    get showRead(){return store.get().showRead;},
     update(catalog:Navigation,sources:SourceState[]=[]) {
       const state=store.get();let selection=state.selection,changed=false,moved=false,collapsed=state.collapsed;
       if(selection.kind==='feed') {const feed=catalog.feeds.find(feed=>feed.id===selection.id);if(!feed){selection=catalog.folders.some(folder=>folder.id===selection.folder)?{kind:'folder',id:selection.folder!}:{kind:'all',id:null};changed=true;}else if(feed.folder_id!==selection.folder){selection={...selection,folder:feed.folder_id};collapsed={...collapsed,[feed.folder_id]:false};save('oko-reading-collapsed',JSON.stringify(collapsed));moved=true;}}

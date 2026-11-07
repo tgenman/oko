@@ -97,7 +97,7 @@ class ReaderFacts:
         return {row['id']: (row, bindings.get(row['id'])) for row in rows}
 
     def avatar(self, feed: str, revision: str) -> tuple[bytes, str] | None:
-        row=self.storage().db.execute("SELECT avatar_image AS image, avatar_mime AS mime FROM feeds WHERE id = %s AND avatar_digest = %s AND connection != 'deleting'", (feed, revision)).fetchone()
+        row=self.storage().db.execute("SELECT avatar_image AS image, avatar_mime AS mime FROM feeds WHERE id = %s AND avatar_digest = %s AND NOT deleted", (feed, revision)).fetchone()
         return (bytes(row['image']), row['mime']) if row else None
 
     def material_feeds(self, identities: set[str]) -> dict[str, str]:

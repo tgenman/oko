@@ -21,9 +21,10 @@ from oko.subscriptions.details import FeedDetails
 from oko.subscriptions.subscriptions import AddFeed, Overrides, FeedPatch, key, identify, FolderConflict, DEFAULT_FEED_REFRESH_MINUTES, DEFAULTS
 
 class SubscriptionRepository:
-    def __init__(self, db: Connection, fault: Callable[[str], None] = lambda _: None, *, wall_clock: Callable[[], float] = time.time) -> None:
+    def __init__(self, db: Connection, fault: Callable[[str], None] = lambda _: None, *, wall_clock: Callable[[], float] = time.time, restore_discovery: Callable[[str], None]) -> None:
         self._feed_batch: dict[str,dict[str,Any]] | None=None
         self.db = db
+        self.restore_discovery = restore_discovery
         self.history = History(db)
 
         self.settings = SettingsRepository(db)
@@ -68,14 +69,14 @@ class SubscriptionRepository:
             raise RuntimeError('Subscription changes require an owning transaction')
         begin_write(self.db)
         self.check_owner('folder', identity)
-        if self.db.execute('SELECT 1 FROM feeds WHERE folder_id = %s LIMIT 1', (identity,)).fetchone():
+        if self.db.execute('SELECT 1 FROM feeds WHERE folder_id = %s AND NOT deleted LIMIT 1', (identity,)).fetchone():
             raise FolderConflict('folder_not_empty', 'Move or delete all feeds before deleting this folder.')
         self.clear_settings('folder', identity)
         self.db.execute('DELETE FROM folders WHERE id = %s', (identity,))
 
     @reading_value
-    def feeds(self, identity: str | None = None, *, folder: str | None = None, transport: str | None = None) -> list[dict[str, Any]]:
-        conditions, parameters = [], []
+    def feeds(self, identity: str | None = None, *, folder: str | None = None, transport: str | None = None, include_deleted: bool = False) -> list[dict[str, Any]]:
+        conditions, parameters = ([] if include_deleted else ['NOT deleted']), []
         if identity is not None:
             conditions.append('id = %s')
             parameters.append(identity)
@@ -93,7 +94,7 @@ class SubscriptionRepository:
         ids = sorted(identities)
         for start in range(0, len(ids), 400):
             batch = ids[start:start+400]
-            rows.extend(self.db.execute(f"SELECT {','.join(READER_FEED_COLUMNS)} FROM feeds WHERE id IN ( {','.join(('%s' for _ in batch))} ) ORDER BY sort_order", batch))
+            rows.extend(self.db.execute(f"SELECT {','.join(READER_FEED_COLUMNS)} FROM feeds WHERE NOT deleted AND id IN ( {','.join(('%s' for _ in batch))} ) ORDER BY sort_order", batch))
         return self._feeds(rows)
 
     def _feeds(self, rows: list[Row]) -> list[dict[str, Any]]:
@@ -143,6 +144,9 @@ class SubscriptionRepository:
         old = self.existing_feed(body.url)
         if old:
             return old
+        deleted=self.db.execute('SELECT id FROM feeds WHERE identity=%s AND deleted',(identity,)).fetchone()
+        if deleted:
+            return self.restore_feed(deleted['id'],body.folder,body.initial_history)
         title = body.title or urlsplit(body.url).hostname or 'RSS'
         identity_id = self.new_feed_id()
         from oko.storage import memberships
@@ -157,6 +161,17 @@ class SubscriptionRepository:
         self.history.configure(identity_id, body.initial_history)
         return next(feed for feed in self.feeds() if feed['identity'] == identity)
 
+    def restore_feed(self, identity: str, folder: str, history: Any) -> dict[str, Any]:
+        memberships.lock_graph(self.db)
+        folder_id=self.ensure_folder(folder)
+        if not self.db.execute('UPDATE feeds SET deleted=false,folder_id=%s WHERE id=%s AND deleted',(folder_id,identity)).rowcount:
+            raise ValueError('Фид уже восстановлен')
+        self.history.start(identity,history,restore=True)
+        self.db.execute("UPDATE initial_history SET selection=jsonb_set(selection::jsonb,'{restore_unread}','true'::jsonb)::text WHERE feed=%s",(identity,))
+        self.restore_discovery(identity)
+        source_changed(self.db)
+        return self.feeds(identity)[0]
+
     def new_feed_id(self) -> str:
         return str(uuid4())
 
@@ -169,6 +184,11 @@ class SubscriptionRepository:
             return
         table = {'folder': 'folders', 'feed': 'feeds'}.get(scope)
         if not table or not self.db.execute(f'SELECT id FROM {table} WHERE id = %s', (owner,)).fetchone():
+            raise LookupError('Настройка не найдена')
+
+    def check_visible_owner(self, scope: str, owner: str) -> None:
+        self.check_owner(scope, owner)
+        if scope=='feed' and not self.db.execute('SELECT 1 FROM feeds WHERE id=%s AND NOT deleted',(owner,)).fetchone():
             raise LookupError('Настройка не найдена')
 
     def feed_refresh_minutes(self) -> int:

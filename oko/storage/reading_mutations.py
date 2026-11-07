@@ -18,3 +18,8 @@ class ReadingMutations:
         if not self._store.db.in_transaction:
             raise RuntimeError('Reader completion requires an owning transaction')
         return self._store.viewed_set(identities)
+
+    def unviewed_set(self, identities: list[str]) -> None:
+        if not self._store.db.in_transaction:
+            raise RuntimeError('Reader completion requires an owning transaction')
+        self._store.unviewed_set(identities)

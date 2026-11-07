@@ -150,3 +150,27 @@ test('real HTTP completed feed stays selected, then hides and can be shown witho
  await expect(page.locator('#text')).toHaveText(text!);
  expect((await api('v3/subscriptions')).feeds).toHaveLength(2);
 });
+
+test('show read reveals viewed publications and hide read hides them again', {timeout:25000}, async t=>{
+ const {page,api,origin,token}=await productionReader(t);
+ await api('settings/oko/global','PATCH',{theses:false,prompt_filters:''});
+ await addSources(api, [['https://a.test/feed','Альфа','Новости']]);
+ await page.goto(origin+'/#token='+token);
+ const cards=page.locator('#cards button'), toggle=page.locator('#read-feeds-toggle');
+ await expect(cards).toHaveCount(1);
+ await cards.first().click();
+ await expect(page.locator('#text')).toContainText('Открылась библиотека');
+ await page.locator('#viewed').click();
+ await expect(cards).toHaveCount(0);
+ await toggle.click();
+ await expect(cards).toHaveCount(1);
+ await expect(page.locator('#message')).not.toContainText('Item removed');
+ await expect(cards.first()).toContainText('Read');
+ await page.screenshot({path:artifactPath('viewed-card.png')});
+ await cards.first().click({button:'right'});
+ await page.getByRole('menuitem',{name:'Mark as Unread'}).click();
+ await expect(cards.first()).not.toContainText('Read');
+ await toggle.click();
+ await expect(cards).toHaveCount(1);
+});
+

@@ -134,7 +134,7 @@ class ReadingQueries:
 
     @repository_access
     def check_owner(self, scope: str, owner: str) -> None:
-        return self._subscriptions().check_owner(scope, owner)
+        return self._subscriptions().check_visible_owner(scope, owner)
 
     @repository_access
     def effective(self, scope: str, owner: str, *, details: bool = True) -> dict[str, Any]:

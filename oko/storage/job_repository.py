@@ -470,9 +470,28 @@ class JobRepository:
         return row[0] if row else None
 
 
+    def suspend_removed_feed_discovery(self, feed: str) -> None:
+        job_write(self.store.db, """UPDATE jobs SET status='cancelled',generation=generation+1
+            WHERE kind='discover' AND item=%s AND status='pending' AND reason_message IS NULL
+            AND (reason_code IS NULL OR reason_code='') AND (retry_at IS NULL OR retry_at<=%s)""",(feed,self.store.wall_clock()))
+
+    def consume_restored_discovery(self, job: Job) -> bool:
+        return bool(job_write(self.store.db,"UPDATE jobs SET payload=payload-'restore_discover' WHERE id=%s AND payload->>'restore_discover'='true' RETURNING id",(job.id,)).fetchone())
+
+    def restore_feed_discovery(self, feed: str) -> None:
+        now=self.store.wall_clock()
+        job_write(self.store.db,"UPDATE jobs SET payload=jsonb_set(payload,'{restore_discover}','true'::jsonb) WHERE kind='discover' AND item=%s AND status='running'",(feed,))
+        job_write(self.store.db,"""UPDATE jobs SET status='pending',next=CASE WHEN retry_at>%s THEN next ELSE 0 END,
+            retry_at=CASE WHEN retry_at>%s THEN retry_at ELSE NULL END,
+            reason_message=CASE WHEN retry_at>%s THEN reason_message ELSE NULL END,
+            reason_code=CASE WHEN retry_at>%s THEN reason_code ELSE NULL END
+            WHERE kind='discover' AND item=%s AND status IN ('done','cancelled')""",(now,now,now,now,feed))
+
     def enqueue_discovery(self, feed: str, next_at: float = 0) -> None:
         if not self.store.db.transaction_depth:
             raise RuntimeError('Discovery scheduling requires an owning transaction')
+        if self.store.db.execute('SELECT 1 FROM feeds WHERE id=%s AND deleted',(feed,)).fetchone():
+            return
         # Monotonic deadlines belong to this process; persist their wall-clock
         # equivalent so a continuation keeps its remaining delay after restart.
         retry_at = self.store.wall_clock()+max(0,next_at-self.store.clock()) if next_at else None

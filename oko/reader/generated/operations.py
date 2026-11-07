@@ -64,6 +64,7 @@ RESPONSES: dict[tuple[str, str], Any] = {
 
 REQUESTS: dict[tuple[str, str], Any] = {
     ('POST', '/api/v3/cards/read'): models.CardReadRequest,
+    ('POST', '/api/v3/cards/unread'): models.CardReadRequest,
     ('POST', '/api/v3/collect'): models.CollectionTarget,
     ('POST', '/api/v3/command-observations'): models.CommandObservation,
     ('POST', '/api/v3/diagnostics'): models.ClientDiagnosticEvent,

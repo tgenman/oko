@@ -18,6 +18,7 @@ class ReadingContents(Protocol):
 class ReadingMutations(Protocol):
     def viewed(self, identity: str) -> bool: ...
     def viewed_set(self, identities: list[str]) -> bool: ...
+    def unviewed_set(self, identities: list[str]) -> None: ...
 
 
 class ReadingService:
@@ -39,6 +40,10 @@ class ReadingService:
         if members and not self._mutations().viewed_set(sorted(members)):
             raise RuntimeError('Selected material disappeared during viewing')
         return members
+
+    @repository_access
+    def unviewed_many(self, identities: list[str]) -> None:
+        self._mutations().unviewed_set(identities)
 
     def _contents(self, owner: str, scope: Literal['folder', 'feed']) -> FolderContents:
         reading = self._reading()

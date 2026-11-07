@@ -32,7 +32,7 @@ function Row({card,selected,onOpen,onArrow,onContext,preview,fetchMedia,showSour
   const longPress=useLongPress();
   const title=newsTitle(card.title);
   const kind=card.hidden?'Hidden':'';
-  const status=[kind,card.loading?'Loading':''].filter(Boolean).join(' · ');
+  const status=[kind,card.viewed?'Read':'',card.loading?'Loading':''].filter(Boolean).join(' · ');
   const sources=card.feed_title||card.feed_id||'';
   return <button type="button" className={'material-row '+(selected?'active ':'')+(preview?'news-range-preview':'')} data-card={card.id} aria-pressed={selected} aria-label={(kind?kind+' · ':'')+title+' · '+sources+' · '+date(card)+(card.external_attachment_kinds?.length?' · '+card.external_attachment_kinds.map(externalMediaLabel).join(' · '):'')} onClick={()=>onOpen(card)} {...longPress((x,y,trigger)=>onContext(card,x,y,trigger))} onKeyDown={event=>{if(event.key==='ContextMenu'||event.shiftKey&&event.key==='F10'){event.preventDefault();const rect=event.currentTarget.getBoundingClientRect();onContext(card,rect.left,rect.bottom,event.currentTarget);return;}if(['ArrowUp','ArrowDown'].includes(event.key)){event.preventDefault();onArrow(card.id,event.key==='ArrowDown'?1:-1);}}}><Preview card={card} fetchMedia={fetchMedia}/><span className="card-body"><span className="card-title" title={title}>{title}</span>{status&&<span className="card-kind">{status}</span>}{showSource&&<span className="card-meta"><span className="card-source" title={sources}>{sources}</span></span>}</span></button>;
 }

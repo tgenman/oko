@@ -273,6 +273,8 @@ class CollectionWorker:
                             CollectionApplication(current.jobs,current.publications,current.processing).apply(effects,job=job)
                             current.jobs.checkpoint('collection_after_result')
                             current.jobs.finish(job)
+                            if current.jobs.consume_restored_discovery(job):
+                                current.jobs.enqueue_discovery(feed)
                             current.jobs.checkpoint('collection_after_finish')
                             self._finish_collection(job, current, collection_error)
                             if outcome.continuation is not None:
