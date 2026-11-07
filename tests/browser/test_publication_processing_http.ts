@@ -28,6 +28,7 @@ test('latest publication keeps accepted theses after failed regeneration and hid
  await expect(r.page.locator('#settings-message')).toHaveText('Setting saved');
  await r.page.locator('#settings-close').click();
  await expect(summary).toHaveText(accepted!);
+ await expect(r.page.locator('#filter-status')).toContainText('Filter out of date');
  await expect(r.page.locator('#filter-status')).toContainText('Реклама');
  await r.page.screenshot({path:artifactPath('publication-processing-settings-retained.png')});
 });
