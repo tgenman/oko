@@ -14,7 +14,7 @@ from tests.support.app import create_app
 from tests.support.synthetic_source import SyntheticSource
 
 
-def test_local_theses_follow_inherited_prompt_and_delete_with_original(tmp_path: Path):
+def test_local_theses_follow_inherited_prompt_and_remain_with_original(tmp_path: Path):
     calls = []
     with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test', ai_transport=model_transport(calls)), headers=HEADERS) as client:
         item = setup_reader(client, theses=True)
@@ -30,9 +30,9 @@ def test_local_theses_follow_inherited_prompt_and_delete_with_original(tmp_path:
         assert 'Один тезис о просмотре.' in payload['messages'][0]['content']
         assert 'tools' not in payload
         assert client.post('/api/v3/materials/' + item + '/viewed').status_code == 200
-        assert client.get('/api/v3/publication/' + item).status_code == 404
-        assert not (tmp_path / 'content' / item).exists()
-        assert not (tmp_path / 'staging' / item).exists()
+        retained = client.get('/api/v3/publication/' + item).json()
+        assert retained['text'] == material['text']
+        assert retained['theses']['result'] == material['theses']['result']
 
 
 def test_unknown_remote_boundary_never_receives_forbidden_content(tmp_path: Path):
@@ -204,7 +204,7 @@ def test_reader_can_retry_theses_after_model_response_is_fixed(tmp_path: Path):
         assert client.post('/api/v3/materials/' + item + '/theses/retry').status_code == 200
         wait_for(client, lambda: client.get('/api/v3/publication/' + item).json()['theses']['result'])
         client.post('/api/v3/materials/' + item + '/viewed')
-        assert client.post('/api/v3/materials/' + item + '/theses/retry').status_code == 404
+        assert client.post('/api/v3/materials/' + item + '/theses/retry').status_code == 200
 
 
 def test_local_router_checks_selected_model_before_sending_forbidden_public_input(tmp_path: Path):

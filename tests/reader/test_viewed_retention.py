@@ -1,6 +1,7 @@
 """Viewing a publication preserves its readable contents."""
 
 from fastapi.testclient import TestClient
+import pytest
 
 from tests.support.presence import presence
 from tests.support.processes import wait_cards
@@ -278,7 +279,12 @@ def test_readding_deleted_feed_restores_saved_publication(tmp_path):
         assert client.delete('/api/v3/feeds/' + feed['id']).status_code == 200
         assert feed['id'] not in [item['id'] for item in client.get('/api/v3/subscriptions').json()['feeds']]
         assert feed['id'] not in [item['feed_id'] for item in client.get('/api/v3/status/details').json()['sources']]
+        assert client.get('/api/v3/settings/feed/' + feed['id']).status_code == 404
+        assert client.patch('/api/v3/settings/feed/' + feed['id'], json={'theses': True}).status_code == 404
+        assert client.patch('/api/v3/feeds/' + feed['id'], json={'title': 'Changed'}).status_code == 404
         assert client.get('/api/v3/publication/' + card['id']).status_code == 404
+        for action in ('viewed', 'retry', 'filter/retry', 'theses/retry', 'regenerate'):
+            assert client.post('/api/v3/materials/' + card['id'] + '/' + action).status_code == 404
         assert client.delete('/api/v3/folders/' + feed['folder_id']).status_code == 200
         restored = add_source(client, 'https://source.test/feed', 'Источник', 'Другая папка')
         assert restored['id'] == feed['id']
@@ -328,6 +334,73 @@ def test_deleting_feed_during_discovery_keeps_late_publications(tmp_path):
             wait_for(client, lambda: next((feed for feed in client.get('/api/v3/subscriptions').json()['feeds'] if feed['id'] == identity and feed['history']['state'] == 'complete'), None))
         finally:
             release.set()
+
+
+@pytest.mark.parametrize('restore', [False, True])
+def test_deleted_feed_keeps_retry_after_and_resumes_started_discovery(tmp_path, restore):
+    import httpx
+    import time
+    from datetime import datetime
+    from tests.support.reader import Clock, wait_for
+    from tests.support.rss import rss
+
+    clock = Clock()
+    clock.now = time.time()
+    calls, limited_calls, limited = [], [], [False]
+    def response(request):
+        if request.url.path == '/feed':
+            calls.append(clock.now)
+            if limited[0]:
+                limited_calls.append(clock.now)
+            return httpx.Response(429, headers={'Retry-After': '120'}) if limited[0] else httpx.Response(200, text=rss())
+        return httpx.Response(200, text='<article>Article</article>')
+
+    app = create_app(tmp_path, token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(response), **clock.options())
+    with TestClient(app, headers={'Authorization': 'Bearer test-token'}) as client:
+        presence(client, 'a')
+        verified = client.post('/api/v3/feeds/verify', json={'url':'https://source.test/feed'}).json()
+        body = {'url':verified['candidate']['url'], 'verification':verified['verification'], 'title':'Source', 'folder':'Folder', 'initial_history':{'mode':'count','count':'1'}}
+        limited[0] = True
+        feed = client.post('/api/v3/feeds', json=body).json()['id']
+        waiting = wait_for(client, lambda: next((work for work in client.get('/api/v3/status/details').json()['work'] if limited_calls and work['phase']=='waiting' and work['retry_at']), None))
+        deadline = datetime.fromisoformat(waiting['retry_at'].replace('Z', '+00:00')).timestamp()
+        assert deadline >= clock.now + 120
+        before = len(calls)
+        assert client.delete('/api/v3/feeds/' + feed).status_code == 200
+        if restore:
+            result = client.post('/api/v3/feeds', json=body)
+            assert result.status_code == 200 and result.json()['id'] == feed
+        clock.now = deadline - 1
+        time.sleep(.15)
+        assert len(calls) == before
+        clock.now = deadline + 1
+        wait_for(client, lambda: len(calls) > before)
+
+
+def test_restoring_feed_preserves_terminal_discovery_failure(tmp_path):
+    import httpx
+    from tests.support.reader import wait_for
+    from tests.support.rss import rss
+
+    denied = [False]
+    def response(request):
+        return httpx.Response(401) if denied[0] else httpx.Response(200, text=rss())
+
+    app = create_app(tmp_path, token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(response))
+    with TestClient(app, headers={'Authorization': 'Bearer test-token'}) as client:
+        presence(client, 'a')
+        verified = client.post('/api/v3/feeds/verify', json={'url':'https://source.test/feed'}).json()
+        body = {'url':verified['candidate']['url'], 'verification':verified['verification'], 'title':'Source', 'folder':'Folder', 'initial_history':{'mode':'count','count':'1'}}
+        denied[0] = True
+        feed = client.post('/api/v3/feeds', json=body).json()['id']
+        def failure():
+            return next((source for source in client.get('/api/v3/status/details').json()['sources'] if source['feed_id']==feed and source['state']=='unavailable'), None)
+        first = wait_for(client, failure)
+        assert client.delete('/api/v3/feeds/' + feed).status_code == 200
+        restored = client.post('/api/v3/feeds', json=body)
+        assert restored.status_code == 200 and restored.json()['id'] == feed
+        after = wait_for(client, failure)
+        assert after['message'] == first['message']
 
 
 def test_readding_deleted_telegram_channel_restores_identity(tmp_path):
@@ -592,3 +665,49 @@ def test_same_publication_in_another_feed_is_reported_as_conflict(tmp_path):
         status = wait_for(client, lambda: (value if VIDEO in (value := str(client.get('/api/v3/status/details').json())) and first['id'] in value and second['id'] in value else None))
         assert original['id'] in status
         assert [card['id'] for card in client.get('/api/v3/cards').json()['items']] == [original['id']]
+
+
+def test_unviewing_keeps_stale_theses_until_new_result_is_accepted(tmp_path):
+    import asyncio
+    import httpx
+    from threading import Event
+    from tests.support.codex import CodexService, configure_codex
+    from tests.support.reader import wait_for
+    from tests.support.rss import import_feed, rss, wait_cards as wait_rss_cards
+
+    hold, started, release = [False], Event(), Event()
+    class Model(CodexService):
+        async def complete(self, prompt, schema, directory, choice):
+            if hold[0]:
+                started.set()
+                await asyncio.to_thread(release.wait, 30)
+            return await super().complete(prompt, schema, directory, choice)
+
+    excerpt = ['Original excerpt']
+    def response(request):
+        return httpx.Response(200, text=rss().replace('Анонс статьи', excerpt[0]) if request.url.path == '/feed' else '<article>Body text</article>')
+
+    app = create_app(tmp_path, token='test-token', rss_enabled=True, codex_client=Model(), rss_transport=httpx.MockTransport(response))
+    with TestClient(app, headers={'Authorization': 'Bearer test-token'}) as client:
+        try:
+            feed = import_feed(client)
+            presence(client, 'a')
+            item = wait_rss_cards(client)[0]['id']
+            configure_codex(client)
+            assert client.patch('/api/v3/feeds/' + feed['id'], json={'public_ai': True}).status_code == 200
+            assert client.patch('/api/v3/settings/oko/global', json={'theses': True}).status_code == 200
+            url = '/api/v3/publication/' + item
+            previous = wait_for(client, lambda: client.get(url).json()['theses']['result'])
+            assert client.post('/api/v3/cards/read', json={'ids':[item]}).status_code == 204
+            excerpt[0] = 'Updated excerpt'
+            assert client.post('/api/v3/collect').status_code == 200
+            wait_for(client, lambda: client.get(url).json()['theses']['stale'])
+            hold[0] = True
+            assert client.post('/api/v3/cards/unread', json={'ids':[item]}).status_code == 204
+            assert started.wait(5)
+            current = client.get(url).json()['theses']
+            assert current['stale'] is True and current['result'] == previous
+            release.set()
+            wait_for(client, lambda: not client.get(url).json()['theses']['stale'])
+        finally:
+            release.set()

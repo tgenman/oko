@@ -8,10 +8,10 @@ from oko.storage.feed_facts import feed_facts, READER_FEED_COLUMNS
 import json
 import re
 import secrets
+import time
 from uuid import uuid4
 from oko.storage.transaction import begin_write
 from oko.storage import memberships
-import time
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlsplit
@@ -21,9 +21,10 @@ from oko.subscriptions.details import FeedDetails
 from oko.subscriptions.subscriptions import AddFeed, Overrides, FeedPatch, key, identify, FolderConflict, DEFAULT_FEED_REFRESH_MINUTES, DEFAULTS
 
 class SubscriptionRepository:
-    def __init__(self, db: Connection, fault: Callable[[str], None] = lambda _: None, *, wall_clock: Callable[[], float] = time.time) -> None:
+    def __init__(self, db: Connection, fault: Callable[[str], None] = lambda _: None, *, restore_discovery: Callable[[str], None], wall_clock: Callable[[], float] = time.time) -> None:
         self._feed_batch: dict[str,dict[str,Any]] | None=None
         self.db = db
+        self.restore_discovery = restore_discovery
         self.history = History(db)
 
         self.settings = SettingsRepository(db)
@@ -166,8 +167,7 @@ class SubscriptionRepository:
             self.db.execute('UPDATE initial_history SET scan_complete = 1 WHERE feed = %s', (identity,))
             self.history.start(identity, history, restore=True)
             self.db.execute("UPDATE initial_history SET selection = jsonb_set(selection::jsonb, '{restore_unread}', 'true'::jsonb)::text WHERE feed = %s", (identity,))
-            self.db.execute("UPDATE jobs SET payload=jsonb_set(payload::jsonb, '{restore_discover}', 'true'::jsonb) WHERE kind='discover' AND item=%s AND status='running'", (identity,))
-            self.db.execute("UPDATE jobs SET status='pending', next=0, retry_at=NULL, error=NULL, problem_code=NULL WHERE kind='discover' AND item=%s AND status IN ('done','cancelled','failed','unavailable')", (identity,))
+            self.restore_discovery(identity)
             source_changed(self.db)
         return self.feeds(identity)[0]
 
@@ -183,6 +183,11 @@ class SubscriptionRepository:
             return
         table = {'folder': 'folders', 'feed': 'feeds'}.get(scope)
         if not table or not self.db.execute(f'SELECT id FROM {table} WHERE id = %s', (owner,)).fetchone():
+            raise LookupError('Настройка не найдена')
+
+    def check_visible_owner(self, scope: str, owner: str) -> None:
+        self.check_owner(scope, owner)
+        if scope == 'feed' and not self.db.execute('SELECT 1 FROM feeds WHERE id=%s AND NOT deleted', (owner,)).fetchone():
             raise LookupError('Настройка не найдена')
 
     def feed_refresh_minutes(self) -> int:

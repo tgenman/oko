@@ -218,7 +218,7 @@ class ReaderApplication:
             self.require_work()
             current = self.require_store()
             with transaction(current.db):
-                if not self.jobs.retry_material(item):
+                if self.queries.material(item) is None or not self.jobs.retry_material(item):
                     raise ActionError('missing', 'Материал недоступен')
                 affected = {current.item_feed(item)}
                 self.jobs.invalidate(affected)
@@ -265,12 +265,7 @@ class ReaderApplication:
         async with self._actions:
             current = self.require_store()
             with transaction(current.db):
-                for identity in set(identities):
-                    if self.queries.result_stale(identity, 'filter'):
-                        current.db.execute("UPDATE publications SET processing_metadata=jsonb_set(processing_metadata::jsonb, '{filter,preserve_stale}', 'true'::jsonb)::text WHERE id=%s", (identity,))
-                current.set_processor_viewed(sorted(set(identities)), False)
-                for identity in set(identities):
-                    current.processing.reconcile_accepted_item(identity)
+                self.reading.unviewed_many(identities)
             current.processing.sync()
 
 
@@ -547,7 +542,7 @@ class ReaderApplication:
         async with self._actions:
             self.require_work()
             with transaction(self.require_store().db):
-                if not self.jobs.retry_filter(item):
+                if self.queries.material(item) is None or not self.jobs.retry_filter(item):
                     raise ActionError('missing', 'Фильтрация не включена')
                 self.jobs.invalidate()
             await self.jobs.cancel(invalidate=False)
@@ -561,7 +556,7 @@ class ReaderApplication:
         async with self._actions:
             self.require_work()
             with transaction(self.require_store().db):
-                if not self.jobs.retry_theses(item):
+                if self.queries.material(item) is None or not self.jobs.retry_theses(item):
                     raise ActionError('missing', 'Тезисы для материала не включены')
 
 
@@ -569,7 +564,7 @@ class ReaderApplication:
         async with self._actions:
             self.require_work()
             with transaction(self.require_store().db):
-                if not self.jobs.retry_theses(item):
+                if self.queries.material(item) is None or not self.jobs.retry_theses(item):
                     raise ActionError('missing', 'Результат недоступен для пересоздания')
 
 
@@ -581,8 +576,7 @@ class ReaderApplication:
             current = self.require_store()
             if not self._live():
                 raise ActionError('conflict', 'Откройте читатель для подключения', expected=True)
-            duplicates = self.connections.owners([(kind, str(address))])
-            active_duplicates = [identity for identity in duplicates if current.db.execute('SELECT 1 FROM feeds WHERE id=%s AND NOT deleted', (identity,)).fetchone()]
+            active_duplicates = self.connections.owners([(kind, str(address))], active_only=True)
             if any(identity!=feed_id for identity in active_duplicates):
                 raise TelegramConflict('duplicate_source', self.connections.duplicates(active_duplicates), 'Источник уже подключён')
             previous=self.queries.binding(feed_id) if feed_id else None

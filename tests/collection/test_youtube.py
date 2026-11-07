@@ -168,7 +168,7 @@ def test_normal_feed_waits_for_mode_and_missing_captions_never_reach_ai(tmp_path
         assert material['text'] == 'Проверенные субтитры.'
 
 
-def test_high_imported_youtube_gets_captions_theses_and_deletes_everything(tmp_path):
+def test_high_imported_youtube_keeps_captions_theses_and_media_after_viewing(tmp_path):
     captions, downloads, ai = Captions(), [], []
     kwargs = dict(token='test', rss_enabled=True, rss_transport=transport(downloads),
                   youtube_captions=captions, ai_transport=model_transport(ai))
@@ -188,14 +188,14 @@ def test_high_imported_youtube_gets_captions_theses_and_deletes_everything(tmp_p
         image = next(media['url'] for media in [media for media in material['media'] if media['role'] == 'attachment'] if media['kind']=='image')
         assert client.get(image).content == PNG
         assert client.post('/api/v3/materials/' + material['id'] + '/viewed').status_code == 200
-        assert client.get(image).status_code == 404
-        assert not list((tmp_path / 'content').rglob('*.*'))
+        assert client.get(image).content == PNG
+        assert client.get('/api/v3/publication/' + material['id']).json()['theses']['result'] == material['theses']['result']
     with TestClient(create_app(tmp_path, **kwargs), headers=HEADERS) as client:
         presence(client, 'reader')
         time.sleep(.2)
-        assert client.get('/api/v3/publication/'+material['id']).status_code==404
-        assert client.get(image).status_code==404
-        # A repeated Atom window can create a new Publication; the old one stays removed.
+        assert client.get('/api/v3/publication/'+material['id']).status_code == 200
+        assert client.get(image).content == PNG
+        assert read_all_cards(client, '/api/v3/cards') == []
 
 
 def test_codex_permission_and_ready_captions_survive_restart(tmp_path):
@@ -278,39 +278,34 @@ def test_late_captions_cannot_publish_after_reader_action(tmp_path, action):
             else:
                 assert client.put('/api/v3/power', json={'enabled':False}).status_code == 200
                 assert client.get('/api/v3/status').json()['work_allowed'] is False
-            assert captions.cancelled.wait(3)
+            if action != 'viewed':
+                assert captions.cancelled.wait(3)
+            else:
+                assert not captions.cancelled.is_set()
         finally:
             captions.release.set()
         # Wait for the whole collection attempt, including acceptance/cleanup,
         # rather than just the synthetic provider returning or a fixed sleep.
         assert captions.completed.wait(3)
-        with psycopg.connect(database_url(tmp_path), autocommit=True) as db:
-            if action == 'viewed':
-                # Deletion defers while the caption attempt owns a media path.
-                # Let its scheduled retry run after that attempt has released it.
-                clock.now += .2
-                wait_for(client, lambda: db.execute('SELECT id FROM publications WHERE id=%s', (item,)).fetchone() is None)
-            rows = db.execute('SELECT content,filtered_content,summarized_content FROM publications').fetchall()
-            assert all(late_text not in value for row in rows for value in row)
-            publication = db.execute('SELECT viewed FROM publications WHERE id=%s', (item,)).fetchone()
-            subtitles = db.execute("SELECT status,storage_key FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles'", (item,)).fetchall()
-            if action == 'viewed':
-                assert publication is None
-                assert db.execute('SELECT id FROM media_files WHERE publication_id=%s', (item,)).fetchall() == []
-            else:
-                assert publication == (0,)
+        if action == 'viewed':
+            retained = wait_for(client, lambda: value if late_text in (value := client.get('/api/v3/publication/' + item).json())['text'] else None)
+            assert retained['id'] == item
+            assert read_all_cards(client, '/api/v3/cards') == []
+            assert PNG in media_files().values()
+        else:
+            with psycopg.connect(database_url(tmp_path), autocommit=True) as db:
+                rows = db.execute('SELECT content,filtered_content,summarized_content FROM publications').fetchall()
+                assert all(late_text not in value for row in rows for value in row)
+                assert db.execute('SELECT viewed FROM publications WHERE id=%s', (item,)).fetchone() == (0,)
+                subtitles = db.execute("SELECT status,storage_key FROM media_files WHERE publication_id=%s AND resource_key='youtube:subtitles'", (item,)).fetchall()
                 assert len(subtitles) == 1
                 assert subtitles[0][0] != 'ready' and subtitles[0][1] is None
-        files = media_files()
-        assert all(late_text.encode() not in data for data in files.values())
-        assert files == ({} if action == 'viewed' else before_files)
-        if action == 'viewed':
-            assert read_all_cards(client, '/api/v3/cards') == []
-            assert client.get('/api/v3/publication/' + item).status_code == 404
-        elif action == 'stop':
-            assert client.get('/api/v3/status').json()['runtime_state'] == 'stopped'
-        else:
-            assert late_text not in client.get('/api/v3/publication/' + item).text
+            assert media_files() == before_files
+            if action == 'stop':
+                assert client.get('/api/v3/status').json()['runtime_state'] == 'stopped'
+            else:
+                assert late_text not in client.get('/api/v3/publication/' + item).text
+
 
 
 def test_owned_caption_worker_preserves_original_exception_in_debug(tmp_path, monkeypatch):

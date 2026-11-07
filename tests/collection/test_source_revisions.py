@@ -1,4 +1,5 @@
 """Revision lifecycle through the agreed reader API and external HTTP seam."""
+from tests.support.cards import read_publications_for_cards
 from oko.collection.contracts import DiscoveryResult, FetchResult
 from tests.support.presence import presence, close_presence
 import time
@@ -39,12 +40,13 @@ def test_rss_edit_keeps_only_latest_media_and_explicit_replay_can_return_viewed(
         assert client.get('/api/v3/publication/' + item).json()['text'].endswith('Версия 2')
         presence(client, 'test')
         client.post('/api/v3/materials/' + item + '/viewed')
-        assert client.get(next(a['url'] for a in [media for media in current['media'] if media['role'] == 'attachment'] if a['kind']=='image')).status_code == 404
-        assert not (tmp_path / 'content' / item).exists()
+        assert client.get(next(a['url'] for a in [media for media in current['media'] if media['role'] == 'attachment'] if a['kind']=='image')).content == PNG + b'2'
+        assert client.get('/api/v3/publication/' + item).status_code == 200
         revision[0] = 3
         client.post('/api/v3/collect')
         time.sleep(.15)
-        # Repeated RSS windows may rediscover the removed record.
+        assert client.get('/api/v3/publication/' + item).status_code == 200
+        assert not read_publications_for_cards(client, '/api/v3/cards')
 
 
 
@@ -73,7 +75,7 @@ def test_confirmed_remote_deletion_keeps_local_copy_but_absence_is_not_deletion(
         assert 'previous_versions' not in retained
         assert (retained['completeness']['state']=='complete') is True
         client.post('/api/v3/materials/' + item + '/viewed')
-        assert client.get('/api/v3/publication/' + item).status_code == 404
+        assert client.get('/api/v3/publication/' + item).json()['text'].endswith('Локальная копия')
 
 
 def test_interrupted_version_publish_keeps_old_until_fresh_retry(tmp_path):

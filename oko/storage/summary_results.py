@@ -47,7 +47,7 @@ class SummaryResults:
         if row is None:
             return None
         metadata=json.loads(row['processing_metadata']).get('summary',{})
-        if not metadata or (not row['viewed'] and (metadata.get('signature')!=self.signature(item) or metadata.get('source_url_stale') or metadata.get('source_title_stale'))):
+        if not metadata or (not row['viewed'] and not metadata.get('preserve_stale') and (metadata.get('signature')!=self.signature(item) or metadata.get('source_url_stale') or metadata.get('source_title_stale'))):
             return None
         result=json.loads(row['summarized_content'])
         identities={identity for point in result['points'] for identity in point['source_publication_ids']}

@@ -548,3 +548,17 @@ def test_single_feed_migration_preserves_owner_and_feedless_articles(connections
         migrate(db, MIGRATIONS)
         assert db.execute("SELECT id,feed_id FROM publications ORDER BY id").fetchall() == [('article',None),('p','a')]
         assert db.execute("SELECT to_regclass('feed_publications')").fetchone() == (None,)
+
+
+def test_cleanup_problem_migration_retires_only_unambiguous_legacy_owners(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:101])
+        db.execute("INSERT INTO feeds(id,identity) VALUES ('feed','feed')")
+        db.execute("INSERT INTO publications(id,platform,external_id,feed_id) VALUES ('delete:article','rss','external','feed')")
+        db.execute("INSERT INTO jobs(kind,item,feed_id,status) VALUES ('delete','article','feed:fetch','cancelled'),('fetch','delete:article',NULL,'done'),('delete','unknown','feed','cancelled')")
+        for ident, identity, operation in [('clear','job:work-delete:feed:delete:unknown','producer:status'), ('ambiguous','job:work-delete:feed:fetch:delete:article',None), ('unmatched','job:work-delete:elsewhere:delete:missing',None)]:
+            db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES (%s,%s,'background',%s,1)", (ident,identity,json.dumps({'code':'work-delete','operation':operation})))
+        migrate(db, MIGRATIONS)
+        rows=dict(db.execute("SELECT id,outcome FROM reader_problems WHERE id IN ('clear','ambiguous','unmatched')").fetchall())
+        assert rows == {'clear':'irrelevant','ambiguous':None,'unmatched':None}

@@ -16,6 +16,8 @@ class ReadingService:
     @repository_access
     def viewed(self, identity: str) -> set[str]:
         repository = self._storage()
+        if repository.material(identity) is None:
+            raise ActionError('missing', 'Материал не найден')
         members = set(repository.reading.members(identity)) | {identity}
         if not repository.viewed(identity):
             raise ActionError('missing', 'Материал не найден')
@@ -28,6 +30,10 @@ class ReadingService:
         if members and not repository.viewed_set(sorted(members)):
             raise RuntimeError('Selected material disappeared during viewing')
         return members
+
+    @repository_access
+    def unviewed_many(self, identities: list[str]) -> None:
+        self._storage().unviewed_set(identities)
 
     def _contents(self, owner: str, scope: Literal['folder', 'feed']) -> FolderContents:
         repository = self._storage()

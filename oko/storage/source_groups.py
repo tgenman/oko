@@ -35,7 +35,7 @@ def job_keys(store: 'Store', job_id: int, code: str | None = None) -> set[str]:
         LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
         LEFT JOIN publication_links l ON l.target_publication_id=coalesce(items.id,media_owner.id)
         LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id OFFSET 0) root ON true
-        WHERE j.id=%s AND coalesce(%s,j.problem_code) LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete')""",(code,job_id,code)).fetchall()
+        WHERE j.id=%s AND coalesce(%s,j.problem_code) LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses')""",(code,job_id,code)).fetchall()
     return {'job:'+r['problem_code']+':'+(r['owner'] or r['feed_id'] or r['item'] or '')+':'+r['kind'] for r in rows}
 
 
@@ -49,7 +49,7 @@ def job_keys_with_previous_feed(store: 'Store', job_id: int, feed: str | None) -
         LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
         LEFT JOIN publication_links l ON l.target_publication_id=coalesce(items.id,media_owner.id)
         LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id OFFSET 0) root ON true
-        WHERE j.id=%s AND j.problem_code LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete')""",(feed,job_id)).fetchall()
+        WHERE j.id=%s AND j.problem_code LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses')""",(feed,job_id)).fetchall()
     if not rows:return None
     kind=rows[0]['kind']
     return kind,{'job:'+row['problem_code']+':'+(row['owner'] or feed or row['item'] or '')+':'+kind for row in rows}
@@ -63,7 +63,7 @@ def job_keys_many(store: 'Store', job_ids: list[int]) -> dict[int,tuple[str,set[
         LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
         LEFT JOIN publication_links l ON l.target_publication_id=coalesce(items.id,media_owner.id)
         LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id OFFSET 0) root ON true
-        WHERE j.id=ANY(%s) AND j.problem_code LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete')""",(job_ids,)).fetchall()
+        WHERE j.id=ANY(%s) AND j.problem_code LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses')""",(job_ids,)).fetchall()
     groups: dict[int,tuple[str,set[str]]]={}
     for row in rows:
         if row['id'] not in groups:groups[row['id']]=(row['kind'],set())
@@ -82,8 +82,6 @@ def group_snapshot(store: 'Store', identity: str, kind: str, now: float, *, excl
             UNION SELECT g.code,g.owner,l.target_publication_id FROM source_groups g JOIN source_members m ON m.feed_id=g.owner
                 JOIN publications root ON root.id=m.publication_id
                 CROSS JOIN LATERAL (SELECT target_publication_id FROM publication_links WHERE source_publication_id=root.id OFFSET 0) l
-            UNION SELECT g.code,g.owner,c.item FROM source_groups g CROSS JOIN LATERAL (SELECT item FROM jobs WHERE kind='delete' AND payload::jsonb->>'cleanup_feed'=g.owner OFFSET 0) c
-                JOIN publications p ON p.id=c.item AND p.viewed=1
         ), targets AS MATERIALIZED (
             SELECT j.id FROM items i CROSS JOIN LATERAL (SELECT id FROM jobs WHERE kind=%s AND item=i.item AND problem_code=i.code AND problem_code LIKE 'source-%%' AND octet_length(problem_code)<=1000 OFFSET 0) j
             UNION SELECT j.id FROM items i CROSS JOIN LATERAL (SELECT id FROM media_files WHERE publication_id=i.item OFFSET 0) m
@@ -114,19 +112,19 @@ def group_snapshot(store: 'Store', identity: str, kind: str, now: float, *, excl
         selected.append((row,owner))
     if not selected:return None,timed,members
     first,first_owner=selected[0];code=first['problem_code']
-    title={'feed-delete':'Удаление фида не завершено','fetch':'Не удалось загрузить материал','download_media':'Не удалось загрузить вложение','delete':'Удаление не завершено'}.get(kind,'Не удалось обработать материал')
+    title={'fetch':'Не удалось загрузить материал','download_media':'Не удалось загрузить вложение'}.get(kind,'Не удалось обработать материал')
     result: dict[str,Any]=dict(id=identity,code=code,section='object',title=title,
-        consequence='Око продолжает попытки удаления.' if kind in ('delete','feed-delete') else 'Сохранённое содержимое остаётся доступным.',
+        consequence='Сохранённое содержимое остаётся доступным.',
         next_step='Включите обработку, чтобы повторить попытку.' if first['status']=='blocked' else 'Повторите загрузку вручную.' if first['status'] in ('done','failed') else 'Проверьте доступность источника.' if first['status']=='unavailable' else 'Око повторит попытку автоматически.',
         objects=[],action=None,operation='producer:'+kind,created_at=now,state='retrying' if first['status']=='running' or not first['error'] else 'current',finished_at=None,outcome=None,next_at=None)
-    if first['error'] and kind!='delete':result['reason']=first['error']
+    if first['error']:result['reason']=first['error']
     if code=='source-reconnect':result.update(section='action',next_step='Проверьте привязку источника; доступ не изменяется автоматически.')
     seen_objects: set[tuple[str,str | None]]=set()
     result['_source_codes']={row['problem_code'] for row,_ in selected}
     for row,owner in selected:
-        obj=dict(kind='feed' if kind=='feed-delete' else 'material',id=owner if kind=='feed-delete' else row['affected'])
+        obj=dict(kind='material',id=row['affected'])
         key=(obj['kind'],obj['id'])
-        if kind!='delete' and key not in seen_objects:
+        if key not in seen_objects:
             seen_objects.add(key)
             result['objects'].append(obj)
     return result,timed,members
@@ -188,7 +186,7 @@ def sync(store: 'Store', kind: str, keys: set[str], now: float, *, exclude: set[
             valid=isinstance(marked_body,dict) and marked_body.get('operation')=='producer:'+kind and marked_body.get('code') in allowed_codes and marked_body.get('code') in {code for code,_ in possible_pairs(canonical,kind)} and all(isinstance(marked_body.get(field),str) for field in ('title','section','consequence','next_step')) and marked_body.get('state') in ('current','retrying') and isinstance(marked_body.get('objects'),list)
             if valid:
                 objects=marked_body['objects']
-                valid=bool(objects or kind=='delete') and marked_body.get('action') is None and (current is not None or canonical in (evidence or {})) and all(isinstance(obj,dict) and set(obj)=={'kind','id'} and (obj.get('kind'),obj.get('id')) in allowed for obj in objects)
+                valid=bool(objects) and marked_body.get('action') is None and (current is not None or canonical in (evidence or {})) and all(isinstance(obj,dict) and set(obj)=={'kind','id'} and (obj.get('kind'),obj.get('id')) in allowed for obj in objects)
                 if valid:valid=len({(obj['kind'],obj['id']) for obj in objects})==len(objects)
             if not valid:
                 ordered_members=sorted(members)
@@ -216,7 +214,7 @@ def sync(store: 'Store', kind: str, keys: set[str], now: float, *, exclude: set[
                 # No adoption of old producer:status records or former owner keys.
                 fallback=(isinstance(body,dict) and body.get('operation')=='producer:'+kind
                     and body.get('code') in actual_codes and isinstance(body.get('objects'),list)
-                    and bool(body['objects'] or kind=='delete')
+                    and bool(body['objects'])
                     and all(isinstance(obj,dict) and set(obj)=={'kind','id'} and (obj.get('kind'),obj.get('id')) in allowed for obj in body['objects']))
             if fallback:row=occupied
             if occupied is not None and not fallback:
@@ -259,7 +257,7 @@ def sync_transition(store: 'Store', kind: str, before: set[str], after: set[str]
             allowed={pair for pair in evidence.get(previous,set()) if pair[0] in ('material','feed')}
             if still is not None:allowed.update((obj['kind'],obj['id']) for obj in still['objects'])
             objects=body.get('objects') if isinstance(body,dict) else None
-            valid=isinstance(body,dict) and body.get('code')==candidate['code'] and ('code',body.get('code')) in evidence.get(previous,set()) and body.get('code') in {code for code,_ in possible_pairs(previous,kind)} and all(isinstance(body.get(field),str) for field in ('title','section','consequence','next_step')) and body.get('state') in ('current','retrying') and body.get('action') is None and isinstance(objects,list) and (bool(objects) or kind=='delete') and all(isinstance(obj,dict) and set(obj)=={'kind','id'} and (obj.get('kind'),obj.get('id')) in allowed for obj in objects)
+            valid=isinstance(body,dict) and body.get('code')==candidate['code'] and ('code',body.get('code')) in evidence.get(previous,set()) and body.get('code') in {code for code,_ in possible_pairs(previous,kind)} and all(isinstance(body.get(field),str) for field in ('title','section','consequence','next_step')) and body.get('state') in ('current','retrying') and body.get('action') is None and isinstance(objects,list) and bool(objects) and all(isinstance(obj,dict) and set(obj)=={'kind','id'} and (obj.get('kind'),obj.get('id')) in allowed for obj in objects)
             if valid and isinstance(objects,list):valid=len({(obj['kind'],obj['id']) for obj in objects})==len(objects)
             if valid:
                 actual=target
@@ -309,7 +307,7 @@ def recover(store: 'Store') -> None:
     while True:
         with store.db:
             memberships.lock_graph(store.db)
-            query="""SELECT id FROM jobs WHERE kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code LIKE 'source-%%' AND source_event_owned=false"""
+            query="""SELECT id FROM jobs WHERE kind IN ('fetch','download_media','filter','theses') AND problem_code LIKE 'source-%%' AND source_event_owned=false"""
             if cursor is not None:query+=' AND id>%s'
             jobs=store.db.execute(query+' ORDER BY id LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
             if not jobs:break
@@ -446,14 +444,14 @@ def job_evidence_many(store: 'Store', rows: Sequence[tuple[int,str | None]]) -> 
             LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
             LEFT JOIN publication_links l ON l.target_publication_id=coalesce(items.id,media_owner.id)
             LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id OFFSET 0) root ON true
-            WHERE j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND coalesce(v.code,j.problem_code) LIKE 'source-%%'""",([r[0] for r in batch],[r[1] for r in batch])).fetchall()
+            WHERE j.kind IN ('fetch','download_media','filter','theses') AND coalesce(v.code,j.problem_code) LIKE 'source-%%'""",([r[0] for r in batch],[r[1] for r in batch])).fetchall()
         for row in found:
             owner=row['owner'] or row['feed_id'] or row['item'] or ''
             key='job:'+row['code']+':'+owner+':'+row['kind']
             objects=evidence.setdefault(key,set())
             objects.add(('code',row['code']))
-            value=owner if row['kind']=='feed-delete' else row['affected']
-            if row['kind']!='delete' and isinstance(value,str):objects.add(('feed' if row['kind']=='feed-delete' else 'material',value))
+            value=row['affected']
+            if isinstance(value,str):objects.add(('material',value))
     return evidence
 
 
@@ -466,13 +464,13 @@ def job_evidence_with_previous_feed(store: 'Store', job_id: int, feed: str | Non
         LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
         LEFT JOIN publication_links l ON l.target_publication_id=coalesce(items.id,media_owner.id)
         LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id OFFSET 0) root ON true
-        WHERE j.id=%s AND j.problem_code LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete')""",(feed,job_id)).fetchall()
+        WHERE j.id=%s AND j.problem_code LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses')""",(feed,job_id)).fetchall()
     evidence: dict[str,set[tuple[str,str]]]={}
     for row in rows:
         owner=row['owner'] or feed or row['item'] or ''
         key='job:'+row['problem_code']+':'+owner+':'+row['kind']
         objects=evidence.setdefault(key,set())
         objects.add(('code',row['problem_code']))
-        value=owner if row['kind']=='feed-delete' else row['affected']
-        if row['kind']!='delete' and isinstance(value,str):objects.add(('feed' if row['kind']=='feed-delete' else 'material',value))
+        value=row['affected']
+        if isinstance(value,str):objects.add(('material',value))
     return evidence

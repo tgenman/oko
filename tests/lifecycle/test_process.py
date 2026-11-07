@@ -4,8 +4,6 @@ from tests.support.processes import launch, connect, wait_cards, cleanup
 import json
 from pathlib import Path
 import time
-import httpx
-import pytest
 
 
 def test_restart_after_atomic_file_move(tmp_path: Path):
@@ -37,33 +35,21 @@ def test_discovery_transaction_survives_process_death(tmp_path: Path):
         cleanup(process)
 
 
-def test_pending_deletion_survives_process_death(tmp_path: Path):
-    process = launch(tmp_path, 'after_viewed_commit')
+def test_viewed_publication_survives_process_death(tmp_path: Path):
+    process = launch(tmp_path)
     try:
         with connect(tmp_path, process) as client:
             presence(client, 'a')
-            cards = wait_cards(client, 3)
-            item = cards[0]['id']
-            try:
-                client.post(f'/api/v3/materials/{item}/viewed')
-            except httpx.TransportError:
-                pass
-        assert process.wait(timeout=5) == 79
+            item = wait_cards(client, 3)[0]['id']
+            before = client.get(f'/api/v3/publication/{item}').json()
+            assert client.post(f'/api/v3/materials/{item}/viewed').status_code == 200
+            process.kill()
+        process.wait(timeout=5)
         process = launch(tmp_path)
         with connect(tmp_path, process) as client:
-            assert client.get(f'/api/v3/publication/{item}').status_code == 404
-            presence(client, 'a')
-            assert len(wait_cards(client, 2)) == 2
-            for _ in range(100):
-                if not any(w['phase']=='deleting' for w in client.get('/api/v3/status/details').json()['work']):
-                    break
-                time.sleep(.02)
-            assert not (tmp_path / 'content' / item).exists()
-            client.post('/api/v3/stop')
-        assert process.wait(timeout=5)==0
-        # Scan stable files after the process exits.
-        assert all('Око: первый материал'.encode() not in p.read_bytes()
-                       for p in tmp_path.rglob('*') if p.is_file())
+            assert client.get(f'/api/v3/publication/{item}').json()['text'] == before['text']
+            assert item not in [card['id'] for card in read_all_cards(client, '/api/v3/cards')]
+            assert item in [card['id'] for card in read_all_cards(client, '/api/v3/cards?show_read=true')]
     finally:
         cleanup(process)
 
@@ -122,34 +108,21 @@ def test_stop_exits_even_if_source_ignores_cancellation(tmp_path: Path):
         cleanup(process)
 
 
-@pytest.mark.parametrize('fault', ['after_viewed_commit', 'after_delete_files'])
-def test_folder_completion_survives_death_during_atomic_set_or_physical_delete(tmp_path: Path, fault):
-    process = launch(tmp_path, fault)
+def test_folder_completion_survives_process_death(tmp_path: Path):
+    process = launch(tmp_path)
     try:
         with connect(tmp_path, process) as client:
-            client.patch('/api/v3/settings/oko/global', json={})
             presence(client, 'a')
             originals = wait_cards(client, 3)
             preview = client.post('/api/v3/folders/fixture/completion/preview').json()
-            try:
-                client.post('/api/v3/folders/fixture/completion', json={'token': preview['token']})
-            except httpx.TransportError:
-                pass
-        assert process.wait(timeout=5) == 79
+            assert client.post('/api/v3/folders/fixture/completion', json={'token': preview['token']}).status_code == 200
+            process.kill()
+        process.wait(timeout=5)
         process = launch(tmp_path)
         with connect(tmp_path, process) as client:
             assert read_all_cards(client, '/api/v3/cards') == []
-            presence(client, 'b')
-            for _ in range(150):
-                if not any(w['phase']=='deleting' for w in client.get('/api/v3/status/details').json()['work']):
-                    break
-                time.sleep(.02)
-            assert not any(w['phase']=='deleting' for w in client.get('/api/v3/status/details').json()['work'])
+            assert {card['id'] for card in read_all_cards(client, '/api/v3/cards?show_read=true')} == {card['id'] for card in originals}
             for card in originals:
-                assert client.get('/api/v3/publication/' + card['id']).status_code == 404
-                assert not (tmp_path / 'content' / card['id']).exists()
-            client.post('/api/v3/collect')
-            time.sleep(.1)
-            assert read_all_cards(client, '/api/v3/cards') == []
+                assert client.get('/api/v3/publication/' + card['id']).status_code == 200
     finally:
         cleanup(process)

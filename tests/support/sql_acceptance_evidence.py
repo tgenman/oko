@@ -63,7 +63,7 @@ def background_evidence():
       viewed=cost(lambda:s.viewed(items[0]))
 
       with s.db:s.db.execute("UPDATE jobs SET status = 'pending' , next = 0 WHERE kind = 'discover' AND item = %s",(feeds[0],))
-      job=s.jobs.next_job(s.clock(),feeds=[feeds[0]],include_deletions=False)
+      job=s.jobs.next_job(s.clock(),feeds=[feeds[0]])
       assert job and job.kind=='discover'
       changed=cost(lambda:discovered(s,[publication_packet(Publication('new','https://example.org/new',999,teaser=Material('New','',captions='not_requested')))],'{}',job,feeds[0]))
       output['background'].append(dict(total=count*4,idle_processing_sql=idle,viewed_store_sql=viewed,new_publication_transaction_sql=changed))

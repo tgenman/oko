@@ -2652,7 +2652,7 @@ class Problems:
             LEFT JOIN media_files m ON jobs.kind='download_media' AND m.id=jobs.item
             LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
             LEFT JOIN publication_links link ON link.target_publication_id=coalesce(items.id,media_owner.id)
-            LEFT JOIN publications linked_root ON linked_root.id=link.source_publication_id AND linked_root.viewed=0
+            LEFT JOIN publications linked_root ON linked_root.id=link.source_publication_id
             WHERE (jobs.status IN ('pending','running','failed','unavailable','blocked')
                 OR (jobs.status='done' AND jobs.kind='fetch' AND jobs.error IS NOT NULL)) ORDER BY jobs.kind,jobs.item,linked_root.id""",params).fetchall())
     def processor_configuration_candidate(self, now: float, job_ids: list[int] | None = None, *, overrides: dict[int,dict[str,Any]] | None = None) -> dict[str, Any] | None:
@@ -2681,20 +2681,18 @@ class Problems:
             kind=row['kind']
             if kind=='download_media' and row['resource_key']=='youtube:subtitles' and paused:
                 continue
-            if row['viewed'] and kind not in ('delete','feed-delete','discover','read'):
-                continue
-            feed=(row['item'] if kind in ('discover','read','feed-delete') else row['resolved_feed_id'] or row['feed_id']) or row['item'] or ''
+            feed=(row['item'] if kind in ('discover','read') else row['resolved_feed_id'] or row['feed_id']) or row['item'] or ''
             if candidate is None:
                 candidate=dict(id='processor:configuration',code='processor-config',section='action',title='Требуется настройка обработчика',
-                    consequence='Око продолжает попытки удаления.' if kind in ('delete','feed-delete') else 'Сохранённое содержимое остаётся доступным.',
+                    consequence='Сохранённое содержимое остаётся доступным.',
                     next_step='Включите обработку, чтобы повторить попытку.' if row['status']=='blocked' else 'Повторите загрузку вручную.' if row['status'] in ('done','failed') else 'Проверьте доступность источника.' if row['status']=='unavailable' else 'Откройте настройки обработчика.',
                     objects=[],action=None,operation='producer:'+kind,created_at=now,
                     state='retrying' if row['status']=='running' or not row['error'] else 'current',finished_at=None,outcome=None,next_at=None)
-                if kind!='delete' and row['error']:
+                if row['error']:
                     candidate['reason']=row['error']
-            obj_kind='feed' if kind in ('discover','read','feed-delete') else 'material'
+            obj_kind='feed' if kind in ('discover','read') else 'material'
             obj_id=feed if obj_kind=='feed' else row['affected_item']
-            if kind!='delete' and isinstance(obj_id,str) and obj_id and (obj_kind,obj_id) not in seen:
+            if isinstance(obj_id,str) and obj_id and (obj_kind,obj_id) not in seen:
                 candidate['objects'].append(dict(kind=obj_kind,id=obj_id))
                 seen.add((obj_kind,obj_id))
         return candidate
@@ -2706,10 +2704,7 @@ class Problems:
             rows=self.db.execute("""UPDATE jobs j SET processor_visible=requested.visible,processor_caption=requested.caption FROM (
                 SELECT j.id,coalesce(j.problem_code='processor-config' AND EXISTS (SELECT 1 FROM media_files m WHERE j.kind='download_media' AND m.id=j.item AND m.resource_key='youtube:subtitles'),false) AS caption,coalesce(j.problem_code='processor-config' AND
                     (j.status IN ('pending','running','failed','unavailable','blocked')
-                        OR (j.kind='fetch' AND j.status='done' AND j.error IS NOT NULL))
-                    AND (j.kind IN ('delete','feed-delete','discover','read') OR CASE WHEN j.kind='download_media' THEN coalesce(
-                        (SELECT p.viewed FROM media_files m JOIN publications p ON p.id=m.publication_id WHERE m.id=j.item),0)=0 ELSE coalesce(
-                        (SELECT p.viewed FROM publications p WHERE p.id=j.item),0)=0 END),false) AS visible
+                        OR (j.kind='fetch' AND j.status='done' AND j.error IS NOT NULL)),false) AS visible
                 FROM jobs j WHERE j.id=ANY(%s) AND (j.processor_visible OR j.processor_caption OR j.problem_code='processor-config') OFFSET 0) AS requested
                 WHERE j.id=requested.id AND (j.processor_visible IS DISTINCT FROM requested.visible OR j.processor_caption IS DISTINCT FROM requested.caption) RETURNING j.id""",(job_ids[start:start+400],)).fetchall()
             if rows:
@@ -3002,7 +2997,7 @@ class Problems:
             source_keys={
                 'job:'+job['problem_code']+':'+(job['resolved_feed_id'] or job['feed_id'] or job['item'] or '')+':'+job['kind']
                 for job in jobs if isinstance(job['problem_code'],str) and job['problem_code'].startswith('source-')
-                and job['kind'] in ('fetch','download_media','filter','theses','delete','feed-delete')
+                and job['kind'] in ('fetch','download_media','filter','theses')
             }
             ordered_source_keys=sorted(source_keys)
             for start in range(0,len(ordered_source_keys),400):
@@ -3021,7 +3016,7 @@ class Problems:
                     candidate,_,_=source_groups.group_snapshot(self.store,canonical,kind,now)
                     if candidate is None or len(candidate.get('_source_codes',set()))!=1 or body.get('code') not in candidate.get('_source_codes',set()) or not isinstance(body.get('objects'),list):continue
                     allowed={(obj.get('kind'),obj.get('id')) for obj in candidate['objects']}
-                    if (body['objects'] or kind=='delete') and all(isinstance(obj,dict) and set(obj)=={'kind','id'} and (obj.get('kind'),obj.get('id')) in allowed for obj in body['objects']) and len({(obj['kind'],obj['id']) for obj in body['objects']})==len(body['objects']):source_owned.add(canonical)
+                    if body['objects'] and all(isinstance(obj,dict) and set(obj)=={'kind','id'} and (obj.get('kind'),obj.get('id')) in allowed for obj in body['objects']) and len({(obj['kind'],obj['id']) for obj in body['objects']})==len(body['objects']):source_owned.add(canonical)
         for job in jobs:
             resolved_feed = job['item'] if job['kind']=='read' else job['resolved_feed_id'] or job['feed_id']
             code = job['problem_code']
@@ -3035,7 +3030,7 @@ class Problems:
                 continue
             if code in ('codex-choice', 'ai-permission'):
                 continue
-            if job['item'] in (None,'') and job['kind'] in ('fetch','filter','theses','download_media','delete','feed-delete') and code not in ('youtube-admission','processor-config'):
+            if job['item'] in (None,'') and job['kind'] in ('fetch','filter','theses','download_media') and code not in ('youtube-admission','processor-config'):
                 continue
             if job['kind']=='download_media' and job['resource_key']=='youtube:subtitles':
                 if youtube['paused'] or code is None and youtube['next_at']>now:
@@ -3048,30 +3043,28 @@ class Problems:
             feed = resolved_feed or job['item'] or ''
             if code in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch') and feed in profile_feeds:
                 continue
-            if job['viewed'] and job['kind'] not in ('delete','feed-delete'):
-                continue
             shared = code in ('processor-config', 'ai-permission') or code.startswith('source-')
             identity = 'job:' + code + ':' + feed + ':' + job['kind'] + ('' if shared else ':' + job['item'])
             if code.startswith('source-') and identity in source_owned:continue
             if code == 'processor-config':
                 identity = 'processor:configuration'
             settings_action = code in ('processor-config', 'ai-permission')
-            obj = None if job['affected_item'] in (None,'') and job['kind'] not in ('discover','read','feed-delete') else dict(kind='feed' if job['kind'] in ('discover', 'read', 'feed-delete') else 'material', id=feed if job['kind'] in ('discover', 'read', 'feed-delete') else job['affected_item'])
+            obj = None if job['affected_item'] in (None,'') and job['kind'] not in ('discover','read') else dict(kind='feed' if job['kind'] in ('discover', 'read') else 'material', id=feed if job['kind'] in ('discover', 'read') else job['affected_item'])
             group_key: str | tuple[str,str] | tuple[str,str,str] = identity if code=='processor-config' else (identity,job['kind']) if shared else (identity,job['kind'],job['item'])
             if group_key not in groups:
                 kind = job['kind']
-                title = {'feed-delete':'Удаление фида не завершено', 'fetch':'Не удалось загрузить материал', 'download_media':'Не удалось загрузить вложение', 'discover':'Не удалось обновить источник',
-                         'read':'Не удалось подтвердить чтение в Telegram', 'delete':'Удаление не завершено'}.get(kind, 'Не удалось обработать материал')
+                title = {'fetch':'Не удалось загрузить материал', 'download_media':'Не удалось загрузить вложение', 'discover':'Не удалось обновить источник',
+                         'read':'Не удалось подтвердить чтение в Telegram'}.get(kind, 'Не удалось обработать материал')
                 if settings_action:
                     title = 'Требуется настройка обработчика'
                 action = None
                 groups[group_key] = dict(id=identity,code=code,section='action' if settings_action else 'object',title=title,
-                    consequence='Сохранённое содержимое остаётся доступным.' if kind not in ('delete','feed-delete') else 'Око продолжает попытки удаления.',
+                    consequence='Сохранённое содержимое остаётся доступным.',
                     next_step='Включите обработку, чтобы повторить попытку.' if job['status']=='blocked' else 'Повторите загрузку вручную.' if job['status'] in ('done','failed') else 'Проверьте доступность источника.' if job['status']=='unavailable' else 'Око повторит попытку автоматически.' if not settings_action else 'Откройте настройки обработчика.',
                     objects=[],action=action,operation='producer:'+kind,created_at=now,state='retrying' if job['status'] == 'running' or not job['error'] else 'current',finished_at=None,outcome=None,next_at=None)
                 if not shared:
                     groups[group_key]['_status_job_target'] = job['item']
-                if kind != 'delete' and job['error']:
+                if job['error']:
                     groups[group_key]['reason'] = job['error']
                 if code == 'source-reconnect':
                     groups[group_key].update(section='action', next_step='Проверьте привязку источника; доступ не изменяется автоматически.', action=None)
@@ -3079,7 +3072,7 @@ class Problems:
             legacy_identity = 'job:' + code + ':' + legacy_feed + ':' + job['kind'] + ('' if shared else ':' + job['item'])
             if identity.startswith('job:') and legacy_identity != identity and not code.startswith('source-'):
                 groups[group_key].setdefault('_legacy_ids',set()).add(legacy_identity)
-            if job['kind'] != 'delete' and obj is not None and obj not in groups[group_key]['objects']:
+            if obj is not None and obj not in groups[group_key]['objects']:
                 groups[group_key]['objects'].append(obj)
         if youtube['paused'] and (scope_items is not None or not getattr(self.store,'youtube_admission_ready',False)):
             owners={job['affected_item'] for job in jobs if job['status'] in ('pending','running')

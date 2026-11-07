@@ -40,11 +40,11 @@ class CollectionStatus:
         from oko.storage import memberships
         memberships.lock_graph(self.db)
         changed = self.db.execute("""UPDATE jobs SET feed_id=%s,collection_attempt=%s::jsonb WHERE id=%s
-            AND CASE WHEN kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND problem_code LIKE 'source-%%' AND feed_id IS DISTINCT FROM %s
+            AND CASE WHEN kind IN ('fetch','download_media','filter','theses') AND problem_code LIKE 'source-%%' AND feed_id IS DISTINCT FROM %s
                 THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END
             RETURNING OLD.feed_id AS previous_feed,OLD.problem_code AS previous_code,kind,item""",(feed,json.dumps(data),job,feed)).fetchone()
         if changed is None:raise LookupError('Collection job no longer exists')
-        if changed['kind'] in ('fetch','download_media','filter','theses','delete','feed-delete') and (changed['previous_code'] or '').startswith('source-') and changed['previous_feed']!=feed:
+        if changed['kind'] in ('fetch','download_media','filter','theses') and (changed['previous_code'] or '').startswith('source-') and changed['previous_feed']!=feed:
             from oko.storage import source_groups
             old=source_groups.job_keys_with_previous_feed(self.store,job,changed['previous_feed'])
             if old:

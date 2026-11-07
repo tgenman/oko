@@ -88,7 +88,7 @@ class Store:
             self.db = PostgresConnection(database_url, clock=clock, wall_clock=wall_clock)
             self.db.claim_store()
             self.jobs = JobRepository(self)
-            self.subscriptions = SubscriptionRepository(self.db, self.fault, wall_clock=self.wall_clock)
+            self.subscriptions = SubscriptionRepository(self.db, self.fault, restore_discovery=self.jobs.restore_feed_discovery, wall_clock=self.wall_clock)
             self.publications = Publications(self)
             self.media = MediaFiles(self)
             self.collection_status = CollectionStatus(self.db, self.clock, self.wall_clock,self)
@@ -463,10 +463,10 @@ class Store:
         return int(expect_row(self.db.execute(f"""SELECT count(*) FROM unnest(%s::text[]) f(id)
             WHERE NOT EXISTS (SELECT 1 FROM jobs j
                 WHERE j.item=f.id
-                    AND j.status IN ('pending','running') AND j.kind IN ('discover','feed-delete') OFFSET 0)
+                    AND j.status IN ('pending','running') AND j.kind='discover' OFFSET 0)
             AND NOT EXISTS (SELECT 1 FROM ({owned_ids('= f.id')}) owner WHERE EXISTS (
                 SELECT 1 FROM jobs j WHERE j.item=owner.id AND j.status IN ('pending','running')
-                    AND j.kind IN ('fetch','filter','theses','delete') OFFSET 0) OFFSET 0)""",
+                    AND j.kind IN ('fetch','filter','theses') OFFSET 0) OFFSET 0)""",
             (feeds,)).fetchone())[0])
 
 
@@ -594,12 +594,24 @@ class Store:
                 self.subscriptions.details.record(feed, 'marked_read')
         return True
 
+    def unviewed_set(self, identities: list[str]) -> None:
+        from oko.storage.reader_facts import ReaderFacts
+        facts = ReaderFacts(lambda: self)
+        selected = [row['id'] for row in self.db.execute('SELECT p.id FROM publications p JOIN feeds f ON f.id=p.feed_id WHERE NOT f.deleted AND p.id=ANY(%s)', (sorted(set(identities)),))]
+        for identity in selected:
+            for kind, section in (('filter', 'filter'), ('theses', 'summary')):
+                if facts.result_stale(identity, kind):
+                    self.db.execute("UPDATE publications SET processing_metadata=jsonb_set(processing_metadata::jsonb, %s::text[], 'true'::jsonb)::text WHERE id=%s", ([section, 'preserve_stale'],identity))
+        self.set_processor_viewed(selected, False)
+        for identity in selected:
+            self.processing.reconcile_accepted_item(identity)
+
     def remove_feed(self, feed: str) -> None:
         self.subscriptions.check_owner('feed', feed)
         with self.db:
             membership_graph.lock_graph(self.db)
             self.db.execute('UPDATE feeds SET deleted = true WHERE id = %s', (feed,))
-            job_write(self.db, "UPDATE jobs SET status='cancelled', generation=generation+1 WHERE kind='discover' AND item=%s AND status='pending'", (feed,))
+            self.jobs.suspend_removed_feed_discovery(feed)
             source_changed(self.db)
     @reading_value
     def original(self, item: str) -> tuple[dict[str, Any], str]:
@@ -698,7 +710,7 @@ class Store:
             # the completed archive even when it has no problems.
             condition = """jobs.id IN (SELECT id FROM jobs WHERE status IN ('pending','running') OR error IS NOT NULL
                 UNION SELECT id FROM jobs WHERE problem_code IS NOT NULL OR error IS NOT NULL)"""
-        rows = self.db.execute(f"SELECT jobs . kind , jobs . status , jobs . problem_code , count ( * ) AS count , CASE WHEN jobs . kind IN ( 'discover' , 'feed-delete' ) THEN NULLIF ( jobs . item , '' ) WHEN jobs . kind = 'download_media' THEN ( SELECT {owner_expr('i')} FROM media_files m JOIN publications i ON i . id = m . publication_id WHERE m . id = jobs . item ) ELSE {owner_expr('items')} END AS feed , min ( jobs . next ) AS next , sum ( CASE WHEN jobs . error IS NOT NULL THEN 1 ELSE 0 END ) AS errors FROM jobs LEFT JOIN publications items ON items . id = jobs . item WHERE {condition} GROUP BY jobs . kind , jobs . status , jobs . problem_code , feed ORDER BY min ( jobs . id )").fetchall()
+        rows = self.db.execute(f"SELECT jobs . kind , jobs . status , jobs . problem_code , count ( * ) AS count , CASE WHEN jobs . kind = 'discover' THEN NULLIF ( jobs . item , '' ) WHEN jobs . kind = 'download_media' THEN ( SELECT {owner_expr('i')} FROM media_files m JOIN publications i ON i . id = m . publication_id WHERE m . id = jobs . item ) ELSE {owner_expr('items')} END AS feed , min ( jobs . next ) AS next , sum ( CASE WHEN jobs . error IS NOT NULL THEN 1 ELSE 0 END ) AS errors FROM jobs LEFT JOIN publications items ON items . id = jobs . item WHERE {condition} AND jobs.kind NOT IN ('delete','feed-delete') GROUP BY jobs . kind , jobs . status , jobs . problem_code , feed ORDER BY min ( jobs . id )").fetchall()
         now, wall = self.clock(), self.wall_clock()
         feed_ids = sorted({row['feed'] for row in rows if row['feed']})
         deleted = {row['id'] for row in self.db.execute('SELECT id FROM feeds WHERE deleted AND id=ANY(%s)', (feed_ids,))} if feed_ids else set()

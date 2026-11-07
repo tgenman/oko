@@ -106,4 +106,5 @@ MIGRATIONS = (
     Migration(99, 'retire-demo-source', (Path(__file__).parent / 'postgres' / '099-retire-demo-source.sql').read_text()),
     Migration(100, 'soft-deleted-feeds', (Path(__file__).parent / 'postgres' / '100-soft-deleted-feeds.sql').read_text()),
     Migration(101, 'single-publication-feed', (Path(__file__).parent / 'postgres' / '101-single-publication-feed.sql').read_text()),
+    Migration(102, 'retire-cleanup-problems', (Path(__file__).parent / 'postgres' / '102-retire-cleanup-problems.sql').read_text()),
 )

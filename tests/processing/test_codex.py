@@ -24,8 +24,7 @@ def test_codex_reports_unavailable_before_any_content_is_sent(tmp_path: Path, mo
         assert blocked['text'].startswith('Это тестовая публикация.')
         assert not list(tmp_path.glob('content/*/1/theses.md'))
         assert client.post('/api/v3/materials/' + item + '/viewed').status_code == 200
-        assert client.get('/api/v3/publication/' + item).status_code == 404
-        assert not (tmp_path / 'content' / item).exists()
+        assert client.get('/api/v3/publication/' + item).status_code == 200
         assert set(record.read_text().splitlines()) == {'--version'}
 
 
@@ -117,7 +116,7 @@ def test_probe_output_limit_does_not_expose_diagnostics(tmp_path, monkeypatch):
         assert response.json()['state']=='unavailable'
 
 
-def test_allowed_codex_theses_use_contract_and_are_deleted(tmp_path):
+def test_allowed_codex_theses_use_contract_and_are_retained(tmp_path):
     service = CodexService()
     with TestClient(create_app(tmp_path, source=SyntheticSource(), token='test', codex_client=service), headers=HEADERS) as client:
         configure_codex(client)
@@ -132,9 +131,7 @@ def test_allowed_codex_theses_use_contract_and_are_deleted(tmp_path):
         assert 'Один тезис' in service.inputs[0]
         assert '"generation":' in service.inputs[0]
         assert client.post('/api/v3/materials/' + item + '/viewed').status_code == 200
-        assert client.get('/api/v3/publication/' + item).status_code == 404
-        assert not (tmp_path / 'content' / item).exists()
-        assert not (tmp_path / 'staging' / item).exists()
+        assert client.get('/api/v3/publication/' + item).json()['theses']['result'] == material['theses']['result']
 
 
 def test_codex_refuses_unknown_source_and_keeps_original(tmp_path):
@@ -197,12 +194,15 @@ def test_completed_codex_theses_survive_restart_without_another_call(tmp_path):
         assert len(service.inputs)==count
 
 
-def test_codex_cancellation_on_view_keeps_late_result_deleted(tmp_path):
+def test_codex_result_started_before_view_is_saved(tmp_path):
     import asyncio
     import threading
     entered, release = threading.Event(), threading.Event()
+    items = []
     class Held(CodexService):
         async def complete(self, prompt, schema, directory, choice):
+            import json
+            items.append(json.loads(prompt.split('\n',1)[1])['sources'][0]['id'])
             entered.set()
             try:
                 while not release.is_set():
@@ -218,13 +218,13 @@ def test_codex_cancellation_on_view_keeps_late_result_deleted(tmp_path):
         client.patch('/api/v3/feeds/fixture',json={'public_ai':True})
         client.patch('/api/v3/settings/oko/global',json={'processor':'codex','theses':True})
         assert entered.wait(2)
+        item = items[0]
         try:
             assert client.post('/api/v3/materials/'+item+'/viewed').status_code==200
         finally:
             release.set()
-        assert client.get('/api/v3/publication/'+item).status_code==404
-        assert not (tmp_path/'content'/item).exists()
-        assert not (tmp_path/'staging'/item).exists()
+        saved = wait_for(client, lambda: client.get('/api/v3/publication/'+item).json()['theses']['result'])
+        assert saved['points'][0] == 'Просмотрено удаляет содержимое.'
 
 
 def test_missing_login_is_reported_as_authorization_in_material(tmp_path,monkeypatch):

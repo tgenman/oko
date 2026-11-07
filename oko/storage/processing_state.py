@@ -61,7 +61,7 @@ class ProcessingRepository:
 
     def satisfied(self, item: str, kind: Kind) -> bool:
         row = self.store.db.execute('SELECT processing_metadata FROM publications WHERE id=%s', (item,)).fetchone()
-        if kind == 'filter' and row and json.loads(row[0]).get('filter', {}).get('preserve_stale'):
+        if row and json.loads(row[0]).get('filter' if kind == 'filter' else 'summary', {}).get('preserve_stale'):
             return False
         return self.store.filters.read(item)['status']=='done' if kind=='filter' else self.store.processing.theses.read(item) is not None
 

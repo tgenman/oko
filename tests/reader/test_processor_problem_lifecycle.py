@@ -74,6 +74,22 @@ def test_mark_viewed_keeps_processor_problem_without_status_get(tmp_path,postgre
     finally:store.db.close()
 
 
+
+def test_processor_problem_created_after_viewing_remains_visible(tmp_path,postgres_url):
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
+            store.db.execute("INSERT INTO publications(id,platform,external_id,viewed,members,feed_id) VALUES ('item','rss','item',1,'[]','feed')")
+            job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('filter','item','running',1) RETURNING id").fetchone()[0]
+        store.jobs.retry(Job(job_id,'filter','item',1),1,'missing',code='processor-config')
+        row=store.db.execute("SELECT body FROM reader_problems WHERE identity='processor:configuration' AND finished IS NULL").fetchone()
+        assert row is not None
+        candidate=store.problems.processor_configuration_candidate(store.wall_clock())
+        assert candidate is not None
+        assert {'kind': 'material', 'id': 'item'} in candidate['objects']
+    finally:store.db.close()
+
 def test_http_etag_after_caption_deadline_without_host_tick(tmp_path,postgres_url):
     from fastapi.testclient import TestClient
     from tests.support.app import create_app

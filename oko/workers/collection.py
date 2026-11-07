@@ -164,7 +164,7 @@ class CollectionWorker:
         if job.kind == 'download_media':
             await self._execute_media(job,capture)
             return
-        diagnostic_materials.set((job.item,) if job.kind in ('fetch','delete') else ())
+        diagnostic_materials.set((job.item,) if job.kind == 'fetch' else ())
         capture_scope.set(secrets.token_hex(16))
         current: Store | None = None
         feed = ''
@@ -211,8 +211,7 @@ class CollectionWorker:
                             current.jobs.apply_collection(effects)
                             current.jobs.checkpoint('collection_after_result')
                             current.jobs.finish(job)
-                            rescan=current.db.execute("UPDATE jobs SET payload=payload-'restore_discover' WHERE id=%s AND payload->>'restore_discover'='true' RETURNING id", (job.id,)).fetchone()
-                            if rescan:
+                            if current.jobs.consume_restored_discovery(job):
                                 current.jobs.enqueue_discovery(feed)
                             current.jobs.checkpoint('collection_after_finish')
                             self._finish_collection(job, current, collection_error)
@@ -455,12 +454,11 @@ class CollectionWorker:
                 if lane=='captions':
                     feeds=caption_feeds
                 dependencies=self._dependency_feeds if lane in ('common','media') else []
-                job = self.execution._store.jobs.next_job(now, deleting_only=not (feeds or dependencies),
-                                           feeds=feeds, include_deletions=lane == 'common', media_only=media_lane,captions_only=lane=='captions',dependency_feeds=dependencies)
+                job = self.execution._store.jobs.next_job(now, feeds=feeds, media_only=media_lane,captions_only=lane=='captions',dependency_feeds=dependencies) if feeds or dependencies else None
                 if job:
                     if media_lane:
                         self.jobs._media_jobs[lane] = job
-                    self.jobs._lane_feeds[lane] = job.item if job.kind in ('discover', 'read', 'feed-delete') else self.service.feed(job.item)
+                    self.jobs._lane_feeds[lane] = job.item if job.kind in ('discover', 'read') else self.service.feed(job.item)
                     self.jobs._lanes[lane] = asyncio.create_task(self._execute(job))
 
 

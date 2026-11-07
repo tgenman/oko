@@ -25,6 +25,7 @@ class SubscriptionService:
     @repository_access
     def update_settings(self, scope: str, owner: str, patch: Overrides) -> SettingsChange:
         repository = self._storage()
+        repository.subscriptions.check_visible_owner(scope, owner)
         previous = repository.subscriptions.effective(scope, owner)
         value = repository.subscriptions.update_settings(scope, owner, patch)
         if patch.model_fields_set & {'filter_enabled', 'prompt_filters'}:
@@ -82,11 +83,15 @@ class SubscriptionService:
 
     @repository_access
     def pause_history(self, identity: str, paused: bool) -> dict[str, Any]:
-        return self._storage().pause_history(identity, paused)
+        store = self._storage()
+        store.subscriptions.check_visible_owner('feed', identity)
+        return store.pause_history(identity, paused)
 
     @repository_access
     def change_history(self, identity: str, selection: 'InitialHistory | None') -> dict[str, Any]:
-        return self._storage().change_history(identity, selection)
+        store = self._storage()
+        store.subscriptions.check_visible_owner('feed', identity)
+        return store.change_history(identity, selection)
 
     @repository_access
     def existing_feed(self, url: str) -> dict[str, Any] | None:

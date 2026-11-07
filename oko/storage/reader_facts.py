@@ -57,11 +57,29 @@ class ReaderFacts:
         return {row['id']: (row, bindings.get(row['id'])) for row in rows}
 
     def avatar(self, feed: str, revision: str) -> tuple[bytes, str] | None:
-        row=self.storage().db.execute("SELECT avatar_image AS image, avatar_mime AS mime FROM feeds WHERE id = %s AND avatar_digest = %s AND connection != 'deleting'", (feed, revision)).fetchone()
+        row=self.storage().db.execute("SELECT avatar_image AS image, avatar_mime AS mime FROM feeds WHERE id = %s AND avatar_digest = %s AND NOT deleted", (feed, revision)).fetchone()
         return (bytes(row['image']), row['mime']) if row else None
 
     def material_feeds(self, identities: set[str]) -> dict[str, str]:
         return {row['id']: row['feed_id'] for row in self.storage().db.execute(f"SELECT i.id , {owner_expr('i')} AS feed_id FROM publications i WHERE i.feed_id IS NOT NULL AND i.id IN ( {','.join(('%s' for _ in identities))} )", tuple(identities))} if identities else {}
+
+    def hidden_problem_objects(self, materials: set[str], feeds: set[str]) -> tuple[set[str], set[str]]:
+        db = self.storage().db
+        hidden_materials = {row['id'] for row in db.execute('SELECT p.id FROM publications p JOIN feeds f ON f.id=p.feed_id WHERE f.deleted AND p.id=ANY(%s)', (sorted(materials),))} if materials else set()
+        hidden_feeds = {row['id'] for row in db.execute('SELECT id FROM feeds WHERE deleted AND id=ANY(%s)', (sorted(feeds),))} if feeds else set()
+        return hidden_materials, hidden_feeds
+
+    def result_stale(self, identity: str, kind: str) -> bool:
+        import json
+        store = self.storage()
+        row = material_read.item(store.db, identity)
+        if row is None:
+            return False
+        metadata = json.loads(row['processing_metadata']).get('filter' if kind == 'filter' else 'summary', {})
+        if not metadata or not (row['viewed'] or metadata.get('preserve_stale')):
+            return False
+        signature = store.filters.signature(identity) if kind == 'filter' else store.processing.theses.signature(identity)
+        return bool(metadata.get('signature') != signature or metadata.get('source_url_stale') or metadata.get('source_title_stale'))
 
     def linked_preview(self, identity: str) -> dict[str, Any] | None:
         store=self.storage()

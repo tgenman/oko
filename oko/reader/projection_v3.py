@@ -188,8 +188,6 @@ def work(jobs: list['WorkSummary']) -> list[wire.WorkEntry]:
             result.append(wire.WorkEntry(wire.WorkWaiting(phase='waiting',reason=wire.WaitingReason(reason),retry_at=timestamp(job.retry_at) if job.retry_at and reason != 'public_ai_not_allowed' else None)))
         elif job.kind in ('theses','filter'):
             result.append(wire.WorkEntry(wire.WorkProcessing(phase='processing',operation='filter' if job.kind=='filter' else 'theses',progress=progress)))
-        elif job.kind in ('delete','feed-delete'):
-            result.append(wire.WorkEntry(wire.WorkDeleting(phase='deleting',feed_id=feed,progress=progress)))
         else:
             result.append(wire.WorkEntry(wire.WorkCollecting(phase='collecting',feed_id=feed,progress=progress)))
     return result or [wire.WorkEntry(wire.WorkIdle(phase='idle'))]

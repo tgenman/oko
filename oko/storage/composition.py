@@ -114,5 +114,5 @@ class ReadingComposition:
             batch = selected[start:start+400]
             marks = ','.join('%s' for _ in batch)
             members.update(row[0] for row in self._store.db.execute(
-                f'SELECT id FROM publications WHERE viewed = 0 AND id IN ( {marks} )', batch))
+                f'SELECT p.id FROM publications p JOIN feeds f ON f.id=p.feed_id WHERE p.viewed = 0 AND NOT f.deleted AND p.id IN ( {marks} )', batch))
         return members

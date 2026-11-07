@@ -79,10 +79,7 @@ class ReadingQueries:
 
     @repository_access
     def hidden_problem_objects(self, materials: set[str], feeds: set[str]) -> tuple[set[str], set[str]]:
-        db = self._storage().db
-        hidden_materials = {row['id'] for row in db.execute('SELECT p.id FROM publications p JOIN feeds f ON f.id=p.feed_id WHERE f.deleted AND p.id=ANY(%s)', (sorted(materials),))} if materials else set()
-        hidden_feeds = {row['id'] for row in db.execute('SELECT id FROM feeds WHERE deleted AND id=ANY(%s)', (sorted(feeds),))} if feeds else set()
-        return hidden_materials, hidden_feeds
+        return self._facts.hidden_problem_objects(materials, feeds)
 
     @repository_access
     def linked_preview(self, identity: str) -> dict[str, Any] | None:
@@ -121,7 +118,7 @@ class ReadingQueries:
 
     @repository_access
     def check_owner(self, scope: str, owner: str) -> None:
-        return self._storage().subscriptions.check_owner(scope, owner)
+        return self._storage().subscriptions.check_visible_owner(scope, owner)
 
     @repository_access
     def effective(self, scope: str, owner: str, *, details: bool = True) -> dict[str, Any]:
@@ -158,17 +155,7 @@ class ReadingQueries:
 
     @repository_access
     def result_stale(self, identity: str, kind: str) -> bool:
-        import json
-        from oko.storage import material_read
-        store = self._storage()
-        row = material_read.item(store.db, identity)
-        if row is None:
-            return False
-        metadata = json.loads(row['processing_metadata']).get('filter' if kind == 'filter' else 'summary', {})
-        if not metadata or not (row['viewed'] or metadata.get('preserve_stale')):
-            return False
-        signature = store.filters.signature(identity) if kind == 'filter' else store.processing.theses.signature(identity)
-        return bool(metadata.get('signature') != signature or metadata.get('source_url_stale') or metadata.get('source_title_stale'))
+        return self._facts.result_stale(identity, kind)
 
     @repository_access
     def original(self, identity: str) -> tuple[dict[str, Any], str]:

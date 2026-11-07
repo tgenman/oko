@@ -508,10 +508,13 @@ class Publications:
             prior_source = saved_summary.get('input_hash')
         saved_title = saved_filter.get('source_title', saved_summary.get('source_title'))
         title_changed = row['platform'] != 'youtube' and saved_title is not None and saved_title != row['title']
-        if not row['viewed'] and not saved_filter.get('preserve_stale') and source_hash is not None and ((prior_source is not None and source_hash != prior_source) or title_changed):
-            self.store.db.execute("UPDATE publications SET filtered_content='{}',summarized_content='{}' WHERE id=%s", (item,))
-            metadata.pop('filter',None)
-            metadata.pop('summary',None)
+        if not row['viewed'] and source_hash is not None and ((prior_source is not None and source_hash != prior_source) or title_changed):
+            if not saved_filter.get('preserve_stale'):
+                self.store.db.execute("UPDATE publications SET filtered_content='{}' WHERE id=%s", (item,))
+                metadata.pop('filter',None)
+            if not saved_summary.get('preserve_stale'):
+                self.store.db.execute("UPDATE publications SET summarized_content='{}' WHERE id=%s", (item,))
+                metadata.pop('summary',None)
         if row['feed_id'] is not None:
             if metadata.get('_revision_input')!=current:
                 metadata['_revision_input']=current

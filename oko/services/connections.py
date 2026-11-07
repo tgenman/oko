@@ -13,8 +13,8 @@ class ConnectionService:
         self._storage = repository
 
     @repository_access
-    def owners(self, claims: list[tuple[str, str]]) -> list[str]:
-        return self._storage().subscriptions.telegram.owners(claims)
+    def owners(self, claims: list[tuple[str, str]], *, active_only: bool = False) -> list[str]:
+        return self._storage().subscriptions.telegram.owners(claims, active_only=active_only)
 
     @repository_access
     def duplicates(self, feeds: list[str]) -> dict[str, Any]:

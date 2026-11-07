@@ -173,7 +173,7 @@ def capture_fetch_problems(store: 'Store', effects: CollectionEffects, items: se
             if candidates or (row['problem_code'] is None and row['error'] is not None):effects.fetch_problems_before[row['id']]=candidates
 
 
-def capture_source_groups(store: 'Store', effects: CollectionEffects, roots: set[str], *, kinds: tuple[str,...]=('fetch','download_media','filter','theses','delete','feed-delete')) -> None:
+def capture_source_groups(store: 'Store', effects: CollectionEffects, roots: set[str], *, kinds: tuple[str,...]=('fetch','download_media','filter','theses')) -> None:
     from oko.storage import source_groups
     ordered=sorted(roots)
     for start in range(0,len(ordered),400):
