@@ -257,6 +257,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       const navigationChanged=recovered||accepted.changed.has('navigation')||accepted.changed.has('feed');
       if(navigationChanged){
         readingCatalog=navigation;
+        opened.reconcile([]);
         feedActions.update(navigation);
         folderMenu.update(navigation);
         folderActions.update(navigation.folders);

@@ -162,7 +162,7 @@ def test_rebuild_shared_article_preserves_other_publication_results(tmp_path):
         assert after['processing_metadata']==before['processing_metadata']
 
 
-def test_viewed_while_rebuilding_rejects_late_file(tmp_path):
+def test_viewed_while_rebuilding_accepts_late_file(tmp_path):
     phase=[0]
     started,release=threading.Event(),threading.Event()
     async def source(request):
@@ -184,7 +184,9 @@ def test_viewed_while_rebuilding_rejects_late_file(tmp_path):
             assert started.wait(10)
             assert client.post('/api/v3/materials/'+item+'/viewed').status_code==200
             release.set()
-            wait_for(client,lambda:client.get('/api/v3/publication/'+item).status_code==404,timeout=15)
+            value=wait_for(client,lambda:(v if body_text(v:=client.get('/api/v3/publication/'+item).json())=='New text' else None),timeout=15)
+            assert client.get(next(m['url'] for m in value['media'] if m['url'])).content==b'new'
+            assert item not in [card['id'] for card in client.get('/api/v3/cards').json()['items']]
         finally:
             release.set()
 

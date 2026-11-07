@@ -48,7 +48,7 @@ def test_viewed_publication_survives_later_collection(tmp_path):
         assert client.get(url).status_code == 200
 
 
-def test_rediscovered_viewed_publication_updates_without_losing_read_state(tmp_path):
+def test_rediscovery_does_not_duplicate_or_change_viewed_publication(tmp_path):
     import httpx
     from tests.support.reader import wait_for
     from tests.support.rss import import_feed, rss, wait_cards as wait_rss_cards
@@ -67,8 +67,8 @@ def test_rediscovered_viewed_publication_updates_without_losing_read_state(tmp_p
         assert client.post('/api/v3/cards/read', json={'ids': [card['id']]}).status_code == 204
         description[0] = 'Changed excerpt'
         assert client.post('/api/v3/collect').status_code == 200
-        updated = wait_for(client, lambda: (value if 'Changed excerpt' in str((value := client.get(url).json())['content']) else None))
-        assert updated['id'] == card['id']
+        wait_for(client, lambda: not any(work['phase']=='collecting' for work in client.get('/api/v3/status/details').json()['work']))
+        assert client.get(url).json()['id'] == card['id']
         assert all(item['id'] != card['id'] for item in client.get('/api/v3/cards').json()['items'])
         assert any(item['id'] == card['id'] and item['viewed'] for item in client.get('/api/v3/cards?show_read=true').json()['items'])
 
@@ -76,30 +76,32 @@ def test_rediscovered_viewed_publication_updates_without_losing_read_state(tmp_p
 def test_unlinked_article_is_preserved_and_readable_when_linked_again(tmp_path):
     import httpx
     from tests.support.reader import wait_for
-    from tests.support.rss import import_feed, rss, wait_cards as wait_rss_cards
+    from tests.support.telegram import configure_fast_web,settled
+    from tests.support.telegram_web import page
 
-    link, offline = ['https://source.test/first'], [False]
+    link,offline=['First'],[False]
     def response(request):
-        if request.url.path == '/feed':
-            return httpx.Response(200, text=rss(url=link[0]))
-        if request.url.path == '/first':
-            return httpx.Response(503) if offline[0] else httpx.Response(200, text='<article>Preserved first article</article>')
-        return httpx.Response(200, text='<article>Second article</article>')
+        if request.url.host=='api.telegra.ph':
+            if request.url.path.endswith('/First') and offline[0]:return httpx.Response(503)
+            text='Preserved first article' if request.url.path.endswith('/First') else 'Second article'
+            return httpx.Response(200,json={'ok':True,'result':{'title':link[0],'content':[{'tag':'p','children':[text]}]}})
+        return httpx.Response(200,text=page([(11,'Post https://telegra.ph/'+link[0])]))
 
-    app = create_app(tmp_path, token='test-token', rss_enabled=True, rss_transport=httpx.MockTransport(response))
-    with TestClient(app, headers={'Authorization': 'Bearer test-token'}) as client:
-        import_feed(client)
-        presence(client, 'a')
-        item = wait_rss_cards(client)[0]['id']
-        url = '/api/v3/publication/' + item
-        wait_for(client, lambda: 'Preserved first article' in str(client.get(url).json()))
-        link[0] = 'https://source.test/second'
-        assert client.post('/api/v3/collect').status_code == 200
-        wait_for(client, lambda: 'Second article' in str(client.get(url).json()))
-        offline[0] = True
-        link[0] = 'https://source.test/first'
-        assert client.post('/api/v3/collect').status_code == 200
-        wait_for(client, lambda: 'Preserved first article' in str(client.get(url).json()))
+    app=create_app(tmp_path,token='test-token',api_only=True,rss_transport=httpx.MockTransport(response))
+    with TestClient(app,headers={'Authorization':'Bearer test-token'}) as client:
+        configure_fast_web(client)
+        client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
+        client.post('/api/v3/telegram/connect',json={'source_locator':'@fixture','folder':'Inbox'})
+        item=settled(client,timeout=15)[0]['id']
+        url='/api/v3/publication/'+item
+        wait_for(client,lambda:'Preserved first article' in str(client.get(url).json()),timeout=15)
+        link[0]='Second'
+        assert client.post('/api/v3/materials/'+item+'/rebuild').status_code==200
+        wait_for(client,lambda:'Second article' in str(client.get(url).json()),timeout=15)
+        offline[0]=True
+        link[0]='First'
+        assert client.post('/api/v3/materials/'+item+'/rebuild').status_code==200
+        wait_for(client,lambda:'Preserved first article' in str(client.get(url).json()),timeout=15)
 
 
 def test_viewed_publication_survives_restart(tmp_path):
@@ -579,18 +581,18 @@ def test_viewed_reload_preserves_stale_theses_without_automatic_reprocessing(tmp
         configure_codex(client)
         assert client.patch('/api/v3/feeds/' + feed['id'], json={'public_ai': True}).status_code == 200
         assert client.patch('/api/v3/settings/oko/global', json={'theses': True}).status_code == 200
-        result = wait_for(client, lambda: client.get(url).json()['theses']['result'])
+        result = wait_for(client, lambda: client.get(url).json()['summarized_content']['points'])
         calls = len(model.inputs)
         assert client.post('/api/v3/cards/read', json={'ids': [card['id']]}).status_code == 204
         text[0] = 'Updated synthetic text'
-        assert client.post('/api/v3/materials/' + card['id'] + '/retry').status_code == 200
-        updated = wait_for(client, lambda: (value if 'Updated synthetic text' in (value := client.get(url).json())['text'] else None))
-        assert updated['theses']['result']['points'] == result['points']
-        assert updated['theses']['stale'] is True
+        assert client.post('/api/v3/materials/' + card['id'] + '/rebuild').status_code == 200
+        updated = wait_for(client, lambda: (value if 'Updated synthetic text' in str((value := client.get(url).json())) else None))
+        assert updated['summarized_content']['points'] == result
+        assert updated['processing_metadata']['summary']['stale'] is True
         assert len(model.inputs) == calls
         assert client.post('/api/v3/materials/' + card['id'] + '/regenerate').status_code == 200
-        regenerated = wait_for(client, lambda: (value if (value := client.get(url).json())['theses']['result'] and not value['theses']['stale'] else None))
-        assert regenerated['theses']['result'] is not None
+        regenerated = wait_for(client, lambda: (value if (value := client.get(url).json())['summarized_content']['points'] and not value['processing_metadata']['summary']['stale'] else None))
+        assert regenerated['summarized_content']['points'] is not None
         assert len(model.inputs) == calls + 1
 
 
@@ -624,25 +626,24 @@ def test_viewed_hidden_publication_keeps_stale_filter_until_refiltered(tmp_path)
         assert client.put('/api/v3/processors/llamacpp', json={'endpoint': 'http://localhost:9931', 'model': 'local:latest', 'local_execution': True}).status_code == 200
         assert client.patch('/api/v3/settings/oko/global', json={'processor': 'llamacpp', 'filter_enabled': True, 'prompt_filters': 'Filter advertisements'}).status_code == 200
         url = '/api/v3/publication/' + item
-        wait_for(client, lambda: (value if (value := client.get(url).json())['filter']['result'] and value['filter']['result']['hidden'] else None))
+        wait_for(client, lambda: (value if (value := client.get(url).json())['filtered_content'].get('hidden') else None))
         assert client.post('/api/v3/cards/read', json={'ids': [item]}).status_code == 204
-        excerpt[0] = 'Revised content'
-        assert client.post('/api/v3/collect').status_code == 200
-        changed = wait_for(client, lambda: (value if 'Revised content' in (value := client.get(url).json())['text'] else None))
-        assert changed['filter']['result']['hidden'] is True
-        assert changed['filter']['stale'] is True
+        assert client.patch('/api/v3/settings/oko/global',json={'prompt_filters':'New filter instruction'}).status_code==200
+        changed = client.get(url).json()
+        assert changed['filtered_content']['hidden'] is True
+        assert changed['processing_metadata']['filter']['stale'] is True
         assert client.get('/api/v3/cards?show_read=true').json()['items'] == []
         assert [card['id'] for card in client.get('/api/v3/cards?show_read=true&show_hidden=true').json()['items']] == [item]
         holding[0] = True
         try:
             assert client.post('/api/v3/cards/unread', json={'ids': [item]}).status_code == 204
             assert started.wait(5)
-            assert client.get(url).json()['filter']['result']['hidden'] is True
+            assert client.get(url).json()['filtered_content']['hidden'] is True
             assert client.get('/api/v3/cards').json()['items'] == []
         finally:
             release.set()
-        refiltered = wait_for(client, lambda: (value if (value := client.get(url).json())['filter']['result'] and not value['filter']['result']['hidden'] and not value['filter']['stale'] else None))
-        assert refiltered['filter']['state'] == 'ready'
+        refiltered = wait_for(client, lambda: (value if (value := client.get(url).json())['filtered_content'].get('hidden') is True and not value['processing_metadata']['filter']['stale'] else None))
+        assert refiltered['filtered_content']['hidden'] is True
 
 
 def test_same_publication_in_another_feed_is_reported_as_conflict(tmp_path):
@@ -666,51 +667,6 @@ def test_same_publication_in_another_feed_is_reported_as_conflict(tmp_path):
         assert original['id'] in status
         assert [card['id'] for card in client.get('/api/v3/cards').json()['items']] == [original['id']]
 
-
-def test_unviewing_keeps_stale_theses_until_new_result_is_accepted(tmp_path):
-    import asyncio
-    import httpx
-    from threading import Event
-    from tests.support.codex import CodexService, configure_codex
-    from tests.support.reader import wait_for
-    from tests.support.rss import import_feed, rss, wait_cards as wait_rss_cards
-
-    hold, started, release = [False], Event(), Event()
-    class Model(CodexService):
-        async def complete(self, prompt, schema, directory, choice):
-            if hold[0]:
-                started.set()
-                await asyncio.to_thread(release.wait, 30)
-            return await super().complete(prompt, schema, directory, choice)
-
-    excerpt = ['Original excerpt']
-    def response(request):
-        return httpx.Response(200, text=rss().replace('Анонс статьи', excerpt[0]) if request.url.path == '/feed' else '<article>Body text</article>')
-
-    app = create_app(tmp_path, token='test-token', rss_enabled=True, codex_client=Model(), rss_transport=httpx.MockTransport(response))
-    with TestClient(app, headers={'Authorization': 'Bearer test-token'}) as client:
-        try:
-            feed = import_feed(client)
-            presence(client, 'a')
-            item = wait_rss_cards(client)[0]['id']
-            configure_codex(client)
-            assert client.patch('/api/v3/feeds/' + feed['id'], json={'public_ai': True}).status_code == 200
-            assert client.patch('/api/v3/settings/oko/global', json={'theses': True}).status_code == 200
-            url = '/api/v3/publication/' + item
-            previous = wait_for(client, lambda: client.get(url).json()['theses']['result'])
-            assert client.post('/api/v3/cards/read', json={'ids':[item]}).status_code == 204
-            excerpt[0] = 'Updated excerpt'
-            assert client.post('/api/v3/collect').status_code == 200
-            wait_for(client, lambda: client.get(url).json()['theses']['stale'])
-            hold[0] = True
-            assert client.post('/api/v3/cards/unread', json={'ids':[item]}).status_code == 204
-            assert started.wait(5)
-            current = client.get(url).json()['theses']
-            assert current['stale'] is True and current['result'] == previous
-            release.set()
-            wait_for(client, lambda: not client.get(url).json()['theses']['stale'])
-        finally:
-            release.set()
 
 
 def test_viewed_summary_is_preserved_and_marked_stale_after_settings_change(tmp_path):

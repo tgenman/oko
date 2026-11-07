@@ -295,20 +295,6 @@ class SubscriptionRepository:
     def clear_settings(self, scope: str, owner: str) -> None:
         self.settings.clear(scope, owner)
 
-    def remove_cleaned_feed(self, feed: str) -> bool:
-        if not self.db.transaction_depth:
-            raise RuntimeError('Feed cleanup requires an owning transaction')
-        for table in ('history_members','initial_history'):
-            deleted=self.db.execute(f'DELETE FROM {table} WHERE feed=%s',(feed,)).rowcount
-            if table=='initial_history' and deleted:source_changed(self.db)
-            if table=='history_members' and deleted:status_changed(self.db)
-        self.clear_settings('feed',feed)
-        self.db.execute('DELETE FROM state WHERE key=%s',('feed-status:'+feed,))
-        self.telegram.release(feed)
-        deleted=bool(self.db.execute('DELETE FROM feeds WHERE id=%s',(feed,)).rowcount)
-        if deleted:source_changed(self.db)
-        return deleted
-
     def youtube_theses(self, feed_id: str) -> bool:
         settings = self.effective('feed', feed_id, details=False)
         return bool(settings['feed']['kind'] == 'youtube' and (settings['feed']['importance'] == 'high' or settings['effective']['theses']['value']))

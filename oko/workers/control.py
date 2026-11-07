@@ -166,8 +166,5 @@ class JobControl:
     def change_adapter(self, feed: str) -> None:
         self.execution.require_store().jobs.change_adapter(feed)
 
-    def remove_feed(self, feed: str, members: set[str]) -> None:
-        self.execution.require_store().jobs.remove_feed(feed,members)
-
     def cancel_history(self, feed: str) -> None:
         self.execution.require_store().jobs.cancel_history(feed)

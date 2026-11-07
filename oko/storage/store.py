@@ -102,18 +102,12 @@ class Store:
                 (root / name).mkdir(exist_ok=True)
             with self.db:
                 collection_jobs.interrupt(self)
-                running_delete = [row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE kind IN ('delete','feed-delete') AND status='running' AND (reason_message IS NOT NULL OR reason_code IS NOT NULL) AND (deletion_extra_owned OR coalesce(nullif(reason_code,''),'work-'||kind) IN ('delete','feed-delete','work-delete','work-feed-delete'))")]
                 running_source=[row['id'] for row in self.db.execute("SELECT id FROM jobs WHERE status='running' AND kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND reason_code LIKE 'source-%%'")]
                 job_write(self.db, "UPDATE jobs SET status='pending', generation=generation+1 WHERE status='running'")
                 if running_source:
                     from oko.storage import source_groups
                     source_groups.sync_jobs(self,running_source,self.wall_clock())
                 job_write(self.db, "UPDATE jobs SET next = 0 WHERE status = 'pending' AND next IS DISTINCT FROM 0")
-                if self.db.execute("SELECT 1 FROM state WHERE key='delete-problems-recovered-v1'").fetchone():
-                    for job_id in running_delete:
-                        self.problems.sync_deletion(job_id,[],self.wall_clock())
-            self.problems.recover_deletion_problems()
-            self.problems.recover_deletion_extra_problems()
             with transaction(self.db):
                 collection_jobs.recover(self)
             self.problems.recover_discover_problems()

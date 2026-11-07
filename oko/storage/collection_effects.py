@@ -27,12 +27,6 @@ class CollectionEffectCapture:
                 effects.source_groups_before.update(source_groups.job_keys_many(store,group))
                 evidence=source_groups.job_evidence_many(store,[(job_id,None) for job_id in group])
                 for key,objects in evidence.items():effects.source_evidence_before.setdefault(key,set()).update(objects)
-        if item not in effects.delete_problems_checked:
-            if plan.delete_problem_job is not None:
-                effects.delete_problem_ids_before[item] = store.problems.deletion_problem_ids(plan.delete_problem_job,store.wall_clock())
-            effects.delete_problems_checked.add(item)
-        if plan.delete_problem_children:
-            publication_links.capture_deletion_problems(store,effects,set(plan.delete_problem_children))
         if plan.fetch_problem_job is not None and plan.fetch_problem_job not in effects.fetch_problems_checked:
             from oko.storage.fetch_job_problems import managed_candidates,previous_candidates
             effects.fetch_problems_checked.add(plan.fetch_problem_job)

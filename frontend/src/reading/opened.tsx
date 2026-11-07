@@ -187,7 +187,7 @@ export function createOpenedMaterial({readerApi,fetchMedia,onViewed,onChanged,ge
   }
   async function open(card:OpenCard) {
     clear('Loading item…');
-    const session:Session={id:card.id,sourceTitle:card.feed_title,folder_id:card.folder_id,etag:null,loading:false,detached:false,reset:false,assetsPaused:false,assetEpoch:0,assets:new AbortController(),controller:new AbortController()};
+    const session:Session={id:card.id,sourceTitle:card.feed_title,sourceFeed:card.feed_id?getFeed(card.feed_id):undefined,folder_id:card.folder_id,etag:null,loading:false,detached:false,reset:false,assetsPaused:false,assetEpoch:0,assets:new AbortController(),controller:new AbortController()};
     store.set({...store.get(),session});
     await load(session);
   }
@@ -232,7 +232,7 @@ export function createOpenedMaterial({readerApi,fetchMedia,onViewed,onChanged,ge
   return {
     workAllowed(allowed:boolean){if(store.get().workAllowed!==allowed)store.set({...store.get(),workAllowed:allowed});},
     get selection(){const session=store.get().session;return session?{id:session.id,folder_id:session.folder_id}:null;},open,clear,refresh,
-    reconcile(_cards:Card[]){/* Feed presentation may change without closing the material. */const state=store.get();if(state.material){const feed=getFeed(state.material.feed_id);if(feed&&state.session){state.session.sourceFeed=feed;state.session.sourceTitle=feed.title;}store.set({...state});}},
+    reconcile(_cards:Card[]){const state=store.get(),feedId=state.material?.feed_id||state.session?.sourceFeed?.id;if(feedId&&!getFeed(feedId)){clear();return;}if(state.material){const feed=getFeed(state.material.feed_id);if(feed&&state.session){state.session.sourceFeed=feed;state.session.sourceTitle=feed.title;}store.set({...state});}},
     disconnected(){const state=store.get();if(!state.material){clear();return;}const session=state.session!;session.assetEpoch++;session.assets.abort();session.assets=new AbortController();session.assetsPaused=true;},
     connected(){const state=store.get(),session=state.session;if(session?.assetsPaused&&!session.reset&&!session.detached){session.assetsPaused=false;store.set({...state});}},
     reset(){const state=store.get();if(!state.material){clear();return;}const session=state.session!;session.assetEpoch++;session.assets.abort();session.assets=new AbortController();session.assetsPaused=true;session.reset=true;session.etag=null;update({...state,pending:null});},

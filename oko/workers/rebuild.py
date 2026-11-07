@@ -3,7 +3,7 @@ import asyncio
 from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
-from collections.abc import Callable
+from collections.abc import Awaitable,Callable
 
 from oko.collection.adapters import (AdapterErrorKind,AdapterException,AdapterIssue,ExternalReference,
                                      MediaReference,PublicationAdapter,PublicationContent)
@@ -21,7 +21,8 @@ def _check(value: PublicationContent) -> None:
 
 
 async def collect(adapter: PublicationAdapter, articles: PublicationAdapter, reference: ExternalReference,
-                  staging: Path, admitted: Callable[[],bool], active: set[Path]) -> tuple[StagedPublication,...]:
+                  staging: Path, admitted: Callable[[],bool], active: set[Path],
+                  reuse_saved: Callable[[ExternalReference],Awaitable[bool]]) -> tuple[StagedPublication,...]:
     """Fetch the root, direct linked articles and their files; never crawl deeper."""
     staging.mkdir(parents=True,exist_ok=True)
     root=await adapter.fetch(reference)
@@ -32,8 +33,13 @@ async def collect(adapter: PublicationAdapter, articles: PublicationAdapter, ref
         identity=(child.key.platform,child.key.external_id)
         if identity in seen:continue
         seen.add(identity)
-        value=await articles.fetch(child)
-        _check(value)
+        try:
+            value=await articles.fetch(child)
+            _check(value)
+        except AdapterException as error:
+            if error.issue.kind in (AdapterErrorKind.temporary,AdapterErrorKind.unavailable) and await reuse_saved(child):
+                continue
+            raise
         if value.metadata.reference.key!=child.key:
             raise AdapterException(AdapterIssue('identity_changed','Источник вернул другую публикацию',AdapterErrorKind.permanent,child))
         values.append((replace(value,linked_publications=()),articles))
