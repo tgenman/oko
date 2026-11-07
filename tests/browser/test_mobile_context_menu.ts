@@ -19,7 +19,7 @@ test('touch hold opens card, feed and folder menus without selecting them', {tim
   };
   await touch('[data-card="a"]','hold');await expect(r.page.locator('#news-context-menu')).toBeVisible();
   await expect(r.page.locator('[data-card="a"]')).toHaveAttribute('aria-pressed','false');
-  await r.page.screenshot({path:artifactPath('mobile-card-context-menu.png')});await r.page.bringToFront();await expect(r.page.locator('#news-context-menu [role=menuitem]:not(:disabled)').first()).toBeFocused();await r.page.keyboard.press('Escape');await expect(r.page.locator('#news-context-menu')).toHaveCount(0);
+  await r.page.screenshot({path:artifactPath('mobile-card-context-menu.png')});await expect.poll(()=>r.page.locator('#news-context-menu [role=menuitem]:not(:disabled)').first().evaluate(el=>el===document.activeElement)).toBe(true);await r.page.keyboard.press('Escape');await expect(r.page.locator('#news-context-menu')).toHaveCount(0);
   await touch('[data-feed="feed"]','hold');await expect(r.page.locator('#feed-context-menu')).toBeVisible();
   await expect(r.page.locator('[data-feed="feed"]')).toHaveAttribute('aria-pressed','false');await r.page.mouse.click(5,5);
   await touch('[data-folder]','hold');await expect(r.page.locator('#folder-context-menu')).toBeVisible();
