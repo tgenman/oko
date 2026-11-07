@@ -12,7 +12,7 @@ export function createCardPages(api:ReaderApi) {
  function get(options:ReadingListOptions){const key=listIdentity(options);let state=states.get(key);if(!state){state={items:[],total:0,next:null,etags:new Map(),head:[],recent:null,newItems:false,changed:false};states.set(key,state);}return state;}
  async function request(options:ReadingListOptions,cursor:string|null,limit:number,signal:AbortSignal,sort:ReadingListOptions['sort']=options.sort,pending?:Map<string,string>):Promise<CardPage|null>{
   const state=get(options),key=JSON.stringify([sort,cursor,limit]);
-  const query:NonNullable<CardsData['query']>={sort,show_hidden:options.show_hidden,limit,...(cursor?{cursor}:{}),...(options.target.scope==='folder'?{folder:options.target.folder_id}:options.target.scope==='feed'?{feed:options.target.feed_id}:{})};
+  const query:NonNullable<CardsData['query']>={sort,show_hidden:options.show_hidden,show_read:!!options.show_read,limit,...(cursor?{cursor}:{}),...(options.target.scope==='folder'?{folder:options.target.folder_id}:options.target.scope==='feed'?{feed:options.target.feed_id}:{})};
   const etag=state.etags.get(key);
   const reply=await getCards({client:api.client,query,signal,throwOnError:false,...(etag?{headers:{'If-None-Match':etag}}:{})});
   signal.throwIfAborted();

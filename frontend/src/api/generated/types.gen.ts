@@ -124,6 +124,7 @@ export type CardListItem = {
      */
     source_url: SourceUrl | null;
     title: string;
+    viewed?: boolean;
 };
 
 export type CardPage = {
@@ -2485,6 +2486,7 @@ export type CardsData = {
          * Scalar duplicates and unknown query keys return 422. Boolean text is exactly true or false.
          */
         sort?: 'newest' | 'oldest';
+        show_read?: boolean;
         /**
          * Scalar duplicates and unknown query keys return 422. Boolean text is exactly true or false.
          */
@@ -2565,6 +2567,43 @@ export type ReadCardsResponses = {
 };
 
 export type ReadCardsResponse = ReadCardsResponses[keyof ReadCardsResponses];
+
+export type UnreadCardsData = {
+    body: CardReadRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v3/cards/unread';
+};
+
+export type UnreadCardsErrors = {
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    403: AuthorizationErrors;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    422: RequestInvalidError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    500: InternalErrorError;
+    /**
+     * Operation-specific typed error. No raw submitted values, secret context or stack traces are returned.
+     */
+    503: StorageUnavailableError;
+};
+
+export type UnreadCardsError = UnreadCardsErrors[keyof UnreadCardsErrors];
+
+export type UnreadCardsResponses = {
+    /**
+     * The selected cards have been marked unread.
+     */
+    204: void;
+};
+
+export type UnreadCardsResponse = UnreadCardsResponses[keyof UnreadCardsResponses];
 
 export type CreateClientSessionData = {
     body?: never;

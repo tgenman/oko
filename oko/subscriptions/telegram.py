@@ -117,8 +117,9 @@ class TelegramAccess:
                 result.append(('username', str(name).lstrip('@').lower()))
         return list(dict.fromkeys(result))
 
-    def owners(self, claims: list[tuple[str, str]]) -> list[str]:
-        return sorted({row[0] for kind, value in claims for row in self.db.execute('SELECT feed FROM telegram_claim_owners WHERE kind = %s AND value = %s', (kind, value))})
+    def owners(self, claims: list[tuple[str, str]], *, active_only: bool = False) -> list[str]:
+        active=' AND NOT f.deleted' if active_only else ''
+        return sorted({row[0] for kind,value in claims for row in self.db.execute('SELECT c.feed FROM telegram_claim_owners c JOIN feeds f ON f.id=c.feed WHERE c.kind=%s AND c.value=%s'+active,(kind,value))})
 
     def claim(self, feed: str, claim: tuple[str, str], evidence: str) -> None:
         self.db.execute('INSERT INTO telegram_claim_owners VALUES ( %s , %s , %s , %s ) ON CONFLICT DO NOTHING', (*claim, feed, evidence))
@@ -138,6 +139,11 @@ class TelegramAccess:
             claims = self.claims(info)
             duplicates = self.conflicts(claims, info.get('peer'))
             if duplicates:
+                deleted=[row[0] for row in self.db.execute('SELECT id FROM feeds WHERE deleted AND id=ANY(%s)',(duplicates,))]
+                if len(duplicates)==1 and deleted==duplicates:
+                    from oko.subscriptions.history import InitialHistory
+                    restored: dict[str,Any]=subscriptions.restore_feed(duplicates[0],folder,history or InitialHistory())
+                    return restored
                 raise TelegramConflict('duplicate_source', self.duplicates(duplicates), 'Источник уже подключён')
             identity = subscriptions.new_feed_id()
             folder_id = subscriptions.ensure_folder(folder)

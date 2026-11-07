@@ -68,9 +68,6 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
   function viewed(id: string, broadcast: boolean) {
     invalidate();
     pages.forget([id]);
-    debug.forgetMaterials([id]);
-    statusPanel.forgetMaterials([id]);
-    opened.viewed(id);
     list.removed(id);
     if (broadcast) session.post(id);
   }
@@ -109,7 +106,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
   });
   const newsActions = createNewsActions({
     readerApi, isStopped: () => stopped,
-    onViewed: id => {if(opened.selection?.id===id)opened.clear();viewed(id, true);},
+    onViewed: id => {viewed(id, true);},
     onRefresh: changed,
     onPreview: ids => list.preview(ids),
   });
@@ -159,6 +156,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     onFolderMenu: (folder, catalog, x, y, trigger) => {feedActions.close(false);newsActions.close(false);folderMenu.open(folder, catalog, x, y, trigger);},
     onFeedSettings: (id, trigger) => menus.openFeed(id, trigger),
     onWarning: () => statusPanel.open(),
+    onShowRead: () => {invalidate();void refresh();},
   });
   function stopUi(message: string) {
     if(stopped)return;
@@ -223,7 +221,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     try {
       const selection=tree.selection;
       const sort=input('sort').value;
-      const options:ReadingListOptions={target:selection.kind==='feed'?{scope:'feed',feed_id:selection.id!}:selection.kind==='folder'?{scope:'folder',folder_id:selection.id!}:{scope:'all'},sort:sort==='oldest'?sort:'newest',show_hidden:input('show-hidden').checked};
+      const options:ReadingListOptions={target:selection.kind==='feed'?{scope:'feed',feed_id:selection.id!}:selection.kind==='folder'?{scope:'folder',folder_id:selection.id!}:{scope:'all'},sort:sort==='oldest'?sort:'newest',show_hidden:input('show-hidden').checked,show_read:tree.showRead};
       currentOptions=options;
       opened.refresh();
       const pageResult=pages.poll(options,list.visible(),list.atTop(),controller.signal)
@@ -259,6 +257,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
       const navigationChanged=recovered||accepted.changed.has('navigation')||accepted.changed.has('feed');
       if(navigationChanged){
         readingCatalog=navigation;
+        opened.reconcile([]);
         feedActions.update(navigation);
         folderMenu.update(navigation);
         folderActions.update(navigation.folders);

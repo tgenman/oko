@@ -66,7 +66,7 @@ def failure_status(issue: AdapterIssue) -> str:
 
 
 def fail(store: 'Store', job: 'Job', issue: AdapterIssue, *, cancelled: bool = False) -> None:
-    if job.kind not in ('discover','feed-delete'):
+    if job.kind != 'discover':
         from oko.storage import memberships
         memberships.lock_graph(store.db)
     if not store.jobs.valid(job):
@@ -78,5 +78,5 @@ def fail(store: 'Store', job: 'Job', issue: AdapterIssue, *, cancelled: bool = F
         delay = min(settings['max_seconds'],max(settings['initial_seconds'],row['retry_delay']*2))
         status = 'cancelled' if cancelled else failure_status(issue)
         until = max(store.wall_clock()+delay,issue.retry_at.timestamp() if issue.retry_at else 0) if status=='pending' else None
-        result.changed=job_write(store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' AND %s = 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = %s , next = %s , retry_at = %s , retry_delay = %s , wait_scope = %s , reason_message = %s , reason_code = %s WHERE id = %s AND generation = %s AND CASE WHEN kind IN ('fetch','download_media','filter','theses','delete','feed-delete') AND (reason_code LIKE 'source-%%' OR %s LIKE 'source-%%') THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING OLD.reason_code AS previous_code",(status,status,store.clock()+max(0,until-store.wall_clock()) if until else 0,
+        result.changed=job_write(store.db, "UPDATE jobs SET queued_wall = CASE WHEN kind IN ('discover','fetch','download_media') AND status != 'pending' AND %s = 'pending' THEN extract(epoch FROM clock_timestamp()) ELSE queued_wall END , status = %s , next = %s , retry_at = %s , retry_delay = %s , wait_scope = %s , reason_message = %s , reason_code = %s WHERE id = %s AND generation = %s AND CASE WHEN kind IN ('fetch','download_media','filter','theses') AND (reason_code LIKE 'source-%%' OR %s LIKE 'source-%%') THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING OLD.reason_code AS previous_code",(status,status,store.clock()+max(0,until-store.wall_clock()) if until else 0,
             until,delay,issue.scope if issue.kind==AdapterErrorKind.source_wait else None,None if cancelled else issue.message,None if cancelled else issue.code,job.id,job.generation,None if cancelled else issue.code)).fetchone()

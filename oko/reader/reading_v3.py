@@ -112,7 +112,7 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
         import hashlib
         import json
         from fastapi.responses import JSONResponse
-        allowed={'folder','feed','sort','show_hidden','cursor','limit'}
+        allowed={'folder','feed','sort','show_hidden','show_read','cursor','limit'}
         for key in request.query_params:
             if key not in allowed or len(request.query_params.getlist(key)) != 1:
                 raise ApiError(422, invalid('query',key))
@@ -130,7 +130,7 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
             raise ApiError(422,invalid('query','limit'))
         limit=int(raw_limit)
         target=dict(scope='folder',folder_id=folder) if folder is not None else dict(scope='feed',feed_id=feed) if feed is not None else dict(scope='all')
-        options=dict(target=target,sort=sort,show_hidden=scalar_boolean(request,'show_hidden'))
+        options=dict(target=target,sort=sort,show_hidden=scalar_boolean(request,'show_hidden'),show_read=scalar_boolean(request,'show_read'))
         current=runtime.queries
         store=runtime.require_store()
         now, wall=store.clock(), store.wall_clock()
@@ -177,6 +177,11 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
     @app.post('/api/v3/cards/read', status_code=204, dependencies=[Depends(no_query)])
     async def read_cards(body: wire.CardReadRequest) -> Response:
         await runtime.viewed_many([item.root for item in body.ids])
+        return Response(status_code=204)
+
+    @app.post('/api/v3/cards/unread', status_code=204, dependencies=[Depends(no_query)])
+    async def unread_cards(body: wire.CardReadRequest) -> Response:
+        await runtime.unviewed_many([item.root for item in body.ids])
         return Response(status_code=204)
 
     def read_media(item: str, kind: Literal['images','media'], name: str, number: int | None = None) -> Response:

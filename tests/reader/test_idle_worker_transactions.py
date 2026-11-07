@@ -33,7 +33,7 @@ def test_idle_collection_and_processing_do_not_open_write_transactions(tmp_path)
         store.db.close()
 
 
-def test_cleanup_and_collection_both_progress_under_backlog(tmp_path):
+def test_collection_progresses_without_dispatching_obsolete_cleanup(tmp_path):
     store,_,_,_=worker_library(tmp_path)
     try:
         with transaction(store.db):
@@ -59,11 +59,12 @@ def test_cleanup_and_collection_both_progress_under_backlog(tmp_path):
         worker._execute=execute
 
         async def drive():
-            for _ in range(6):
+            for _ in range(3):
                 await worker.tick()
                 await worker.jobs._lanes['common']
 
         asyncio.run(drive())
-        assert seen==['delete','fetch','delete','fetch','delete','fetch']
+        assert seen==['fetch','fetch','fetch']
+        assert store.db.execute("SELECT count(*) FROM jobs WHERE kind='delete' AND status='pending'").fetchone()[0]==3
     finally:
         store.db.close()

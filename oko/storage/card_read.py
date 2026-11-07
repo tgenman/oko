@@ -35,7 +35,7 @@ def card(store: 'Store', identity: str) -> dict[str, Any] | None:
     if row is None:return None
     hidden=bool(row['reader_hidden']) if 'reader_hidden' in row.keys() else row['status']=='filter_out'
     result: dict[str,Any]=dict(id=identity,feed_id=row['feed_id'],title='Материал загружается',
-        published_at=row['published_at'],source_url=row['url'],loading=True,preview_url=None,hidden=hidden,
+        published_at=row['published_at'],source_url=row['url'],loading=True,preview_url=None,hidden=hidden,viewed=bool(row['viewed']),
         external_attachment_kinds=[])
     if 'blocks' not in row['content']:return result
     try:

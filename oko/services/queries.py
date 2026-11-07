@@ -90,6 +90,10 @@ class ReadingQueries:
 
 
     @repository_access
+    def hidden_problem_objects(self, materials: set[str], feeds: set[str]) -> tuple[set[str],set[str]]:
+        return self._facts.hidden_problem_objects(materials,feeds)
+
+    @repository_access
     def was_viewed(self, identity: str) -> bool:
         return self._facts.was_viewed(identity)
 
@@ -134,7 +138,7 @@ class ReadingQueries:
 
     @repository_access
     def check_owner(self, scope: str, owner: str) -> None:
-        return self._subscriptions().check_owner(scope, owner)
+        return self._subscriptions().check_visible_owner(scope, owner)
 
     @repository_access
     def effective(self, scope: str, owner: str, *, details: bool = True) -> dict[str, Any]:
@@ -177,7 +181,7 @@ class ReadingQueries:
 
     @repository_access
     def media_file(self, identity: str, name: str) -> tuple[Path, str] | None:
-        return self._media().file(identity, name)
+        return self._media().visible_file(identity, name)
 
     @repository_access
     def content_version(self, identity: str) -> str:

@@ -150,7 +150,7 @@ def test_competing_workers_commit_one_shared_processing_context(tmp_path):
     asyncio.run(scenario())
 
 
-def test_late_result_from_deleted_selected_feed_is_rejected(tmp_path):
+def test_late_result_from_deleted_selected_feed_is_saved(tmp_path):
     from oko.subscriptions.subscriptions import AddFeed, Overrides
     async def scenario():
         entered, release = asyncio.Event(), asyncio.Event()
@@ -174,11 +174,10 @@ def test_late_result_from_deleted_selected_feed_is_rejected(tmp_path):
             assert store.db.execute("SELECT input_snapshot->>'feed_id' FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()[0]==second
             with transaction(store.db):
                 store.remove_feed(second)
-                store.jobs.remove_feed(second,{item})
             release.set()
             await tasks._ai
-            assert store.db.execute('SELECT 1 FROM publications WHERE id=%s',(item,)).fetchone() is None
-            assert store.db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()[0]=='cancelled'
+            assert store.db.execute('SELECT 1 FROM publications WHERE id=%s',(item,)).fetchone() is not None
+            assert store.db.execute("SELECT status FROM jobs WHERE kind='filter' AND item=%s",(item,)).fetchone()[0]=='done'
         finally:
             store.db.close()
     asyncio.run(scenario())
@@ -345,49 +344,6 @@ def test_missing_subtitle_repair_is_rediscovered_after_restart(tmp_path):
         store = Store(tmp_path, lambda _: None)
         assert store.db.execute("SELECT status FROM media_files WHERE id='missing-caption'").fetchone()[0] == 'pending_download'
         assert store.db.execute("SELECT status FROM jobs WHERE kind='download_media' AND item='missing-caption'").fetchone()[0] == 'pending'
-    finally:
-        store.db.close()
-
-
-def test_failed_delete_problem_follows_job_without_status_read(tmp_path, postgres_url):
-    import json
-    from oko.domain.job import Job
-    from oko.storage.transaction import transaction
-    from tests.support.storage import Store
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    try:
-        with store.db:
-            row=store.db.execute("INSERT INTO jobs(kind,item,status,generation,payload) VALUES ('delete','item','running',1,%s) RETURNING id", (json.dumps({'cleanup_feed':'fixture'}),)).fetchone()
-        job=Job(row['id'],'delete','item',1)
-        def current():
-            return store.db.execute("SELECT id,body FROM reader_problems WHERE identity='job:delete:fixture:delete:item' AND finished IS NULL").fetchone()
-        with pytest.raises(ValueError,match='rollback'):
-            with transaction(store.db):
-                retry_job(store, job,1,'Ошибка удаления',code='delete')
-                assert current() is not None
-                raise ValueError('rollback')
-        assert current() is None
-        retry_job(store, job,1,'Ошибка удаления',code='delete')
-        problem=current()
-        assert problem is not None
-        assert not any(c['id']=='job:delete:fixture:delete:item' for c in store.problems.candidates(5))
-        with store.db:
-            store.db.execute("UPDATE jobs SET next=0 WHERE id=%s", (job.id,))
-        claimed=claim_job(store, 1,deleting_only=True)
-        assert claimed is not None and claimed.id==job.id
-        assert json.loads(current()['body'])['state']=='retrying'
-        assert store.publication_files.delete(claimed.item) is True
-        with pytest.raises(ValueError,match='finish rollback'):
-            with transaction(store.db):
-                store.jobs.finish_delete(claimed)
-                assert current() is None
-                raise ValueError('finish rollback')
-        assert current() is not None
-        assert store.jobs.valid(claimed)
-        with transaction(store.db):
-            store.jobs.finish_delete(claimed)
-        assert current() is None
-        assert store.db.execute('SELECT outcome FROM reader_problems WHERE id=%s',(problem['id'],)).fetchone()['outcome']=='resolved'
     finally:
         store.db.close()
 

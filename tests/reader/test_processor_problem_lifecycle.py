@@ -62,7 +62,7 @@ def test_configure_codex_closes_last_preclaim_problem_before_status_get(tmp_path
     finally:store.db.close()
 
 
-def test_mark_viewed_through_store_closes_processor_without_status_get(tmp_path,postgres_url):
+def test_mark_viewed_through_store_keeps_processor_without_status_get(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         with store.db:
@@ -74,7 +74,7 @@ def test_mark_viewed_through_store_closes_processor_without_status_get(tmp_path,
         row=store.db.execute("SELECT id FROM reader_problems WHERE identity='processor:configuration' AND finished IS NULL").fetchone()
         with transaction(store.db):
             assert store.viewed_set(['item'])
-        assert not store.db.execute('SELECT 1 FROM reader_problems WHERE id=%s AND finished IS NULL',(row[0],)).fetchone()
+        assert store.db.execute('SELECT 1 FROM reader_problems WHERE id=%s AND finished IS NULL',(row[0],)).fetchone()
     finally:store.db.close()
 
 

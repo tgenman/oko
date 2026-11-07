@@ -33,7 +33,7 @@ class CollectionState:
 
     def configuration(self) -> SourceConfiguration:
         store=self.store
-        feeds=store.subscriptions.feeds()
+        feeds=store.subscriptions.feeds(include_deleted=True)
         bindings=store.subscriptions.telegram.bindings()
         settings=[]
         dependencies=[]

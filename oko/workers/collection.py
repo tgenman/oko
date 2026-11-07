@@ -17,7 +17,7 @@ from oko.collection.rss_adapter import RSSAdapter
 from oko.collection.telegram.adapter import TelegramWebAdapter
 from oko.collection.youtube.adapter import YouTubeAdapter
 from oko.collection.contracts import SourceError, SourceUnavailable, SourceSkipped, SourceDeferred, SourceObservation
-from oko.collection.adapters import FeedAdapter
+from oko.collection.adapters import ExternalReference, FeedAdapter
 from oko.collection.adapters import AdapterException, AdapterErrorKind, AdapterIssue
 from oko.collection.telegram.http import TelegramHTTP
 from oko.collection.http import SourceHTTP
@@ -71,7 +71,6 @@ class CollectionWorker:
         self._captions_active: 'CaptionAttempt | None' = None
         self._started=False
         self._source_revision: int | None = None
-        self._prefer_cleanup = True
         self._dependency_feeds: list[str] = []
         self._source,self._clock,self._fault=source,clock,fault
         self._source_feed = source_feed
@@ -214,10 +213,6 @@ class CollectionWorker:
                 current = self.execution._store
                 if not current or not current.jobs.valid(job) or not self._live():
                     return
-                if job.kind in ('delete', 'feed-delete'):
-                    diagnostic_source.set('Удаление · ' + job.item)
-                    self.jobs._delete(job, current)
-                    return
                 feed = job.item if job.kind in ('discover', 'read') else self.service.feed(job.item)
                 if job.kind in ('discover','fetch'):
                     with current.jobs.transaction(self._live):
@@ -273,6 +268,8 @@ class CollectionWorker:
                             CollectionApplication(current.jobs,current.publications,current.processing).apply(effects,job=job)
                             current.jobs.checkpoint('collection_after_result')
                             current.jobs.finish(job)
+                            if current.jobs.consume_restored_discovery(job):
+                                current.jobs.enqueue_discovery(feed)
                             current.jobs.checkpoint('collection_after_finish')
                             self._finish_collection(job, current, collection_error)
                             if outcome.continuation is not None:
@@ -330,7 +327,6 @@ class CollectionWorker:
                         collection_error = None
                         with current.jobs.transaction(self._live):
                             self.service.viewed(job.item)
-                            current.jobs.reconcile_cleanup()
                             self._finish_collection(job,current)
                         return
                     if isinstance(error, SourceUnavailable) and job.kind == 'fetch':
@@ -360,8 +356,7 @@ class CollectionWorker:
                     with current.jobs.transaction(self._live):
                         current.jobs.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,code=code,
                             terminal=isinstance(error, SourceError) and not error.retryable or job.kind in ('discover','fetch') and (isinstance(error,ValueError) or Store.is_integrity_failure(error)),
-                            issue=error.adapter_issue if isinstance(error,SourceError) else None,
-                            cleanup_backoff=job.kind in ('delete','feed-delete') and not (isinstance(error,SourceError) and not error.retryable))
+                            issue=error.adapter_issue if isinstance(error,SourceError) else None)
                         if job.kind=='fetch':
                             current.publications.notify_parents(job.item)
                         if job.kind=='discover':
@@ -406,7 +401,11 @@ class CollectionWorker:
                 active.add(staging)
             def admitted() -> bool:
                 return bool(current and self.execution._store is current and self._live() and current.jobs.valid(job))
-            staged=await collect(adapter,self._collection.article_adapter(),reference,staging,admitted,active)
+            async def reuse_saved(child: ExternalReference) -> bool:
+                async with self.execution._actions:
+                    if not admitted():return False
+                    return self.service.saved_reference(child)
+            staged=await collect(adapter,self._collection.article_adapter(),reference,staging,admitted,active,reuse_saved)
             if staged[0].value.metadata.reference.key!=reference.key:
                 raise ValueError('Rebuild returned another publication identity')
             async with self.execution._actions:
@@ -524,9 +523,7 @@ class CollectionWorker:
                             current.processing.reconcile_accepted_item(replacement[0])
                     else:
                         current.jobs.finish(job)
-                current.jobs.reconcile_cleanup()
             else:
-                current.jobs.reconcile_cleanup()
                 current.jobs.fail_media(job,issue)
                 if issue.kind==AdapterErrorKind.media_changed:
                     owner=self.media.owner(job.item)
@@ -669,23 +666,17 @@ class CollectionWorker:
                 if lane=='captions':
                     feeds=caption_feeds
                 dependencies=self._dependency_feeds if lane in ('common','media') else []
-                options: dict[str,Any]=dict(deleting_only=not (feeds or dependencies), feeds=feeds,
-                             include_deletions=lane == 'common', media_only=media_lane,
-                             captions_only=lane=='captions', dependency_feeds=dependencies,
-                             prefer_cleanup=self._prefer_cleanup)
+                if not feeds and not dependencies:
+                    continue
+                options: dict[str,Any]=dict(feeds=feeds,media_only=media_lane,
+                             captions_only=lane=='captions',dependency_feeds=dependencies)
                 if not self.execution._store.jobs.has_due_job(now,**options):
                     continue
                 with self.execution._store.jobs.transaction(self._live):
                     job = self.execution._store.jobs.next_job(now,**options)
                 if job:
-                    if lane=='common':
-                        self._prefer_cleanup=not self._prefer_cleanup
                     self.jobs._lane_jobs[lane] = job
-                    if job.kind=='delete':
-                        owner=self.execution._store.db.execute("SELECT payload->>'cleanup_feed' FROM jobs WHERE id=%s",(job.id,)).fetchone()
-                        self.jobs._lane_feeds[lane]=owner[0] if owner and owner[0] else job.item
-                    else:
-                        self.jobs._lane_feeds[lane] = job.item if job.kind in ('discover', 'read', 'feed-delete') else self.service.feed(job.item)
+                    self.jobs._lane_feeds[lane] = job.item if job.kind in ('discover','read') else self.service.feed(job.item)
                     self.jobs._lanes[lane] = asyncio.create_task(self._execute(job))
 
 

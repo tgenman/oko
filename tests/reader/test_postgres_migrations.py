@@ -1164,7 +1164,7 @@ def test_viewed_cleanup_migration_preserves_job_after_removing_publication(conne
         db.execute("INSERT INTO publications(id,platform,external_id,viewed) VALUES ('old','rss','old',1)")
         db.execute("INSERT INTO jobs(kind,item,status,payload,reason_code,reason_message) VALUES ('delete','old','pending','{\"cleanup_feed\":\"feed\"}','delete','temporary')")
         db.execute("INSERT INTO jobs(kind,item,status) VALUES ('fetch','old','running')")
-        migrate(db,MIGRATIONS)
+        migrate(db,MIGRATIONS[:118])
         assert db.execute("SELECT 1 FROM publications WHERE id='old'").fetchone() is None
         assert db.execute("SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='publications' AND column_name='viewed'").fetchone() is None
         assert db.execute("SELECT status,payload->>'cleanup_feed',reason_message FROM jobs WHERE kind='delete' AND item='old'").fetchone()==('pending','feed','temporary')
@@ -1462,3 +1462,30 @@ def test_migration_rejects_empty_duplicate_external_poster_key(connections):
             migrate(db,MIGRATIONS)
         verify(db,MIGRATIONS[:107])
         assert db.execute("SELECT content FROM publications WHERE id='p'").fetchone()==(content,)
+
+
+def test_retention_upgrade_preserves_surviving_cleanup_and_feed_identity(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:124])
+        db.execute("INSERT INTO feeds(id,identity,connection) VALUES ('active','rss:active','connected'),('removed','rss:removed','deleting')")
+        db.execute("INSERT INTO publications(id,platform,external_id,discovered_at,status) VALUES ('saved','rss','one',1,'ready'),('partial','rss','two',1,'ready')")
+        db.execute("INSERT INTO jobs(kind,item,status,payload,reason_code,reason_message) VALUES ('delete','saved','pending',%s,NULL,NULL),('delete','partial','failed',%s,'cleanup-error','old failure'),('feed-delete','removed','pending','{}',NULL,NULL)", (json.dumps({'cleanup_feed':'active'}),json.dumps({'cleanup_feed':'removed'})))
+        migrate(db, MIGRATIONS)
+        assert db.execute("SELECT id,feed_id,viewed,status FROM publications ORDER BY id").fetchall() == [('partial','removed',True,'pending_collection'),('saved','active',True,'pending_collection')]
+        assert db.execute("SELECT id,deleted FROM feeds ORDER BY id").fetchall() == [('active',False),('removed',True)]
+        assert db.execute("SELECT kind,item,status,reason_code,reason_message FROM jobs WHERE kind IN ('delete','feed-delete') ORDER BY kind,item").fetchall() == [('delete','partial','cancelled',None,None),('delete','saved','cancelled',None,None),('feed-delete','removed','cancelled',None,None)]
+
+
+def test_cleanup_problem_migration_retires_only_unambiguous_legacy_owners(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        migrate(db, MIGRATIONS[:125])
+        db.execute("INSERT INTO feeds(id,identity) VALUES ('feed','feed')")
+        db.execute("INSERT INTO publications(id,platform,external_id,feed_id) VALUES ('delete:article','rss','external','feed')")
+        db.execute("INSERT INTO jobs(kind,item,feed_id,status) VALUES ('delete','article','feed:fetch','cancelled'),('fetch','delete:article',NULL,'done'),('delete','unknown','feed','cancelled')")
+        for ident, identity, operation in [('clear','job:work-delete:feed:delete:unknown','producer:status'), ('ambiguous','job:work-delete:feed:fetch:delete:article',None), ('unmatched','job:work-delete:elsewhere:delete:missing',None)]:
+            db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES (%s,%s,'background',%s,1)", (ident,identity,json.dumps({'code':'work-delete','operation':operation})))
+        migrate(db, MIGRATIONS)
+        rows=dict(db.execute("SELECT id,outcome FROM reader_problems WHERE id IN ('clear','ambiguous','unmatched')").fetchall())
+        assert rows == {'clear':'irrelevant','ambiguous':None,'unmatched':None}

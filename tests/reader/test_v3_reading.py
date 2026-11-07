@@ -24,7 +24,7 @@ def test_reading_and_explicit_completion_receipts(tmp_path):
         result = client.post('/api/v3/materials/' + item + '/viewed', headers={'X-Oko-Action':'view-one'})
         assert result.status_code == 200, result.text
         assert client.get('/api/v3/commands/view-one').json()['outcome'] == 'succeeded'
-        assert client.get('/api/v3/publication/' + item).status_code == 404
+        assert client.get('/api/v3/publication/' + item).status_code == 200
         folder = next(f['id'] for f in client.get('/api/v3/reading-composition').json()['folders'])
         preview = client.post(f'/api/v3/folders/{folder}/completion/preview').json()
         assert preview['publications_count'] == 2

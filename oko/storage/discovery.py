@@ -21,11 +21,11 @@ from oko.storage.history_publication import loaded as history_loaded
 class DiscoveryRepository:
     def __init__(self, *, db: Connection, publications: Publications, subscriptions: SubscriptionRepository,
                  versions: ReaderVersions, effects: CollectionEffectCapture,
-                 root: Path,
+                 root: Path, unviewed: Callable[[list[str]],None],
                  clock: Callable[[], float], fault: Callable[[str], None]) -> None:
         self._db, self._publications, self._subscriptions = db, publications, subscriptions
         self._versions, self._effects = versions, effects
-        self._root, self._clock, self._fault = root, clock, fault
+        self._root, self._clock, self._fault, self._unviewed = root, clock, fault, unviewed
 
     def accept(self,publications: Sequence[PublicationContent],cursor: str,feed: str,namespace: str = '',*,description: str | None = None,successful: bool = True) -> CollectionEffects:
         try:
@@ -47,7 +47,12 @@ class DiscoveryRepository:
         completed_links: set[str] = set()
         envelope=HistoryEnvelope.decode(cursor,adapter='web') if namespace=='telegram-web' else None
         selection=json.loads(cursor) if not envelope and self._subscriptions.history.status(feed) else {}
+        history_row=self._db.execute('SELECT selection FROM initial_history WHERE feed=%s',(feed,)).fetchone()
+        saved_selection=json.loads(history_row['selection']) if history_row else {}
+        result_run=envelope.position.get('run') if envelope else selection.get('run')
+        stale_history=bool(saved_selection.get('restore_unread') and result_run and result_run!=saved_selection.get('run'))
         enrolled=set(envelope.selection.enrolled_ids) if envelope else set(selection.get('history_enroll',[]))
+        if stale_history:enrolled.clear()
         for publication in publications:
             ref=publication.metadata.reference
             identity=ref.key.external_id
@@ -100,7 +105,10 @@ class DiscoveryRepository:
         if item_status_changed:
             status_changed(self._db)
         self._versions.memberships_changed(added_memberships)
-        if envelope or 'history_enroll' in selection:
+        if not stale_history and (envelope or 'history_enroll' in selection):
+            if saved_selection.get('restore_unread') and history_items:
+                enrolled_before={row[0] for row in self._db.execute('SELECT item FROM history_members WHERE feed=%s AND item=ANY(%s)',(feed,history_items))}
+                self._unviewed([item for item in history_items if item not in enrolled_before])
             self._subscriptions.history.enroll(feed,history_items,envelope.selection.scan_complete if envelope else selection['scan_complete'])
             if envelope:
                 self._subscriptions.history.telegram_state(feed,envelope.selection)
@@ -108,7 +116,7 @@ class DiscoveryRepository:
                 row=expect_row(self._db.execute('SELECT content FROM publications WHERE id = %s',(item,)).fetchone())
                 if 'blocks' in row['content']:
                     self._subscriptions.history.saved(item,history_loaded(self._db,self._root,item))
-        if selection:
+        if selection and not stale_history:
             self._subscriptions.history.discovery_state(feed,selection)
         effects.processing_items.update(saved_items)
         for item in set(added_memberships) | completed_links:
@@ -117,6 +125,6 @@ class DiscoveryRepository:
             self._subscriptions.details.record(feed,'updated')
         self._subscriptions.details.description(feed,description)
         self._fault('before_discovery_commit')
-        self._db.execute('UPDATE feeds SET cursor = %s WHERE id = %s',(cursor,feed))
+        if not stale_history:self._db.execute('UPDATE feeds SET cursor = %s WHERE id = %s',(cursor,feed))
 
         return self._effects.finish(effects,operation='discover',target=feed)

@@ -93,9 +93,9 @@ class History:
         self.db.execute('INSERT INTO initial_history ( feed , selection ) VALUES ( %s , %s )', (feed, json.dumps(dict(selection.selection(),run=secrets.token_hex(16)))))
         source_changed(self.db)
 
-    def start(self, feed: str, selection: InitialHistory) -> dict[str, Any]:
+    def start(self, feed: str, selection: InitialHistory, *, restore: bool = False) -> dict[str, Any]:
         current = self.status(feed)
-        if current and current['state'] not in ('done', 'cancelled'):
+        if not restore and current and current['state'] not in ('done', 'cancelled'):
             raise ValueError('Сначала остановите текущую загрузку истории')
         if self.db.execute('DELETE FROM history_members WHERE feed = %s', (feed,)).rowcount:
             status_changed(self.db)
@@ -193,6 +193,7 @@ class History:
     @staticmethod
     def _status(row: Row, counts: dict[str,int], errors: list[dict[str,Any]]) -> dict[str,Any]:
         result: dict[str, Any] = json.loads(row['selection'])
+        result.pop('restore_unread',None)
         result.pop('date',None)
         result.pop('timezone',None)
         result['count_text'] = str(result['count']) if result['count'] is not None else None

@@ -126,7 +126,7 @@ def test_settings_and_viewed_during_recovery_survive_an_early_stop_and_restart(p
     try:
         with closing(ready(root, process)) as client:
             assert client.get('/api/v3/settings/oko/global').json()['effective']['prompt_filters']['value'] == 'Keep useful text'
-            assert client.get('/api/v3/publication/'+cards[0]['id']).status_code == 404
+            assert client.get('/api/v3/publication/'+cards[0]['id']).status_code == 200
             assert len(read_all_cards(client, '/api/v3/cards')) == len(cards)-1
             assert client.get('/api/v3/status').json()['runtime_state'] == 'disabled'
             assert client.post('/api/v3/stop').status_code == 200

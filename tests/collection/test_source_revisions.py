@@ -73,7 +73,7 @@ def test_confirmed_remote_deletion_keeps_local_copy_but_absence_is_not_deletion(
         assert 'previous_versions' not in retained
         assert retained['status']=='ready'
         client.post('/api/v3/materials/' + item + '/viewed')
-        assert client.get('/api/v3/publication/' + item).status_code == 404
+        assert 'Локальная копия' in body_text(client.get('/api/v3/publication/' + item).json())
 
 
 @pytest.mark.skip(reason='Ручная пересборка вместо автоматического обновления: задача #216')

@@ -25,7 +25,7 @@ def test_disabled_oko_keeps_reading_and_local_actions_and_survives_restart(tmp_p
         assert client.get('/api/v3/publication/' + item).status_code == 200
         assert client.patch('/api/v3/settings/oko/global', json={'prompt_filters': 'later'}).status_code == 200
         assert client.post('/api/v3/materials/' + item + '/viewed').status_code == 200
-        assert client.get('/api/v3/publication/' + item).status_code == 404
+        assert client.get('/api/v3/publication/' + item).status_code == 200
         assert len(read_all_cards(client, '/api/v3/cards')) == 2
     with TestClient(create_app(tmp_path, **options), headers=HEADERS) as client:
         assert client.get('/api/v3/status').json()['runtime_state'] == 'disabled'

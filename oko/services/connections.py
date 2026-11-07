@@ -10,7 +10,7 @@ from oko.subscriptions.history import InitialHistory
 
 
 class TelegramConnectionRepository(Protocol):
-    def owners(self, claims: list[tuple[str, str]]) -> list[str]: ...
+    def owners(self, claims: list[tuple[str, str]], *, active_only: bool = False) -> list[str]: ...
     def duplicates(self, feeds: list[str]) -> dict[str, Any]: ...
     def supports_access_change(self, feed: str) -> bool: ...
     def change_access(self, feed: str, binding: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]: ...
@@ -37,8 +37,8 @@ class ConnectionService:
         self._access, self._telegram, self._processor, self._youtube = access, telegram, processor, youtube
 
     @repository_access
-    def owners(self, claims: list[tuple[str, str]]) -> list[str]:
-        return self._telegram().owners(claims)
+    def owners(self, claims: list[tuple[str, str]], *, active_only: bool = False) -> list[str]:
+        return self._telegram().owners(claims, active_only=active_only)
 
     @repository_access
     def duplicates(self, feeds: list[str]) -> dict[str, Any]:

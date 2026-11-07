@@ -23,7 +23,7 @@ class FilterResults:
     def read(self,item: str) -> dict[str,Any]:
         row=material_read.item(self.store.db,item)
         metadata=json.loads(row['processing_metadata']).get('filter',{}) if row else {}
-        if row is not None and metadata and row['filtered_content']!='{}' and not metadata.get('source_url_stale') and not metadata.get('source_title_stale'):
+        if row is not None and metadata and row['filtered_content']!='{}' and (row['viewed'] or metadata.get('preserve_stale') or not (metadata.get('source_url_stale') or metadata.get('source_title_stale'))):
             result=json.loads(row['filtered_content'])
             return dict(status='done',hidden=result.get('hidden',False),
                         reason=result['reason'],removed=[part['text'] for part in result['removed']],error=None)

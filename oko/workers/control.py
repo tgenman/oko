@@ -7,13 +7,11 @@ from contextlib import nullcontext
 from typing import Any, Literal, TYPE_CHECKING
 from oko.storage.store import Store
 from oko.domain.job import Job
-from oko.diagnostics import Journal, record_caught
+from oko.diagnostics import Journal
 from oko.execution import Execution
-from oko.storage.reader_facts import ReaderFacts
 from oko.storage.job_repository import JobRepository
 from oko.workers.processing_service import processing_service
 from oko.services.feed_refresh import FeedRefresh
-from oko.services.feed_deletion import FeedDeletion
 if TYPE_CHECKING:
     from oko.observability import Metrics
 
@@ -133,39 +131,6 @@ class JobControl:
         task.add_done_callback(completed)
 
 
-    async def _drain_deletions(self, current: Store) -> None:
-        feeds = ReaderFacts(lambda: current).deletion_feeds()
-        if feeds:
-            await self.cancel(feeds)
-        with current.jobs.transaction(lambda: not self.execution.stopped):
-            job = current.jobs.next_job(self._clock(), deleting_only=True)
-        while job:
-            self._delete(job, current)
-            with current.jobs.transaction(lambda: not self.execution.stopped):
-                job = current.jobs.next_job(self._clock(), deleting_only=True)
-
-
-    def _delete(self, job: Job, current: Store) -> None:
-        try:
-            if job.kind == 'feed-delete':
-                with current.jobs.transaction(lambda: True):
-                    if current.jobs.valid(job) and not FeedDeletion(current.jobs,current.publications,current.subscriptions).finish(job):
-                        current.jobs.retry(job, self._clock(), 'Ожидание очистки файлов', .1)
-            else:
-                if current.jobs.valid(job):
-                    deleted = current.publication_files.delete(job.item)
-                    with current.jobs.transaction(lambda: True):
-                        if deleted:
-                            current.jobs.finish_delete(job)
-                        elif current.jobs.valid(job):
-                            current.jobs.retry(job, self._clock(), 'Ожидание завершения сохранения файла', .1)
-        except Exception:
-            record_caught('runtime._delete')
-            with current.jobs.transaction(lambda: True):
-                if current.jobs.valid(job):
-                    current.jobs.retry(job, self._clock(), 'Ошибка удаления', code='delete', cleanup_backoff=True)
-
-
     def retry_material(self, identity: str) -> bool:
         return self.execution.require_store().jobs.retry_material(identity)
 
@@ -198,15 +163,8 @@ class JobControl:
             service.refresh(identity)
         return accepted
 
-    def reconcile_cleanup(self) -> None:
-        store=self.execution.require_store()
-        store.jobs.reconcile_cleanup()
-
     def change_adapter(self, feed: str) -> None:
         self.execution.require_store().jobs.change_adapter(feed)
-
-    def remove_feed(self, feed: str, members: set[str]) -> None:
-        self.execution.require_store().jobs.remove_feed(feed,members)
 
     def cancel_history(self, feed: str) -> None:
         self.execution.require_store().jobs.cancel_history(feed)

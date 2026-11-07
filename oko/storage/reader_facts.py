@@ -23,6 +23,18 @@ class ReaderFacts:
         from oko.storage.unified_publication import project
         store=self.storage()
         value=project(store.db,store.root,identity,store.clock(),store.wall_clock())
+        row=material_read.item(store.db,identity)
+        if row and row['feed_id'] is not None:
+            effective=store.subscriptions.effective('feed',row['feed_id'],details=False)['effective']
+            for section,kind,setting in (('filter','filter','prompt_filters'),('summary','theses','prompt_theses')):
+                metadata=value['processing_metadata'].get(section)
+                if not isinstance(metadata,dict):continue
+                from oko.storage import processing_input
+                source_hash=processing_input.input_hash(store,identity,kind)
+                stale=bool(metadata.get('preserve_stale') or metadata.get('source_url_stale') or metadata.get('source_title_stale')
+                    or metadata.get('prompt') is not None and metadata['prompt'] != effective[setting]['value']
+                    or source_hash is not None and metadata.get('input_hash') is not None and metadata['input_hash']!=source_hash)
+                metadata['stale']=stale
         files={item['id']:item for item in value['media']}
         for owner in [{'id':identity,'content':value['content']},*value['linked_publications']]:
             for block in owner['content'].get('blocks',[]):
@@ -97,12 +109,18 @@ class ReaderFacts:
         return {row['id']: (row, bindings.get(row['id'])) for row in rows}
 
     def avatar(self, feed: str, revision: str) -> tuple[bytes, str] | None:
-        row=self.storage().db.execute("SELECT avatar_image AS image, avatar_mime AS mime FROM feeds WHERE id = %s AND avatar_digest = %s AND connection != 'deleting'", (feed, revision)).fetchone()
+        row=self.storage().db.execute("SELECT avatar_image AS image, avatar_mime AS mime FROM feeds WHERE id = %s AND avatar_digest = %s AND NOT deleted", (feed, revision)).fetchone()
         return (bytes(row['image']), row['mime']) if row else None
 
     def material_feeds(self, identities: set[str]) -> dict[str, str]:
         return {row['id']: row['feed_id'] for row in self.storage().db.execute(f"SELECT i.id , {owner_expr('i')} AS feed_id FROM publications i WHERE i.id IN ( {','.join(('%s' for _ in identities))} )", tuple(identities))} if identities else {}
 
+
+    def hidden_problem_objects(self, materials: set[str], feeds: set[str]) -> tuple[set[str],set[str]]:
+        db=self.storage().db
+        hidden_materials={row['id'] for row in db.execute('SELECT p.id FROM publications p JOIN feeds f ON f.id=p.feed_id WHERE f.deleted AND p.id=ANY(%s)',(sorted(materials),))} if materials else set()
+        hidden_feeds={row['id'] for row in db.execute('SELECT id FROM feeds WHERE deleted AND id=ANY(%s)',(sorted(feeds),))} if feeds else set()
+        return hidden_materials,hidden_feeds
 
     def was_viewed(self, identity: str) -> bool:
         return self.storage().db.execute('SELECT 1 FROM publications WHERE id = %s', (identity,)).fetchone() is None

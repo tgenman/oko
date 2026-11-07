@@ -31,7 +31,7 @@ def _sync(store: 'Store', kind: str, job_id: int, previous: list[dict[str, Any]]
         store.problems.sync_processing_problem(job_id, previous, store.wall_clock())
 
 
-_SOURCE_KINDS = ('fetch', 'download_media', 'filter', 'theses', 'delete', 'feed-delete')
+_SOURCE_KINDS = ('fetch', 'download_media', 'filter', 'theses')
 
 
 def _sync_source(store: 'Store', kind: str, job_id: int, old_code: str | None, before: set[str]) -> None:

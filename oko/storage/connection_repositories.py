@@ -13,8 +13,8 @@ class TelegramConnections:
     def __init__(self, store: 'Store') -> None:
         self._store = store
 
-    def owners(self, claims: list[tuple[str, str]]) -> list[str]:
-        return self._store.subscriptions.telegram.owners(claims)
+    def owners(self, claims: list[tuple[str, str]], *, active_only: bool = False) -> list[str]:
+        return self._store.subscriptions.telegram.owners(claims, active_only=active_only)
 
     def duplicates(self, feeds: list[str]) -> dict[str, Any]:
         return self._store.subscriptions.telegram.duplicates(feeds)

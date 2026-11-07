@@ -37,8 +37,7 @@ def test_hidden_ads_and_clean_view_preserve_original_and_restore_same_version(tm
         assert len(read_publications_for_cards(client, '/api/v3/cards')) == 2
         assert 'restored' not in filter_result(client.get('/api/v3/publication/' + hidden['id']).json())
         client.post('/api/v3/materials/' + hidden['id'] + '/viewed')
-        assert client.get('/api/v3/publication/' + hidden['id']).status_code == 404
-        assert not (tmp_path / 'content' / hidden['id']).exists()
+        assert filter_result(client.get('/api/v3/publication/' + hidden['id']).json())['hidden']
 
 
 def test_theses_receive_clean_text_and_hidden_material_is_not_summarized(tmp_path):
@@ -72,7 +71,7 @@ def test_unknown_filter_fragment_is_error_and_forbidden_ai_sends_nothing(tmp_pat
         assert not any(r.url.host == 'remote.example.org' and r.url.path == '/v1/chat/completions' for r in calls)
 
 
-def test_filter_delete_and_stop_reject_cancel_resistant_late_reply(tmp_path):
+def test_view_then_stop_rejects_cancel_resistant_late_filter_reply(tmp_path):
     import asyncio
     import threading
     import time
@@ -101,10 +100,8 @@ def test_filter_delete_and_stop_reject_cancel_resistant_late_reply(tmp_path):
         client.post('/api/v3/stop')
         held.release.set()
         time.sleep(.15)
-        assert not (tmp_path / 'content' / item).exists()
-        assert not (tmp_path / 'staging' / item).exists()
     with TestClient(create_app(tmp_path, source=FilterSource(), token='test', ai_transport=transport([])), headers=HEADERS) as client:
-        assert client.get('/api/v3/publication/' + item).status_code == 404
+        assert not filter_result(client.get('/api/v3/publication/' + item).json())
         presence(client, 'reader')
         wait_for(client, lambda: all(filter_state(c) == 'ready' for c in read_publications_for_cards(client, '/api/v3/cards')))
         assert len(read_publications_for_cards(client, '/api/v3/cards?show_hidden=true')) == 2

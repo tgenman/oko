@@ -1272,6 +1272,7 @@ class CardListItem(WireModel):
         ..., description="Null only when a damaged publication has no valid source URL."
     )
     title: StrictStr
+    viewed: StrictBool = False
 
 
 class CardPage(WireModel):

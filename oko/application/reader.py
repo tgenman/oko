@@ -63,7 +63,7 @@ class ReaderApplication:
         self._rss_transport, self._ai_transport = rss_transport, ai_transport
         self._telegram_http, self._codex_client = telegram_http, codex
         self.stop, self.admission_changed, self.set_power = stop, admission_changed, set_power
-        self._cancel, self._drain_deletions = jobs.cancel, jobs._drain_deletions
+        self._cancel = jobs.cancel
         self._feed_checks: dict[str, str] = {}
         self._last_problems: dict[str, Any] = dict(current=[], recent=[], count=0, updated_at=wall_clock())
         self._viewed_ids: list[str] = []
@@ -173,10 +173,10 @@ class ReaderApplication:
         state['viewed_ids'] = self._viewed_ids
         source_states = self._store.source_statuses() if self._store else []
         names = {f['id']: f['title'] for f in self._store.subscriptions.feeds()} if self._store else {}
-        source_states = [dict(s, title=names.get(s['feed_id'], s['feed_id']), changes=self._source_description(s['feed_id'])) for s in source_states if s['feed_id'] in self._sources]
+        source_states = [dict(s, title=names.get(s['feed_id'], s['feed_id']), changes=self._source_description(s['feed_id'])) for s in source_states if s['feed_id'] in self._sources and s['feed_id'] in names]
         return dict(**state, initial_histories=[dict(feed_id=f['id'], **f['initial_history']) for f in self._store.subscriptions.feeds() if f['initial_history']] if self._store else [], sources=source_states, error=self._error,
-                    ready_sources=self._store.ready_sources(list(self._sources)) if self._store and not self.stopped else 0,
-                    total_sources=len(self._sources))
+                    ready_sources=self._store.ready_sources([feed for feed in self._sources if feed in names]) if self._store and not self.stopped else 0,
+                    total_sources=sum(feed in names for feed in self._sources))
 
 
     async def action_started(self, identity: str, context: dict[str, Any], *, restart: bool = False, expected_identity: str | None = None) -> None:
@@ -231,10 +231,16 @@ class ReaderApplication:
                     self.jobs.refresh_feed(source_feed)
 
 
+    def _require_visible_material(self, item: str) -> None:
+        row=self.queries.item(item)
+        if row is None or row['feed_id'] is None or not self.queries.feed_resources({row['feed_id']}):
+            raise ActionError('missing','Материал недоступен')
+
     async def rebuild_publication(self, item: str) -> None:
         async with self._actions:
             self.require_work()
             with transaction(self.require_store().db):
+                self._require_visible_material(item)
                 if not self.require_store().jobs.enqueue_rebuild(item):
                     raise ActionError('missing','Публикация не найдена')
 
@@ -243,6 +249,7 @@ class ReaderApplication:
             self.require_work()
             current = self.require_store()
             with transaction(current.db):
+                self._require_visible_material(item)
                 if not self.jobs.retry_material(item):
                     raise ActionError('missing', 'Материал недоступен')
                 affected = {current.item_feed(item)}
@@ -273,28 +280,18 @@ class ReaderApplication:
 
     async def viewed(self, item: str) -> None:
         async with self._actions:
-            current = self.require_store()
-            with transaction(current.db):
-                members = self.reading.viewed(item)
-                self.jobs.reconcile_cleanup()
-            if self.diagnostics:
-                self.diagnostics.forget_materials(members)
-            await self._drain_deletions(current)
-
+            with transaction(self.require_store().db):
+                self.reading.viewed(item)
 
     async def viewed_many(self, identities: list[str]) -> None:
-        """Atomically mark existing cards viewed; repeated or missing IDs are harmless."""
         async with self._actions:
-            current = self.require_store()
-            with transaction(current.db):
-                members = self.reading.viewed_many(identities)
-                if members:
-                    self.jobs.reconcile_cleanup()
-            if self.diagnostics and members:
-                self.diagnostics.forget_materials(members)
-            if members:
-                await self._drain_deletions(current)
+            with transaction(self.require_store().db):
+                self.reading.viewed_many(identities)
 
+    async def unviewed_many(self, identities: list[str]) -> None:
+        async with self._actions:
+            with transaction(self.require_store().db):
+                self.reading.unviewed_many(identities)
 
     def _completion_preview(self, folder: str, current: Store, scope: Literal['folder', 'feed'] = 'folder') -> dict[str, Any]:
         return self.reading.preview(folder, scope)
@@ -318,12 +315,8 @@ class ReaderApplication:
         async with self._actions:
             current = self.require_store()
             with transaction(current.db):
-                members = self.reading.complete(folder, token, scope)
-                self.jobs.reconcile_cleanup()
+                self.reading.complete(folder, token, scope)
             self.reading.accepted(folder, token, scope)
-            if self.diagnostics and members:
-                self.diagnostics.forget_materials(members)
-            await self._drain_deletions(current)
             if current.status()['deleting']:
                 raise ActionError('unavailable', 'Удаление не завершено. Око повторит попытку; ошибка видна в статусе.')
 
@@ -577,6 +570,7 @@ class ReaderApplication:
         async with self._actions:
             self.require_work()
             with transaction(self.require_store().db):
+                self._require_visible_material(item)
                 if not self.jobs.retry_filter(item):
                     raise ActionError('missing', 'Фильтрация не включена')
             await self.jobs.cancel_stale_ai()
@@ -590,6 +584,7 @@ class ReaderApplication:
         async with self._actions:
             self.require_work()
             with transaction(self.require_store().db):
+                self._require_visible_material(item)
                 if not self.jobs.retry_theses(item):
                     raise ActionError('missing', 'Тезисы для материала не включены')
 
@@ -598,6 +593,7 @@ class ReaderApplication:
         async with self._actions:
             self.require_work()
             with transaction(self.require_store().db):
+                self._require_visible_material(item)
                 if not self.jobs.retry_theses(item):
                     raise ActionError('missing', 'Результат недоступен для пересоздания')
 
@@ -610,7 +606,7 @@ class ReaderApplication:
             current = self.require_store()
             if not self._live():
                 raise ActionError('conflict', 'Откройте читатель для подключения', expected=True)
-            duplicates = self.connections.owners([(kind, str(address))])
+            duplicates = self.connections.owners([(kind, str(address))], active_only=True)
             if any(identity!=feed_id for identity in duplicates):
                 raise TelegramConflict('duplicate_source', self.connections.duplicates(duplicates), 'Источник уже подключён')
             previous=self.queries.binding(feed_id) if feed_id else None
@@ -651,18 +647,9 @@ class ReaderApplication:
 
     async def remove_feed(self, identity: str) -> None:
         async with self._actions:
-            current = self.require_store()
-            members = self.queries.feed_members(identity)
+            current=self.require_store()
             with transaction(current.db):
                 self.subscriptions.remove_feed(identity)
-                self.jobs.remove_feed(identity,members)
-                self.jobs.invalidate({identity})
-            if self.diagnostics:
-                self.diagnostics.forget_materials(members)
-            await self.jobs.cancel({identity}, invalidate=False)
-            self._sources.pop(identity, None)
-            self._telegram_bindings.pop(identity, None)
-
 
     def _clean_collection(self, value: Any) -> Any:
         diagnostics = self.diagnostics

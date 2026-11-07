@@ -162,7 +162,7 @@ def test_proxy_configuration_redacts_preserves_and_clears_secrets(tmp_path):
         assert 'private-' not in json.dumps(client.get('/api/v3/diagnostics').json())
 
 
-def test_closed_browser_allows_retry_but_viewed_material_does_not_resume(tmp_path):
+def test_closed_browser_and_viewed_material_allow_retry(tmp_path):
     clock = Clock()
     captions = Captions(clock, [CaptionsBlocked(), CaptionsBlocked()])
     with TestClient(app(tmp_path, clock, captions), headers=HEADERS) as client:
@@ -178,8 +178,7 @@ def test_closed_browser_allows_retry_but_viewed_material_does_not_resume(tmp_pat
         client.put('/api/v3/power',json={'enabled':False})
         client.post('/api/v3/materials/' + item['id'] + '/viewed')
         assert client.put('/api/v3/power',json={'enabled':True}).status_code == 200
-        clock.advance(900)
-        time.sleep(.1)
-        assert client.get('/api/v3/publication/'+item['id']).status_code==404
+        clock.advance(1800)
+        eventually(lambda: len(captions.calls) >= 3)
+        assert client.get('/api/v3/publication/'+item['id']).status_code==200
         assert read_all_cards(client, '/api/v3/cards') == []
-        assert len(captions.calls) == 2

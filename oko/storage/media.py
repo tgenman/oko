@@ -83,6 +83,13 @@ class MediaFiles:
         return None
 
 
+    def visible_file(self, item: str, media: str) -> tuple[Path,str] | None:
+        visible=self.store.db.execute("""SELECT 1 FROM publications p WHERE p.id=%s AND (
+            EXISTS (SELECT 1 FROM feeds f WHERE f.id=p.feed_id AND NOT f.deleted)
+            OR EXISTS (SELECT 1 FROM publication_links l JOIN publications root ON root.id=l.source_publication_id
+                JOIN feeds f ON f.id=root.feed_id WHERE l.target_publication_id=p.id AND NOT f.deleted))""",(item,)).fetchone()
+        return self.file(item,media) if visible else None
+
     def owner(self, media: str) -> str | None:
         row = self.store.db.execute('SELECT publication_id FROM media_files WHERE id = %s', (media,)).fetchone()
         return str(row[0]) if row else None

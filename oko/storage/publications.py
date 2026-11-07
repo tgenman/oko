@@ -40,8 +40,6 @@ class PreparedPublication:
 @dataclass
 class DiscoveryProjection:
     item: str
-    delete_problem_job: int | None = None
-    delete_problem_children: tuple[str,...] = ()
     fetch_problem_job: int | None = None
     fetch_problem_children: tuple[str,...] = ()
     media_problem_exists: bool = False
@@ -61,12 +59,6 @@ class Publications:
     def owns(self, item: str) -> bool:
         row=material_read.item(self.store.db,item)
         return row is not None and row['platform'] is not None
-
-    def remove_cleaned(self, identities: list[str]) -> None:
-        if not self.store.db.transaction_depth:
-            raise RuntimeError('Publication cleanup requires an owning transaction')
-        if identities and self.store.db.execute('DELETE FROM publications WHERE id=ANY(%s)',(identities,)).rowcount:
-            status_changed(self.store.db)
 
     def notify_parents(self, item: str, *, preserve_cancelled: bool = False) -> None:
         if not self.store.db.transaction_depth:
@@ -183,7 +175,6 @@ class Publications:
             if not existing:plan.new_source_jobs=tuple(new_source_jobs)
             current=self.store.db.execute("""SELECT content,status,
                 EXISTS (SELECT 1 FROM jobs j WHERE j.item=publications.id AND j.reason_code LIKE 'source-%%') OR EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=publications.id AND j.reason_code LIKE 'source-%%') OR EXISTS (SELECT 1 FROM publication_links l JOIN jobs j ON j.item=l.target_publication_id AND j.reason_code LIKE 'source-%%' WHERE l.source_publication_id=publications.id) OR EXISTS (SELECT 1 FROM publication_links l JOIN media_files m ON m.publication_id=l.target_publication_id JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE l.source_publication_id=publications.id AND j.reason_code LIKE 'source-%%') AS source_problem_exists,
-                (SELECT j.id FROM jobs j WHERE j.kind='delete' AND j.item=publications.id AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL)) AS delete_problem_job,
                 (EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=publications.id AND (((m.resource_key='youtube:subtitles' OR j.media_null_owned) AND j.reason_code IS NULL AND j.reason_message IS NOT NULL) OR (j.reason_code IS NOT NULL AND j.reason_code NOT LIKE 'source-%%'))) OR EXISTS (SELECT 1 FROM jobs j WHERE j.kind='download_media' AND j.item=publications.id AND ((j.media_null_owned AND j.reason_code IS NULL AND j.reason_message IS NOT NULL) OR (j.identity_event_owned AND j.reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'))))) AS media_problem_exists,
                 ARRAY(SELECT DISTINCT m.publication_id FROM publication_links l JOIN media_files m ON m.publication_id=l.target_publication_id JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE l.source_publication_id=publications.id AND (((m.resource_key='youtube:subtitles' OR j.media_null_owned) AND j.reason_code IS NULL AND j.reason_message IS NOT NULL) OR (j.reason_code IS NOT NULL AND j.reason_code NOT LIKE 'source-%%')) UNION SELECT j.item FROM publication_links l JOIN jobs j ON j.kind='download_media' AND j.item=l.target_publication_id WHERE l.source_publication_id=publications.id AND ((j.media_null_owned AND j.reason_code IS NULL AND j.reason_message IS NOT NULL) OR (j.identity_event_owned AND j.reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')))) AS media_problem_children,
                 EXISTS (SELECT 1 FROM jobs j WHERE j.kind IN ('filter','theses') AND j.item=publications.id AND (((j.reason_code='' OR (j.reason_code IS NULL AND j.reason_message IS NOT NULL))) OR (j.reason_code IS NOT NULL AND j.reason_code<>'' AND j.reason_code NOT LIKE 'source-%%' AND j.reason_code NOT IN ('processor-config','ai-permission','codex-choice','youtube-admission')))) AS processing_problem_exists,
@@ -192,19 +183,9 @@ class Publications:
                 ARRAY(SELECT j.item FROM LATERAL
                       (SELECT target_publication_id FROM publication_links WHERE source_publication_id=publications.id ORDER BY target_publication_id OFFSET 0) l
                       CROSS JOIN LATERAL (SELECT j.item FROM jobs j WHERE j.item=l.target_publication_id AND j.kind='fetch'
-                          AND ((j.reason_code IS NULL AND j.reason_message IS NOT NULL) OR (j.reason_code IS NOT NULL AND j.reason_code NOT LIKE 'source-%%' AND j.reason_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config'))) OFFSET 0) j) AS fetch_problem_children,
-                CASE WHEN feed_id IS NULL
-                     THEN ARRAY(SELECT j.item FROM LATERAL
-                                (SELECT target_publication_id FROM publication_links WHERE source_publication_id=publications.id
-                                 ORDER BY target_publication_id OFFSET 0) l
-                                CROSS JOIN LATERAL (SELECT j.item FROM jobs j WHERE j.item=l.target_publication_id AND j.kind='delete'
-                                 AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL) OFFSET 0) j)
-                     ELSE ARRAY[]::text[] END AS delete_problem_children
+                          AND ((j.reason_code IS NULL AND j.reason_message IS NOT NULL) OR (j.reason_code IS NOT NULL AND j.reason_code NOT LIKE 'source-%%' AND j.reason_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config'))) OFFSET 0) j) AS fetch_problem_children
                 FROM publications WHERE id = %s""",(item,)).fetchone() if existing else None
-            if current and current['delete_problem_job'] is not None:
-                plan.delete_problem_job = current['delete_problem_job']
             if current:
-                plan.delete_problem_children = tuple(current['delete_problem_children'])
                 plan.fetch_problem_job = current['fetch_problem_job']
                 plan.fetch_problem_children = tuple(current['fetch_problem_children'])
                 plan.media_problem_exists = bool(current['media_problem_exists'])
@@ -465,7 +446,7 @@ class Publications:
         saved_title = saved_filter.get('source_title', saved_summary.get('source_title'))
         title_changed = row['platform'] != 'youtube' and saved_title is not None and saved_title != row['title']
         stale_source=any(section.get('source_url_stale') or section.get('source_title_stale') for section in (saved_filter,saved_summary))
-        if not preserved and source_hash is not None and not stale_source and ((prior_source is not None and source_hash != prior_source) or title_changed):
+        if not row['viewed'] and not preserved and not any(section.get('preserve_stale') for section in (saved_filter,saved_summary)) and source_hash is not None and not stale_source and ((prior_source is not None and source_hash != prior_source) or title_changed):
             self.store.db.execute("UPDATE publications SET filtered_content='{}',summarized_content='{}' WHERE id=%s", (item,))
             metadata.pop('filter',None)
             metadata.pop('summary',None)
@@ -485,37 +466,3 @@ class Publications:
             for path in media_directory.iterdir():
                 if str(path.relative_to(self.store.root)) not in referenced and path not in self.store.media.active_paths:
                     path.unlink()
-
-    def forget(self, item: str, *, prune: bool = True, effects: CollectionDiagnostics | None = None) -> None:
-        db = self.store.db
-        linked={row[0] for row in db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id = %s',(item,))}
-        self.forget_many([item],effects=effects)
-        if prune:
-            publication_links.prune(self.store,linked,effects=effects)
-
-    def forget_many(self, items: list[str], *, effects: CollectionDiagnostics | None = None) -> None:
-        """Clear saved copies without re-evaluating graph reachability."""
-        db = self.store.db
-        memberships.lock_graph(db)
-        local_effects=effects if effects is not None else CollectionDiagnostics()
-        publication_links.capture_media_problems(self.store,local_effects,set(items))
-        publication_links.capture_source_groups(self.store,local_effects,set(items))
-        for start in range(0, len(items), 400):
-            batch = items[start:start+400]
-            marks = ','.join('%s' for _ in batch)
-            children=[row['target_publication_id'] for row in db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id=ANY(%s)',(batch,))]
-            self.store.incomplete_draft.mark_materials(batch+children)
-            removed = memberships.remove(db,items=batch)
-            self.store.read_versions.memberships_changed(removed)
-            db.execute(f'DELETE FROM publication_links WHERE source_publication_id IN ( {marks} ) OR target_publication_id IN ( {marks} )', batch+batch)
-            # Keep the owner until its disk cleanup completes, after MediaFile rows
-            # have been removed and late downloads have been cancelled.
-            db.execute("""UPDATE jobs j SET payload=jsonb_set(j.payload,'{cleanup_publication}',to_jsonb(m.publication_id))
-                FROM media_files m WHERE j.kind='download_media' AND j.item=m.id AND m.publication_id=ANY(%s)""",(batch,))
-            db.execute(f'DELETE FROM media_files WHERE publication_id IN ( {marks} )', batch)
-            db.execute(f"UPDATE publications SET content = '{{}}' , media_ids = '[]' , filtered_content = '{{}}' , summarized_content = '{{}}' , processing_metadata = '{{}}' WHERE id IN ( {marks} )", batch)
-            self.store.processing.memberships_removed(removed)
-        if effects is None:
-            if local_effects.source_groups_before:self.store.jobs.sync_captured_source_groups(local_effects)
-            for job_id,previous in local_effects.media_problems_before.items():
-                self.store.problems.sync_media_problem(job_id,previous,self.store.wall_clock())

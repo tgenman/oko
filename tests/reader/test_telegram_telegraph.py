@@ -121,7 +121,7 @@ def test_article_completion_and_retry_keep_previous_copy_without_false_edit(tmp_
         assert 'Version one' in body_text(changed) and 'previous_versions' not in changed
 
 
-def test_late_article_after_feed_deletion_cannot_download_media_or_publish(tmp_path):
+def test_late_article_after_feed_deletion_finishes_and_is_retained(tmp_path):
     import asyncio
     import threading
     import time
@@ -150,14 +150,15 @@ def test_late_article_after_feed_deletion_cannot_download_media_or_publish(tmp_p
         assert started.wait(10)
         try:
             assert client.delete('/api/v3/feeds/'+result.json()['feed_id']).status_code == 200
-            assert cancelled.is_set()
+            assert not cancelled.is_set()
             release.set()
-            deadline = time.monotonic()+2
-            while time.monotonic()<deadline and (client.get('/api/v3/subscriptions').json()['feeds'] or list((tmp_path/'staging').rglob('incoming-*'))):
+            deadline = time.monotonic()+10
+            while time.monotonic()<deadline and not assets:
                 time.sleep(.02)
-            time.sleep(.05)
+            assert assets
             assert not read_all_cards(client, '/api/v3/cards')
-            assert not assets
+            restored=client.post('/api/v3/telegram/connect',json=dict(source_locator='@fixture',folder='Inbox'))
+            assert restored.status_code == 200 and restored.json()['feed_id']==result.json()['feed_id']
         finally:
             release.set()
     assert not list((tmp_path/'staging').rglob('incoming-*'))
