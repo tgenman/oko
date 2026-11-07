@@ -63,7 +63,7 @@ class ReaderApplication:
         self._rss_transport, self._ai_transport = rss_transport, ai_transport
         self._telegram_http, self._codex_client = telegram_http, codex
         self.stop, self.admission_changed, self.set_power = stop, admission_changed, set_power
-        self._cancel, self._drain_deletions = jobs.cancel, jobs._drain_deletions
+        self._cancel = jobs.cancel
         self._feed_checks: dict[str, str] = {}
         self._last_problems: dict[str, Any] = dict(current=[], recent=[], count=0, updated_at=wall_clock())
         self._viewed_ids: list[str] = []
@@ -315,12 +315,8 @@ class ReaderApplication:
         async with self._actions:
             current = self.require_store()
             with transaction(current.db):
-                members = self.reading.complete(folder, token, scope)
-                self.jobs.reconcile_cleanup()
+                self.reading.complete(folder, token, scope)
             self.reading.accepted(folder, token, scope)
-            if self.diagnostics and members:
-                self.diagnostics.forget_materials(members)
-            await self._drain_deletions(current)
             if current.status()['deleting']:
                 raise ActionError('unavailable', 'Удаление не завершено. Око повторит попытку; ошибка видна в статусе.')
 
@@ -610,7 +606,7 @@ class ReaderApplication:
             current = self.require_store()
             if not self._live():
                 raise ActionError('conflict', 'Откройте читатель для подключения', expected=True)
-            duplicates = self.connections.owners([(kind, str(address))])
+            duplicates = self.connections.owners([(kind, str(address))], active_only=True)
             if any(identity!=feed_id for identity in duplicates):
                 raise TelegramConflict('duplicate_source', self.connections.duplicates(duplicates), 'Источник уже подключён')
             previous=self.queries.binding(feed_id) if feed_id else None

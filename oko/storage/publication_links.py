@@ -87,7 +87,6 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
         targets.append(identity)
     store.db.execute('DELETE FROM publication_links WHERE source_publication_id = %s',(item,))
     store.db.executemany('INSERT INTO publication_links VALUES ( %s , %s ) ON CONFLICT DO NOTHING',[(item,target) for target in targets])
-    prune(store,previous-set(targets),effects=effects)
     changed=previous!=set(targets)
     if changed and store.problems.processor_jobs_for_materials(sorted(previous | set(targets))):
         status_changed(store.db)

@@ -1469,9 +1469,9 @@ def test_retention_upgrade_preserves_surviving_cleanup_and_feed_identity(connect
     with connections() as db:
         migrate(db, MIGRATIONS[:124])
         db.execute("INSERT INTO feeds(id,identity,connection) VALUES ('active','rss:active','connected'),('removed','rss:removed','deleting')")
-        db.execute("INSERT INTO publications(id,platform,external_id,discovered_at) VALUES ('saved','rss','one',1),('partial','rss','two',1)")
+        db.execute("INSERT INTO publications(id,platform,external_id,discovered_at,status) VALUES ('saved','rss','one',1,'ready'),('partial','rss','two',1,'ready')")
         db.execute("INSERT INTO jobs(kind,item,status,payload,reason_code,reason_message) VALUES ('delete','saved','pending',%s,NULL,NULL),('delete','partial','failed',%s,'cleanup-error','old failure'),('feed-delete','removed','pending','{}',NULL,NULL)", (json.dumps({'cleanup_feed':'active'}),json.dumps({'cleanup_feed':'removed'})))
         migrate(db, MIGRATIONS)
-        assert db.execute("SELECT id,feed_id,viewed FROM publications ORDER BY id").fetchall() == [('partial','removed',True),('saved','active',True)]
+        assert db.execute("SELECT id,feed_id,viewed,status FROM publications ORDER BY id").fetchall() == [('partial','removed',True,'pending_collection'),('saved','active',True,'pending_collection')]
         assert db.execute("SELECT id,deleted FROM feeds ORDER BY id").fetchall() == [('active',False),('removed',True)]
         assert db.execute("SELECT kind,item,status,reason_code,reason_message FROM jobs WHERE kind IN ('delete','feed-delete') ORDER BY kind,item").fetchall() == [('delete','partial','cancelled',None,None),('delete','saved','cancelled',None,None),('feed-delete','removed','cancelled',None,None)]

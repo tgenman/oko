@@ -90,6 +90,10 @@ class ReadingQueries:
 
 
     @repository_access
+    def hidden_problem_objects(self, materials: set[str], feeds: set[str]) -> tuple[set[str],set[str]]:
+        return self._facts.hidden_problem_objects(materials,feeds)
+
+    @repository_access
     def was_viewed(self, identity: str) -> bool:
         return self._facts.was_viewed(identity)
 

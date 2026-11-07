@@ -41,7 +41,7 @@ def test_viewed_publication_survives_later_collection(tmp_path):
         presence(client, 'a')
         card = wait_cards(client, 3)[0]
         url = '/api/v3/publication/' + card['id']
-        wait_for(client, lambda: client.get(url).json()['availability'] == 'available')
+        wait_for(client, lambda: bool(client.get(url).json()['content'].get('blocks')))
         assert client.post('/api/v3/cards/read', json={'ids': [card['id']]}).status_code == 204
         assert client.post('/api/v3/collect').status_code == 200
         wait_for(client, lambda: not any(work['phase'] == 'collecting' for work in client.get('/api/v3/status/details').json()['work']))
@@ -63,11 +63,11 @@ def test_rediscovered_viewed_publication_updates_without_losing_read_state(tmp_p
         presence(client, 'a')
         card = wait_rss_cards(client)[0]
         url = '/api/v3/publication/' + card['id']
-        assert 'Original excerpt' in client.get(url).json()['text']
+        assert 'Original excerpt' in str(client.get(url).json()['content'])
         assert client.post('/api/v3/cards/read', json={'ids': [card['id']]}).status_code == 204
         description[0] = 'Changed excerpt'
         assert client.post('/api/v3/collect').status_code == 200
-        updated = wait_for(client, lambda: (value if 'Changed excerpt' in (value := client.get(url).json())['text'] else None))
+        updated = wait_for(client, lambda: (value if 'Changed excerpt' in str((value := client.get(url).json())['content']) else None))
         assert updated['id'] == card['id']
         assert all(item['id'] != card['id'] for item in client.get('/api/v3/cards').json()['items'])
         assert any(item['id'] == card['id'] and item['viewed'] for item in client.get('/api/v3/cards?show_read=true').json()['items'])
@@ -92,14 +92,14 @@ def test_unlinked_article_is_preserved_and_readable_when_linked_again(tmp_path):
         presence(client, 'a')
         item = wait_rss_cards(client)[0]['id']
         url = '/api/v3/publication/' + item
-        wait_for(client, lambda: 'Preserved first article' in client.get(url).json()['text'])
+        wait_for(client, lambda: 'Preserved first article' in str(client.get(url).json()))
         link[0] = 'https://source.test/second'
         assert client.post('/api/v3/collect').status_code == 200
-        wait_for(client, lambda: 'Second article' in client.get(url).json()['text'])
+        wait_for(client, lambda: 'Second article' in str(client.get(url).json()))
         offline[0] = True
         link[0] = 'https://source.test/first'
         assert client.post('/api/v3/collect').status_code == 200
-        wait_for(client, lambda: 'Preserved first article' in client.get(url).json()['text'])
+        wait_for(client, lambda: 'Preserved first article' in str(client.get(url).json()))
 
 
 def test_viewed_publication_survives_restart(tmp_path):
@@ -219,8 +219,8 @@ def test_fetch_started_before_viewing_completes(tmp_path):
             url = '/api/v3/publication/' + fetching['id']
             assert client.post('/api/v3/cards/read', json={'ids': [fetching['id']]}).status_code == 204
             release.set()
-            wait_for(client, lambda: client.get(url).json()['availability'] == 'available')
-            assert client.get(url).json()['text']
+            wait_for(client, lambda: bool(client.get(url).json()['content'].get('blocks')))
+            assert client.get(url).json()['content']['blocks']
         finally:
             release.set()
 
@@ -255,8 +255,8 @@ def test_pending_fetch_continues_after_viewing(tmp_path):
             url = '/api/v3/publication/' + pending['id']
             assert client.post('/api/v3/cards/read', json={'ids': [pending['id']]}).status_code == 204
             release.set()
-            wait_for(client, lambda: client.get(url).json()['availability'] == 'available')
-            assert client.get(url).json()['text']
+            wait_for(client, lambda: bool(client.get(url).json()['content'].get('blocks')))
+            assert client.get(url).json()['content']['blocks']
         finally:
             release.set()
 
@@ -441,7 +441,7 @@ def test_viewed_publication_keeps_downloaded_media_accessible(tmp_path):
         assert client.post('/api/v3/telegram/connect', json={'source_locator': '@fixture', 'folder': 'Inbox'}).status_code == 200
         card = settled(client)[0]
         publication = client.get('/api/v3/publication/' + card['id']).json()
-        url = next(media['url'] for media in publication['media'] if media['role'] == 'attachment')
+        url = next(media['url'] for media in publication['media'] if media['url'])
         assert client.get(url).content == b'synthetic-image'
         assert client.post('/api/v3/cards/read', json={'ids': [card['id']]}).status_code == 204
         assert client.get(url).content == b'synthetic-image'
@@ -553,8 +553,8 @@ def test_started_theses_are_saved_after_viewing(tmp_path):
             item = items[0]
             assert client.post('/api/v3/cards/read', json={'ids': [item]}).status_code == 204
             release.set()
-            result = wait_for(client, lambda: client.get('/api/v3/publication/' + item).json()['theses']['result'])
-            assert result['points'][0] == 'Synthetic result'
+            result = wait_for(client, lambda: client.get('/api/v3/publication/' + item).json()['summarized_content']['points'])
+            assert result[0]['text'] == 'Synthetic result'
         finally:
             release.set()
 
@@ -709,5 +709,68 @@ def test_unviewing_keeps_stale_theses_until_new_result_is_accepted(tmp_path):
             assert current['stale'] is True and current['result'] == previous
             release.set()
             wait_for(client, lambda: not client.get(url).json()['theses']['stale'])
+        finally:
+            release.set()
+
+
+def test_viewed_summary_is_preserved_and_marked_stale_after_settings_change(tmp_path):
+    import time
+    from tests.support.codex import CodexService, configure_codex
+    from tests.support.reader import wait_for
+
+    model=CodexService()
+    with TestClient(create_app(tmp_path,source=SyntheticSource(),token='test-token',codex_client=model), headers={'Authorization':'Bearer test-token'}) as client:
+        client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
+        presence(client,'reader')
+        item=wait_cards(client,3)[0]['id']
+        configure_codex(client)
+        client.patch('/api/v3/feeds/fixture',json={'public_ai':True})
+        client.patch('/api/v3/settings/oko/global',json={'theses':True})
+        url='/api/v3/publication/'+item
+        before=wait_for(client,lambda: value if (value:=client.get(url).json())['summarized_content']['points'] else None)
+        client.post('/api/v3/cards/read',json={'ids':[item]})
+        calls=len(model.inputs)
+        client.patch('/api/v3/settings/oko/global',json={'prompt_theses':'A changed instruction'})
+        time.sleep(.2)
+        after=client.get(url).json()
+        assert after['summarized_content']==before['summarized_content']
+        assert after['processing_metadata']['summary']['stale'] is True
+        assert len(model.inputs)==calls
+
+
+def test_unview_keeps_stale_summary_while_new_summary_is_running(tmp_path):
+    import asyncio
+    from threading import Event
+    from tests.support.codex import CodexService, configure_codex
+    from tests.support.reader import wait_for
+
+    hold,started,release=[False],Event(),Event()
+    class Model(CodexService):
+        async def complete(self,prompt,schema,directory,choice):
+            if hold[0]:
+                started.set()
+                await asyncio.to_thread(release.wait,30)
+            return await super().complete(prompt,schema,directory,choice)
+
+    with TestClient(create_app(tmp_path,source=SyntheticSource(),token='test-token',codex_client=Model()),headers={'Authorization':'Bearer test-token'}) as client:
+        try:
+            client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
+            presence(client,'reader')
+            item=wait_cards(client,3)[0]['id']
+            configure_codex(client)
+            client.patch('/api/v3/feeds/fixture',json={'public_ai':True})
+            client.patch('/api/v3/settings/oko/global',json={'theses':True})
+            url='/api/v3/publication/'+item
+            previous=wait_for(client,lambda: value if (value:=client.get(url).json())['summarized_content']['points'] else None)
+            client.post('/api/v3/cards/read',json={'ids':[item]})
+            client.patch('/api/v3/settings/oko/global',json={'prompt_theses':'A changed instruction'})
+            hold[0]=True
+            assert client.post('/api/v3/cards/unread',json={'ids':[item]}).status_code==204
+            assert started.wait(5)
+            pending=client.get(url).json()
+            assert pending['summarized_content']==previous['summarized_content']
+            assert pending['processing_metadata']['summary']['stale'] is True
+            release.set()
+            wait_for(client,lambda: not client.get(url).json()['processing_metadata']['summary']['stale'])
         finally:
             release.set()

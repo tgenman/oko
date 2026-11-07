@@ -344,9 +344,26 @@ class Store:
     def unviewed_set(self, identities: list[str]) -> None:
         if not self.db.transaction_depth:
             raise RuntimeError('Restoring reading state requires an owning transaction')
+        from oko.storage.reader_facts import ReaderFacts
+        from oko.storage import processing_input
         membership_graph.lock_graph(self.db)
-        rows=self.db.execute("UPDATE publications p SET viewed=false FROM feeds f WHERE p.feed_id=f.id AND NOT f.deleted AND p.viewed AND p.id=ANY(%s) RETURNING p.id", (sorted(set(identities)),)).fetchall()
-        self.read_versions.memberships_changed([row['id'] for row in rows])
+        selected=self.db.execute("SELECT p.id,p.processing_metadata FROM publications p JOIN feeds f ON f.id=p.feed_id WHERE NOT f.deleted AND p.viewed AND p.id=ANY(%s)",(sorted(set(identities)),)).fetchall()
+        stale: dict[str,list[str]]={}
+        for row in selected:
+            projected=ReaderFacts(lambda:self).unified_publication(row['id'])['processing_metadata']
+            metadata=json.loads(row['processing_metadata'])
+            for section,kind in (('filter','filter'),('summary','theses')):
+                if projected.get(section,{}).get('stale'):
+                    metadata[section]['preserve_stale']=True
+                    stale.setdefault(row['id'],[]).append(kind)
+            self.db.execute('UPDATE publications SET viewed=false,processing_metadata=%s WHERE id=%s',(json.dumps(metadata,ensure_ascii=False),row['id']))
+        self.read_versions.memberships_changed([row['id'] for row in selected])
+        for row in selected:
+            item=row['id']
+            self.processing.reconcile_accepted_item(item)
+            for kind in stale.get(item,[]):
+                if processing_input.stage_enabled(self,item,kind):
+                    self.jobs.retry_processing(item,kind)
 
     def remove_feed(self, feed: str) -> None:
         if not self.db.transaction_depth:

@@ -600,7 +600,9 @@ class JobRepository:
         return self._candidate_job(now, **options) is not None
 
     def _candidate_job(self, now: float, deleting_only: bool = False, source_feed: str = '', feeds: list[str] | None = None, ai_only: bool = False, include_deletions: bool = True, media_only: bool = False, captions_only: bool = False, dependency_feeds: list[str] | None = None, processing_kind: str | None = None, prefer_cleanup: bool = True) -> Row | None:
-        if media_only and not ai_only and not deleting_only:
+        if deleting_only:
+            return None
+        if media_only and not ai_only:
             if processing_kind is not None:
                 return None
             available = feeds if feeds is not None else [source_feed]
@@ -614,8 +616,6 @@ class JobRepository:
                 AND NOT ((jobs.kind='filter' AND i.status IN ('pending_filtering','filter_out'))
                       OR (jobs.kind='theses' AND (i.status IN ('pending_summary','ready')
                           OR i.status='pending_filtering'))))"""
-        elif deleting_only:
-            query += " AND kind IN ('delete','feed-delete')"
         elif media_only:
             available = feeds if feeds is not None else [source_feed]
             placeholders = ','.join('%s' for _ in available) or "''"
@@ -633,9 +633,8 @@ class JobRepository:
             placeholders = ','.join('%s' for _ in available) or "''"
             dependencies=available if dependency_feeds is None else dependency_feeds
             dependency_keys=','.join('%s' for _ in dependencies) or "''"
-            query += f""" AND kind IN ('delete','feed-delete','discover','fetch','rebuild') AND id IN (WITH allowed AS MATERIALIZED (
-                SELECT id FROM jobs WHERE status='pending' AND kind IN ('delete','feed-delete')
-                UNION SELECT id FROM jobs WHERE status='pending' AND kind = 'discover' AND item IN ({placeholders})
+            query += f""" AND kind IN ('discover','fetch','rebuild') AND id IN (WITH allowed AS MATERIALIZED (
+                SELECT id FROM jobs WHERE status='pending' AND kind = 'discover' AND item IN ({placeholders})
                 UNION SELECT id FROM jobs WHERE status='pending' AND kind IN ('fetch','rebuild') AND item IN (
                     SELECT own.id FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) owner JOIN publications own ON own.id=owner.id
                         WHERE owner.feed_id IN ({placeholders})
@@ -989,7 +988,6 @@ class JobRepository:
         diagnostics=state.diagnostics
         processor_jobs=state.processor_jobs
         processor_previous=state.processor_previous
-        self.reconcile_cleanup(sync_processor=False,skip_source_jobs=set(diagnostics.source_groups_before),skip_media_jobs=set(diagnostics.media_problems_before))
         for job_id,previous in diagnostics.fetch_problems_before.items():
             self.store.problems.sync_fetch(job_id,previous,self.store.wall_clock())
         if processor_jobs:self.store.problems.finish_processor_change(processor_jobs,processor_previous,self.store.wall_clock())

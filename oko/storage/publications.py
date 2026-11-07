@@ -465,7 +465,7 @@ class Publications:
         saved_title = saved_filter.get('source_title', saved_summary.get('source_title'))
         title_changed = row['platform'] != 'youtube' and saved_title is not None and saved_title != row['title']
         stale_source=any(section.get('source_url_stale') or section.get('source_title_stale') for section in (saved_filter,saved_summary))
-        if not preserved and source_hash is not None and not stale_source and ((prior_source is not None and source_hash != prior_source) or title_changed):
+        if not row['viewed'] and not preserved and not any(section.get('preserve_stale') for section in (saved_filter,saved_summary)) and source_hash is not None and not stale_source and ((prior_source is not None and source_hash != prior_source) or title_changed):
             self.store.db.execute("UPDATE publications SET filtered_content='{}',summarized_content='{}' WHERE id=%s", (item,))
             metadata.pop('filter',None)
             metadata.pop('summary',None)

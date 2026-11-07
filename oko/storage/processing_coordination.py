@@ -70,7 +70,7 @@ class ProcessingState:
             yield
 
     def invalidate(self, scope: str = 'oko', owner: str = 'global') -> None:
-        query = 'SELECT DISTINCT i . id FROM publications i JOIN (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m ON m.id = i . id JOIN feeds f ON f . id = m . feed_id WHERE TRUE'
+        query = 'SELECT DISTINCT i . id FROM publications i JOIN (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m ON m.id = i . id JOIN feeds f ON f . id = m . feed_id WHERE NOT i.viewed'
         params: tuple[str, ...] = ()
         if scope in ('feed', 'folder'):
             condition = 'f.id=%s' if scope=='feed' else 'f.folder_id=%s'
@@ -79,7 +79,7 @@ class ProcessingState:
             query += """ UNION SELECT DISTINCT parent.id FROM publications parent
                 JOIN publication_links l ON l.source_publication_id=parent.id
                 JOIN (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m ON m.id=l.target_publication_id
-                JOIN feeds f ON f.id=m.feed_id WHERE """ + condition
+                JOIN feeds f ON f.id=m.feed_id WHERE NOT parent.viewed AND """ + condition
             params = (owner,owner)
         items = [row[0] for row in self.store.db.execute(query, params).fetchall()]
         from oko.storage.processing_batch import reconcile_settings
@@ -195,6 +195,9 @@ class ProcessingState:
             raise RuntimeError('Accepted publication requires an owned transaction')
         repository = ProcessingRepository(self.store)
         self.store.publications.reconcile(item)
+        row=self.store.db.execute('SELECT viewed FROM publications WHERE id=%s',(item,)).fetchone()
+        if row and row['viewed']:
+            return
         for kind in ('filter','theses'):
             with reading_snapshot():
                 candidates = [(identity, input_hash, repository.satisfied(identity,kind), repository.revision(identity))

@@ -214,10 +214,6 @@ class CollectionWorker:
                 current = self.execution._store
                 if not current or not current.jobs.valid(job) or not self._live():
                     return
-                if job.kind in ('delete', 'feed-delete'):
-                    diagnostic_source.set('Удаление · ' + job.item)
-                    self.jobs._delete(job, current)
-                    return
                 feed = job.item if job.kind in ('discover', 'read') else self.service.feed(job.item)
                 if job.kind in ('discover','fetch'):
                     with current.jobs.transaction(self._live):
@@ -332,7 +328,6 @@ class CollectionWorker:
                         collection_error = None
                         with current.jobs.transaction(self._live):
                             self.service.viewed(job.item)
-                            current.jobs.reconcile_cleanup()
                             self._finish_collection(job,current)
                         return
                     if isinstance(error, SourceUnavailable) and job.kind == 'fetch':
@@ -526,9 +521,7 @@ class CollectionWorker:
                             current.processing.reconcile_accepted_item(replacement[0])
                     else:
                         current.jobs.finish(job)
-                current.jobs.reconcile_cleanup()
             else:
-                current.jobs.reconcile_cleanup()
                 current.jobs.fail_media(job,issue)
                 if issue.kind==AdapterErrorKind.media_changed:
                     owner=self.media.owner(job.item)

@@ -11,7 +11,7 @@ BEGIN
  WHERE j.status<>'done' AND p.feed_id IS NOT NULL AND p.feed_id<>f.id;
  IF conflicts IS NOT NULL THEN RAISE EXCEPTION 'Conflicting cleanup publication owners: %', conflicts; END IF;
 END $$;
-UPDATE publications p SET feed_id=f.id,viewed=true
+UPDATE publications p SET feed_id=f.id,viewed=true,status='pending_collection'
 FROM jobs j JOIN feeds f ON f.id=j.payload->>'cleanup_feed'
 WHERE j.kind='delete' AND j.item=p.id AND j.status<>'done';
 UPDATE feeds SET deleted=true,connection='needs_connection' WHERE connection='deleting';
