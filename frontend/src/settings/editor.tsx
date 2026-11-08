@@ -67,15 +67,15 @@ function FeedOptions({owner,feed}:{owner:MenusOwner;feed:SubscriptionFeed|undefi
  const transport=feed.kind==='telegram'?'telegram':feed.transport;
  const deleting=feed.connection==='deleting'||owner.deletions.has(feed.id);
  const values=owner.draft('feed/'+feed.id);const value=(name:string,fallback:string|boolean)=>values['feed-'+name]??fallback;const edit=(name:string,value:string|boolean)=>owner.edit('feed/'+feed.id,'feed-'+name,value);
- const storedHistory=owner.getHistory(feed);const history=storedHistory?.state==='absent'?undefined:storedHistory;const active=history&&!['complete','cancelled'].includes(history.state);
+ const storedHistory=owner.getHistory(feed);const history=storedHistory?.state==='absent'?undefined:storedHistory;const damaged=history?.state==='damaged';const active=history&&!['complete','cancelled','damaged'].includes(history.state);
  const help=owner.sources.find(source=>source.feed_id===feed.id)?.changes;
  const connection=feed.kind==='telegram'?accessLabel(feed.access):transport==='rss'?'RSS connected: collects while the tab is open':transport==='youtube'?'YouTube connected: collects while the tab is open':feed.kind==='youtube'?'YouTube disabled':feed.connection==='ambiguous'?'Ambiguous address: select a connection explicitly':'Collector connection required';
  const historyBusy=owner.historyBusy(feed.id);
- const count=String(values.youtubeHistoryCount??(history?.selection.mode==='count'?history.selection.count:60));
+ const count=String(values.youtubeHistoryCount??(history&&'selection'in history&&history.selection.mode==='count'?history.selection.count:60));
  return <><details hidden={!help}><summary>Update Detection Capabilities</summary><p id="source-help">{help&&help}</p></details><h2>Feed Connection</h2>
  {(history||feed.kind==='youtube'&&transport==='youtube')&&<><p id="history-progress" data-feed={feed.id} role="status" hidden={!history}>{historyProgress(history)}</p></>}
- {transport==='rss'&&<RSSHistoryControls owner={owner} feed={feed} active={Boolean(active)} busy={historyBusy}/>}
- {feed.kind==='youtube'&&transport==='youtube'&&<><p>History includes regular videos and recorded streams, excluding Shorts. Saved videos are not duplicated. Older videos may lack dates and descriptions.</p><label>Latest N Videos<input id="youtube-history-count" type="number" min={1} step={1} required value={count} onChange={event=>owner.edit('feed/'+feed.id,'youtubeHistoryCount',event.target.value)}/></label><button id="youtube-history-start" disabled={!owner.workAllowed||historyBusy||Boolean(active)} onClick={()=>{const input=document.getElementById('youtube-history-count')as HTMLInputElement;input.setCustomValidity(/^\d+$/.test(count)?'':'Enter a whole number, at least 1');if(input.reportValidity())void owner.history(feed,'start',count);}}>Load Latest N Videos</button><button id="youtube-history-stop" disabled={!owner.workAllowed||historyBusy} hidden={!active} onClick={()=>void owner.history(feed,'stop')}>Stop History Download</button></>}
+ {transport==='rss'&&<RSSHistoryControls owner={owner} feed={feed} active={Boolean(active)} damaged={damaged} busy={historyBusy}/>}
+ {feed.kind==='youtube'&&transport==='youtube'&&<><p>History includes regular videos and recorded streams, excluding Shorts. Saved videos are not duplicated. Older videos may lack dates and descriptions.</p><label>Latest N Videos<input id="youtube-history-count" type="number" min={1} step={1} required value={count} onChange={event=>owner.edit('feed/'+feed.id,'youtubeHistoryCount',event.target.value)}/></label><button id="youtube-history-start" disabled={!owner.workAllowed||historyBusy||Boolean(active)||damaged} onClick={()=>{const input=document.getElementById('youtube-history-count')as HTMLInputElement;input.setCustomValidity(/^\d+$/.test(count)?'':'Enter a whole number, at least 1');if(input.reportValidity())void owner.history(feed,'start',count);}}>Load Latest N Videos</button><button id="youtube-history-stop" disabled={!owner.workAllowed||historyBusy} hidden={!active} onClick={()=>void owner.history(feed,'stop')}>Stop History Download</button></>}
  <p>{connection}</p><p>Original addresses: {feed.original_urls?.join(', ')}</p>{feed.kind==='youtube'&&<p>{transport==='youtube'?'YouTube: updates are collected while the tab is open. ':'YouTube connects automatically when you add a feed URL. '}Summaries are enabled by default; available YouTube subtitles are requested. High importance also enables subtitles and summaries. Videos are not downloaded.</p>}
  <label>Feed Importance<select id="feed-importance" value={String(value('importance',feed.importance||'normal'))} onChange={event=>edit('importance',event.target.value)}>{Object.entries({normal:'Normal',elevated:'Elevated',high:'High'}).map(([key,title])=><option key={key} value={key}>{title}</option>)}</select></label><label>Allow Public AI Processing<input id="feed-public-ai" type="checkbox" checked={Boolean(value('public-ai',Boolean(feed.public_ai)))} onChange={event=>edit('public-ai',event.target.checked)}/></label>
  {feed.kind==='youtube'&&<label>Collect YouTube Updates<input id="feed-youtube" type="checkbox" checked={Boolean(value('youtube',transport==='youtube'))} onChange={event=>edit('youtube',event.target.checked)}/></label>}
@@ -86,13 +86,13 @@ function FeedOptions({owner,feed}:{owner:MenusOwner;feed:SubscriptionFeed|undefi
  </>;
 }
 
-function RSSHistoryControls({owner,feed,active,busy}:{owner:MenusOwner;feed:SubscriptionFeed;active:boolean;busy:boolean}){
+function RSSHistoryControls({owner,feed,active,damaged,busy}:{owner:MenusOwner;feed:SubscriptionFeed;active:boolean;damaged:boolean;busy:boolean}){
  const path='feed/'+feed.id, draft=owner.draft(path), saved=owner.getHistory(feed);
  const history=saved&&saved.state!=='absent'?saved:null;
- const value:Selection={mode:'count',count:String(draft.rssHistoryCount??(history?.selection.mode==='count'?history.selection.count:'20'))};
- return <><HistoryFields prefix="rss-load" value={value} disabled={!owner.workAllowed} onChange={next=>{
+ const value:Selection={mode:'count',count:String(draft.rssHistoryCount??(history&&'selection'in history&&history.selection.mode==='count'?history.selection.count:'20'))};
+ return <><HistoryFields prefix="rss-load" value={value} disabled={!owner.workAllowed||damaged} onChange={next=>{
   owner.edit(path,'rssHistoryCount',next.count);
  }}/><p>History follows continuation links supplied by the source. The requested number may be unavailable.</p>
- <button id="rss-load-history-start" disabled={!owner.workAllowed||busy||active} onClick={()=>{const chosen=selection(value,'rss-load');if(chosen)void owner.history(feed,'start',chosen);}}>Load History</button>
+ <button id="rss-load-history-start" disabled={!owner.workAllowed||busy||active||damaged} onClick={()=>{const chosen=selection(value,'rss-load');if(chosen)void owner.history(feed,'start',chosen);}}>Load History</button>
  <button id="rss-load-history-stop" disabled={!owner.workAllowed||busy} hidden={!active} onClick={()=>void owner.history(feed,'stop')}>Stop History Download</button></>;
 }

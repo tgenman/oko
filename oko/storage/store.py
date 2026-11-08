@@ -328,7 +328,7 @@ class Store:
         changed = [row['id'] for row in rows if not row['viewed']]
         if changed:
             self.db.execute('UPDATE publications SET viewed=true WHERE id=ANY(%s)', (changed,))
-            self.db.execute("UPDATE history_members SET outcome='viewed' WHERE item=ANY(%s) AND outcome IN ('pending','retrying')", (changed,))
+            self.subscriptions.history.viewed_many(changed)
             for feed in {row['feed_id'] for row in rows if not row['viewed'] and row['feed_id'] is not None}:
                 self.subscriptions.details.record(feed, 'marked_read')
             self.incomplete_draft.mark_materials(changed)

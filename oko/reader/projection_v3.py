@@ -59,7 +59,7 @@ def command_recovery(context: wire.CommandContext) -> tuple[list[wire.AffectedRe
 
 
 def producer_code(raw: str, kind: str) -> str:
-    known = {'legacy-unaddressable':'job_target_unknown', 'codex-choice':'processor_not_configured', 'processor-config':'processor_not_configured',
+    known = {'history-invalid':'history_invalid', 'legacy-unaddressable':'job_target_unknown', 'codex-choice':'processor_not_configured', 'processor-config':'processor_not_configured',
         'ai-permission':'public_ai_not_allowed', 'material-read-failed':'material_read_failed', 'material-save-failed':'material_save_failed', 'source-reconnect':'source_reconnect_required',
         'material-incomplete':'material_incomplete', 'youtube-admission':'youtube_rate_limited',
         'storage-unavailable':'storage_unavailable', 'identity-unconfirmed':'profile_not_configured',
@@ -205,7 +205,9 @@ def youtube(value: facts.YouTube | None) -> wire.YouTubeState:
         reason=wire.WaitingReason('youtube_rate_limited') if value.reason else None)
 
 
-def history(value: facts.InitialHistoryStatus) -> wire.FeedHistoryState:
+def history(value: facts.InitialHistoryStatus | facts.DamagedHistoryStatus) -> wire.FeedHistoryState:
+    if isinstance(value, facts.DamagedHistoryStatus):
+        return wire.FeedHistoryState(feed_id=wire.FeedId(value.feed_id), history=wire.HistoryState(wire.HistoryDamaged(state='damaged')))
     count=value.count_text or (str(value.count) if value.count is not None else None)
     if count is None:
         raise ValueError('Count selection lacks exact count')
@@ -253,8 +255,10 @@ def telegram_access(value: facts.SubscriptionFeed, binding: dict[str, object] | 
 
 def subscription(value: facts.SubscriptionFeed, binding: dict[str, object] | None = None) -> wire.SubscriptionFeed:
     data = value.model_dump(exclude_unset=True)
-    data['history'] = history(facts.InitialHistoryStatus.model_validate(dict(value.initial_history.model_dump(), feed_id=value.id))).history.model_dump(mode='json') if isinstance(value.initial_history, facts.History) else wire.HistoryState(wire.HistoryAbsent(state='absent')).model_dump(mode='json')
+    data['history'] = (wire.HistoryState(wire.HistoryDamaged(state='damaged')).model_dump(mode='json') if value.initial_history_invalid is True else
+        history(facts.InitialHistoryStatus.model_validate(dict(value.initial_history.model_dump(), feed_id=value.id))).history.model_dump(mode='json') if isinstance(value.initial_history, facts.History) else wire.HistoryState(wire.HistoryAbsent(state='absent')).model_dump(mode='json'))
     data.pop('initial_history', None)
+    data.pop('initial_history_invalid', None)
     data['connection'] = 'ready' if data.get('connection') == 'connected' else data.get('connection', 'unavailable')
     if value.kind == 'telegram':
         if binding and binding['kind'] == 'web':

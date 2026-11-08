@@ -17,7 +17,7 @@ test('real HTTP settings load three YouTube materials and preserves a viewed pub
     await feedOptions(page);
   await page.locator('#youtube-history-count').fill('3');
   await page.locator('#youtube-history-start').click();
-  await expect.poll(async()=>{const value=await history();return value.state==='absent'?0:value.progress.loaded;},{timeout:20000}).toBe(3);
+  await expect.poll(async()=>{const value=await history();return value.state==='absent'||value.state==='damaged'?0:value.progress.loaded;},{timeout:20000}).toBe(3);
   try {await expect(page.locator('#history-progress')).toContainText('Loaded 3 of 3',{timeout:15000});}
   catch(error){
     const details=await api('v3/status/details');
@@ -43,9 +43,9 @@ test('real HTTP settings load three YouTube materials and preserves a viewed pub
   // The previous three-item selection is already done while the new POST is in flight.
   await expect.poll(async()=>{
     const value=await history();
-    return [value.state==='absent'?null:value.selection.mode==='count'?value.selection.count:null,value.state];
+    return [value.state==='absent'||value.state==='damaged'?null:value.selection.mode==='count'?value.selection.count:null,value.state];
   },{timeout:20000}).toEqual(['2', 'complete']);
-  const finalHistory=await history();expect(finalHistory.state!=='absent'&&finalHistory.progress.viewed).toBe(0);
+  const finalHistory=await history();expect(finalHistory.state!=='absent'&&finalHistory.state!=='damaged'&&finalHistory.progress.viewed).toBe(0);
   expect(((await api('cards')).items).length).toBe(2);
   const shown=await page.request.get(origin+'/api/v3/cards?show_read=true',{headers:{Authorization:'Bearer '+token}});expect((await shown.json()).items.length).toBe(3);
   expect(errors).toEqual([]);

@@ -15,7 +15,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlsplit
-from oko.subscriptions.history import History
+from oko.subscriptions.history import History, InvalidHistory, InvalidHistoryError
 from oko.subscriptions.telegram import TelegramAccess
 from oko.subscriptions.details import FeedDetails
 from oko.subscriptions.subscriptions import AddFeed, Overrides, FeedPatch, key, identify, FolderConflict, DEFAULT_FEED_REFRESH_MINUTES, DEFAULTS
@@ -74,8 +74,11 @@ class SubscriptionRepository:
         self.clear_settings('folder', identity)
         self.db.execute('DELETE FROM folders WHERE id = %s', (identity,))
 
-    @reading_value
     def feeds(self, identity: str | None = None, *, folder: str | None = None, transport: str | None = None, include_deleted: bool = False) -> list[dict[str, Any]]:
+        return self._feed_basics(identity, folder, transport, include_deleted)
+
+    @reading_value
+    def _feed_basics(self, identity: str | None, folder: str | None, transport: str | None, include_deleted: bool) -> list[dict[str, Any]]:
         conditions, parameters = ([] if include_deleted else ['NOT deleted']), []
         if identity is not None:
             conditions.append('id = %s')
@@ -87,7 +90,11 @@ class SubscriptionRepository:
             conditions.append('transport = %s')
             parameters.append(transport)
         query = 'SELECT ' + ','.join(READER_FEED_COLUMNS) + ' FROM feeds' + (' WHERE ' + ' AND '.join(conditions) if conditions else '') + ' ORDER BY sort_order'
-        return self._feeds(list(self.db.execute(query,parameters)))
+        return [self._feed_base(row) for row in self.db.execute(query,parameters)]
+
+    @reading_value
+    def feeds_with_history(self, identity: str | None = None, *, folder: str | None = None, transport: str | None = None, include_deleted: bool = False) -> list[dict[str, Any]]:
+        return self._feeds_with_history(self.feeds(identity, folder=folder, transport=transport, include_deleted=include_deleted))
 
     def feeds_many(self, identities: set[str]) -> list[dict[str, Any]]:
         rows: list[Row] = []
@@ -95,20 +102,20 @@ class SubscriptionRepository:
         for start in range(0, len(ids), 400):
             batch = ids[start:start+400]
             rows.extend(self.db.execute(f"SELECT {','.join(READER_FEED_COLUMNS)} FROM feeds WHERE NOT deleted AND id IN ( {','.join(('%s' for _ in batch))} ) ORDER BY sort_order", batch))
-        return self._feeds(rows)
+        return self._feeds_with_history([self._feed_base(row) for row in rows])
 
-    def _feeds(self, rows: list[Row]) -> list[dict[str, Any]]:
-        return [feed for start in range(0, len(rows), 400)
-                for feed in self._feed_values(rows[start:start+400])]
+    def _feeds_with_history(self, feeds: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [feed for start in range(0, len(feeds), 400)
+                for feed in self._feed_values(feeds[start:start+400])]
 
-    def _feed_values(self, rows: list[Row]) -> list[dict[str, Any]]:
-        identities=[row['id'] for row in rows]
+    def _feed_values(self, feeds: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        identities=[feed['id'] for feed in feeds]
         if not identities:
             return []
         histories=self.history.statuses(identities)
         batch={}
-        for row in rows:
-            batch[row['id']]=self._feed_value(row,histories.get(row['id']),row['avatar_digest'])
+        for feed in feeds:
+            batch[feed['id']]=self._history_feed(feed, histories.get(feed['id']))
         previous=self._feed_batch
         self._feed_batch=batch
         try:
@@ -125,14 +132,19 @@ class SubscriptionRepository:
         row=self.db.execute('SELECT '+','.join(READER_FEED_COLUMNS)+' FROM feeds WHERE id = %s',(identity,)).fetchone()
         if row is None:
             raise LookupError('Фид не найден')
-        return self._feed_value(row,self.history.status(identity),row['avatar_digest'])
+        return self._history_feed(self._feed_base(row), self.history.statuses([identity]).get(identity))
 
     @staticmethod
-    def _feed_value(row: Row, history: dict[str,Any] | None, avatar: str | None) -> dict[str,Any]:
+    def _history_feed(feed: dict[str, Any], history: dict[str, Any] | InvalidHistory | None) -> dict[str, Any]:
+        if isinstance(history, InvalidHistory):
+            return dict(feed, initial_history=None, initial_history_invalid=True)
+        return dict(feed, initial_history=history)
+
+    @staticmethod
+    def _feed_base(row: Row) -> dict[str,Any]:
         feed = feed_facts(row)
-        if avatar:
-            feed['avatar_url'] = '/api/v3/feeds/'+feed['id']+'/avatar/'+avatar
-        feed['initial_history'] = history
+        if row['avatar_digest']:
+            feed['avatar_url'] = '/api/v3/feeds/'+feed['id']+'/avatar/'+row['avatar_digest']
         return feed
 
     def add_feed(self, body: AddFeed) -> dict[str, Any]:
@@ -159,7 +171,7 @@ class SubscriptionRepository:
         source_changed(self.db)
         self.details.created(identity_id)
         self.history.configure(identity_id, body.initial_history)
-        return next(feed for feed in self.feeds() if feed['identity'] == identity)
+        return self.feeds_with_history(identity_id)[0]
 
     def restore_feed(self, identity: str, folder: str, history: Any) -> dict[str, Any]:
         memberships.lock_graph(self.db)
@@ -170,14 +182,15 @@ class SubscriptionRepository:
         self.db.execute("UPDATE initial_history SET selection=jsonb_set(selection::jsonb,'{restore_unread}','true'::jsonb)::text WHERE feed=%s",(identity,))
         self.restore_discovery(identity)
         source_changed(self.db)
-        return self.feeds(identity)[0]
+        return self.feeds_with_history(identity)[0]
 
     def new_feed_id(self) -> str:
         return str(uuid4())
 
     def existing_feed(self, url: str) -> dict[str, Any] | None:
         identity, _, _ = identify(url)
-        return next((feed for feed in self.feeds() if feed['identity'] == identity), None)
+        feed = next((feed for feed in self.feeds() if feed['identity'] == identity), None)
+        return self._feeds_with_history([feed])[0] if feed else None
 
     def check_owner(self, scope: str, owner: str) -> None:
         if scope == 'oko' and owner == 'global':
@@ -194,13 +207,17 @@ class SubscriptionRepository:
     def feed_refresh_minutes(self) -> int:
         return int(self._settings('oko', 'global').get('feed_refresh_minutes', DEFAULT_FEED_REFRESH_MINUTES))
 
-    def resume_history(self, feed: str) -> None:
+    def resume_history(self, feed: str) -> bool:
         if not self.db.transaction_depth:
             raise RuntimeError('History changes require an owning transaction')
         memberships.lock_graph(self.db)
-        history=self.history.status(feed)
+        try:
+            history=self.history.status(feed)
+        except InvalidHistoryError:
+            return False
         if history and not history.get('cancelled'):
             self.history.pause(feed,False)
+        return True
 
     def telegram_http_settings(self) -> dict[str, Any]:
         values = self._settings('oko', 'global')
@@ -347,4 +364,4 @@ class SubscriptionRepository:
             status_changed(self.db)
         if source_modified:
             source_changed(self.db)
-        return next(f for f in self.feeds() if f['id'] == feed_id)
+        return self.feeds_with_history(feed_id)[0]

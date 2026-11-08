@@ -83,30 +83,32 @@ def register(app: FastAPI, runtime: ReaderApplication, wall_clock: Callable[[], 
     status_version: object = 0
     status_changed: float | None = None
 
-    def status_tag(details: bool) -> str:
+    def status_tag(details: bool, previous: tuple[object, object, object, object, object] | None = None) -> tuple[str, tuple[object, object, object, object, object]]:
         nonlocal status_storage,status_version,status_changed
         queries=runtime.final_queries if runtime.has_storage and runtime._error is None else None
-        boundaries = None
-        source_revision = None
-        history_versions = None
         if queries is not None:
             status_storage=queries.versions.identity
             version=queries.versions.version('status','runtime')
             if version is not None:status_version=version['version'];status_changed=version['changed']
-            boundaries = queries.versions.time_boundaries()
-            source_revision = queries.versions.source_revision()
-            history_versions = queries.versions.history_versions()
-        stamp=json.dumps([status_storage,status_version,details,metadata(),boundaries,source_revision,history_versions],sort_keys=True,separators=(',',':')).encode()
-        return '"'+hashlib.sha256(stamp).hexdigest()+'"'
+        if previous is None:
+            history_versions = queries.versions.history_versions() if queries else None
+            deferred_tick = int(wall_clock() // 5) if history_versions and any(
+                isinstance(entry, list) and len(entry) == 2 and entry[1] == 'deferred'
+                for entry in history_versions) else None
+            previous = (metadata(), queries.versions.time_boundaries() if queries else None,
+                        queries.versions.source_revision() if queries else None,
+                        history_versions, deferred_tick)
+        stamp=json.dumps([status_storage,status_version,details,*previous],sort_keys=True,separators=(',',':')).encode()
+        return '"'+hashlib.sha256(stamp).hexdigest()+'"', previous
 
     def status_response(request: Request, details: bool) -> Response:
         nonlocal status_storage
-        etag=status_tag(details)
+        etag,validator_inputs=status_tag(details)
         headers={'ETag':etag,'X-Oko-Storage-Id':status_storage}
         if request.headers.get('if-none-match')==etag:return Response(status_code=304,headers=headers)
         value = status_data().model_dump(mode='json')
-        # Reconciliation can change the saved status version during projection.
-        etag=status_tag(details)
+        # A concurrent history change must invalidate this response on the next read.
+        etag,_=status_tag(details, validator_inputs)
         if status_changed is not None:value['problems']['updated_at']=timestamp(status_changed).model_dump(mode='json')
         if not details:
             def progress(phase: str) -> dict[str, object]:

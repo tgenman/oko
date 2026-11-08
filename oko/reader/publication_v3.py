@@ -25,7 +25,7 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
         with read_snapshot(runtime.require_store().db), reading_snapshot(), runtime.queries.inputs({item}):
             current=runtime.queries
             row=current.item(item)
-            if row is None or row['feed_id'] is None or not current.feed_resources({row['feed_id']}):
+            if row is None or row['feed_id'] is None or not current.feeds(row['feed_id']):
                 raise missing(wire.AffectedResource(wire.MaterialResource(kind='material',material_id=identity(item))))
             body=dict(id=row['id'],title=row['title'] or '',feed_id=row['feed_id'],
                 published_at=project.timestamp(row['published_at']).root if row['published_at'] is not None else None,

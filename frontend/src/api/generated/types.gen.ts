@@ -1263,6 +1263,13 @@ export type HistoryCountSelection = {
     mode: 'count';
 };
 
+/**
+ * Saved initial history cannot be read; its data are retained.
+ */
+export type HistoryDamaged = {
+    state: 'damaged';
+};
+
 export type HistoryDiscovering = {
     progress: HistoryProgress;
     run: string;
@@ -1343,6 +1350,8 @@ export type HistoryStart409Errors = ({
 export type HistoryState = ({
     state: 'absent';
 } & HistoryAbsent) | ({
+    state: 'damaged';
+} & HistoryDamaged) | ({
     state: 'not_started';
 } & HistoryNotStarted) | ({
     state: 'discovering';
@@ -1558,7 +1567,7 @@ export type PowerRequest = {
 
 export type Problem = CurrentProblem | RetryingProblem | FinishedProblem;
 
-export type ProblemCode = 'job_target_unknown' | 'processor_not_configured' | 'processor_configuration_invalid' | 'public_ai_not_allowed' | 'source_reconnect_required' | 'source_unavailable' | 'material_incomplete' | 'processing_failed' | 'youtube_rate_limited' | 'storage_unavailable' | 'command_failed' | 'command_outcome_unknown' | 'material_save_failed' | 'material_read_failed' | 'feed_delete_failed' | 'telegram_read_failed' | 'profile_not_configured' | 'profile_unavailable' | 'account_identity_mismatch' | 'source_identity_conflict' | 'duplicate_source' | 'profile_in_use' | 'profile_account_conflict';
+export type ProblemCode = 'history_invalid' | 'job_target_unknown' | 'processor_not_configured' | 'processor_configuration_invalid' | 'public_ai_not_allowed' | 'source_reconnect_required' | 'source_unavailable' | 'material_incomplete' | 'processing_failed' | 'youtube_rate_limited' | 'storage_unavailable' | 'command_failed' | 'command_outcome_unknown' | 'material_save_failed' | 'material_read_failed' | 'feed_delete_failed' | 'telegram_read_failed' | 'profile_not_configured' | 'profile_unavailable' | 'account_identity_mismatch' | 'source_identity_conflict' | 'duplicate_source' | 'profile_in_use' | 'profile_account_conflict';
 
 export type ProblemId = string;
 

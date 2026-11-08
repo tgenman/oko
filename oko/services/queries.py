@@ -117,6 +117,10 @@ class ReadingQueries:
         return repository.feeds() if identity is None else repository.feeds(identity)
 
     @repository_access
+    def feeds_with_history(self, identity: str | None = None) -> list[dict[str, Any]]:
+        return self._subscriptions().feeds_with_history(identity)
+
+    @repository_access
     def feed_resources(self, identities: set[str] | None = None) -> dict[str, tuple[dict[str, Any], dict[str, Any] | None]]:
         return self._facts.feed_resources(identities)
 

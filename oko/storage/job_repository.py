@@ -576,15 +576,16 @@ class JobRepository:
             self.store.incomplete_draft.mark_job('fetch',item)
 
 
-    def next_job(self, now: float, source_feed: str = '', feeds: list[str] | None = None, ai_only: bool = False, media_only: bool = False, captions_only: bool = False, dependency_feeds: list[str] | None = None, processing_kind: str | None = None) -> Job | None:
+    def next_job(self, now: float, source_feed: str = '', feeds: list[str] | None = None, ai_only: bool = False, media_only: bool = False, captions_only: bool = False, dependency_feeds: list[str] | None = None, processing_kind: str | None = None, invalid_history_feeds: list[str] | None = None) -> Job | None:
         if not self.store.db.transaction_depth:
             raise RuntimeError('Job claim requires an owning transaction')
-        return self._claim(self._candidate_job(now, source_feed=source_feed, feeds=feeds, ai_only=ai_only, media_only=media_only, captions_only=captions_only, dependency_feeds=dependency_feeds, processing_kind=processing_kind))
+        return self._claim(self._candidate_job(now, source_feed=source_feed, feeds=feeds, ai_only=ai_only, media_only=media_only, captions_only=captions_only, dependency_feeds=dependency_feeds, processing_kind=processing_kind, invalid_history_feeds=invalid_history_feeds))
 
     def has_due_job(self, now: float, **options: Any) -> bool:
         return self._candidate_job(now, **options) is not None
 
-    def _candidate_job(self, now: float, source_feed: str = '', feeds: list[str] | None = None, ai_only: bool = False, media_only: bool = False, captions_only: bool = False, dependency_feeds: list[str] | None = None, processing_kind: str | None = None) -> Row | None:
+    def _candidate_job(self, now: float, source_feed: str = '', feeds: list[str] | None = None, ai_only: bool = False, media_only: bool = False, captions_only: bool = False, dependency_feeds: list[str] | None = None, processing_kind: str | None = None, invalid_history_feeds: list[str] | None = None) -> Row | None:
+        invalid_history = invalid_history_feeds or []
         if media_only and not ai_only:
             if processing_kind is not None:
                 return None
@@ -616,8 +617,10 @@ class JobRepository:
             placeholders = ','.join('%s' for _ in available) or "''"
             dependencies=available if dependency_feeds is None else dependency_feeds
             dependency_keys=','.join('%s' for _ in dependencies) or "''"
+            discover = [feed for feed in available if feed not in invalid_history]
+            discover_keys = ','.join('%s' for _ in discover) or "''"
             query += f""" AND kind IN ('discover','fetch','rebuild') AND id IN (WITH allowed AS MATERIALIZED (
-                SELECT id FROM jobs WHERE status='pending' AND kind = 'discover' AND item IN ({placeholders})
+                SELECT id FROM jobs WHERE status='pending' AND kind = 'discover' AND item IN ({discover_keys})
                 UNION SELECT id FROM jobs WHERE status='pending' AND kind IN ('fetch','rebuild') AND item IN (
                     SELECT own.id FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) owner JOIN publications own ON own.id=owner.id
                         WHERE owner.feed_id IN ({placeholders})
@@ -628,13 +631,25 @@ class JobRepository:
         if media_only:
             subtitles="SELECT 1 FROM media_files m JOIN publications i ON i . id = m . publication_id JOIN jsonb_array_elements(CASE WHEN jsonb_typeof(i.content::jsonb->'blocks')='array' THEN i.content::jsonb->'blocks' ELSE '[]'::jsonb END) b(value) ON b.value->>'media_id' = m.id WHERE m . id = jobs . item AND i . platform = 'youtube' AND b.value->>'role' = 'subtitles'"
             query += ' AND '+('EXISTS' if captions_only else 'NOT EXISTS')+' ('+subtitles+')'
-        blocked_history = "SELECT m . item FROM history_members m JOIN initial_history h ON h . feed = m . feed WHERE ( h . paused = 1 OR ( h . scan_complete = 0 AND ( h.selection::jsonb->>'mode' = 'count' OR h . feed IN ( SELECT id FROM feeds WHERE transport = 'rss' ) ) ) )"
+        # The worker's damaged-feed set is only a hint: repair can pause a
+        # history before the next poll. Recheck those feeds against current data.
+        invalid_for_fetch = sorted(self.store.subscriptions.history.invalid_feeds(
+            invalid_history, require_rows=True, allow_deferred=True)) if invalid_history and not ai_only and not media_only else []
+        blocked_history = """SELECT m.item FROM history_members m JOIN initial_history h ON h.feed=m.feed
+            WHERE NOT (m.feed=ANY(%s)) AND CASE
+                WHEN NOT pg_input_is_valid(h.selection, 'jsonb') THEN FALSE
+                WHEN jsonb_typeof(h.selection::jsonb) IS DISTINCT FROM 'object'
+                    OR h.selection::jsonb->>'mode' IS DISTINCT FROM 'count'
+                    OR jsonb_typeof(h.selection::jsonb->'count') IS DISTINCT FROM 'number'
+                    OR (h.selection::jsonb->>'count') !~ '^[1-9][0-9]*$' THEN FALSE
+                ELSE h.paused=1 OR (h.scan_complete=0 AND (h.selection::jsonb->>'mode'='count'
+                    OR h.feed IN (SELECT id FROM feeds WHERE transport='rss'))) END"""
         # PostgreSQL primary keys reject NULL history memberships. A malformed
         # fetch without an item is never dispatchable; valid work uses the index.
         query += f""" AND NOT (kind='fetch' AND
             (jobs.item IS NULL OR EXISTS ({blocked_history} AND m.item=jobs.item OFFSET 0)))"""
         query += " ORDER BY CASE WHEN kind='discover' THEN 1 WHEN kind IN ('filter','read') THEN 2 ELSE 3 END,id LIMIT 1"
-        params = (now,) if ai_only else (now, *available, *dependencies) if media_only else (now, *available, *available, *dependencies)
+        params = ((now,) if ai_only else (now, *available, *dependencies) if media_only else (now, *discover, *available, *dependencies)) + (invalid_for_fetch,)
         row = self.store.db.execute(query, params).fetchone()
         return row
 

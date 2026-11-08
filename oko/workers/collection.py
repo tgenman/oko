@@ -23,6 +23,7 @@ from oko.collection.telegram.http import TelegramHTTP
 from oko.collection.http import SourceHTTP
 from oko.storage.media import MediaOutput, MediaDownload
 from oko.storage.store import Store
+from oko.storage.job_writes import execute as job_write
 from oko.domain.job import Job
 from oko.collection.telegram.contracts import TelegramBinding
 from oko.collection.youtube.source import LocalCaptions
@@ -52,6 +53,9 @@ def media_service(storage: Callable[[], Store]) -> MediaService:
     return MediaService(access=lambda: storage().db.access_lock, repository=lambda: storage().media)
 
 
+_HISTORY_UNCAPTURED = object()
+
+
 class CollectionWorker:
     clean_collection: Callable[[dict[str, Any]], dict[str, Any]]
     _collection_interval: float
@@ -71,6 +75,12 @@ class CollectionWorker:
         self._captions_active: 'CaptionAttempt | None' = None
         self._started=False
         self._source_revision: int | None = None
+        self._history_revision: list[Any] | None = None
+        self._next_history_revision_check = float('-inf')
+        self._invalid_history: set[str] = set()
+        self._next_history_replay_check = float('-inf')
+        self._history_replay_after = ''
+        self._force_history_sync = False
         self._dependency_feeds: list[str] = []
         self._source,self._clock,self._fault=source,clock,fault
         self._source_feed = source_feed
@@ -128,17 +138,32 @@ class CollectionWorker:
         return self.execution._live()
 
     def _sync_sources(self) -> None:
-        if not self.execution._store or self.service.source_revision()==self._source_revision:
+        if not self.execution._store:
             return
+        revision = self.service.source_revision()
+        now = self._clock()
+        history_revision = self._history_revision
+        if now >= self._next_history_revision_check or revision != self._source_revision:
+            history_revision = self.service.history_revision()
+            self._next_history_revision_check = now + 5
         current=self.execution._store
+        if self._replay_history(current,now):
+            self._force_history_sync = True
+        if revision == self._source_revision and history_revision == self._history_revision and not self._force_history_sync:
+            return
         with current.jobs.transaction(self._live):
             snapshot=self.service.configuration()
+        self._force_history_sync=False
+        self._history_revision=history_revision
+        repaired=self._invalid_history-set(snapshot.invalid_history)
+        self._invalid_history=set(snapshot.invalid_history)
         self._dependency_feeds=snapshot.dependencies
         settings=[setting for setting in snapshot.settings if not (setting.feed==self._source_feed and self._source)]
         updates=self._collection.configure(settings)
-        if updates.created:
+        scheduled=set(updates.created) | (repaired & self._sources.keys())
+        if scheduled:
             with current.jobs.transaction(self._live):
-                for identity in updates.created:
+                for identity in sorted(scheduled-self._invalid_history):
                     current.jobs.enqueue_discovery(identity)
         if updates.captions:
             with current.jobs.transaction(self._live):
@@ -153,6 +178,25 @@ class CollectionWorker:
                 if binding['kind']=='web':
                     self._telegram_bindings[feed]=TelegramBinding('telegram-web','common')
         self._source_revision=snapshot.revision
+
+    def _replay_history(self, current: Store, now: float) -> bool:
+        """Replay one feed at a time and rotate past blocked feeds."""
+        if now < self._next_history_replay_check:
+            return False
+        query="SELECT e.feed FROM history_deferred_events e JOIN feeds f ON f.id=e.feed AND NOT f.deleted WHERE e.feed>%s GROUP BY e.feed ORDER BY e.feed LIMIT 1"
+        row=current.db.execute(query,(self._history_replay_after,)).fetchone()
+        if row is None and self._history_replay_after:
+            row=current.db.execute(query,('',)).fetchone()
+        if row is None:
+            self._history_replay_after=''
+            self._next_history_replay_check=now+5
+            return False
+        feed=str(row[0])
+        with current.jobs.transaction(self._live):
+            consumed,_pending=current.subscriptions.history.replay_deferred(feed)
+        self._history_replay_after=feed
+        self._next_history_replay_check=now+(1 if consumed else 5)
+        return consumed
 
     @property
     def stopped(self) -> bool:
@@ -191,6 +235,58 @@ class CollectionWorker:
                 event('job_finished', job_id=job.id, kind=job.kind, level='error' if error else 'info', error=error, elapsed=elapsed)
         current.jobs.after_commit(committed)
 
+    def _defer_discovery(self, current: Store, job: Job, feed: str, *, damaged: bool) -> None:
+        """Release a stale discovery attempt without changing its retry outcome."""
+        if damaged:
+            self._invalid_history.add(feed)
+        self._source_revision = None
+        self._next_history_revision_check = float('-inf')
+        self._defer_collection_attempt(current,job)
+
+    def _defer_collection_attempt(self, current: Store, job: Job) -> None:
+        changed=job_write(current.db, "UPDATE jobs SET status='pending',generation=generation+1 WHERE id=%s AND generation=%s AND status='running'",(job.id,job.generation))
+        if changed.rowcount:
+            attempt=self.jobs._collection_active.get(job.id)
+            if attempt and attempt.job.generation==job.generation:
+                current.jobs.collection_interrupt(job,attempt.feed,deepcopy(attempt.saved),max(0.,self._clock()-attempt.started))
+
+    def _defer_paused_fetch(self, current: Store, job: Job) -> bool:
+        """Honor current valid history even if the damaged-feed cache is stale."""
+        from oko.storage import memberships
+        memberships.lock_graph(current.db)
+        feeds=[row[0] for row in current.db.execute(
+            'SELECT feed FROM history_members WHERE item=%s ORDER BY feed FOR UPDATE',(job.item,))]
+        history=current.subscriptions.history
+        invalid=history.invalid_feeds(feeds,lock=True,require_rows=True,allow_deferred=True)
+        valid=sorted(set(feeds)-invalid)
+        if valid and current.db.execute("SELECT 1 FROM initial_history WHERE feed=ANY(%s) AND (paused=1 OR scan_complete=0) LIMIT 1",(valid,)).fetchone():
+            self._defer_collection_attempt(current,job)
+            return True
+        return False
+
+    def _admit_discovery_result(self, current: Store, job: Job, feed: str, revision: object) -> bool:
+        """Revalidate inside the acceptance transaction, including saved errors."""
+        from oko.storage import memberships
+        from oko.subscriptions.history import InvalidHistoryError
+        memberships.lock_graph(current.db)
+        try:
+            saved, current_revision = current.subscriptions.history.admission(feed,lock=True)
+        except InvalidHistoryError:
+            self._defer_discovery(current,job,feed,damaged=True)
+            return False
+        if revision is _HISTORY_UNCAPTURED:
+            return True
+        if current_revision != revision:
+            # Re-add keeps an already running discovery intentionally. Its
+            # old run is interpreted by DiscoveryRepository.restore_unread.
+            row=current.db.execute("""SELECT (j.payload->>'restore_discover')='true' AND
+                COALESCE((h.selection::jsonb->>'restore_unread')='true',false) AS restoring
+                FROM jobs j LEFT JOIN initial_history h ON h.feed=%s WHERE j.id=%s""",(feed,job.id)).fetchone()
+            if not row or not row['restoring']:
+                self._defer_discovery(current,job,feed,damaged=False)
+                return False
+        return True
+
     async def _execute(self, job: Job) -> None:
         capture = Capture()
         with capture.scope():
@@ -208,6 +304,7 @@ class CollectionWorker:
         current: Store | None = None
         feed = ''
         collection_error: BaseException | None = None
+        history_revision: object = _HISTORY_UNCAPTURED
         try:
             async with self.execution._actions:
                 current = self.execution._store
@@ -216,6 +313,8 @@ class CollectionWorker:
                 feed = job.item if job.kind in ('discover', 'read') else self.service.feed(job.item)
                 if job.kind in ('discover','fetch'):
                     with current.jobs.transaction(self._live):
+                        if job.kind=='fetch' and self._defer_paused_fetch(current,job):
+                            return
                         saved=current.jobs.collection_start(job,feed)
                     self.jobs._collection_active[job.id] = _CollectionAttempt(job,feed,self._clock(),capture,saved)
                     if self.jobs.metrics:
@@ -224,6 +323,22 @@ class CollectionWorker:
                 diagnostic_source.set('Сбор · ' + feed + ' · ' + job.kind)
                 linked=job.kind=='fetch' and self.service.feedless(job.item)
                 source = self._sources.get(feed)
+                if job.kind == 'discover':
+                    from oko.subscriptions.history import InvalidHistoryError
+                    from oko.storage import memberships
+                    with current.jobs.transaction(self._live):
+                        memberships.lock_graph(current.db)
+                        try:
+                            history_saved, history_revision = current.subscriptions.history.admission(feed,lock=True)
+                        except InvalidHistoryError:
+                            self._defer_discovery(current,job,feed,damaged=True)
+                            return
+                        if source is not None and source.kind != 'injected':
+                            configured = source.settings.initial_history or {}
+                            keys=('mode','count','run','paused','cancelled','resume')
+                            if any(configured.get(key)!=(history_saved or {}).get(key) for key in keys):
+                                self._defer_discovery(current,job,feed,damaged=False)
+                                return
                 publication = self.service.reference(job.item) if job.kind == 'fetch' else None
                 revision=self.service.revision(job.item) if job.kind=='fetch' else ''
                 binding = self._telegram_bindings.get(feed)
@@ -261,6 +376,8 @@ class CollectionWorker:
                         with current.jobs.transaction(self._live):
                             if not self._live() or not current.jobs.valid(job):
                                 return
+                            if not self._admit_discovery_result(current,job,feed,history_revision):
+                                return
                             if outcome.observation.identity:
                                 self.service.refresh_identity(feed, outcome.observation.identity.as_info())
                             current.jobs.begin_collection(job)
@@ -292,6 +409,7 @@ class CollectionWorker:
                     if self.execution._store is current and self._live() and current.jobs.valid(job):
                         with current.jobs.transaction(self._live):
                             if not self._live() or not current.jobs.valid(job):return
+                            if self._defer_paused_fetch(current,job):return
                             if not self.service.current(job.item,revision):
                                 current.jobs.cancel(job)
                                 return
@@ -326,12 +444,14 @@ class CollectionWorker:
                     if isinstance(error, SourceSkipped) and job.kind == 'fetch':
                         collection_error = None
                         with current.jobs.transaction(self._live):
+                            if self._defer_paused_fetch(current,job):return
                             self.service.viewed(job.item)
                             self._finish_collection(job,current)
                         return
                     if isinstance(error, SourceUnavailable) and job.kind == 'fetch':
                         collection_error = None
                         with current.jobs.transaction(self._live):
+                            if self._defer_paused_fetch(current,job):return
                             current.jobs.retry(job,self._clock(),error.label,terminal=True,
                                 issue=error.adapter_issue or AdapterIssue('source-unavailable',error.label,AdapterErrorKind.unavailable))
                             current.publications.notify_parents(job.item)
@@ -354,6 +474,9 @@ class CollectionWorker:
                         code = job.kind + ':' + type(error).__name__
                     label = self.execution.diagnostics.clean(label) if self.execution.diagnostics else label
                     with current.jobs.transaction(self._live):
+                        if job.kind=='fetch' and self._defer_paused_fetch(current,job):return
+                        if job.kind=='discover' and not self._admit_discovery_result(current,job,feed,history_revision):
+                            return
                         current.jobs.retry(job, self._clock(), label, error.delay if isinstance(error, SourceError) else 1,code=code,
                             terminal=isinstance(error, SourceError) and not error.retryable or job.kind in ('discover','fetch') and (isinstance(error,ValueError) or Store.is_integrity_failure(error)),
                             issue=error.adapter_issue if isinstance(error,SourceError) else None)
@@ -641,7 +764,8 @@ class CollectionWorker:
             if now-self._last_collection >= self._collection_interval:
                 with self.execution._store.jobs.transaction(self._live):
                     for feed in self._sources:
-                        self.execution._store.jobs.enqueue_discovery(feed)
+                        if feed not in self._invalid_history:
+                            self.execution._store.jobs.enqueue_discovery(feed)
                 self._last_collection = now
             caption_feeds=self._collection.caption_feeds()
             for lane in ('common', 'media','captions'):
@@ -669,7 +793,8 @@ class CollectionWorker:
                 if not feeds and not dependencies:
                     continue
                 options: dict[str,Any]=dict(feeds=feeds,media_only=media_lane,
-                             captions_only=lane=='captions',dependency_feeds=dependencies)
+                             captions_only=lane=='captions',dependency_feeds=dependencies,
+                             invalid_history_feeds=sorted(self._invalid_history))
                 if not self.execution._store.jobs.has_due_job(now,**options):
                     continue
                 with self.execution._store.jobs.transaction(self._live):

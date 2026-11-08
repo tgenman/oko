@@ -48,7 +48,7 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
 
     def feeds(identity: str | None = None) -> dict[str, wire.SubscriptionFeed]:
         saved = runtime.queries
-        rows=saved.feeds() if identity is None else saved.feeds(identity)
+        rows=saved.feeds_with_history() if identity is None else saved.feeds_with_history(identity)
         bindings=saved.bindings([row['id'] for row in rows])
         return {v['id']:project.subscription(facts.SubscriptionFeed.model_validate(v),bindings.get(v['id'])) for v in rows}
 

@@ -136,4 +136,5 @@ MIGRATIONS = (
     Migration(124, 'retry-delay-bounds', (Path(__file__).parent / 'postgres' / '124-retry-delay-bounds.sql').read_text()),
     Migration(125, 'retain-viewed', (Path(__file__).parent / 'postgres' / '125-retain-viewed.sql').read_text()),
     Migration(126, 'retire-cleanup-problems', (Path(__file__).parent / 'postgres' / '126-retire-cleanup-problems.sql').read_text()),
+    Migration(127, 'history-integrity', (Path(__file__).parent / 'postgres' / '127-history-integrity.sql').read_text()),
 )

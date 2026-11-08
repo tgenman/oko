@@ -102,7 +102,7 @@ class ReaderFacts:
 
     def feed_resources(self, identities: set[str] | None = None) -> dict[str, tuple[dict[str, Any], dict[str, Any] | None]]:
         subscriptions = self.storage().subscriptions
-        rows = subscriptions.feeds() if identities is None else subscriptions.feeds_many(identities)
+        rows = subscriptions.feeds_with_history() if identities is None else subscriptions.feeds_many(identities)
         bindings = {}
         for start in range(0, len(rows), 400):
             bindings.update(subscriptions.telegram.bindings([row['id'] for row in rows[start:start+400]]))

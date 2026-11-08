@@ -441,6 +441,11 @@ class HistoryAbsent(WireModel):
     state: Literal["absent"]
 
 
+class HistoryDamaged(WireModel):
+    model_config = ConfigDict(extra="forbid")
+    state: Literal["damaged"]
+
+
 class HistoryPauseRequest(WireModel):
     model_config = ConfigDict(extra="forbid")
     paused: StrictBool
@@ -633,6 +638,7 @@ class PowerRequest(WireModel):
 class ProblemCode(
     RootModel[
         Literal[
+            "history_invalid",
             "job_target_unknown",
             "processor_not_configured",
             "processor_configuration_invalid",
@@ -661,6 +667,7 @@ class ProblemCode(
 ):
     model_config = ConfigDict(allow_inf_nan=False)
     root: Literal[
+        "history_invalid",
         "job_target_unknown",
         "processor_not_configured",
         "processor_configuration_invalid",
@@ -2630,6 +2637,7 @@ class HistoryPaused(WireModel):
 class HistoryState(
     RootModel[
         HistoryAbsent
+        | HistoryDamaged
         | HistoryNotStarted
         | HistoryDiscovering
         | HistoryFetching
@@ -2642,6 +2650,7 @@ class HistoryState(
     model_config = ConfigDict(allow_inf_nan=False)
     root: (
         HistoryAbsent
+        | HistoryDamaged
         | HistoryNotStarted
         | HistoryDiscovering
         | HistoryFetching
