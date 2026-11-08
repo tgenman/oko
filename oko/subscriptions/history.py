@@ -201,21 +201,19 @@ class History:
             feeds = sorted({row['feed'] for row in rows})
             # Lock both sources of run identity through event insertion. A valid
             # but different selection must never be merged into the old run.
-            owners = {row['id']:row['initial_history_run'] for row in self.db.execute(
-                'SELECT id,initial_history_run FROM feeds WHERE id=ANY(%s) ORDER BY id FOR UPDATE', (feeds,))}
-            invalid = self.invalid_feeds(feeds, lock=True, require_rows=True)
-            selections = {row['feed']:row for row in self.db.execute(
-                "SELECT feed,selection,pg_input_is_valid(selection,'jsonb') AS json_valid FROM initial_history WHERE feed=ANY(%s)", (feeds,))}
+            admission_rows = self._admission_rows(feeds, lock=True)
+            invalid = self._invalid_admission_rows(feeds, admission_rows, require_rows=True)
+            selections = {row['feed']:row for row in admission_rows}
             event_runs: dict[str, str | None] = {}
             for feed in feeds:
-                marker = owners.get(feed)
-                marker = marker if isinstance(marker, str) and marker else None
                 row = selections.get(feed)
                 if row is None:
                     invalid.add(feed)
                     event_runs[feed] = None
                     continue
-                if row['json_valid'] is not True:
+                marker = row['initial_history_run']
+                marker = marker if isinstance(marker, str) and marker else None
+                if row['selection_jsonb_valid'] is not True:
                     # Invalid JSON cannot supply a competing run. The marker is
                     # the last identity atomically installed by History.start.
                     event_runs[feed] = marker
@@ -234,7 +232,6 @@ class History:
                     event_runs[feed] = None
                 else:
                     event_runs[feed] = run
-            invalid.update(feed for feed in feeds if feed not in owners)
             deferred = [(row['feed'],row['item'],event_runs[row['feed']],row['base_outcome']) for row in rows if row['feed'] in invalid]
             if deferred:
                 latest = {(row['feed'],row['item']):row for row in self.db.execute('''SELECT DISTINCT ON (e.feed,e.item)
@@ -422,6 +419,9 @@ class History:
         if not feeds:
             return set()
         rows = self._admission_rows(feeds, lock=lock)
+        return self._invalid_admission_rows(feeds, rows, require_rows=require_rows, allow_deferred=allow_deferred)
+
+    def _invalid_admission_rows(self, feeds: list[str], rows: list[Row], *, require_rows: bool = False, allow_deferred: bool = False) -> set[str]:
         present = {row['feed'] for row in rows}
         missing = [feed for feed in feeds if feed not in present]
         invalid = set(missing) if require_rows else self._invalid_missing(missing)
