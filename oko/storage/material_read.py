@@ -12,8 +12,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from oko.storage.reading import reading_value, saved_content
-from oko.storage.feed_facts import feed_facts, READER_FEED_COLUMNS
-import json
+from oko.storage.feed_facts import READER_FEED_COLUMNS
 
 
 @dataclass
@@ -33,7 +32,6 @@ class Inputs:
     related_items: dict[str, Row] = field(default_factory=dict)
     children: dict[str, list[Row]] = field(default_factory=dict)
     owners: dict[str, set[str]] = field(default_factory=dict)
-    memberships: dict[str, list[str]] = field(default_factory=dict)
 
 
 _current: ContextVar[Inputs | None] = ContextVar('material_inputs', default=None)
@@ -46,7 +44,6 @@ def current(db: Database) -> Inputs | None:
 
 _ITEM = f"SELECT i.*, COALESCE(i.content #> '{{extra,telegram,members}}','[]'::jsonb)::text AS members, {owner_expr('i')} AS reader_feed_id, CASE WHEN i.status='filter_out' THEN 1 ELSE 0 END AS reader_hidden FROM publications i"
 _FEED_COLUMNS = ','.join('f.' + name for name in READER_FEED_COLUMNS)
-_FEED = 'SELECT ' + _FEED_COLUMNS + ', b.binding AS reader_binding,b.binding_raw AS reader_binding_raw FROM feeds f LEFT JOIN telegram_bindings b ON b.feed = f.id'
 _BATCH_FEED = 'SELECT ' + _FEED_COLUMNS + ''', b.binding AS reader_binding,b.binding_raw AS reader_binding_raw,
     COALESCE((SELECT jsonb_agg(jsonb_build_array(
         CASE WHEN s.feed_id IS NOT NULL THEN 'feed' WHEN s.folder_id IS NOT NULL THEN 'folder' ELSE 'oko' END,
@@ -78,16 +75,6 @@ def jobs(db: Database, identity: str) -> dict[str, Row]:
 
 
 
-@reading_value
-def feed(db: Database, identity: str) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    value = current(db)
-    row = value.feeds.get(identity) if value and identity in value.feeds else db.execute(f'{_FEED} WHERE f . id = %s', (identity,)).fetchone()
-    if row is None:
-        raise ValueError('Feed not found')
-    binding = (json.loads(row['reader_binding_raw']) if row['reader_binding_raw'] is not None else row['reader_binding']) if row['kind']=='telegram' else None
-    return feed_facts(row), binding
-
-
 def state(db: Database, key: str) -> str | None:
     value = current(db)
     if value is not None and key in value.state_keys:
@@ -97,7 +84,7 @@ def state(db: Database, key: str) -> str | None:
 
 
 @contextmanager
-def material_inputs(db: Database, identities: set[str], *, include_subtitles: bool = True) -> Iterator[None]:
+def material_inputs(db: Database, identities: set[str], *, cards_only: bool = False) -> Iterator[None]:
     """Bounded inputs for requested materials; independent of foreign data."""
     value = Inputs(db)
     ids = sorted(identities)
@@ -118,12 +105,11 @@ def material_inputs(db: Database, identities: set[str], *, include_subtitles: bo
         for row in db.execute(f"SELECT l . source_publication_id AS reader_source , i . * , {owner_expr('i')} AS reader_feed_id , j . reason_message AS fetch_error FROM publication_links l JOIN publications i ON i . id = l . target_publication_id LEFT JOIN jobs j ON j . kind = 'fetch' AND j . item = i . id WHERE l . source_publication_id = ANY ( %s ) ORDER BY l . rowid", (batch,)):
             value.children[row['reader_source']].append(row)
             value.related_items[row['id']] = row
-        value.memberships.update({identity: [] for identity in batch})
-        for row in db.execute('SELECT id AS publication_id,feed_id FROM publications WHERE feed_id IS NOT NULL AND id=ANY(%s) ORDER BY id', (batch,)):
-            value.memberships[row['publication_id']].append(row['feed_id'])
-        value.owners.update({identity: set() for identity in batch})
-        for row in db.execute('SELECT m.id AS reader_source , m . feed_id FROM (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m WHERE m.id = ANY ( %s ) UNION SELECT l . source_publication_id AS reader_source , m . feed_id FROM publication_links l JOIN (SELECT id,feed_id FROM publications WHERE feed_id IS NOT NULL) m ON m.id = l . target_publication_id WHERE l . source_publication_id = ANY ( %s )', (batch, batch)):
-            value.owners[row['reader_source']].add(row['feed_id'])
+        if not cards_only:
+            for root_id in batch:
+                root = value.items.get(root_id)
+                rows = ([root] if root is not None else []) + value.children[root_id]
+                value.owners[root_id] = {row['feed_id'] for row in rows if row['feed_id'] is not None}
     # Linked publications participate in the same read snapshot. Prefetch their
     # jobs and media in batches before projecting any of their saved content.
     related=sorted(set(value.related_items)-set(value.items))
@@ -132,29 +118,31 @@ def material_inputs(db: Database, identities: set[str], *, include_subtitles: bo
         value.media.update({identity: [] for identity in batch})
         for row in db.execute("SELECT m.*,j.id AS reader_job_id,j.status AS reader_job_status,j.reason_message AS reader_reason,j.reason_code AS reader_code FROM media_files m LEFT JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=ANY(%s)",(batch,)):
             value.media[row['publication_id']].append(row)
-        for row in db.execute("SELECT j.* FROM jobs j WHERE j.item=ANY(%s) AND j.kind<>'download_media'",(batch,)):
-            value.jobs.setdefault(row['item'],{})[row['kind']]=row
-        for row in db.execute("SELECT j.*,m.publication_id AS reader_item FROM jobs j JOIN media_files m ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=ANY(%s)",(batch,)):
-            value.media_jobs.setdefault(row['reader_item'],[]).append(row)
+        if not cards_only:
+            for row in db.execute("SELECT j.* FROM jobs j WHERE j.item=ANY(%s) AND j.kind<>'download_media'",(batch,)):
+                value.jobs.setdefault(row['item'],{})[row['kind']]=row
+            for row in db.execute("SELECT j.*,m.publication_id AS reader_item FROM jobs j JOIN media_files m ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=ANY(%s)",(batch,)):
+                value.media_jobs.setdefault(row['reader_item'],[]).append(row)
     value.media_owners={row['id']:owner for owner,rows in value.media.items() for row in rows}
-    feeds = sorted({r['reader_feed_id'] for r in value.items.values() if r['reader_feed_id'] is not None}
-                   | {feed for owners in value.owners.values() for feed in owners})
-    for start in range(0, len(feeds), 400):
-        batch = feeds[start:start+400]
-        for row in db.execute(_BATCH_FEED+' WHERE f.id = ANY(%s)', (batch,)):
-            value.feeds[row['id']] = row
-            value.settings.setdefault(('oko', 'global'), {})
-            value.settings.setdefault(('feed', row['id']), {})
-            value.settings.setdefault(('folder', row['folder_id']), {})
-            for scope, owner, field, setting in row['reader_settings']:
-                value.settings.setdefault((scope, owner), {})[field] = setting
-    keys = ['settings-version', 'processor:codex', 'processor:llamacpp'] + ['settings-version:'+f for f in feeds]
-    value.state_keys=set(keys)
-    for start in range(0,len(keys),400):
-        batch = keys[start:start+400]
-        value.state.update({r['key']:r['value'] for r in db.execute("SELECT key , value FROM state WHERE key = ANY(%s)", (batch,))})
+    if not cards_only:
+        feeds = sorted({r['reader_feed_id'] for r in value.items.values() if r['reader_feed_id'] is not None}
+                       | {feed for owners in value.owners.values() for feed in owners})
+        for start in range(0, len(feeds), 400):
+            batch = feeds[start:start+400]
+            for row in db.execute(_BATCH_FEED+' WHERE f.id = ANY(%s)', (batch,)):
+                value.feeds[row['id']] = row
+                value.settings.setdefault(('oko', 'global'), {})
+                value.settings.setdefault(('feed', row['id']), {})
+                value.settings.setdefault(('folder', row['folder_id']), {})
+                for scope, owner, field, setting in row['reader_settings']:
+                    value.settings.setdefault((scope, owner), {})[field] = setting
+        keys = ['settings-version', 'processor:codex', 'processor:llamacpp'] + ['settings-version:'+f for f in feeds]
+        value.state_keys=set(keys)
+        for start in range(0,len(keys),400):
+            batch = keys[start:start+400]
+            value.state.update({r['key']:r['value'] for r in db.execute("SELECT key , value FROM state WHERE key = ANY(%s)", (batch,))})
     from oko.storage.youtube_media import subtitle_id
-    for row in value.items.values() if include_subtitles else ():
+    for row in value.items.values() if not cards_only else ():
         try:
             content = saved_content(row['content'])
             identity = subtitle_id(content) if 'youtube' in content.get('extra', {}) else None

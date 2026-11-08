@@ -67,7 +67,6 @@ class ReaderApplication:
         self._cancel = jobs.cancel
         self._feed_checks: dict[str, str] = {}
         self._last_problems: dict[str, Any] = dict(current=[], recent=[], count=0, updated_at=wall_clock())
-        self._viewed_ids: list[str] = []
         self._codex_status = codex_status()
         self._collection_instance = secrets.token_hex(16)
         self._collection_revision = 0
@@ -127,7 +126,7 @@ class ReaderApplication:
     def material_was_viewed(self, identity: str) -> bool:
         if self._store:
             return self.queries.was_viewed(identity)
-        return identity in self._viewed_ids
+        return False
 
 
     def collection_snapshot(self, feed_id: str | None = None) -> dict[str, Any]:
@@ -171,14 +170,12 @@ class ReaderApplication:
     def _status(self) -> dict[str, Any]:
         state: dict[str, Any] = {}
         state['youtube'] = self.youtube_status() if self._store and not self.stopped else None
-        if self._store and not self.stopped:
-            self._viewed_ids = self.queries.viewed_ids()
         state['problems'] = self._last_problems
         if self._error:
             state['problems'] = dict(current=[dict(id='runtime:storage',code='storage-unavailable',operation='producer:storage',section='action',title='Хранилище недоступно',
                 consequence='Сбор и обработка остановлены.',next_step='Проверьте доступность хранилища; состояние не сбрасывается.',
                 objects=[],action=None,created_at=self._wall_clock(),next_at=None,state='current',finished_at=None,outcome=None)],recent=[],count=1,updated_at=self._wall_clock())
-        state['viewed_ids'] = self._viewed_ids
+        state['viewed_ids'] = []
         source_states = self._store.source_statuses() if self._store else []
         names = {f['id']: f['title'] for f in self._store.subscriptions.feeds()} if self._store else {}
         source_states = [dict(s, title=names.get(s['feed_id'], s['feed_id']), changes=self._source_description(s['feed_id'])) for s in source_states if s['feed_id'] in self._sources and s['feed_id'] in names]

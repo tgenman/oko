@@ -2,12 +2,12 @@
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
-from oko.storage.publication_owners import owned_ids, owner_expr
+from oko.storage.publication_owners import owner_expr
 from oko.storage.store import Store
 from oko.domain.reader import WorkSummary
 from oko.processing.config import ProcessorConfig
 from oko.storage.problems import CommandRecord
-from oko.storage import material_read, publication_links
+from oko.storage import material_read
 from oko.storage.reading import reader_now
 
 class ReaderFacts:
@@ -43,8 +43,6 @@ class ReaderFacts:
                     store.processing.repair(owner['id'])
         return value
 
-    def content_version(self, identity: str) -> str:
-        return self.storage().content_version(identity)
 
     def processor_config(self) -> ProcessorConfig | None:
         return self.storage().processor_config()
@@ -58,25 +56,15 @@ class ReaderFacts:
     def command_succeeded(self, context: str) -> bool:
         return bool(self.storage().db.execute("SELECT 1 FROM reader_action_results WHERE identity=%s AND result='succeeded' LIMIT 1",(context,)).fetchone())
 
-    def clock(self) -> float:
-        return self.storage().clock()
-
-    def wall_clock(self) -> float:
-        return self.storage().wall_clock()
 
     def item(self, identity: str) -> dict[str, Any] | None:
         row = material_read.item(self.storage().db, identity)
         return dict(row) if row else None
 
-    def jobs(self, identity: str) -> dict[str, dict[str, Any]]:
-        return {kind: dict(row) for kind, row in material_read.jobs(self.storage().db, identity).items()}
-
-    def feed(self, identity: str) -> tuple[dict[str, Any], dict[str, Any] | None]:
-        return material_read.feed(self.storage().db, identity)
 
     @contextmanager
-    def inputs(self, identities: set[str], *, include_subtitles: bool = True) -> Iterator[None]:
-        with self.storage().db.access_lock, material_read.material_inputs(self.storage().db, identities, include_subtitles=include_subtitles):
+    def inputs(self, identities: set[str], *, cards_only: bool = False) -> Iterator[None]:
+        with self.storage().db.access_lock, material_read.material_inputs(self.storage().db, identities, cards_only=cards_only):
             yield
 
     def card_validators(self, identities: list[str]) -> dict[str, tuple[Any, ...]]:
@@ -124,15 +112,3 @@ class ReaderFacts:
 
     def was_viewed(self, identity: str) -> bool:
         return self.storage().db.execute('SELECT 1 FROM publications WHERE id = %s', (identity,)).fetchone() is None
-
-    def viewed_ids(self) -> list[str]:
-        # Completed roots are removed or retained only as linked dependencies;
-        # neither case is a persisted list of viewed publication identities.
-        return []
-
-    def feed_members(self, identity: str) -> set[str]:
-        return {row[0] for row in self.storage().db.execute(f'''SELECT id FROM publications WHERE feed_id=%s
-            UNION SELECT id FROM ({owned_ids('= %s')}) owner''', (identity,identity,identity))}
-
-    def deletion_feeds(self) -> set[str]:
-        return {row[0] for row in self.storage().db.execute(f"SELECT DISTINCT {owner_expr('i')} AS feed_id FROM publications i WHERE i.id IN ( SELECT item FROM jobs WHERE kind = 'delete' AND status != 'done' )")}

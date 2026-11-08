@@ -1,6 +1,5 @@
 """Unified publication projection and HTTP conditional delivery."""
 import hashlib
-import json
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from oko.execution import read_locked
@@ -31,7 +30,8 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
                 published_at=project.timestamp(row['published_at']).root if row['published_at'] is not None else None,
                 source_url=row['url'],**current.unified_publication(item))
         body=wire.PublicationResponse.model_validate(body).model_dump(mode='json')
-        encoded=json.dumps(body,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()
-        etag='"'+hashlib.sha256(storage.encode()+b'\0'+encoded).hexdigest()+'"'
+        response=JSONResponse(body)
+        etag='"'+hashlib.sha256(storage.encode()+b'\0'+response.body).hexdigest()+'"'
         if request.headers.get('if-none-match')==etag:return Response(status_code=304,headers={'ETag':etag})
-        return JSONResponse(body,headers={'ETag':etag})
+        response.headers['ETag']=etag
+        return response
