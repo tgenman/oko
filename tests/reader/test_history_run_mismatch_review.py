@@ -40,10 +40,10 @@ def test_later_outcomes_do_not_merge_into_old_run(prepared, replacement):
     run_a = selection_a['run']
     set_selection(dsn, feed, '{broken')
     with transaction(store.db):
-        store.subscriptions.history.failed(item)
+        store.subscriptions.history.saved(item,False)
     first = events(store, feed)
     assert len(first) == 1 and first[0]['run_id'] == run_a
-    assert first[0]['transitions']['pending'] == 'retrying'
+    assert first[0]['transitions']['pending'] == 'incomplete'
 
     selection_b = dict(selection_a)
     if replacement == 'different-run':
@@ -69,7 +69,7 @@ def test_later_outcomes_do_not_merge_into_old_run(prepared, replacement):
         progressed, pending = store.subscriptions.history.replay_deferred(feed)
     assert progressed and pending
     # B's saved and Viewed actions are retained unresolved, not misapplied to A.
-    assert store.db.execute('SELECT outcome FROM history_members WHERE feed=%s AND item=%s',(feed,item)).fetchone()[0] == 'retrying'
+    assert store.db.execute('SELECT outcome FROM history_members WHERE feed=%s AND item=%s',(feed,item)).fetchone()[0] == 'incomplete'
     remaining = events(store, feed)
     assert remaining and all(row['run_id'] is None for row in remaining)
     assert store.db.execute('SELECT viewed FROM publications WHERE id=%s',(item,)).fetchone()[0] is True
@@ -80,7 +80,7 @@ def test_missing_trusted_run_never_merges_unattributed_outcomes(prepared):
     with transaction(store.db):
         store.db.execute('UPDATE feeds SET initial_history_run=NULL WHERE id=%s', (feed,))
         store.db.execute('UPDATE initial_history SET selection=%s WHERE feed=%s', ('{broken',feed))
-        store.subscriptions.history.failed(item)
+        store.subscriptions.history.saved(item,False)
         store.subscriptions.history.saved(item, True)
     retained = events(store, feed)
     assert len(retained) == 2 and all(row['run_id'] is None for row in retained)
@@ -97,7 +97,7 @@ def test_invalid_json_with_trusted_run_preserves_normal_coalescing(prepared):
     run_a = json.loads(raw_a)['run']
     set_selection(dsn, feed, '{broken')
     with transaction(store.db):
-        store.subscriptions.history.failed(item)
+        store.subscriptions.history.saved(item,False)
         store.subscriptions.history.saved(item, True)
     retained = events(store, feed)
     assert len(retained) == 1 and retained[0]['run_id'] == run_a

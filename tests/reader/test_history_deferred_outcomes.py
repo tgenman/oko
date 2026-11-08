@@ -30,10 +30,10 @@ def test_deferred_outcomes_survive_rollback_restart_and_repair(tmp_path):
             raise RuntimeError('rollback')
     assert value(store,'SELECT count(*) FROM history_deferred_events') == 0
     with transaction(store.db):
-        store.subscriptions.history.failed(item)
+        store.subscriptions.history.saved(item,False)
         store.subscriptions.history.viewed(item)
         store.subscriptions.history.saved(item,True)
-        store.subscriptions.history.failed(item)
+        store.subscriptions.history.viewed(item)
     assert value(store,'SELECT outcome FROM history_members WHERE feed=%s AND item=%s',(feed,item)) == 'pending'
     assert value(store,'SELECT count(*) FROM history_deferred_events') == 1
     store.db.close()
@@ -48,6 +48,63 @@ def test_deferred_outcomes_survive_rollback_restart_and_repair(tmp_path):
             progressed, pending = store.subscriptions.history.replay_deferred(feed)
         assert progressed and not pending
         assert value(store,'SELECT outcome FROM history_members WHERE feed=%s AND item=%s',(feed,item)) == 'loaded'
+    finally:
+        store.db.close()
+
+
+@pytest.mark.parametrize(('first','last','expected'), [
+    (False, True, 'loaded'),
+    (True, False, 'incomplete'),
+])
+def test_last_accepted_save_determines_deferred_outcome(tmp_path, first, last, expected):
+    store, feed, item, selection = prepared(tmp_path)
+    try:
+        with transaction(store.db):
+            store.db.execute('UPDATE initial_history SET selection=%s WHERE feed=%s', ('{bad',feed))
+            store.subscriptions.history.saved(item,first)
+            store.subscriptions.history.viewed(item)
+            store.subscriptions.history.saved(item,last)
+        with transaction(store.db):
+            store.db.execute('UPDATE initial_history SET selection=%s WHERE feed=%s',(selection,feed))
+            progressed, pending = store.subscriptions.history.replay_deferred(feed)
+        assert progressed and not pending
+        assert value(store,'SELECT outcome FROM history_members WHERE feed=%s AND item=%s',(feed,item)) == expected
+    finally:
+        store.db.close()
+
+
+@pytest.mark.parametrize(('initial','expected'), [
+    ('retrying','viewed'),
+    ('unavailable','unavailable'),
+])
+def test_view_preserves_existing_retry_and_unavailable_semantics(tmp_path, initial, expected):
+    store, feed, item, selection = prepared(tmp_path)
+    try:
+        with transaction(store.db):
+            store.db.execute('UPDATE history_members SET outcome=%s WHERE feed=%s AND item=%s',(initial,feed,item))
+            store.db.execute('UPDATE initial_history SET selection=%s WHERE feed=%s', ('{bad',feed))
+            assert store.viewed_set([item])
+        with transaction(store.db):
+            store.db.execute('UPDATE initial_history SET selection=%s WHERE feed=%s',(selection,feed))
+            progressed, pending = store.subscriptions.history.replay_deferred(feed)
+        assert progressed and not pending
+        assert value(store,'SELECT outcome FROM history_members WHERE feed=%s AND item=%s',(feed,item)) == expected
+    finally:
+        store.db.close()
+
+
+def test_replay_preserves_preexisting_failed_transition(tmp_path):
+    store, feed, item, selection = prepared(tmp_path)
+    try:
+        run = json.loads(selection)['run']
+        previous = dict(pending='retrying', retrying='retrying', unavailable='unavailable',
+                        loaded='loaded', incomplete='incomplete', viewed='viewed')
+        with transaction(store.db):
+            store.db.execute('''INSERT INTO history_deferred_events(feed,item,run_id,base_outcome,transitions)
+                VALUES (%s,%s,%s,'pending',%s::jsonb)''', (feed,item,run,json.dumps(previous)))
+            progressed, pending = store.subscriptions.history.replay_deferred(feed)
+        assert progressed and not pending
+        assert value(store,'SELECT outcome FROM history_members WHERE feed=%s AND item=%s',(feed,item)) == 'retrying'
     finally:
         store.db.close()
 

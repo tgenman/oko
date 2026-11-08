@@ -65,10 +65,6 @@ class History:
     def member(self, item: str) -> bool:
         return self.db.execute('SELECT 1 FROM history_members WHERE item = %s', (item,)).fetchone() is not None
 
-    def failed(self, item: str, unavailable: bool = False) -> None:
-        outcome = 'unavailable' if unavailable else 'retrying'
-        self._events([item], 'failed', outcome)
-
     def _add_members(self, feed: str, items: list[str]) -> None:
         ordered = sorted(set(items))
         changed = False
@@ -187,7 +183,7 @@ class History:
     def viewed_many(self, items: list[str]) -> None:
         self._events(items, 'viewed', 'viewed')
 
-    def _events(self, items: list[str], operation: str, outcome: str) -> None:
+    def _events(self, items: list[str], operation: Literal['saved', 'viewed'], outcome: str) -> None:
         """Apply healthy history outcomes; durably defer the rest in order."""
         from oko.storage import memberships
         if not items:
@@ -225,14 +221,14 @@ class History:
                     event_runs[feed] = marker
                     continue
                 try:
-                    selected = json.loads(row['selection'])
+                    selection = json.loads(row['selection'])
                 except (TypeError, ValueError, RecursionError):
                     event_runs[feed] = None
                     invalid.add(feed)
                     continue
-                run = selected.get('run') if isinstance(selected, dict) else None
+                run = selection.get('run') if isinstance(selection, dict) else None
                 run = run if isinstance(run, str) and run else None
-                if run != marker or not isinstance(selected, dict):
+                if run != marker or not isinstance(selection, dict):
                     # No evidence that the outcome belongs to either run.
                     invalid.add(feed)
                     event_runs[feed] = None
@@ -253,8 +249,7 @@ class History:
                     transition = dict(previous['transitions']) if same_run and previous is not None else {state:state for state in _OUTCOMES}
                     for state in _OUTCOMES:
                         value = transition[state]
-                        if (operation=='saved' or operation=='viewed' and value in ('pending','retrying')
-                                or operation=='failed' and value not in ('loaded','incomplete','viewed','unavailable')):
+                        if operation=='saved' or value in ('pending','retrying'):
                             transition[state] = outcome
                     encoded = json.dumps(transition)
                     if same_run and previous is not None:
@@ -269,8 +264,7 @@ class History:
                     self.db.execute('''INSERT INTO history_deferred_events(feed,item,run_id,base_outcome,transitions)
                         SELECT feed,item,run_id,base,transitions::jsonb FROM unnest(%s::text[],%s::text[],%s::text[],%s::text[],%s::text[]) v(feed,item,run_id,base,transitions)''',
                         tuple([row[i] for row in inserts] for i in range(5)))
-            predicate = (" AND outcome NOT IN ('loaded','incomplete','viewed','unavailable')" if operation == 'failed'
-                         else " AND outcome IN ('pending','retrying')" if operation == 'viewed' else '')
+            predicate = " AND outcome IN ('pending','retrying')" if operation == 'viewed' else ''
             changed = self.db.execute('UPDATE history_members SET outcome=%s WHERE item=ANY(%s) AND NOT (feed=ANY(%s)) AND outcome IS DISTINCT FROM %s'+predicate,
                                       (outcome,batch,sorted(invalid),outcome)).rowcount
             if changed or deferred:
