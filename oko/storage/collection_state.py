@@ -11,7 +11,6 @@ class SourceConfiguration:
     revision: int
     settings: list[SourceSettings]
     dependencies: list[str]
-    bindings: dict[str,dict[str,Any]]
     invalid_history: list[str] = field(default_factory=list)
 
 
@@ -51,7 +50,7 @@ class CollectionState:
                 dependencies.append(feed['id'])
             settings.append(SourceSettings(feed['id'],feed['transport'],(feed['original_urls'] or [''])[0],feed['initial_days'],feed['initial_history'],
                 feed['connection']=='deleting',access,store.subscriptions.youtube_theses(feed['id']) if feed['transport']=='youtube' else False))
-        return SourceConfiguration(self.revision(),settings,dependencies,bindings,
+        return SourceConfiguration(self.revision(),settings,dependencies,
                                    [feed['id'] for feed in feeds if feed.get('initial_history_invalid')])
 
     def binding(self, feed: str) -> dict[str,Any] | None:

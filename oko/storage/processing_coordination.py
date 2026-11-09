@@ -1,13 +1,11 @@
 """Current processing work and reconciliation of dependent reader results."""
 from oko.storage import material_read
 from oko.storage.publication_document import stored_content
-from oko.storage.reading import retry_time
 from oko.storage.transaction import begin_write
 from oko.storage.media_paths import existing_file
 from oko.storage.job_writes import execute as job_write
-from dataclasses import dataclass
 import json
-from typing import Literal, TYPE_CHECKING
+from typing import TYPE_CHECKING
 from collections.abc import Iterator
 
 from oko.processing.contracts import FilterResult, Theses
@@ -20,7 +18,6 @@ if TYPE_CHECKING:
 Result = Theses | FilterResult
 
 
-from oko.domain.processing import ProcessingWait
 
 
 class ProcessingState:
@@ -31,18 +28,6 @@ class ProcessingState:
         self.recovering = False
         self.background = False
         self.theses = SummaryResults(store)
-    def waiting(self, item: str, kind: Literal['filter', 'theses'], now: float, wall_now: float) -> ProcessingWait | None:
-        row = material_read.jobs(self.store.db,item).get(kind)
-        if not row or row['status'] != 'pending' or not (row['reason_code'] or row['reason_message']):
-            return None
-        reason: Literal['processor_not_configured', 'public_ai_not_allowed', 'processor_unavailable', 'retry_scheduled']
-        if row['reason_code'] == 'processor-config':
-            reason = 'processor_not_configured'
-        elif row['reason_code'] == 'ai-permission':
-            reason = 'public_ai_not_allowed'
-        else:
-            reason = 'retry_scheduled'
-        return ProcessingWait(reason, retry_time(row['next'], now, wall_now) if row['next'] and reason != 'public_ai_not_allowed' else None)
 
     def recover(self) -> None:
         """Only startup scans the whole library, including interrupted file moves."""

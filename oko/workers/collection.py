@@ -25,7 +25,6 @@ from oko.storage.media import MediaOutput, MediaDownload
 from oko.storage.store import Store
 from oko.storage.job_writes import execute as job_write
 from oko.domain.job import Job
-from oko.collection.telegram.contracts import TelegramBinding
 from oko.collection.youtube.source import LocalCaptions
 from oko.collection.contracts import CaptionsClient
 from oko.collection.youtube.history import HistoryClient
@@ -96,7 +95,7 @@ class CollectionWorker:
                                    self._youtube_captions, self._youtube_history, self._telegram_http,self._source_http)
         self._sources = self._collection.sources
         self.jobs = JobControl(self.execution, clock)
-        self._telegram_bindings: dict[str, TelegramBinding] = {}
+        self._telegram_web_feeds: set[str] = set()
         self._last_collection = clock()
         # Recover unfinished file cleanup on startup, then run it hourly.
         self._last_media_cleanup = clock()-3600
@@ -169,14 +168,8 @@ class CollectionWorker:
             with current.jobs.transaction(self._live):
                 for identity,want_captions in updates.captions:
                     current.jobs.prepare_youtube(identity,want_captions)
-        self._telegram_bindings.clear()
-        for setting in snapshot.settings:
-            feed=setting.feed
-            binding=snapshot.bindings.get(feed)
-            source=self._sources.get(feed)
-            if source and binding and not setting.deleting:
-                if binding['kind']=='web':
-                    self._telegram_bindings[feed]=TelegramBinding('telegram-web','common')
+        self._telegram_web_feeds = {setting.feed for setting in snapshot.settings
+                                    if setting.telegram and not setting.deleting and setting.feed in self._sources}
         self._source_revision=snapshot.revision
 
     def _replay_history(self, current: Store, now: float) -> bool:
@@ -210,10 +203,6 @@ class CollectionWorker:
             raise ActionError('unavailable', self.execution._error or 'Хранилище не готово')
         return self.execution._store
 
-
-    def _lane(self, feed: str) -> str:
-        binding = self._telegram_bindings.get(feed)
-        return binding.lane if binding else 'common'
 
     def _finish_collection(self, job: Job, current: Store, error: BaseException | None = None) -> None:
         attempt = self.jobs._collection_active.get(job.id)
@@ -341,8 +330,7 @@ class CollectionWorker:
                                 return
                 publication = self.service.reference(job.item) if job.kind == 'fetch' else None
                 revision=self.service.revision(job.item) if job.kind=='fetch' else ''
-                binding = self._telegram_bindings.get(feed)
-                namespace = binding.cursor_key if binding else ''
+                namespace = 'telegram-web' if feed in self._telegram_web_feeds else ''
                 cursor = self.service.cursor(feed) if job.kind == 'discover' else None
                 access = None if linked else self._collection.telegram_access(feed)
             if not source and not linked:
@@ -786,7 +774,7 @@ class CollectionWorker:
                     self.jobs._lane_jobs.pop(lane,None)
                 if lane in self.jobs._lanes:
                     continue
-                feeds = [feed for feed in self._sources if self._collection.publication_adapter(feed) is not None] if media_lane else [feed for feed in self._sources if self._lane(feed) == lane]
+                feeds = [feed for feed in self._sources if self._collection.publication_adapter(feed) is not None] if media_lane else list(self._sources)
                 if lane=='captions':
                     feeds=caption_feeds
                 dependencies=self._dependency_feeds if lane in ('common','media') else []
