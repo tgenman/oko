@@ -11,15 +11,6 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 from oko.collection.contracts import SourceError, ExternalMedia
 
 Adapter = Literal['web']
-Lane = Literal['common']
-
-
-@dataclass(frozen=True)
-class TelegramBinding:
-    cursor_key: str
-    lane: Lane
-
-
 @dataclass(frozen=True)
 class ExpectedMedia:
     id: str

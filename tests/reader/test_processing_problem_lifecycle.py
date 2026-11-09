@@ -8,6 +8,37 @@ from oko.storage.transaction import transaction
 from tests.support.storage import Store
 
 
+@pytest.mark.parametrize('operation,expected_status,expected_generation', [
+    ('cancel', 'cancelled', 2),
+    ('block', 'blocked', 1),
+])
+def test_stopping_running_processing_preserves_generation_and_rollback(
+    tmp_path, postgres_url, operation, expected_status, expected_generation,
+):
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    try:
+        with store.db:
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
+            store.db.execute("INSERT INTO publications(id,platform,external_id,feed_id) VALUES ('article','other_web','article','feed')")
+            job_id=store.db.execute("INSERT INTO jobs(kind,item,status,generation,reason_code,reason_message) VALUES ('theses','article','running',1,'model-invalid','failure') RETURNING id").fetchone()[0]
+            store.problems.sync_processing_problem(job_id,[],1)
+        job=Job(job_id,'theses','article',1)
+        before=[tuple(row) for row in store.db.execute("SELECT id,body,finished FROM reader_problems ORDER BY id")]
+        with pytest.raises(ValueError,match='rollback'):
+            with transaction(store.db):
+                getattr(store.jobs,operation)(job)
+                raise ValueError('rollback')
+        assert tuple(store.db.execute('SELECT status,generation FROM jobs WHERE id=%s',(job_id,)).fetchone())==('running',1)
+        assert [tuple(row) for row in store.db.execute("SELECT id,body,finished FROM reader_problems ORDER BY id")]==before
+        with transaction(store.db):
+            getattr(store.jobs,operation)(Job(job_id,'theses','article',0))
+        assert tuple(store.db.execute('SELECT status,generation FROM jobs WHERE id=%s',(job_id,)).fetchone())==('running',1)
+        with transaction(store.db):
+            getattr(store.jobs,operation)(job)
+        assert tuple(store.db.execute('SELECT status,generation FROM jobs WHERE id=%s',(job_id,)).fetchone())==(expected_status,expected_generation)
+    finally:store.db.close()
+
+
 @pytest.mark.parametrize('kind',['filter','theses'])
 def test_processing_failure_and_finish_are_saved_without_status_read(tmp_path,postgres_url,kind):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
@@ -132,19 +163,6 @@ def test_changed_processing_input_clears_previous_job_reason(tmp_path,postgres_u
     finally:store.db.close()
 
 
-def test_processing_wait_uses_current_job_reason(tmp_path,postgres_url):
-    from tests.support.worker_library import worker_library
-    store,item,_,_=worker_library(tmp_path,database_url=postgres_url)
-    try:
-        with store.db:
-            row=store.db.execute("UPDATE jobs SET status='pending',reason_code='ai-permission',reason_message='Current permission error' WHERE kind='filter' AND item=%s RETURNING id",(item,)).fetchone()
-            assert row is not None
-            wait=store.processing.waiting(item,'filter',store.clock(),store.wall_clock())
-            assert wait is not None and wait.reason=='public_ai_not_allowed'
-            store.db.execute('UPDATE jobs SET reason_message=NULL WHERE id=%s',(row['id'],))
-            wait=store.processing.waiting(item,'filter',store.clock(),store.wall_clock())
-            assert wait is not None and wait.reason=='public_ai_not_allowed'
-    finally:store.db.close()
 
 
 def test_removing_feed_clears_reason_of_cancelled_processing(tmp_path,postgres_url):

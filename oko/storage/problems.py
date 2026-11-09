@@ -1021,12 +1021,6 @@ class Problems:
         if found!=['fetch'] or tail.count(':fetch:')!=1:return False
         return True
 
-    def fetch_record(self, candidate: dict[str, Any]) -> Any:
-        rows=self.db.execute("SELECT id,identity,body FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:fetch' AND body::jsonb->>'fetch_job_identity'=%s",(candidate['id'],)).fetchall()
-        for row in rows:
-            if self.fetch_record_matches(row,candidate):return row
-        canonical_row=self.db.execute('SELECT id,identity,body FROM reader_problems WHERE identity=%s AND finished IS NULL',(candidate['id'],)).fetchone()
-        return canonical_row if canonical_row and self.fetch_record_matches(canonical_row,candidate) else None
 
     def protect_foreign_identity_fetch(self, row: Any) -> None:
         """Protect an occupied foreign occurrence without changing its contents."""
@@ -1663,12 +1657,6 @@ class Problems:
         if found!=['download_media'] or tail.count(':download_media:')!=1:return False
         return True
 
-    def media_record(self, candidate: dict[str, Any]) -> Any:
-        rows=self.db.execute("SELECT id,identity,body FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:download_media' AND body::jsonb->>'media_job_identity'=%s",(candidate['id'],)).fetchall()
-        for row in rows:
-            if self.media_record_matches(row,candidate):return row
-        canonical_row=self.db.execute('SELECT id,identity,body FROM reader_problems WHERE identity=%s AND finished IS NULL',(candidate['id'],)).fetchone()
-        return canonical_row if canonical_row and self.media_record_matches(canonical_row,candidate) else None
 
     def saved_media_candidates(self, job_ids: list[int]) -> dict[int,list[dict[str,Any]]]:
         if not job_ids:return {}
@@ -2198,12 +2186,6 @@ class Problems:
         if found!=[candidate['processing_kind']] or tail.count(':'+candidate['processing_kind']+':')!=1:return False
         return True
 
-    def processing_record(self, candidate: dict[str, Any]) -> Any:
-        rows=self.db.execute("SELECT id,identity,body FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation' IN ('producer:filter','producer:theses') AND body::jsonb->>'processing_job_identity'=%s",(candidate['id'],)).fetchall()
-        for row in rows:
-            if self.processing_record_matches(row,candidate):return row
-        canonical_row=self.db.execute('SELECT id,identity,body FROM reader_problems WHERE identity=%s AND finished IS NULL',(candidate['id'],)).fetchone()
-        return canonical_row if canonical_row and self.processing_record_matches(canonical_row,candidate) else None
 
     def saved_processing_candidates(self, job_ids: list[int]) -> dict[int,list[dict[str,Any]]]:
         if not job_ids:return {}
@@ -2416,15 +2398,6 @@ class Problems:
                 SELECT id,identity,origin,body,created,NULL,NULL FROM unnest(%s::text[],%s::text[],%s::text[],%s::text[],%s::double precision[]) AS p(id,identity,origin,body,created)""",tuple([row[i] for row in added] for i in range(5)))
         if updates or added:status_changed(self.db)
 
-    @staticmethod
-    def valid_read_problem_body(raw: str) -> bool:
-        try:
-            body = json.loads(raw)
-        except (TypeError,ValueError):
-            return False
-        if not isinstance(body,dict) or not isinstance(body.get('code'),str) or not isinstance(body.get('objects'),list):
-            return False
-        return all(isinstance(obj,dict) and obj.get('kind')=='feed' and isinstance(obj.get('id'),str) for obj in body['objects'])
 
     def discover_profile_suppresses(self, feed: str, code: str) -> bool:
         if code not in ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'):

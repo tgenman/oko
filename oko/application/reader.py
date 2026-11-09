@@ -4,7 +4,6 @@ from oko.storage.reading import reading_snapshot
 import asyncio
 from dataclasses import dataclass
 from contextlib import nullcontext
-from oko.domain.processing import ProcessingWait
 from collections.abc import Awaitable, Callable
 import secrets
 from typing import Any, Literal
@@ -19,7 +18,6 @@ from oko.processing.execution import CodexSettings
 from oko.processing.codex import Codex, CodexClient, status as codex_status
 from oko.collection.telegram.http import TelegramHTTP
 from oko.storage.store import Store
-from oko.collection.telegram.contracts import TelegramBinding
 from oko.subscriptions.subscriptions import AddFeed, FeedURL, Overrides, FeedPatch, FolderConflict, identify
 from oko.subscriptions.history import InitialHistory
 from oko.subscriptions.telegram import TelegramConflict
@@ -44,7 +42,7 @@ class StatusSnapshot:
 
 
 class ReaderApplication:
-    def __init__(self, execution: Execution, jobs: JobControl, *, clock: Callable[[], float], wall_clock: Callable[[], float], sources: dict[str, FeedRuntime], bindings: dict[str, TelegramBinding], sync_sources: Callable[[], None], interval_changed: Callable[[float], None], source_description: Callable[[str], str | None], rss_transport: httpx.AsyncBaseTransport | None, ai_transport: httpx.AsyncBaseTransport | None, telegram_http: TelegramHTTP, codex: CodexClient, stop: Callable[[], Awaitable[None]], admission_changed: Callable[[], Awaitable[None]], set_power: Callable[[bool], Awaitable[None]]) -> None:
+    def __init__(self, execution: Execution, jobs: JobControl, *, clock: Callable[[], float], wall_clock: Callable[[], float], sources: dict[str, FeedRuntime], sync_sources: Callable[[], None], interval_changed: Callable[[float], None], source_description: Callable[[str], str | None], rss_transport: httpx.AsyncBaseTransport | None, ai_transport: httpx.AsyncBaseTransport | None, telegram_http: TelegramHTTP, codex: CodexClient, stop: Callable[[], Awaitable[None]], admission_changed: Callable[[], Awaitable[None]], set_power: Callable[[bool], Awaitable[None]]) -> None:
         self.execution, self.jobs = execution, jobs
         self.subscriptions = subscription_service(execution.require_store)
         self.queries = reader_queries(execution.require_store)
@@ -58,7 +56,7 @@ class ReaderApplication:
             records=lambda: execution.require_store().problems, facts=ReaderFacts(execution.require_store), clock=wall_clock)
         self.final_queries = reader_queries(execution.retained_store)
         self._actions, self._clock, self._wall_clock = execution._actions, clock, wall_clock
-        self._sources, self._telegram_bindings = sources, bindings
+        self._sources = sources
         self._sync_sources, self._interval_changed = sync_sources, interval_changed
         self._source_description = source_description
         self._rss_transport, self._ai_transport = rss_transport, ai_transport
@@ -581,8 +579,6 @@ class ReaderApplication:
             await self.jobs.cancel_stale_ai()
 
 
-    def processing_wait(self, item: str, kind: Literal['filter', 'theses']) -> 'ProcessingWait | None':
-        return self.require_store().processing.waiting(item, kind, self._clock(), self._wall_clock())
 
 
     async def retry_theses(self, item: str) -> None:

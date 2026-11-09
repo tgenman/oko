@@ -62,7 +62,7 @@ def create_app(root: Path, *, source: FeedAdapter | None = None, token: str | No
     instance_id = secrets.token_hex(16)
     runtime = Host(root, source, clock, fault, shutdown, lifetime.admitted, lifetime.should_stop, source_feed, rss_enabled, rss_transport, ai_transport, codex_client, youtube_captions, youtube_history, wall_clock, database_url)
     application = ReaderApplication(runtime.execution, runtime.jobs, clock=clock, wall_clock=wall_clock,
-        sources=runtime.collection._sources, bindings=runtime.collection._telegram_bindings, sync_sources=runtime.collection._sync_sources,
+        sources=runtime.collection._sources, sync_sources=runtime.collection._sync_sources,
         interval_changed=lambda value: setattr(runtime.collection, '_collection_interval', value),
         source_description=runtime.collection._collection.description, rss_transport=rss_transport, ai_transport=ai_transport,
         telegram_http=runtime.collection._telegram_http, codex=runtime.codex,

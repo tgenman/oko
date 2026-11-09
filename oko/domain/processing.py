@@ -19,10 +19,6 @@ class ProcessingInput:
 
 
 
-@dataclass(frozen=True)
-class ProcessingWait:
-    reason: Literal['processor_not_configured', 'public_ai_not_allowed', 'processor_unavailable', 'retry_scheduled']
-    retry_at: float | None
 
 
 @dataclass(frozen=True)

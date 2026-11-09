@@ -405,37 +405,24 @@ class JobRepository:
             self.store.publications.status(job.item)
 
     def cancel(self, job: Job) -> None:
-        if job.kind not in ('read','discover'):memberships.lock_graph(self.store.db)
-        from oko.storage.fetch_job_problems import previous_candidates as managed_candidates
-        previous=managed_candidates(self.store,job.id,self.store.wall_clock()) if job.kind=='fetch' else []
-        from oko.storage.media_job_problems import previous_candidates as media_candidates
-        previous_media=media_candidates(self.store,job.id,self.store.wall_clock()) if job.kind=='download_media' else []
-        processor_previous=self.store.problems.prepare_processor_change([job.id],self.store.wall_clock())
-        from oko.storage.processing_job_problems import managed_candidates as processing_candidates
-        previous_processing=processing_candidates(self.store,job.id,self.store.wall_clock()) if job.kind in ('filter','theses') else []
-        changed=job_write(self.store.db, "UPDATE jobs SET status = 'cancelled' , generation = generation + 1 WHERE id = %s AND generation = %s AND status = 'running' AND CASE WHEN kind IN ('fetch','download_media','filter','theses') AND reason_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING OLD.reason_code AS previous_code",(job.id,job.generation)).fetchone()
-        if changed:self.store.problems.finish_processor_change([job.id],processor_previous,self.store.wall_clock())
-        if changed and job.kind in ('fetch','download_media','filter','theses') and (changed['previous_code'] or '').startswith('source-'):
-            from oko.storage import source_groups
-            complete=source_groups.sync(self.store,job.kind,source_groups.job_keys(self.store,job.id,changed['previous_code']),self.store.wall_clock(),evidence=source_groups.job_evidence_many(self.store,[(job.id,changed['previous_code'])]))
-            job_write(self.store.db,"UPDATE jobs SET source_event_owned=(%s=1) AND status IN ('pending','running','failed','unavailable','blocked') WHERE id=%s",(complete,job.id))
-        if changed and job.kind=='filter':self.store.processing.filter_changed(job.item)
-        if changed and previous:self.store.problems.sync_fetch(job.id,previous,self.store.wall_clock())
-        if changed and previous_media:self.store.problems.sync_media_problem(job.id,previous_media,self.store.wall_clock())
-        if changed and previous_processing:self.store.problems.sync_processing_problem(job.id,previous_processing,self.store.wall_clock())
-        if changed:self.store.incomplete_draft.mark_job(job.kind,job.item,job.id)
+        self._stop_running(job, cancelled=True)
 
     def block(self, job: Job) -> None:
-        if job.kind in ('fetch','download_media','filter','theses'):
-            from oko.storage import memberships
+        self._stop_running(job, cancelled=False)
+
+    def _stop_running(self, job: Job, *, cancelled: bool) -> None:
+        if (cancelled and job.kind not in ('read','discover')) or (not cancelled and job.kind in ('fetch','download_media','filter','theses')):
             memberships.lock_graph(self.store.db)
         from oko.storage.fetch_job_problems import previous_candidates as managed_candidates
         previous=managed_candidates(self.store,job.id,self.store.wall_clock()) if job.kind=='fetch' else []
         from oko.storage.media_job_problems import previous_candidates as media_candidates
         previous_media=media_candidates(self.store,job.id,self.store.wall_clock()) if job.kind=='download_media' else []
+        processor_previous=self.store.problems.prepare_processor_change([job.id],self.store.wall_clock()) if cancelled else None
         from oko.storage.processing_job_problems import managed_candidates as processing_candidates
         previous_processing=processing_candidates(self.store,job.id,self.store.wall_clock()) if job.kind in ('filter','theses') else []
-        changed=job_write(self.store.db, "UPDATE jobs SET status = 'blocked' WHERE id = %s AND generation = %s AND status = 'running' AND CASE WHEN kind IN ('fetch','download_media','filter','theses') AND reason_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING OLD.reason_code AS previous_code", (job.id, job.generation)).fetchone()
+        transition="status = 'cancelled', generation = generation + 1" if cancelled else "status = 'blocked'"
+        changed=job_write(self.store.db, f"UPDATE jobs SET {transition} WHERE id = %s AND generation = %s AND status = 'running' AND CASE WHEN kind IN ('fetch','download_media','filter','theses') AND reason_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING OLD.reason_code AS previous_code", (job.id, job.generation)).fetchone()
+        if changed and cancelled:self.store.problems.finish_processor_change([job.id],processor_previous,self.store.wall_clock())
         if changed and job.kind in ('fetch','download_media','filter','theses') and (changed['previous_code'] or '').startswith('source-'):
             from oko.storage import source_groups
             complete=source_groups.sync(self.store,job.kind,source_groups.job_keys(self.store,job.id,changed['previous_code']),self.store.wall_clock(),evidence=source_groups.job_evidence_many(self.store,[(job.id,changed['previous_code'])]))
@@ -795,9 +782,6 @@ class JobRepository:
             raise RuntimeError('Execution settings require an owning transaction')
         self.store.db.execute('UPDATE jobs SET execution_settings=NULL WHERE kind=%s AND item=%s', (kind, item))
 
-    def execution_provenance(self, job: Job) -> dict[str, Any] | None:
-        row = self.store.db.execute("SELECT execution_settings->'parameters' FROM jobs WHERE id=%s AND execution_settings->>'generation'=%s::text", (job.id, job.generation)).fetchone()
-        return dict(row[0]) if row and row[0] is not None else None
 
 
     def prepare_youtube(self, feed: str, want_captions: bool) -> None:
@@ -1139,9 +1123,6 @@ class JobRepository:
             self.store.problems.sync_fetch(job_id,previous,self.store.wall_clock())
         if processor_affected:self.store.problems.finish_processor_change(processor_affected,processor_previous,self.store.wall_clock())
 
-    def backfill_processing_inputs(self) -> None:
-        for _ in self.backfill_processing_steps():
-            pass
 
     def backfill_processing_steps(self) -> Iterator[None]:
         if not self.store.db.transaction_depth:

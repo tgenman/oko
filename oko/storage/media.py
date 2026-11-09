@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 import secrets
 import shutil
-from uuid import UUID,uuid4
+from uuid import uuid4
 from typing import Any, TYPE_CHECKING
 
 from oko.collection.adapters import AdapterIssue, AdapterErrorKind, ExternalKey, ExternalReference, MediaReference, Platform
@@ -70,9 +70,6 @@ class MediaFiles:
     def url(item: str, media: str) -> str:
         return f'/api/v3/materials/{item}/media/{media}'
 
-    @staticmethod
-    def projection_name(row: Any) -> str:
-        return 'media-'+str(UUID(row['id']).int)+'.bin'
 
     def file(self, item: str, media: str) -> tuple[Path, str] | None:
         row = self.store.db.execute("SELECT m . * FROM media_files m JOIN publications i ON i . id = m . publication_id WHERE m . id = %s AND m . publication_id = %s AND m . status = 'ready' ", (media,item)).fetchone()
