@@ -3,7 +3,6 @@ import json
 from typing import Any, Literal, TYPE_CHECKING
 from dataclasses import dataclass
 from oko.storage import processing_input as publication_input
-from oko.storage.publication_owners import owner_expr
 from oko.processing.contracts import ProcessingRequest, FilterResult, Theses
 from oko.processing.config import ProcessorConfig
 from oko.processing.execution import CodexSettings

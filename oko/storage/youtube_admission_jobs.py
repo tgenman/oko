@@ -1,6 +1,5 @@
 """Experimental addressed YouTube admission contributor projection."""
 from typing import Any
-from oko.storage.publication_owners import owner_expr
 
 
 def contributions(store: Any, ids: list[int]) -> dict[int,set[str | None]]:
@@ -14,7 +13,7 @@ def contributions(store: Any, ids: list[int]) -> dict[int,set[str | None]]:
         LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
         LEFT JOIN publication_links link ON link.target_publication_id=coalesce(item.id,media_owner.id)
         LEFT JOIN publications root ON root.id=link.source_publication_id
-        JOIN feeds f ON f.id=coalesce({owner_expr('item')},{owner_expr('media_owner')},{owner_expr('root')},j.feed_id)
+        JOIN feeds f ON f.id=coalesce(item.feed_id,media_owner.feed_id,root.feed_id,j.feed_id)
         WHERE j.id=ANY(%s) AND j.status IN ('pending','running') AND f.kind='youtube'
         AND NOT (j.kind='fetch' AND item.id IS NULL AND j.youtube_admission_forgotten_item IS NOT NULL AND j.youtube_admission_forgotten_item=j.item)
         AND j.reason_code IS DISTINCT FROM 'processor-config'
@@ -216,7 +215,7 @@ def capture_fetch_flag_changes(store: Any, ids: list[int]) -> None:
             LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
             LEFT JOIN publication_links link ON link.target_publication_id=coalesce(item.id,media_owner.id)
             LEFT JOIN publications root ON root.id=link.source_publication_id
-            LEFT JOIN feeds f ON f.id=coalesce({owner_expr('item')},{owner_expr('media_owner')},{owner_expr('root')},j.feed_id)
+            LEFT JOIN feeds f ON f.id=coalesce(item.feed_id,media_owner.feed_id,root.feed_id,j.feed_id)
             WHERE j.id=ANY(%s) AND (j.youtube_admission_candidate OR f.kind='youtube')''',(batch,)).fetchall()
         capture_ids(store,[row['id'] for row in rows])
 

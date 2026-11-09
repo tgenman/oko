@@ -198,3 +198,32 @@ def source_revision_hash(store: 'Store', item: str) -> str:
 
 def revision(store: 'Store', item: str) -> str:
     return source_revision_hash(store,item)
+
+
+def mark_stale(store: 'Store', item: str, feed: str, metadata: dict[str, Any]) -> None:
+    """Mark saved processing results against current source and prompt rules."""
+    effective=store.subscriptions.effective('feed',feed,details=False)['effective']
+    for section,kind,setting in (('filter','filter','prompt_filters'),('summary','theses','prompt_theses')):
+        result=metadata.get(section)
+        if not isinstance(result,dict):
+            continue
+        source_hash=input_hash(store,item,kind)
+        result['stale']=bool(result.get('preserve_stale') or result.get('source_url_stale') or result.get('source_title_stale')
+            or result.get('prompt') is not None and result['prompt'] != effective[setting]['value']
+            or source_hash is not None and result.get('input_hash') is not None and result['input_hash']!=source_hash)
+
+
+def repair_missing_subtitles(store: 'Store', item: str) -> None:
+    """Retain read-time recovery when restoring a viewed publication."""
+    from oko.storage.media_paths import existing_file
+    rows=store.db.execute("""SELECT p.id,p.content FROM publications p WHERE p.id=%s
+        UNION ALL SELECT p.id,p.content FROM publication_links l
+        JOIN publications p ON p.id=l.target_publication_id WHERE l.source_publication_id=%s""",(item,item)).fetchall()
+    owners={row['id']:saved_content(row['content']) for row in rows}
+    media={row['id']:row for row in store.db.execute(
+        "SELECT id,status,storage_key FROM media_files WHERE publication_id=ANY(%s)",(list(owners),))}
+    for owner,document in owners.items():
+        for block in document.get('blocks',[]):
+            file=media.get(block.get('media_id')) if block.get('type')=='media' and block.get('role')=='subtitles' else None
+            if file and file['status']=='ready' and existing_file(store.root,file['storage_key']) is None:
+                store.processing.repair(owner)

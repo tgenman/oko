@@ -1051,7 +1051,6 @@ def apply_due_current_for_keys(store: Any, keys: list[str], now: float) -> None:
 
 def refresh_youtube_flags(store: Any, roots: list[str]) -> None:
     """Refresh the derived time-sensitive fetch flag only for affected roots."""
-    from oko.storage.publication_owners import owner_expr
     targets=generic_job_targets(store.db,roots)
     for start in range(0,len(targets),400):
         rows=store.db.execute(f"""SELECT j.id,coalesce(bool_or(j.reason_code IS NULL AND j.reason_message IS NOT NULL
@@ -1061,7 +1060,7 @@ def refresh_youtube_flags(store: Any, roots: list[str]) -> None:
             LEFT JOIN pg_temp.oko_incomplete_facts p ON p.id=j.item
             LEFT JOIN publication_links link ON link.target_publication_id=p.id
             LEFT JOIN pg_temp.oko_incomplete_facts root ON root.id=link.source_publication_id
-            LEFT JOIN feeds f ON f.id=coalesce({owner_expr('p')},{owner_expr('root')},j.feed_id)
+            LEFT JOIN feeds f ON f.id=coalesce(p.feed_id,root.feed_id,j.feed_id)
             GROUP BY j.id""",(targets[start:start+400],)).fetchall()
         if rows:
             store.db.execute('UPDATE jobs j SET incomplete_youtube_sensitive=s.sensitive FROM unnest(%s::bigint[],%s::boolean[]) s(id,sensitive) WHERE j.id=s.id AND j.incomplete_youtube_sensitive IS DISTINCT FROM s.sensitive',([row['id'] for row in rows],[row['sensitive'] for row in rows]))

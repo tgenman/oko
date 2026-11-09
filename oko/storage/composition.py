@@ -1,5 +1,4 @@
 """Current reading composition; no persisted snapshot or lifecycle ownership."""
-from oko.storage.publication_owners import owner_expr
 from oko.storage.database import expect_row
 from oko.storage.reading import reading_snapshot
 from dataclasses import dataclass

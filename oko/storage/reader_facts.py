@@ -2,7 +2,6 @@
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
-from oko.storage.publication_owners import owner_expr
 from oko.storage.store import Store
 from oko.domain.reader import WorkSummary
 from oko.processing.config import ProcessorConfig
@@ -25,16 +24,8 @@ class ReaderFacts:
         value=project(store.db,store.root,identity,store.clock(),store.wall_clock())
         row=material_read.item(store.db,identity)
         if row and row['feed_id'] is not None:
-            effective=store.subscriptions.effective('feed',row['feed_id'],details=False)['effective']
-            for section,kind,setting in (('filter','filter','prompt_filters'),('summary','theses','prompt_theses')):
-                metadata=value['processing_metadata'].get(section)
-                if not isinstance(metadata,dict):continue
-                from oko.storage import processing_input
-                source_hash=processing_input.input_hash(store,identity,kind)
-                stale=bool(metadata.get('preserve_stale') or metadata.get('source_url_stale') or metadata.get('source_title_stale')
-                    or metadata.get('prompt') is not None and metadata['prompt'] != effective[setting]['value']
-                    or source_hash is not None and metadata.get('input_hash') is not None and metadata['input_hash']!=source_hash)
-                metadata['stale']=stale
+            from oko.storage.processing_input import mark_stale
+            mark_stale(store,identity,row['feed_id'],value['processing_metadata'])
         files={item['id']:item for item in value['media']}
         for owner in [{'id':identity,'content':value['content']},*value['linked_publications']]:
             for block in owner['content'].get('blocks',[]):
@@ -101,7 +92,7 @@ class ReaderFacts:
         return (bytes(row['image']), row['mime']) if row else None
 
     def material_feeds(self, identities: set[str]) -> dict[str, str]:
-        return {row['id']: row['feed_id'] for row in self.storage().db.execute(f"SELECT i.id , {owner_expr('i')} AS feed_id FROM publications i WHERE i.id IN ( {','.join(('%s' for _ in identities))} )", tuple(identities))} if identities else {}
+        return {row['id']: row['feed_id'] for row in self.storage().db.execute(f"SELECT i.id , i.feed_id AS feed_id FROM publications i WHERE i.id IN ( {','.join(('%s' for _ in identities))} )", tuple(identities))} if identities else {}
 
 
     def hidden_problem_objects(self, materials: set[str], feeds: set[str]) -> tuple[set[str],set[str]]:

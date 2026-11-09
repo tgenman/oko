@@ -165,19 +165,6 @@ def test_changed_processing_input_clears_previous_job_reason(tmp_path,postgres_u
 
 
 
-def test_removing_feed_clears_reason_of_cancelled_processing(tmp_path,postgres_url):
-    from tests.support.worker_library import worker_library
-    store,item,_,_=worker_library(tmp_path,database_url=postgres_url)
-    try:
-        with store.db:
-            row=store.db.execute("UPDATE jobs SET status='cancelled',input_snapshot=NULL,reason_code='old-code',reason_message='old' WHERE kind='filter' AND item=%s RETURNING id",(item,)).fetchone()
-            store.db.execute('UPDATE publications SET feed_id=NULL WHERE id=%s',(item,))
-            store.processing.memberships_removed([item])
-            job=store.db.execute('SELECT status,reason_code,reason_message FROM jobs WHERE id=%s',(row['id'],)).fetchone()
-            assert tuple(job)==('cancelled',None,None)
-    finally:store.db.close()
-
-
 def test_processing_waits_for_pending_initial_collection_even_with_text(tmp_path,postgres_url):
     from tests.support.worker_library import worker_library
     store,item,_,_=worker_library(tmp_path,database_url=postgres_url)

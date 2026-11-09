@@ -1,6 +1,5 @@
 """Bounded projection of one individual processing Job into reader problems."""
 from typing import Any, TYPE_CHECKING
-from oko.storage.publication_owners import owner_expr
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
@@ -8,12 +7,12 @@ if TYPE_CHECKING:
 
 def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_suppressed: bool = False) -> dict[int,list[dict[str, Any]]]:
     rows=store.db.execute(f"""SELECT j.id,j.kind,j.item,j.status,j.reason_message AS reason_message,j.reason_code AS reason_code,j.feed_id,
-        coalesce({owner_expr('p')},{owner_expr('root')},j.feed_id) AS owner,
+        coalesce(p.feed_id,root.feed_id,j.feed_id) AS owner,
         coalesce(root.id,j.item) AS affected, f.kind AS feed_kind
         FROM jobs j LEFT JOIN publications p ON p.id=j.item
         LEFT JOIN publication_links link ON link.target_publication_id=p.id
         LEFT JOIN publications root ON root.id=link.source_publication_id
-        LEFT JOIN feeds f ON f.id=coalesce({owner_expr('p')},{owner_expr('root')},j.feed_id)
+        LEFT JOIN feeds f ON f.id=coalesce(p.feed_id,root.feed_id,j.feed_id)
         WHERE j.id=ANY(%s) AND j.kind IN ('filter','theses') AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL OR j.status IN ('failed','unavailable')) ORDER BY j.id,root.id""",(job_ids,)).fetchall()
     results: dict[tuple[int,str],dict[str,Any]]={}
     for row in rows:

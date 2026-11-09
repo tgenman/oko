@@ -12,11 +12,3 @@ def owned_ids(feed_condition: str) -> str:
         SELECT j.item AS id FROM jobs j
         WHERE j.kind='delete' AND (j.payload::jsonb->>'cleanup_feed') {feed_condition}
           AND NOT EXISTS (SELECT 1 FROM publications p WHERE p.id=j.item)"""
-
-
-def owner_expr(publication_alias: str) -> str:
-    """SQL expression for one publication's primary feed.
-
-    The alias is supplied by the caller's own SQL, never by external input.
-    """
-    return f"{publication_alias}.feed_id"

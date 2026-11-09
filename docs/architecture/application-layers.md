@@ -14,6 +14,8 @@ flowchart TB
     C --> AD["Адаптеры источников и медиа"]
     F --> AI["Адаптеры модели"]
     T --> AI
+    C --> CR["CollectionRepository"]
+    CR --> DB
     C --> JR["JobRepository"]
     F --> JR
     T --> JR
@@ -45,8 +47,8 @@ flowchart TB
 - JobRepository выполняет SQL для захвата, поколений, условного finish, повтора,
   source-wait и восстановления. Сохранённый payload связывает Job с ревизией входа. Старым Job с прежней
   совпавшей подписью ревизия добавляется без переоткрытия terminal/source-wait.
-- ProcessingService готовит и принимает вход/результат; CollectionService —
-  публикации, курсоры и связи; MediaService — ресурс и его файл. Сервисы не получают
+- ProcessingService готовит и принимает вход/результат; CollectionRepository —
+  публикации, курсоры и связи; MediaService — ресурс и его файл. Они не получают
   Job, не вызывают адаптеры, не завершают транзакцию. Возвращённые CollectionEffects
   содержат доменные последствия; Job на их основании создаёт владелец сбора.
 - Репозитории FilterResults, SummaryResults, ProcessingState, Publications и
