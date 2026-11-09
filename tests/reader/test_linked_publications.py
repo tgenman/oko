@@ -1,6 +1,5 @@
 """Linked articles remain independent publications at the reader HTTP boundary."""
 from tests.support.publications import body_text,summary,reasons
-from oko.storage.publication_owners import owner_expr
 from tests.support.cards import read_all_cards, read_publications_for_cards
 import httpx
 
@@ -53,7 +52,7 @@ def test_rss_article_is_fetched_separately_and_does_not_become_a_feed_card(tmp_p
             assert len(read_all_cards(client, '/api/v3/cards'))==1
             with database(root) as db:
                 linked=db.execute('SELECT target_publication_id FROM publication_links WHERE source_publication_id = %s',(card['id'],)).fetchone()[0]
-                row=db.execute(f"SELECT {owner_expr('i')} AS feed_id,i.platform,i.status,i.content FROM publications i WHERE i.id = %s",(linked,)).fetchone()
+                row=db.execute(f"SELECT i.feed_id AS feed_id,i.platform,i.status,i.content FROM publications i WHERE i.id = %s",(linked,)).fetchone()
                 assert row[:3]==(None,'other_web','ready')
                 assert 'Article body' in row[3]['blocks'][0]['text']
                 assert not db.execute('SELECT 1 FROM publications WHERE feed_id IS NOT NULL AND id = %s',(linked,)).fetchone()

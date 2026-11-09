@@ -2,7 +2,7 @@
 from oko.storage.publication_document import stored_content
 from oko.storage.reading import saved_content
 from oko.storage.job_writes import execute as job_write
-from oko.storage.publication_owners import owned_ids, owner_expr
+from oko.storage.publication_owners import owned_ids
 from oko.storage.database import expect_row, Database, Row
 import json
 from oko.domain.collection import CollectionEffects
@@ -1020,7 +1020,7 @@ class JobRepository:
             if changed:source_rows.append(changed)
             if previous:self.store.problems.sync_media_problem(row['id'],previous,self.store.wall_clock())
         media_targets=[]
-        owner=db.execute(f"SELECT {owner_expr('p')} AS feed_id FROM publications p WHERE p.id=%s",(item,)).fetchone()
+        owner=db.execute(f"SELECT p.feed_id AS feed_id FROM publications p WHERE p.id=%s",(item,)).fetchone()
         captions_allowed=bool(owner and owner['feed_id'] and self.store.subscriptions.youtube_theses(owner['feed_id']))
         for row in db.execute("SELECT m.id,m.resource_key,j.id AS job_id,j.reason_message,j.reason_code FROM media_files m LEFT JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=%s AND m.status='pending_download'", (item,)).fetchall():
             if row['resource_key']=='youtube:subtitles' and not captions_allowed:
@@ -1047,7 +1047,7 @@ class JobRepository:
         source_rows: list[Any]=[]
         affected=store.problems.processor_jobs_for_materials([item])
         previous=store.problems.prepare_processor_change(affected,store.wall_clock())
-        owner=store.db.execute(f"SELECT i.platform, {owner_expr('i')} AS feed_id FROM publications i WHERE i.id = %s",(item,)).fetchone()
+        owner=store.db.execute(f"SELECT i.platform, i.feed_id AS feed_id FROM publications i WHERE i.id = %s",(item,)).fetchone()
         captions_allowed=not owner or owner['platform']!='youtube' or store.subscriptions.youtube_theses(owner['feed_id'])
         from oko.storage.media_paths import existing_file
         for file in store.media.publication_rows(item):
@@ -1086,7 +1086,7 @@ class JobRepository:
 
     def revalidate_media(self, identity: str, *, manual: bool = True, sync_processor: bool = True) -> None:
         store=self.store
-        row=store.db.execute(f"SELECT m.resource_key, i.platform, {owner_expr('i')} AS feed_id FROM media_files m JOIN publications i ON i.id=m.publication_id WHERE m.id = %s AND m.status = 'ready'",(identity,)).fetchone()
+        row=store.db.execute(f"SELECT m.resource_key, i.platform, i.feed_id AS feed_id FROM media_files m JOIN publications i ON i.id=m.publication_id WHERE m.id = %s AND m.status = 'ready'",(identity,)).fetchone()
         if row is None or row['resource_key']=='youtube:subtitles' and not store.subscriptions.youtube_theses(row['feed_id']):
             return
         memberships.lock_graph(store.db)

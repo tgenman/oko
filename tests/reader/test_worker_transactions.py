@@ -897,23 +897,23 @@ def test_discovery_acceptance_invalidates_an_older_running_fetch(tmp_path,comple
 
 
 def test_collection_admission_ignores_media_url_completion_but_detects_body_change(tmp_path):
-    from oko.storage.collection_state import CollectionState
+    from oko.workers.collection import collection_service
     store,item,_,_=worker_library(tmp_path)
     try:
         content={'blocks':[{'type':'text','role':'body','text':'Body'},
                            {'type':'media','role':'image','media_id':'m','source_url':None,'publication_url':None}], 'extra':{}}
         with transaction(store.db):
             store.db.execute('UPDATE publications SET content=%s::jsonb WHERE id=%s',(json.dumps(content),item))
-        state=CollectionState(store)
-        original=state.publication_revision(item)
+        state=collection_service(lambda:store)
+        original=state.revision(item)
         content['blocks'][1]['source_url']='https://cdn.example/image'
         with transaction(store.db):
             store.db.execute('UPDATE publications SET content=%s::jsonb WHERE id=%s',(json.dumps(content),item))
-        assert state.publication_revision(item)==original
+        assert state.revision(item)==original
         content['blocks'][0]['text']='Changed body'
         with transaction(store.db):
             store.db.execute('UPDATE publications SET content=%s::jsonb WHERE id=%s',(json.dumps(content),item))
-        assert state.publication_revision(item)!=original
+        assert state.revision(item)!=original
     finally:
         store.db.close()
 

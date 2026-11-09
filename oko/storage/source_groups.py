@@ -7,7 +7,6 @@ and the ("material"|"feed", object ID) pairs observed under the graph lock.
 """
 from typing import Any, TYPE_CHECKING
 from collections.abc import Sequence
-from oko.storage.publication_owners import owner_expr
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
@@ -29,7 +28,7 @@ def possible_pairs(identity: str, kind: str) -> list[tuple[str,str]]:
 
 def job_keys(store: 'Store', job_id: int, code: str | None = None) -> set[str]:
     rows=store.db.execute(f"""SELECT j.kind,j.item,coalesce(%s,j.reason_code) AS reason_code,j.feed_id,
-        coalesce({owner_expr('items')},{owner_expr('media_owner')},{owner_expr('root')},j.feed_id) AS owner
+        coalesce(items.feed_id,media_owner.feed_id,root.feed_id,j.feed_id) AS owner
         FROM jobs j LEFT JOIN publications items ON items.id=j.item
         LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
         LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
@@ -43,7 +42,7 @@ def job_keys(store: 'Store', job_id: int, code: str | None = None) -> set[str]:
 
 def job_keys_with_previous_feed(store: 'Store', job_id: int, feed: str | None) -> tuple[str,set[str]] | None:
     rows=store.db.execute(f"""SELECT j.kind,j.item,j.reason_code,
-        coalesce({owner_expr('items')},{owner_expr('media_owner')},{owner_expr('root')},%s::text) AS owner
+        coalesce(items.feed_id,media_owner.feed_id,root.feed_id,%s::text) AS owner
         FROM jobs j LEFT JOIN publications items ON items.id=j.item
         LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
         LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
@@ -57,7 +56,7 @@ def job_keys_with_previous_feed(store: 'Store', job_id: int, feed: str | None) -
 def job_keys_many(store: 'Store', job_ids: list[int]) -> dict[int,tuple[str,set[str]]]:
     if not job_ids:return {}
     rows=store.db.execute(f"""SELECT j.id,j.kind,j.item,j.reason_code,j.feed_id,
-        coalesce({owner_expr('items')},{owner_expr('media_owner')},{owner_expr('root')},j.feed_id) AS owner
+        coalesce(items.feed_id,media_owner.feed_id,root.feed_id,j.feed_id) AS owner
         FROM jobs j LEFT JOIN publications items ON items.id=j.item
         LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
         LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
@@ -89,7 +88,7 @@ def group_snapshot(store: 'Store', identity: str, kind: str, now: float, *, excl
                 CROSS JOIN LATERAL (SELECT id FROM jobs WHERE kind=%s AND kind='download_media' AND item=m.id AND reason_code=i.code AND reason_code LIKE 'source-%%' AND octet_length(reason_code)<=1000 OFFSET 0) j
             UNION SELECT j.id FROM source_groups g CROSS JOIN LATERAL (SELECT id FROM jobs WHERE kind=%s AND feed_id=g.owner AND reason_code=g.code AND reason_code LIKE 'source-%%' AND octet_length(reason_code)<=1000 AND coalesce(octet_length(feed_id),0)<=1000 OFFSET 0) j
         ) SELECT j.id,j.kind,j.item,j.status,j.reason_message,j.reason_code,j.feed_id,m.resource_key,
-            coalesce({owner_expr('items')},{owner_expr('media_owner')},{owner_expr('root')},j.feed_id) AS owner,
+            coalesce(items.feed_id,media_owner.feed_id,root.feed_id,j.feed_id) AS owner,
             coalesce(root.id,m.publication_id,j.item) AS affected
         FROM targets t CROSS JOIN LATERAL (SELECT * FROM jobs WHERE id=t.id OFFSET 0) j
         LEFT JOIN publications items ON items.id=j.item LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
@@ -398,7 +397,7 @@ def previous_keys_many(store: 'Store', rows: list[tuple[int,str]]) -> dict[int,t
     for start in range(0,len(rows),400):
         batch=rows[start:start+400]
         found=store.db.execute(f"""SELECT j.id,j.kind,j.item,v.code AS reason_code,j.feed_id,
-            coalesce({owner_expr('items')},{owner_expr('media_owner')},{owner_expr('root')},j.feed_id) AS owner
+            coalesce(items.feed_id,media_owner.feed_id,root.feed_id,j.feed_id) AS owner
             FROM unnest(%s::bigint[],%s::text[]) AS v(id,code) JOIN jobs j ON j.id=v.id
             LEFT JOIN publications items ON items.id=j.item LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
             LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
@@ -438,7 +437,7 @@ def job_evidence_many(store: 'Store', rows: Sequence[tuple[int,str | None]]) -> 
     for start in range(0,len(rows),400):
         batch=rows[start:start+400]
         found=store.db.execute(f"""SELECT j.id,j.kind,j.item,coalesce(v.code,j.reason_code) AS code,j.feed_id,
-            coalesce({owner_expr('items')},{owner_expr('media_owner')},{owner_expr('root')},j.feed_id) AS owner,
+            coalesce(items.feed_id,media_owner.feed_id,root.feed_id,j.feed_id) AS owner,
             coalesce(root.id,m.publication_id,j.item) AS affected
             FROM unnest(%s::bigint[],%s::text[]) AS v(id,code) JOIN jobs j ON j.id=v.id
             LEFT JOIN publications items ON items.id=j.item LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
@@ -458,7 +457,7 @@ def job_evidence_many(store: 'Store', rows: Sequence[tuple[int,str | None]]) -> 
 
 def job_evidence_with_previous_feed(store: 'Store', job_id: int, feed: str | None) -> dict[str,set[tuple[str,str]]]:
     rows=store.db.execute(f"""SELECT j.kind,j.item,j.reason_code,
-        coalesce({owner_expr('items')},{owner_expr('media_owner')},{owner_expr('root')},%s::text) AS owner,
+        coalesce(items.feed_id,media_owner.feed_id,root.feed_id,%s::text) AS owner,
         coalesce(root.id,m.publication_id,j.item) AS affected
         FROM jobs j LEFT JOIN publications items ON items.id=j.item
         LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item

@@ -9,7 +9,7 @@ import time
 from tests.support.legacy_source import Publication
 
 from tests.support.synthetic_material import material as Material
-from oko.storage.publication_owners import owner_expr, owned_ids
+from oko.storage.publication_owners import owned_ids
 from oko.storage.transaction import transaction
 from tests.support.storage import Store
 from oko.subscriptions.subscriptions import AddFeed

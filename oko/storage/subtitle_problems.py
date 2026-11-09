@@ -1,7 +1,9 @@
 """Event-owned subtitle episodes, including reserved future occurrences."""
 from typing import TYPE_CHECKING,Any
+from collections.abc import Sequence
 import json,uuid
 from oko.storage.reader_status import changed as status_changed
+from oko.storage.reservation_ids import allocate, cleanup_pointers as cleanup_reservation_pointers, protect_rows as protect_reservation_rows
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
@@ -9,29 +11,6 @@ if TYPE_CHECKING:
 
 def new_reservation_id() -> str:
     return uuid.uuid4().hex
-
-
-def allocate_reservation_ids(store: 'Store', count: int) -> list[str]:
-    """Allocate only free IDs; retry collisions without replacing foreign state."""
-    accepted: list[str]=[]
-    occupied: set[str]=set()
-    for _ in range(3):
-        missing=count-len(accepted)
-        if missing<=0:break
-        proposals=[new_reservation_id() for _ in range(missing)]
-        counts: dict[str,int]={}
-        for value in proposals:counts[value]=counts.get(value,0)+1
-        used=set(occupied)
-        for start in range(0,len(proposals),400):
-            chunk=proposals[start:start+400]
-            used.update(row['id'] for row in store.db.execute('SELECT id FROM reader_problems WHERE id=ANY(%s)',(chunk,)))
-            keys=['subtitle:reservation:'+value for value in chunk]
-            used.update(row['key'][len('subtitle:reservation:'):] for row in store.db.execute('SELECT key FROM state WHERE key=ANY(%s)',(keys,)))
-        for value in proposals:
-            if counts[value]==1 and value not in used:
-                accepted.append(value);occupied.add(value)
-    if len(accepted)!=count:raise RuntimeError('Unable to allocate subtitle reservation identity')
-    return accepted
 
 
 def sync_timer(store: 'Store', now: float, job_ids: list[int] | None = None, *, new_ids: set[str] | None = None, previous: list[dict[str,Any]] | None = None) -> None:
@@ -132,7 +111,7 @@ def sync_timer(store: 'Store', now: float, job_ids: list[int] | None = None, *, 
         actual_removes=[value for job,value in removes if job not in ambiguous_jobs]
         # Newly created active rows have not been observable outside this
         # transaction; replace them with safely allocated reservation IDs.
-        reservation_ids=allocate_reservation_ids(store,len(actual_rekeys)+len(actual_inserts))
+        reservation_ids=allocate(store,len(actual_rekeys)+len(actual_inserts),'subtitle:reservation:',new_reservation_id)
         for staged,identity in zip(actual_rekeys,reservation_ids):
             actual_removes.append((staged[0],staged[4],staged[5]))
             actual_inserts.append((identity,'subtitle:reservation:'+identity,staged[2],now,-62135596800,staged[3]))
@@ -405,7 +384,6 @@ def transfer_reservation(store: 'Store', job_id: int, previous: list[dict[str,An
 
 def protect_legacy(store: 'Store', item: str) -> None:
     """Preserve exact affected legacy occurrences, never an item-wide marker."""
-    import hashlib
     cursor: tuple[str,str] | None=None
     while True:
         query="""SELECT id,identity,md5(id) AS page_hash FROM reader_problems WHERE finished IS NULL AND identity LIKE 'job:%%'
@@ -416,17 +394,13 @@ def protect_legacy(store: 'Store', item: str) -> None:
         if cursor is not None:query+=' AND (md5(id),id COLLATE "C")>(%s,%s)';params=(*params,*cursor)
         rows=store.db.execute(query+' ORDER BY md5(id),id COLLATE "C" LIMIT 400',params).fetchall()
         if not rows:return
-        pairs=[('fetch-null-protected:'+hashlib.sha256(row['id'].encode()).hexdigest(),json.dumps(['oko-fetch-null-v2',row['id'],row['identity']])) for row in rows]
-        store.db.execute('INSERT INTO state(key,value) SELECT key,value FROM unnest(%s::text[],%s::text[]) v(key,value) ON CONFLICT(key) DO NOTHING',([p[0] for p in pairs],[p[1] for p in pairs]))
-        found={row['key']:row['value'] for row in store.db.execute('SELECT key,value FROM state WHERE key=ANY(%s)',([p[0] for p in pairs],))}
-        if any(found.get(key)!=value for key,value in pairs):raise RuntimeError('Conflicting subtitle protection marker')
+        protect_rows(store,rows)
         cursor=(rows[-1]['page_hash'],rows[-1]['id'])
         store.fault('subtitle_legacy_protection_batch')
 
 
 def protect_isolated(store: 'Store', field: str, canonical: str) -> None:
     """Preserve exact legacy collisions without trusting the stored marker."""
-    import hashlib
     if field not in ('media_job_identity','status_job_identity'):raise ValueError('Invalid subtitle identity field')
     cursor: tuple[str,str] | None=None
     while True:
@@ -437,43 +411,14 @@ def protect_isolated(store: 'Store', field: str, canonical: str) -> None:
         if cursor is not None:query+=' AND (md5(id),id COLLATE "C")>(%s,%s)';params=(*params,*cursor)
         rows=store.db.execute(query+' ORDER BY md5(id),id COLLATE "C" LIMIT 400',params).fetchall()
         if not rows:return
-        pairs=[('fetch-null-protected:'+hashlib.sha256(row['id'].encode()).hexdigest(),json.dumps(['oko-fetch-null-v2',row['id'],row['identity']])) for row in rows]
-        store.db.execute('INSERT INTO state(key,value) SELECT key,value FROM unnest(%s::text[],%s::text[]) v(key,value) ON CONFLICT(key) DO NOTHING',([p[0] for p in pairs],[p[1] for p in pairs]))
-        found={row['key']:row['value'] for row in store.db.execute('SELECT key,value FROM state WHERE key=ANY(%s)',([p[0] for p in pairs],))}
-        if any(found.get(key)!=value for key,value in pairs):raise RuntimeError('Conflicting subtitle protection marker')
+        protect_rows(store,rows)
         cursor=(rows[-1]['page_hash'],rows[-1]['id'])
         store.fault('subtitle_isolated_protection_batch')
 
 
 def cleanup_pointers(store: 'Store', cursor: str | None) -> tuple[str | None,bool]:
-    """Remove only well-formed pointers with no exact reservation row."""
-    import re
-    query='SELECT key,value FROM state WHERE key COLLATE "C">=\'subtitle:reservation:\' AND key COLLATE "C"<\'subtitle:reservation;\''
-    params: tuple[Any,...]=()
-    if cursor is not None:query+=' AND key COLLATE "C">%s';params=(cursor,)
-    rows=store.db.execute(query+' ORDER BY key COLLATE "C" LIMIT 100',params).fetchall()
-    if not rows:return None,True
-    parsed=[]
-    for row in rows:
-        identity=row['key'][len('subtitle:reservation:'):]
-        try:body=json.loads(row['value'])
-        except (TypeError,ValueError):continue
-        if not re.fullmatch('[0-9a-f]{32}',identity):continue
-        if not isinstance(body,list) or len(body)!=3 or body[0]!='oko-subtitle-v1' or not all(isinstance(value,str) for value in body[1:]):continue
-        parsed.append((row['key'],row['value'],identity))
-    saved={row['id']:row['identity'] for row in store.db.execute('SELECT id,identity FROM reader_problems WHERE id=ANY(%s)',([row[2] for row in parsed],))} if parsed else {}
-    stale=[(key,value) for key,value,identity in parsed if identity not in saved or saved[identity]!=key]
-    if stale:store.db.execute('DELETE FROM state s USING unnest(%s::text[],%s::text[]) v(key,value) WHERE s.key=v.key AND s.value=v.value',([x[0] for x in stale],[x[1] for x in stale]))
-    return rows[-1]['key'],False
+    return cleanup_reservation_pointers(store,cursor,'subtitle:reservation:','oko-subtitle-v1')
 
 
-def protect_rows(store: 'Store', rows: list[Any]) -> None:
-    """Keep unknown records byte-identical when a candidate identity collides."""
-    import hashlib
-    for start in range(0,len(rows),400):
-        batch=rows[start:start+400]
-        pairs=[('fetch-null-protected:'+hashlib.sha256(row['id'].encode()).hexdigest(),json.dumps(['oko-fetch-null-v2',row['id'],row['identity']])) for row in batch]
-        if not pairs:continue
-        store.db.execute('INSERT INTO state(key,value) SELECT key,value FROM unnest(%s::text[],%s::text[]) v(key,value) ON CONFLICT(key) DO NOTHING',([p[0] for p in pairs],[p[1] for p in pairs]))
-        found={row['key']:row['value'] for row in store.db.execute('SELECT key,value FROM state WHERE key=ANY(%s)',([p[0] for p in pairs],))}
-        if any(found.get(key)!=value for key,value in pairs):raise RuntimeError('Conflicting subtitle protection marker')
+def protect_rows(store: 'Store', rows: Sequence[Any]) -> None:
+    protect_reservation_rows(store,rows,'subtitle')

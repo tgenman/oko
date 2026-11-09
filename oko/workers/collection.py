@@ -34,18 +34,14 @@ from oko.diagnostics import Journal, diagnostic_source, diagnostic_materials, ca
 
 from oko.execution import Execution, ActionError
 from oko.workers.control import JobControl, _CollectionAttempt
-from oko.services.collection import CollectionService
+from oko.storage.collection_repository import CollectionRepository
 from oko.services.discovery import DiscoveryService
-from oko.storage.collection_state import CollectionState
-from oko.storage.collection_publications import CollectionPublications
 from oko.services.media import MediaService
 from oko.application.collection_effects import CollectionApplication
 
 
-def collection_service(storage: Callable[[], Store]) -> CollectionService:
-    return CollectionService(access=lambda: storage().db.access_lock,
-        publications=lambda: CollectionPublications(storage()), sources=lambda: CollectionState(storage()),
-        collected=lambda: storage().collected_publication)
+def collection_service(storage: Callable[[], Store]) -> CollectionRepository:
+    return CollectionRepository(storage)
 
 
 def media_service(storage: Callable[[], Store]) -> MediaService:

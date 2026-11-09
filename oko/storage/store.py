@@ -1,4 +1,4 @@
-from oko.storage.publication_owners import owned_ids, owner_expr
+from oko.storage.publication_owners import owned_ids
 from oko.storage.database import expect_row, Connection, INTEGRITY_ERRORS
 from oko.storage.collection_status import CollectionStatus
 from oko.storage import material_read, collection_jobs, publication_links
@@ -277,7 +277,7 @@ class Store:
         if row is None:
             raise LookupError('Publication not found')
         if row['reader_feed_id'] is None:
-            root=self.db.execute(f"SELECT {owner_expr('i')} AS feed_id FROM publication_links l JOIN publications i ON i.id=l.source_publication_id WHERE l.target_publication_id = %s AND {owner_expr('i')} IS NOT NULL ORDER BY i.id LIMIT 1",(item,)).fetchone()
+            root=self.db.execute(f"SELECT i.feed_id AS feed_id FROM publication_links l JOIN publications i ON i.id=l.source_publication_id WHERE l.target_publication_id = %s AND i.feed_id IS NOT NULL ORDER BY i.id LIMIT 1",(item,)).fetchone()
             if root:
                 return str(root[0])
             return ''
@@ -337,14 +337,15 @@ class Store:
     def unviewed_set(self, identities: list[str]) -> None:
         if not self.db.transaction_depth:
             raise RuntimeError('Restoring reading state requires an owning transaction')
-        from oko.storage.reader_facts import ReaderFacts
         from oko.storage import processing_input
         membership_graph.lock_graph(self.db)
-        selected=self.db.execute("SELECT p.id,p.processing_metadata FROM publications p JOIN feeds f ON f.id=p.feed_id WHERE NOT f.deleted AND p.viewed AND p.id=ANY(%s)",(sorted(set(identities)),)).fetchall()
+        selected=self.db.execute("SELECT p.id,p.feed_id,p.processing_metadata FROM publications p JOIN feeds f ON f.id=p.feed_id WHERE NOT f.deleted AND p.viewed AND p.id=ANY(%s)",(sorted(set(identities)),)).fetchall()
         stale: dict[str,list[Literal['filter','theses']]]={}
         for row in selected:
-            projected=ReaderFacts(lambda:self).unified_publication(row['id'])['processing_metadata']
             metadata=json.loads(row['processing_metadata'])
+            projected=json.loads(row['processing_metadata'])
+            processing_input.mark_stale(self,row['id'],row['feed_id'],projected)
+            processing_input.repair_missing_subtitles(self,row['id'])
             stages: tuple[tuple[str,Literal['filter','theses']],...]=(('filter','filter'),('summary','theses'))
             for section,kind in stages:
                 if projected.get(section,{}).get('stale'):
@@ -376,7 +377,7 @@ class Store:
             condition = """jobs.id IN (SELECT id FROM jobs WHERE status IN ('pending','running')
                 UNION SELECT id FROM jobs WHERE status IN ('failed','unavailable') OR (status<>'done' AND (reason_code IS NOT NULL OR reason_message IS NOT NULL)))"""
         now, wall = self.clock(), self.wall_clock()
-        rows = self.db.execute(f"SELECT jobs . kind , jobs . status , jobs . reason_code AS reason_code , (jobs.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at > %s) AS source_wait , count ( * ) AS count , CASE WHEN jobs . kind IN ( 'discover' , 'feed-delete' ) THEN NULLIF ( jobs . item , '' ) WHEN jobs . kind = 'download_media' THEN ( SELECT {owner_expr('i')} FROM media_files m JOIN publications i ON i . id = m . publication_id WHERE m . id = jobs . item ) ELSE {owner_expr('items')} END AS feed , min ( jobs . next ) AS next , sum ( CASE WHEN jobs . status IN ('failed','unavailable') OR jobs . reason_message IS NOT NULL OR jobs . reason_code IS NOT NULL THEN 1 ELSE 0 END ) AS errors FROM jobs LEFT JOIN publications items ON items . id = jobs . item WHERE {condition} GROUP BY jobs . kind , jobs . status , jobs . reason_code , source_wait , feed ORDER BY min ( jobs . id )",(wall,)).fetchall()
+        rows = self.db.execute(f"SELECT jobs . kind , jobs . status , jobs . reason_code AS reason_code , (jobs.status='pending' AND jobs.wait_scope IS NOT NULL AND jobs.retry_at > %s) AS source_wait , count ( * ) AS count , CASE WHEN jobs . kind IN ( 'discover' , 'feed-delete' ) THEN NULLIF ( jobs . item , '' ) WHEN jobs . kind = 'download_media' THEN ( SELECT i.feed_id FROM media_files m JOIN publications i ON i . id = m . publication_id WHERE m . id = jobs . item ) ELSE items.feed_id END AS feed , min ( jobs . next ) AS next , sum ( CASE WHEN jobs . status IN ('failed','unavailable') OR jobs . reason_message IS NOT NULL OR jobs . reason_code IS NOT NULL THEN 1 ELSE 0 END ) AS errors FROM jobs LEFT JOIN publications items ON items . id = jobs . item WHERE {condition} GROUP BY jobs . kind , jobs . status , jobs . reason_code , source_wait , feed ORDER BY min ( jobs . id )",(wall,)).fetchall()
         feed_ids=sorted({row['feed'] for row in rows if row['feed']})
         deleted={row['id'] for row in self.db.execute('SELECT id FROM feeds WHERE deleted AND id=ANY(%s)',(feed_ids,))} if feed_ids else set()
         return [WorkSummary(row['kind'],row['status'],row['feed'],row['count'],
