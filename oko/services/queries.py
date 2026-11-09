@@ -14,9 +14,6 @@ from oko.storage.reader_facts import ReaderFacts
 from oko.processing.config import ProcessorConfig
 from oko.storage.composition import Navigation, ReadingComposition
 from oko.storage.subscriptions import SubscriptionRepository
-from oko.storage.publications import Publications
-from oko.storage.filter_results import FilterResults
-from oko.storage.processing_coordination import ProcessingState
 from oko.storage.media import MediaFiles
 from oko.storage.reader_versions import ReaderVersions
 
@@ -58,27 +55,19 @@ class VersionQueries:
 class ReadingQueries:
     def __init__(self, *, access: Callable[[], AbstractContextManager[Any]], facts: ReaderFacts,
                  subscriptions: Callable[[], SubscriptionRepository], reading: Callable[[], ReadingComposition],
-                 publications: Callable[[], Publications], filters: Callable[[], FilterResults],
-                 processing: Callable[[], ProcessingState], media: Callable[[], MediaFiles],
+                 media: Callable[[], MediaFiles],
                  versions: Callable[[], ReaderVersions]) -> None:
         self._access, self._facts, self._subscriptions, self._reading = access, facts, subscriptions, reading
-        self._publications, self._filters, self._processing, self._media, self._versions = publications, filters, processing, media, versions
+        self._media, self._versions = media, versions
 
     @repository_access
     def item(self, identity: str) -> dict[str, Any] | None:
         return self._facts.item(identity)
 
-    @repository_access
-    def jobs(self, identity: str) -> dict[str, dict[str, Any]]:
-        return self._facts.jobs(identity)
 
     @repository_access
-    def feed(self, identity: str) -> tuple[dict[str, Any], dict[str, Any] | None]:
-        return self._facts.feed(identity)
-
-    @repository_access
-    def inputs(self, identities: set[str], *, include_subtitles: bool = True) -> AbstractContextManager[None]:
-        return self._facts.inputs(identities, include_subtitles=include_subtitles)
+    def inputs(self, identities: set[str], *, cards_only: bool = False) -> AbstractContextManager[None]:
+        return self._facts.inputs(identities, cards_only=cards_only)
 
     @repository_access
     def avatar(self, feed: str, revision: str) -> tuple[bytes, str] | None:
@@ -97,17 +86,7 @@ class ReadingQueries:
     def was_viewed(self, identity: str) -> bool:
         return self._facts.was_viewed(identity)
 
-    @repository_access
-    def viewed_ids(self) -> list[str]:
-        return self._facts.viewed_ids()
 
-    @repository_access
-    def feed_members(self, identity: str) -> set[str]:
-        return self._facts.feed_members(identity)
-
-    @repository_access
-    def deletion_feeds(self) -> set[str]:
-        return self._facts.deletion_feeds()
 
     @repository_access
     def feeds(self, identity: str | None = None, *, folder: str | None = None) -> list[dict[str, Any]]:
@@ -115,6 +94,10 @@ class ReadingQueries:
         if folder is not None:
             return repository.feeds(identity, folder=folder)
         return repository.feeds() if identity is None else repository.feeds(identity)
+
+    @repository_access
+    def feeds_with_history(self, identity: str | None = None) -> list[dict[str, Any]]:
+        return self._subscriptions().feeds_with_history(identity)
 
     @repository_access
     def feed_resources(self, identities: set[str] | None = None) -> dict[str, tuple[dict[str, Any], dict[str, Any] | None]]:
@@ -165,27 +148,15 @@ class ReadingQueries:
         return self._facts.card(identity)
 
 
-
-
     @repository_access
     def unified_publication(self, identity: str) -> dict[str, Any]:
         return self._facts.unified_publication(identity)
 
-    @repository_access
-    def filter(self, identity: str) -> dict[str, Any]:
-        return self._filters().read(identity)
-
-    @repository_access
-    def media_loading(self, identity: str) -> bool:
-        return self._media().loading(identity)
 
     @repository_access
     def media_file(self, identity: str, name: str) -> tuple[Path, str] | None:
         return self._media().visible_file(identity, name)
 
-    @repository_access
-    def content_version(self, identity: str) -> str:
-        return self._facts.content_version(identity)
 
     @repository_access
     def processor_config(self) -> ProcessorConfig | None:
@@ -202,14 +173,6 @@ class ReadingQueries:
     @repository_access
     def work_summary(self) -> list[WorkSummary]:
         return self._facts.work_summary()
-
-    @repository_access
-    def clock(self) -> float:
-        return self._facts.clock()
-
-    @repository_access
-    def wall_clock(self) -> float:
-        return self._facts.wall_clock()
 
 
     @property

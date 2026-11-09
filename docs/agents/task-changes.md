@@ -54,7 +54,7 @@ python3 scripts/task_changes.py commit /tmp/oko-task-ready --message 'feat: exam
 
 ## Интеграция с актуальным main
 
-После разрешения на публикацию переносите только коммиты задачи на свежий `main`:
+Для публикации в рамках постоянного разрешения из [порядка разработки](development.md) переносите только коммиты задачи на свежий `main`:
 
 ```sh
 ./scripts/prepare-integration --output /tmp/oko-integration \

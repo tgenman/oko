@@ -205,7 +205,7 @@ class CollectionStatus:
                 operation=primary, operation_count=len(operations), error_count=sum(op['state']=='error' or bool(op['last_error'] and not op['last_error']['resolved']) for op in operations),
                 waiting_count=sum(op['state']=='waiting' for op in operations), last_success_at=timestamp(result.get('success_at')),
                 last_success_seconds=result.get('duration'), has_details=bool(operations or result.get('last_error')),
-                history=feed.get('initial_history'), operations=operations, last_error=result.get('last_error')))
+                history={'damaged':True} if feed.get('initial_history_invalid') else feed.get('initial_history'), operations=operations, last_error=result.get('last_error')))
         sources.sort(key=lambda s:(ranks[s['state']], -(s['operation']['elapsed_seconds'] or 0) if s['state']=='collecting' else 0,
                                   s['operation']['retry_at'] or '9999' if s['state']=='waiting' and s['operation'] else '', s['title'].casefold()))
         return sources

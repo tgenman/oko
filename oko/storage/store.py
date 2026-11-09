@@ -1,10 +1,9 @@
 from oko.storage.publication_owners import owned_ids, owner_expr
 from oko.storage.database import expect_row, Connection, INTEGRITY_ERRORS
 from oko.storage.collection_status import CollectionStatus
-from oko.storage import material_read, collection_jobs, publication_links, youtube_media
+from oko.storage import material_read, collection_jobs, publication_links
 from oko.storage import memberships as membership_graph
-from oko.storage import processing_input as publication_input
-from oko.storage.reading import reading_snapshot, reading_value, retry_time, saved_content
+from oko.storage.reading import reading_snapshot, reading_value, retry_time
 import json
 from pathlib import Path
 import shutil
@@ -328,7 +327,7 @@ class Store:
         changed = [row['id'] for row in rows if not row['viewed']]
         if changed:
             self.db.execute('UPDATE publications SET viewed=true WHERE id=ANY(%s)', (changed,))
-            self.db.execute("UPDATE history_members SET outcome='viewed' WHERE item=ANY(%s) AND outcome IN ('pending','retrying')", (changed,))
+            self.subscriptions.history.viewed_many(changed)
             for feed in {row['feed_id'] for row in rows if not row['viewed'] and row['feed_id'] is not None}:
                 self.subscriptions.details.record(feed, 'marked_read')
             self.incomplete_draft.mark_materials(changed)
@@ -458,14 +457,3 @@ class Store:
         self.processing.invalidate(scope, owner)
         self.problems.sync_codex_choice(self.wall_clock())
         self.processing.sync()
-
-    @reading_value
-    def content_version(self, item: str) -> str:
-        def input_value(row: Any) -> list[Any]:
-            content=saved_content(row['content'])
-            from oko.storage.files import file_digest
-            path=youtube_media.subtitle_path(self,youtube_media.subtitle_id(content)) if 'youtube' in content.get('extra',{}) else None
-            return [row['title'],publication_input.blocks(content),json.loads(row['media_ids']),file_digest(path) if path else None]
-        own=material_read.item(self.db,item)
-        return publication_input.digest([input_value(own) if own else None,
-            [(row['id'],input_value(row)) for row in publication_links.children(self,item) if 'blocks' in row['content']]])

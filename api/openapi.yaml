@@ -13059,6 +13059,18 @@ components:
       additionalProperties: false
       examples:
       - state: absent
+    HistoryDamaged:
+      type: object
+      properties:
+        state:
+          type: string
+          const: damaged
+      required:
+      - state
+      additionalProperties: false
+      description: Saved initial history cannot be read; its data are retained.
+      examples:
+      - state: damaged
     HistoryNotStarted:
       type: object
       properties:
@@ -13480,6 +13492,7 @@ components:
     HistoryState:
       oneOf:
       - $ref: '#/components/schemas/HistoryAbsent'
+      - $ref: '#/components/schemas/HistoryDamaged'
       - $ref: '#/components/schemas/HistoryNotStarted'
       - $ref: '#/components/schemas/HistoryDiscovering'
       - $ref: '#/components/schemas/HistoryFetching'
@@ -13491,6 +13504,7 @@ components:
         propertyName: state
         mapping:
           absent: '#/components/schemas/HistoryAbsent'
+          damaged: '#/components/schemas/HistoryDamaged'
           not_started: '#/components/schemas/HistoryNotStarted'
           discovering: '#/components/schemas/HistoryDiscovering'
           fetching: '#/components/schemas/HistoryFetching'
@@ -16047,6 +16061,7 @@ components:
     ProblemCode:
       type: string
       enum:
+      - history_invalid
       - job_target_unknown
       - processor_not_configured
       - processor_configuration_invalid

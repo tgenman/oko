@@ -162,6 +162,7 @@ class Problems:
         self.store = store
         self.db = store.db
         self._receipt_cleanup_cursor: tuple[float, int] | None = None
+        self._history_replay_cursor: str | None = None
         self._processor_transaction_captures: dict[int,dict[str,Any]] = {}
         self._recovering_actions = True
         # Recovery projection only: preserve the original service records for rollback.
@@ -175,6 +176,19 @@ class Problems:
                         self.sync_action(receipt['identity'], self.store.wall_clock())
         self.recover_action_problems()
         self._recovering_actions = False
+
+    def replay_history_batch(self, feeds: set[str]) -> tuple[bool, bool]:
+        """Try at most one deferred-history feed in round-robin order."""
+        if not feeds:
+            return False, False
+        from bisect import bisect_right
+        ordered = sorted(feeds)
+        previous = self._history_replay_cursor
+        index = bisect_right(ordered, previous) if previous is not None else 0
+        selected = ordered[index % len(ordered)]
+        self._history_replay_cursor = selected
+        self.db.after_rollback(lambda: setattr(self, '_history_replay_cursor', previous))
+        return self.store.subscriptions.history.replay_deferred(selected)
 
     def recover_action_problems(self) -> None:
         if self.db.execute("SELECT 1 FROM state WHERE key='action-problems-recovered-v2'").fetchone():
@@ -3174,7 +3188,15 @@ class Problems:
         return groups,feeds,youtube
 
     def candidates(self, now: float) -> list[dict[str, Any]]:
-        current: list[dict[str, Any]] = []
+        current: list[dict[str, Any]] = [
+            dict(id='history-invalid:'+feed['id'], code='history-invalid', section='action',
+                 title='Повреждена история фида',
+                 consequence='Новые публикации этого фида не собираются; сохранённые данные остаются доступными.',
+                 next_step='Проверьте сохранённую историю фида.',
+                 objects=[dict(kind='feed', id=feed['id'])], action=None, created_at=now,
+                 state='current', finished_at=None, outcome=None, next_at=None)
+            for feed in self.store.subscriptions.feeds_with_history() if feed.get('initial_history_invalid')
+        ]
         groups,feeds,youtube=self.incomplete_generic_groups(now)
         if self.db.execute("SELECT 1 FROM state WHERE key='experimental-incomplete-problems-v1'").fetchone():
             current.extend(groups.values())
@@ -3624,6 +3646,43 @@ class Problems:
                 foreign_records[identity]=body
         finished_foreign=self._finished_foreign_legacy_jobs(foreign_records)
         with self.db:
+            history_feed_ids = {obj['id'] for candidate in candidates if candidate.get('code') == 'history-invalid'
+                             for obj in candidate.get('objects', []) if obj.get('kind') == 'feed'}
+            # Recheck all formerly invalid feeds together, including feeds that
+            # became damaged after the candidates were read.
+            for row in existing.values():
+                if row['identity'] in identities:
+                    continue
+                body = json.loads(row['body'])
+                if body.get('code') == 'history-invalid':
+                    history_feed_ids.update(obj['id'] for obj in body.get('objects', []) if obj.get('kind') == 'feed')
+            history_feeds = sorted(history_feed_ids)
+            live_feeds: set[str] = set()
+            history_check: dict[str, Any] = {}
+            if history_feeds:
+                # A repair may have committed after the candidate snapshot.
+                from oko.storage.transaction import begin_write
+                from oko.storage import memberships
+                from oko.subscriptions.history import InvalidHistory
+                begin_write(self.db)
+                memberships.lock_graph(self.db)
+                pending: set[str] = set()
+                for start in range(0, len(history_feeds), 400):
+                    pending.update(row[0] for row in self.db.execute(
+                        'SELECT DISTINCT feed FROM history_deferred_events WHERE feed=ANY(%s)',
+                        (history_feeds[start:start+400],)))
+                self.replay_history_batch(pending)
+                for start in range(0, len(history_feeds), 400):
+                    chunk = history_feeds[start:start+400]
+                    live_feeds.update(row[0] for row in self.db.execute(
+                        'SELECT id FROM feeds WHERE NOT deleted AND id=ANY(%s) FOR KEY SHARE', (chunk,)))
+                    history_check.update(self.store.subscriptions.history.statuses(chunk, lock=True))
+                candidates = [candidate for candidate in candidates if candidate.get('code') != 'history-invalid'
+                    or any(obj.get('id') in live_feeds and (obj['id'] not in history_check
+                        or isinstance(history_check[obj['id']], InvalidHistory))
+                        for obj in candidate.get('objects', []) if obj.get('kind') == 'feed')]
+                by_identity = {candidate['id']: candidate for candidate in candidates}
+                identities = set(by_identity)
             added: list[tuple[str,str,str,str,float]] = []
             remapped,merged = self._rekey_regrouped_jobs(existing,candidates,now)
             changed = bool(remapped or merged)
@@ -3637,6 +3696,13 @@ class Problems:
                         continue
                     if isinstance(body.get('source_group_identity'),str):continue
                     code=body.get('code')
+                    if code == 'history-invalid':
+                        damaged_feed = next((obj.get('id') for obj in body.get('objects', [])
+                                             if obj.get('kind') == 'feed'), None)
+                        if damaged_feed and damaged_feed in live_feeds and (
+                            damaged_feed not in history_check or isinstance(history_check[damaged_feed], InvalidHistory)
+                        ):
+                            continue
                     if row['id'] in protected_fetch_null:continue
                     if getattr(self.store,'youtube_admission_ready',False) and code=='youtube-admission':
                         from oko.storage.youtube_admission import valid as valid_admission

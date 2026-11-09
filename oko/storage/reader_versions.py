@@ -46,7 +46,24 @@ class ReaderVersions:
         return self.db.execute("SELECT (value::jsonb->>'version')::bigint AS version, (value::jsonb->>'changed')::double precision AS changed FROM state WHERE key='reader-status-revision'").fetchone()
 
     def history_versions(self) -> list[Any]:
-        row = self.db.execute("SELECT coalesce(jsonb_agg(jsonb_build_array(feed,xmin::text) ORDER BY feed),'[]'::jsonb) FROM initial_history").fetchone()
+        row = self.db.execute("""WITH versions AS (
+            SELECT h.feed, 'history:'||h.xmin::text||':owner:'||CASE WHEN f.id IS NULL THEN 'missing' ELSE 'present' END||':run:'||coalesce(f.initial_history_run,'') AS revision
+                FROM initial_history h LEFT JOIN feeds f ON f.id=h.feed
+            UNION ALL
+            SELECT f.id, 'missing' FROM feeds f
+                WHERE NOT EXISTS (SELECT 1 FROM initial_history h WHERE h.feed=f.id)
+                  AND (f.initial_history_expected OR EXISTS (SELECT 1 FROM history_members m WHERE m.feed=f.id))
+            UNION ALL
+            SELECT DISTINCT m.feed, 'invalid-outcome' FROM history_members m
+                WHERE m.outcome IS NULL OR m.outcome NOT IN ('pending','retrying','unavailable','loaded','incomplete','viewed')
+            UNION ALL
+            SELECT f.id, 'deferred' FROM feeds f WHERE NOT f.deleted
+                AND EXISTS (SELECT 1 FROM history_deferred_events e WHERE e.feed=f.id)
+            UNION ALL
+            SELECT m.feed, 'invalid-error:'||m.xmin::text||':'||j.xmin::text
+                FROM history_members m JOIN jobs j ON j.item=m.item AND j.kind='fetch'
+                WHERE m.item='' AND m.outcome IN ('retrying','unavailable') AND j.reason_message IS NOT NULL
+        ) SELECT coalesce(jsonb_agg(jsonb_build_array(feed,revision) ORDER BY feed,revision),'[]'::jsonb) FROM versions""").fetchone()
         return row[0] if row else []
 
     def time_boundaries(self) -> tuple[Any, ...]:

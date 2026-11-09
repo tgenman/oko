@@ -159,7 +159,7 @@ class TelegramAccess:
                 self.claim(identity, claim, 'public preview')
             if history is not None:
                 subscriptions.history.configure(identity, history)
-        result: dict[str, Any] = subscriptions.feeds(identity)[0]
+        result: dict[str, Any] = subscriptions.feeds_with_history(identity)[0]
         return result
 
     def duplicates(self, feeds: list[str]) -> dict[str, Any]:
@@ -192,7 +192,7 @@ class TelegramAccess:
         for claim in self.claims(info):
             self.claim(feed,claim,'explicit access change')
         self.modified(feed)
-        return dict(subscriptions.feeds(feed)[0])
+        return dict(subscriptions.feeds_with_history(feed)[0])
 
     def refresh(self, feed: str, info: dict[str, Any]) -> None:
         claims = self.claims(info)

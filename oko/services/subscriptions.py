@@ -76,7 +76,7 @@ class SubscriptionService:
     def patch_feed(self, identity: str, value: FeedPatch) -> tuple[dict[str, Any], bool]:
         repository = self._repository()
         self._effects().lock_feed_graph()
-        known = repository.feeds(identity)
+        known = repository.feeds_with_history(identity)
         if not known:
             raise LookupError('Фид не найден')
         previous = known[0]

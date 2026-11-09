@@ -7,6 +7,12 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 from pydantic import BeforeValidator, ConfigDict, Field, RootModel, StrictBool, StrictFloat, StrictInt, StrictStr
 from pydantic.experimental.missing_sentinel import MISSING
+from oko.domain.initial_history import (
+    History as History,
+    HistoryError as HistoryError,
+    InitialHistoryStatus as InitialHistoryStatus,
+    DamagedHistoryStatus as DamagedHistoryStatus,
+)
 from oko.reader.wire import TimestampValue as datetime
 from oko.reader.wire import WireModel, boolean_constant, integer_constant
 
@@ -98,41 +104,6 @@ class Folder(WireModel):
     position: StrictInt | MISSING = Field(default=MISSING, title='Position')
     title: StrictStr = Field(..., title='Title')
 
-class HistoryError(WireModel):
-    model_config = ConfigDict(extra='forbid')
-    item: StrictStr = Field(..., title='Item')
-    message: StrictStr = Field(..., title='Message')
-
-class InitialHistoryStatus(WireModel):
-    model_config = ConfigDict(extra='forbid')
-    available: StrictInt = Field(..., title='Available')
-    cancelled: StrictBool | MISSING = Field(default=MISSING, title='Cancelled')
-    count: StrictInt | None = Field(..., title='Count')
-    count_text: StrictStr | None = Field(..., title='Count Text')
-    discovery_error: StrictStr | None | MISSING = Field(default=MISSING, title='Discovery Error')
-    discovery_retry_at: StrictFloat | None | MISSING = Field(default=MISSING, title='Discovery Retry At')
-    errors: list[HistoryError] = Field(..., title='Errors')
-    feed_id: StrictStr = Field(..., title='Feed Id')
-    frozen: StrictBool = Field(..., title='Frozen')
-    incomplete: StrictInt = Field(..., title='Incomplete')
-    loaded: StrictInt = Field(..., title='Loaded')
-    mode: Literal['count'] = Field(..., title='Mode')
-    paused: StrictBool = Field(..., title='Paused')
-    requests: StrictInt | MISSING = Field(default=MISSING, title='Requests')
-    resume: StrictInt | MISSING = Field(default=MISSING, title='Resume')
-    retrying: StrictInt = Field(..., title='Retrying')
-    run: StrictStr | MISSING = Field(default=MISSING, title='Run')
-    scan_complete: StrictBool = Field(..., title='Scan Complete')
-    since: StrictFloat | None = Field(..., title='Since')
-    stop_reason: StrictStr | None | MISSING = MISSING
-    state: Literal['pending', 'loading', 'done', 'selecting', 'paused', 'waiting', 'cancelled'] = Field(..., title='State')
-    unavailable: StrictInt = Field(..., title='Unavailable')
-    viewed: StrictInt = Field(..., title='Viewed')
-    waiting: StrictBool | MISSING = Field(default=MISSING, title='Waiting')
-    warnings: list[StrictStr] | MISSING = Field(default=MISSING, title='Warnings')
-
-
-
 class ProblemObject(WireModel):
     model_config = ConfigDict(extra='forbid')
     id: StrictStr = Field(..., title='Id')
@@ -205,34 +176,6 @@ class CompletionConflict(WireModel):
     message: StrictStr
     preview: CompletionPreview
 
-class History(WireModel):
-    model_config = ConfigDict(extra='forbid')
-    available: StrictInt = Field(..., title='Available')
-    cancelled: StrictBool | MISSING = Field(default=MISSING, title='Cancelled')
-    count: StrictInt | None = Field(..., title='Count')
-    count_text: StrictStr | None = Field(..., title='Count Text')
-    discovery_error: StrictStr | None | MISSING = Field(default=MISSING, title='Discovery Error')
-    discovery_retry_at: StrictFloat | None | MISSING = Field(default=MISSING, title='Discovery Retry At')
-    errors: list[HistoryError] = Field(..., title='Errors')
-    frozen: StrictBool = Field(..., title='Frozen')
-    incomplete: StrictInt = Field(..., title='Incomplete')
-    loaded: StrictInt = Field(..., title='Loaded')
-    mode: Literal['count'] = Field(..., title='Mode')
-    paused: StrictBool = Field(..., title='Paused')
-    requests: StrictInt | MISSING = Field(default=MISSING, title='Requests')
-    resume: StrictInt | MISSING = Field(default=MISSING, title='Resume')
-    retrying: StrictInt = Field(..., title='Retrying')
-    run: StrictStr | MISSING = Field(default=MISSING, title='Run')
-    scan_complete: StrictBool = Field(..., title='Scan Complete')
-    since: StrictFloat | None = Field(..., title='Since')
-    stop_reason: StrictStr | None | MISSING = MISSING
-    state: Literal['pending', 'loading', 'done', 'selecting', 'paused', 'waiting', 'cancelled'] = Field(..., title='State')
-    unavailable: StrictInt = Field(..., title='Unavailable')
-    viewed: StrictInt = Field(..., title='Viewed')
-    waiting: StrictBool | MISSING = Field(default=MISSING, title='Waiting')
-    warnings: list[StrictStr] | MISSING = Field(default=MISSING, title='Warnings')
-
-
 class Problem(WireModel):
     model_config = ConfigDict(extra='ignore')
     code: StrictStr = Field(..., title='Code')
@@ -260,7 +203,7 @@ class ProblemSnapshot(WireModel):
 class Status(WireModel):
     model_config = ConfigDict(extra='forbid')
     error: StrictStr | None | MISSING = Field(default=MISSING, title='Error')
-    initial_histories: list[InitialHistoryStatus] | MISSING = Field(default=MISSING, title='Initial Histories')
+    initial_histories: list[InitialHistoryStatus | DamagedHistoryStatus] | MISSING = Field(default=MISSING, title='Initial Histories')
     problems: ProblemSnapshot | MISSING = MISSING
     ready_sources: StrictInt = Field(..., title='Ready Sources')
     sources: list[SourceStatus] = Field(..., title='Sources')
@@ -269,6 +212,7 @@ class Status(WireModel):
     youtube: YouTube | None | MISSING = MISSING
 
 class SubscriptionFeed(WireModel):
+    initial_history_invalid: StrictBool | MISSING = MISSING
     avatar_url: StrictStr | MISSING = MISSING
     model_config = ConfigDict(extra='forbid')
     auto_read: StrictBool | None | MISSING = Field(default=MISSING, title='Auto Read')
@@ -297,6 +241,7 @@ class EffectiveSettings(WireModel):
     overrides: SettingOverrides
 
 class Feed(WireModel):
+    initial_history_invalid: StrictBool | MISSING = MISSING
     has_unviewed: StrictBool
     avatar_url: StrictStr | MISSING = MISSING
     model_config = ConfigDict(extra='forbid')

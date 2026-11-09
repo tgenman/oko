@@ -3,7 +3,6 @@ from oko.execution import read_locked
 from oko.storage.reading import reading_snapshot, stable_reader_time
 from oko.storage.transaction import read_snapshot
 import hashlib
-import json
 from pathlib import Path
 from typing import Literal
 
@@ -48,7 +47,7 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
 
     def feeds(identity: str | None = None) -> dict[str, wire.SubscriptionFeed]:
         saved = runtime.queries
-        rows=saved.feeds() if identity is None else saved.feeds(identity)
+        rows=saved.feeds_with_history() if identity is None else saved.feeds_with_history(identity)
         bindings=saved.bindings([row['id'] for row in rows])
         return {v['id']:project.subscription(facts.SubscriptionFeed.model_validate(v),bindings.get(v['id'])) for v in rows}
 
@@ -88,11 +87,12 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
             for group in groups:
                 group['feeds'].sort(key=lambda feed:(feed['title'].casefold(),feed['id']))
             body = wire.NavigationResponse.model_validate(dict(total=snapshot['count'],folders=groups)).model_dump(mode='json')
-            encoded = json.dumps(body,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()
-            etag = '"'+hashlib.sha256(runtime.queries.versions.identity.encode()+b'\0'+encoded).hexdigest()+'"'
+            response = JSONResponse(body)
+            etag = '"'+hashlib.sha256(runtime.queries.versions.identity.encode()+b'\0'+response.body).hexdigest()+'"'
             if request.headers.get('if-none-match') == etag:
                 return Response(status_code=304,headers={'ETag':etag,'X-Oko-Storage-Id':runtime.queries.versions.identity})
-            return JSONResponse(body,headers={'ETag':etag,'X-Oko-Storage-Id':runtime.queries.versions.identity})
+            response.headers.update({'ETag':etag,'X-Oko-Storage-Id':runtime.queries.versions.identity})
+            return response
 
     @router.get('/api/v3/reading-composition', response_model=wire.ReadingComposition)
     @read_locked(runtime.execution)
@@ -145,7 +145,7 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
             headers={'ETag':tag,'Cache-Control':'private, no-cache'}
             if request.headers.get('if-none-match')==tag:return Response(status_code=304,headers=headers)
             items=[]
-            with current.inputs(set(shown),include_subtitles=False):
+            with current.inputs(set(shown),cards_only=True):
                 for item in shown:
                     card_data=current.card(item)
                     if card_data is None:continue

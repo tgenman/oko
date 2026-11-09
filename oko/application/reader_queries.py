@@ -9,6 +9,5 @@ from oko.storage.store import Store
 def reader_queries(storage: Callable[[], Store]) -> ReadingQueries:
     return ReadingQueries(access=lambda: storage().db.access_lock, facts=ReaderFacts(storage),
         subscriptions=lambda: storage().subscriptions, reading=lambda: storage().reading,
-        publications=lambda: storage().publications, filters=lambda: storage().filters,
-        processing=lambda: storage().processing, media=lambda: storage().media,
+        media=lambda: storage().media,
         versions=lambda: storage().read_versions)

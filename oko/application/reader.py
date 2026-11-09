@@ -3,6 +3,7 @@ from oko.storage.database import INTEGRITY_ERRORS
 from oko.storage.reading import reading_snapshot
 import asyncio
 from dataclasses import dataclass
+from contextlib import nullcontext
 from oko.domain.processing import ProcessingWait
 from collections.abc import Awaitable, Callable
 import secrets
@@ -25,7 +26,7 @@ from oko.subscriptions.telegram import TelegramConflict
 from oko.diagnostics import Journal, diagnostic_source, record_caught
 from oko.execution import Execution, ActionError, _ExternalCheck
 from oko.workers.control import JobControl
-from oko.storage.transaction import transaction
+from oko.storage.transaction import transaction, read_snapshot
 from oko.application.subscription_service import subscription_service
 from oko.application.reader_queries import reader_queries
 from oko.services.reading import ReadingService
@@ -66,7 +67,6 @@ class ReaderApplication:
         self._cancel = jobs.cancel
         self._feed_checks: dict[str, str] = {}
         self._last_problems: dict[str, Any] = dict(current=[], recent=[], count=0, updated_at=wall_clock())
-        self._viewed_ids: list[str] = []
         self._codex_status = codex_status()
         self._collection_instance = secrets.token_hex(16)
         self._collection_revision = 0
@@ -126,12 +126,12 @@ class ReaderApplication:
     def material_was_viewed(self, identity: str) -> bool:
         if self._store:
             return self.queries.was_viewed(identity)
-        return identity in self._viewed_ids
+        return False
 
 
     def collection_snapshot(self, feed_id: str | None = None) -> dict[str, Any]:
         current = self.require_store()
-        feeds = self.queries.feeds(feed_id)
+        feeds = self.queries.feeds_with_history(feed_id)
         bindings=self.queries.bindings([feed['id'] for feed in feeds if feed['kind']=='telegram'])
         for feed in feeds:
             binding=bindings.get(feed['id'])
@@ -147,7 +147,8 @@ class ReaderApplication:
 
     def status_snapshot(self) -> StatusSnapshot:
         candidates = None
-        with reading_snapshot():
+        database_snapshot = read_snapshot(self._store.db) if self._store else nullcontext()
+        with database_snapshot, reading_snapshot():
             if self._store and not self.stopped:
                 candidates = self._store.problems.candidates(self._wall_clock())
             feeds = {f['id']: f for f in self._store.subscriptions.feeds()} if self._store else {}
@@ -155,6 +156,12 @@ class ReaderApplication:
             state = self._status()
         if candidates is not None and self._store:
             self._last_problems = self._store.problems.reconcile(candidates, self._wall_clock(), feeds)
+            damaged = {entry['feed_id'] for entry in state.get('initial_histories', []) if entry.get('state') == 'damaged'}
+            still_damaged = {obj['id'] for problem in self._last_problems['current'] if problem['code'] == 'history-invalid'
+                             for obj in problem['objects'] if obj['kind'] == 'feed'}
+            if damaged - still_damaged:
+                with read_snapshot(self._store.db), reading_snapshot():
+                    state = self._status()
             if not self._error:
                 state['problems'] = self._last_problems
         return StatusSnapshot(state, bindings)
@@ -163,18 +170,16 @@ class ReaderApplication:
     def _status(self) -> dict[str, Any]:
         state: dict[str, Any] = {}
         state['youtube'] = self.youtube_status() if self._store and not self.stopped else None
-        if self._store and not self.stopped:
-            self._viewed_ids = self.queries.viewed_ids()
         state['problems'] = self._last_problems
         if self._error:
             state['problems'] = dict(current=[dict(id='runtime:storage',code='storage-unavailable',operation='producer:storage',section='action',title='Хранилище недоступно',
                 consequence='Сбор и обработка остановлены.',next_step='Проверьте доступность хранилища; состояние не сбрасывается.',
                 objects=[],action=None,created_at=self._wall_clock(),next_at=None,state='current',finished_at=None,outcome=None)],recent=[],count=1,updated_at=self._wall_clock())
-        state['viewed_ids'] = self._viewed_ids
+        state['viewed_ids'] = []
         source_states = self._store.source_statuses() if self._store else []
         names = {f['id']: f['title'] for f in self._store.subscriptions.feeds()} if self._store else {}
         source_states = [dict(s, title=names.get(s['feed_id'], s['feed_id']), changes=self._source_description(s['feed_id'])) for s in source_states if s['feed_id'] in self._sources and s['feed_id'] in names]
-        return dict(**state, initial_histories=[dict(feed_id=f['id'], **f['initial_history']) for f in self._store.subscriptions.feeds() if f['initial_history']] if self._store else [], sources=source_states, error=self._error,
+        return dict(**state, initial_histories=[dict(feed_id=f['id'], state='damaged') if f.get('initial_history_invalid') else dict(feed_id=f['id'], **f['initial_history']) for f in self._store.subscriptions.feeds_with_history() if f['initial_history'] or f.get('initial_history_invalid')] if self._store else [], sources=source_states, error=self._error,
                     ready_sources=self._store.ready_sources([feed for feed in self._sources if feed in names]) if self._store and not self.stopped else 0,
                     total_sources=sum(feed in names for feed in self._sources))
 
@@ -233,7 +238,7 @@ class ReaderApplication:
 
     def _require_visible_material(self, item: str) -> None:
         row=self.queries.item(item)
-        if row is None or row['feed_id'] is None or not self.queries.feed_resources({row['feed_id']}):
+        if row is None or row['feed_id'] is None or not self.queries.feeds(row['feed_id']):
             raise ActionError('missing','Материал недоступен')
 
     async def rebuild_publication(self, item: str) -> None:

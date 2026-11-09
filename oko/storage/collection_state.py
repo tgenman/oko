@@ -1,5 +1,5 @@
 """Saved feed/source facts used by collection services."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from oko.storage.publication_owners import owner_expr
 from oko.storage.store import Store
@@ -12,6 +12,7 @@ class SourceConfiguration:
     settings: list[SourceSettings]
     dependencies: list[str]
     bindings: dict[str,dict[str,Any]]
+    invalid_history: list[str] = field(default_factory=list)
 
 
 class CollectionState:
@@ -31,9 +32,12 @@ class CollectionState:
     def revision(self) -> int:
         return self.store.subscriptions.source_revision()
 
+    def history_revision(self) -> list[Any]:
+        return self.store.read_versions.history_versions()
+
     def configuration(self) -> SourceConfiguration:
         store=self.store
-        feeds=store.subscriptions.feeds(include_deleted=True)
+        feeds=store.subscriptions.feeds_with_history(include_deleted=True)
         bindings=store.subscriptions.telegram.bindings()
         settings=[]
         dependencies=[]
@@ -47,7 +51,8 @@ class CollectionState:
                 dependencies.append(feed['id'])
             settings.append(SourceSettings(feed['id'],feed['transport'],(feed['original_urls'] or [''])[0],feed['initial_days'],feed['initial_history'],
                 feed['connection']=='deleting',access,store.subscriptions.youtube_theses(feed['id']) if feed['transport']=='youtube' else False))
-        return SourceConfiguration(self.revision(),settings,dependencies,bindings)
+        return SourceConfiguration(self.revision(),settings,dependencies,bindings,
+                                   [feed['id'] for feed in feeds if feed.get('initial_history_invalid')])
 
     def binding(self, feed: str) -> dict[str,Any] | None:
         return self.store.subscriptions.telegram.binding(feed)

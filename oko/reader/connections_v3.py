@@ -128,7 +128,7 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
                 if runtime.stopped or error.kind == 'unavailable' or error.code == 'runtime_disabled':
                     raise
                 command_id = wire.CommandId(request.state.command_id)
-                saved = runtime.queries.feeds(identity)
+                saved = runtime.queries.feeds_with_history(identity)
                 if not saved:
                     raise ApiError(404, wire.ErrorEnvelope(wire.ResourceNotFoundError(code='resource_not_found', message=str(error.detail), diagnostic_id=None, command_id=command_id,
                         details=wire.ResourceNotFoundErrorDetails(resource=wire.AffectedResource(wire.FeedResource(kind='feed', feed_id=wire.FeedId(identity))))))) from None

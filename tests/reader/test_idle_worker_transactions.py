@@ -15,6 +15,7 @@ def test_idle_collection_and_processing_do_not_open_write_transactions(tmp_path)
         collection=collection_worker(tmp_path,store,StructuredSource(SyntheticSource()))
         collection._started=True
         collection._source_revision=collection.service.source_revision()
+        collection._history_revision=collection.service.history_revision()
         collection._collection_interval=10**9
         collection._last_collection=collection._clock()
         collection._last_media_cleanup=collection._clock()
@@ -46,6 +47,7 @@ def test_collection_progresses_without_dispatching_obsolete_cleanup(tmp_path):
         worker=collection_worker(tmp_path,store,StructuredSource(SyntheticSource()))
         worker._started=True
         worker._source_revision=worker.service.source_revision()
+        worker._history_revision=worker.service.history_revision()
         worker._collection_interval=10**9
         worker._last_collection=worker._clock()
         worker._last_media_cleanup=worker._clock()

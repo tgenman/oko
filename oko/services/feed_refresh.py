@@ -7,7 +7,7 @@ class RefreshMedia(Protocol):
 
 
 class RefreshHistory(Protocol):
-    def resume_history(self, feed: str) -> None: ...
+    def resume_history(self, feed: str) -> bool: ...
 
 
 class RefreshJobs(Protocol):
@@ -24,7 +24,7 @@ class FeedRefresh:
     def refresh(self, feed: str) -> None:
         for publication in self.media.publications_for_feed(feed):
             self.jobs.retry_media(publication,revalidate_ready=False)
-        self.history.resume_history(feed)
-        self.jobs.refresh_discovery(feed)
+        if self.history.resume_history(feed):
+            self.jobs.refresh_discovery(feed)
         self.jobs.retry_feed_fetches(feed)
         self.jobs.retry_feed_processing(feed)

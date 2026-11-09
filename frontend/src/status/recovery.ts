@@ -1,6 +1,7 @@
 import type {AffectedResource,CommandContext,Problem,RecoveryIntent,RuntimeStatus} from '../api/generated/types.gen';
 export type Section='action'|'wait'|'object';
 const presentation:Record<Problem['code'],{section:Section;title:string}>={
+ history_invalid:{section:'action',title:'Saved History Needs Attention'},
  job_target_unknown:{section:'object',title:'Saved Job Needs Review'},
  processor_not_configured:{section:'action',title:'No Model Selected'},
  processor_configuration_invalid:{section:'action',title:'Check Model Settings'},

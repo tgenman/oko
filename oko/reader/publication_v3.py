@@ -1,6 +1,5 @@
 """Unified publication projection and HTTP conditional delivery."""
 import hashlib
-import json
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from oko.execution import read_locked
@@ -25,13 +24,14 @@ def register(app: FastAPI, runtime: ReaderApplication) -> None:
         with read_snapshot(runtime.require_store().db), reading_snapshot(), runtime.queries.inputs({item}):
             current=runtime.queries
             row=current.item(item)
-            if row is None or row['feed_id'] is None or not current.feed_resources({row['feed_id']}):
+            if row is None or row['feed_id'] is None or not current.feeds(row['feed_id']):
                 raise missing(wire.AffectedResource(wire.MaterialResource(kind='material',material_id=identity(item))))
             body=dict(id=row['id'],title=row['title'] or '',feed_id=row['feed_id'],
                 published_at=project.timestamp(row['published_at']).root if row['published_at'] is not None else None,
                 source_url=row['url'],**current.unified_publication(item))
         body=wire.PublicationResponse.model_validate(body).model_dump(mode='json')
-        encoded=json.dumps(body,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()
-        etag='"'+hashlib.sha256(storage.encode()+b'\0'+encoded).hexdigest()+'"'
+        response=JSONResponse(body)
+        etag='"'+hashlib.sha256(storage.encode()+b'\0'+response.body).hexdigest()+'"'
         if request.headers.get('if-none-match')==etag:return Response(status_code=304,headers={'ETag':etag})
-        return JSONResponse(body,headers={'ETag':etag})
+        response.headers['ETag']=etag
+        return response

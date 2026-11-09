@@ -16,7 +16,7 @@ def source(value: dict[str, Any]) -> dict[str, Any]:
     if row['operation']:
         row['operation'] = dict(row['operation'], last_error=None)
     history = row['history']
-    row['history'] = f"History · loaded {history.get('loaded', 0)} · viewed {history.get('viewed', 0)}" if history else None
+    row['history'] = ('Saved history needs attention' if history.get('damaged') else f"History · loaded {history.get('loaded', 0)} · viewed {history.get('viewed', 0)}") if history else None
     return row
 
 
