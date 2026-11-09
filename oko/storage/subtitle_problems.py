@@ -120,7 +120,6 @@ def sync_timer(store: 'Store', now: float, job_ids: list[int] | None = None, *, 
             staged=actual_inserts[index-offset]
             identity=reservation_ids[index]
             actual_inserts[index-offset]=(identity,'subtitle:reservation:'+identity,*staged[2:])
-        actual_rekeys=[]
         pending_pointers=[]
         for staged in actual_inserts:
             body=json.loads(str(staged[2]));pending_pointers.append((staged[1],json.dumps(['oko-subtitle-v1',body['media_job_id'],body['subtitle_canonical']])))
@@ -140,13 +139,6 @@ def sync_timer(store: 'Store', now: float, job_ids: list[int] | None = None, *, 
             count=store.db.execute("""UPDATE reader_problems p SET finished=%s,outcome='resolved' FROM unnest(%s::text[],%s::text[],%s::text[]) v(id,identity,body)
                 WHERE p.id=v.id AND p.identity=v.identity AND p.body=v.body AND p.finished IS NULL""",(now,*tuple([row[i] for row in chunk_closes] for i in range(3)))).rowcount
             if count!=len(chunk_closes):raise RuntimeError('Subtitle occurrence changed during pause')
-            changed+=count
-        for start in range(0,len(actual_rekeys),400):
-            chunk_rekeys=actual_rekeys[start:start+400]
-            count=store.db.execute("""UPDATE reader_problems p SET identity=v.identity,body=v.body,finished=-62135596800,outcome='irrelevant',subtitle_due=v.due,subtitle_reserved_owned=true
-                FROM unnest(%s::text[],%s::text[],%s::text[],%s::double precision[],%s::text[],%s::text[]) v(id,identity,body,due,old_identity,old_body)
-                WHERE p.id=v.id AND p.identity=v.old_identity AND p.body=v.old_body AND p.finished IS NULL""",tuple([row[i] for row in chunk_rekeys] for i in range(6))).rowcount
-            if count!=len(chunk_rekeys):raise RuntimeError('Subtitle occurrence changed during reservation')
             changed+=count
         for start in range(0,len(actual_inserts),400):
             chunk_inserts=actual_inserts[start:start+400]
