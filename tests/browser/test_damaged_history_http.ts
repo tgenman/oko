@@ -12,6 +12,7 @@ import * as path from 'node:path';
 import {createRequire} from 'node:module';
 import {productionReader} from './http-reader';
 import {openAdmin, openReading} from './admin-navigation';
+import {artifactPath} from './artifacts';
 
 const repo=process.cwd();
 const requireFromRepo=createRequire(path.join(repo,'package.json'));
@@ -114,7 +115,7 @@ test('damaged saved history leaves reading available and does not offer destruct
   await page.locator('#cards [data-card]').click();
   await expect(page.locator('#title')).toContainText('Bad publication');
   await expect(page.locator('#text')).toContainText('Bad synthetic body');
-  await page.screenshot({path:'/private/tmp/oko-damaged-history-reading.png',fullPage:true});
+  await page.screenshot({path:artifactPath('oko-damaged-history-reading.png'),fullPage:true});
   const status=await api('status/details');
   const problems=status.problems.current.filter(p=>p.code==='history_invalid');
   expect(problems).toHaveLength(1);expect(problems[0]!.recovery).toEqual([]);
@@ -124,14 +125,14 @@ test('damaged saved history leaves reading available and does not offer destruct
   await expect(problem).toBeVisible();
   await expect(problem).toContainText('Saved History Needs Attention');
   await expect(problem.locator('.status-action')).toHaveCount(0);
-  await page.screenshot({path:'/private/tmp/oko-damaged-history-problem.png',fullPage:true});
+  await page.screenshot({path:artifactPath('oko-damaged-history-problem.png'),fullPage:true});
   await page.locator('#status-close').click();await openReading(page);
   await page.locator('#feeds-open').click();
   await page.locator('#feed-tree').getByRole('button',{name:'Bad feed',exact:true}).click();
   await page.getByRole('button',{name:'Connection and Options',exact:true}).click();
   await expect(page.locator('#history-progress')).toHaveText('Saved history needs attention');
   await expect(page.locator('#rss-load-history-start')).toBeDisabled();
-  await page.screenshot({path:'/private/tmp/oko-damaged-history-settings.png',fullPage:true});
+  await page.screenshot({path:artifactPath('oko-damaged-history-settings.png'),fullPage:true});
   expect(historyWrites).toEqual([]);expect(errors).toEqual([]);
   expect(dbSnapshot()).toEqual(before);
  } finally {
@@ -205,7 +206,7 @@ test('open feed settings switch to damaged when details report a newly damaged h
   await expect(page.locator('#rss-load-history-start')).toBeDisabled();
   await expect(page.locator('#rss-load-history-count')).toBeDisabled();
   await expect(page.locator('#rss-load-history-stop')).toBeHidden();
-  await page.screenshot({path:'/private/tmp/oko-damaged-history-live-settings.png',fullPage:true});
+  await page.screenshot({path:artifactPath('oko-damaged-history-live-settings.png'),fullPage:true});
   expect(historyWrites).toEqual([]);expect(errors).toEqual([]);
   expect(dbSnapshot()).toEqual(damaged);
   await page.locator('#feeds-close').click();
@@ -215,7 +216,7 @@ test('open feed settings switch to damaged when details report a newly damaged h
   await expect(page.locator('#cards [data-card]')).toHaveCount(1);
   await page.locator('#cards [data-card]').click();
   await expect(page.locator('#text')).toContainText('Bad synthetic body');
-  await page.screenshot({path:'/private/tmp/oko-damaged-history-live-reading.png',fullPage:true});
+  await page.screenshot({path:artifactPath('oko-damaged-history-live-reading.png'),fullPage:true});
   expect(dbSnapshot()).toEqual(damaged);
  } finally {
   if(reader)await reader.close();
