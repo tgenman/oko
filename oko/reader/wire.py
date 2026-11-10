@@ -3,29 +3,13 @@ from datetime import date, datetime, timezone
 import re
 from typing import Annotated
 
-from pydantic import AfterValidator, AnyUrl, BaseModel, BeforeValidator, ConfigDict, PlainSerializer, Strict, TypeAdapter
-from collections.abc import Callable
-from typing import Any, TypeVar
-
-DomainModel = TypeVar('DomainModel', bound=BaseModel)
+from pydantic import AfterValidator, AnyUrl, BaseModel, ConfigDict, PlainSerializer, Strict, TypeAdapter
 
 
 class WireModel(BaseModel):
     # Primitive fields are generated as Strict* types. Formats such as a JSON
     # date-time must still parse from strings before domain validation.
     model_config = ConfigDict(regex_engine='python-re', allow_inf_nan=False)
-
-
-def normalize(domain: type[DomainModel]) -> Callable[[Any], dict[str, Any]]:
-    """Retain existing semantic validation before constructing an input DTO."""
-    def prepare(value: Any) -> dict[str, Any]:
-        return domain.model_validate(value).model_dump(mode='json', by_alias=True, exclude_unset=True)
-    return prepare
-
-
-def to_domain(domain: type[DomainModel], wire: WireModel) -> DomainModel:
-    return domain.model_validate(wire.model_dump(mode='json', by_alias=True, exclude_unset=True))
-
 
 
 def timestamp_text(value: str) -> str:
