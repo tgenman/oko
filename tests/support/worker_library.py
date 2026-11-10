@@ -59,5 +59,5 @@ def collection_worker(root,store,source):
     worker=app.state.host.collection
     worker.execution._store=store
     from oko.collection.sources import FeedRuntime,SourceSettings
-    worker._sources['fixture']=FeedRuntime(source,SourceSettings('fixture','injected','https://fixture.invalid/feed',0,None),'injected')
+    worker._sources['fixture']=FeedRuntime(source,SourceSettings('fixture','injected','https://fixture.invalid/feed',None),'injected')
     return worker

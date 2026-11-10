@@ -75,7 +75,7 @@ class CollectionRepository:
                 access=TelegramAccess('web',binding.get('username',feed.get('telegram_username')))
             if feed['connection']!='deleting' and (feed['transport'] is not None or binding and binding['kind']=='web'):
                 dependencies.append(feed['id'])
-            settings.append(SourceSettings(feed['id'],feed['transport'],(feed['original_urls'] or [''])[0],feed['initial_days'],feed['initial_history'],
+            settings.append(SourceSettings(feed['id'],feed['transport'],(feed['original_urls'] or [''])[0],feed['initial_history'],
                 feed['connection']=='deleting',access,store.subscriptions.youtube_theses(feed['id']) if feed['transport']=='youtube' else False))
         return SourceConfiguration(store.subscriptions.source_revision(),settings,dependencies,
                                    [feed['id'] for feed in feeds if feed.get('initial_history_invalid')])
