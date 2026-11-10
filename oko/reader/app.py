@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 import re
 import ipaddress
+import math
 import secrets
 import time
 from urllib.parse import urlsplit
@@ -22,7 +23,6 @@ from oko.processing.codex import CodexClient
 from oko.host import Host
 from oko.application.reader import ReaderApplication
 from oko.execution import ActionError
-from oko.reader.lifetime import validate_legacy_intervals
 from oko.reader import api_v3
 from oko.reader.password_auth import PasswordAccess, access_response, install_login
 from oko.reader.http_schemas import SchemaRoute
@@ -57,7 +57,9 @@ def create_app(root: Path, *, source: FeedAdapter | None = None, token: str | No
             raise ValueError('Public URL must be a local HTTP or explicit HTTPS origin')
         public_host = parsed.netloc
     password_access = PasswordAccess(root, wall_clock) if persistent or (public_url and urlsplit(public_url).scheme == 'https') else None
-    validate_legacy_intervals(lease, grace)
+    # Older launchers still pass these options; they no longer control work.
+    if not all(math.isfinite(value) and value > 0 for value in (lease, grace)) or not 0 < min(2.0, lease / 3) < lease:
+        raise ValueError('Lifetime durations must be finite and positive')
     token = token or secrets.token_urlsafe(32)
     instance_id = secrets.token_hex(16)
     runtime = Host(root, source, clock, fault, shutdown, source_feed, rss_enabled, rss_transport, ai_transport, codex_client, youtube_captions, youtube_history, wall_clock, database_url)
