@@ -7,6 +7,7 @@ from oko.domain.collection import CollectionEffects
 
 @dataclass
 class CollectionDiagnostics(CollectionEffects):
+    title_only_changes: set[str] = field(default_factory=set)
     fetch_problems_before: dict[int,list[dict[str,Any]]] = field(default_factory=dict)
     fetch_problems_checked: set[int] = field(default_factory=set)
     media_problems_before: dict[int,list[dict[str,Any]]] = field(default_factory=dict)

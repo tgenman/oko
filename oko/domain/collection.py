@@ -9,7 +9,6 @@ class CollectionEffects:
     source_url_changes: set[str] = field(default_factory=set)
     refresh_status: set[str] = field(default_factory=set)
     sync_processing: bool = False
-    title_only_changes: set[str] = field(default_factory=set)
     fetch: dict[str,bool] = field(default_factory=dict)
     invalidated_fetch: set[str] = field(default_factory=set)
     media: set[str] = field(default_factory=set)
