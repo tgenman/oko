@@ -88,11 +88,6 @@ def group_candidates(store: Any, keys: list[str], now: float, sticky: set[str] |
     return result
 
 
-def group_candidate(store: Any, key: str, now: float) -> dict[str,Any] | None:
-    return group_candidates(store,[key],now).get(key)
-
-
-
 def valid_group_record(row: Any, key: str, allowed: set[str]) -> bool:
     try:body=json.loads(row['body'])
     except (TypeError,ValueError):return False
@@ -109,41 +104,6 @@ def valid_group_record(row: Any, key: str, allowed: set[str]) -> bool:
     objects=body.get('objects')
     return bool(isinstance(objects,list) and objects and all(isinstance(obj,dict) and set(obj)=={'kind','id'}
         and obj['kind']=='material' and isinstance(obj['id'],str) and obj['id'] in allowed for obj in objects))
-
-def sync_group(store: Any, key: str, now: float, *, previous_items: set[str] | None = None) -> None:
-    import hashlib
-    import uuid
-    candidate=group_candidate(store,key,now)
-    canonical=store.db.execute('SELECT id,identity,body,created FROM reader_problems WHERE identity=%s AND finished IS NULL',(key,)).fetchone()
-    indexed={r['id'] for r in store.db.execute('SELECT id FROM pg_temp.oko_incomplete_facts WHERE incomplete_group_key COLLATE "C"=%s',(key,))}
-    allowed=indexed | (previous_items or set())
-    def valid(row: Any) -> bool:
-        return valid_group_record(row,key,allowed)
-    row=canonical if canonical is not None and valid(canonical) else None
-    isolated=store.db.execute("SELECT id,identity,body,created FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:incomplete' AND body::jsonb->>'incomplete_group_identity'=%s ORDER BY created,id COLLATE \"C\" LIMIT 2",(key,)).fetchall()
-    if len(isolated)>1:return  # Preserve ambiguous legacy state for recovery review.
-    if isolated and valid(isolated[0]):
-        if row is not None:return  # Do not merge two existing occurrences without proof.
-        row=isolated[0]
-    if candidate is None:
-        if row is None:return
-        store.problems.sync_candidate(row['identity'],None,now,removed_outcome='resolved')
-        return
-    if row is not None:
-        identity=row['identity']
-    elif canonical is None:
-        identity=key
-    else:
-        digest=hashlib.sha256(key.encode()).hexdigest()
-        for _ in range(3):
-            identity='incomplete:isolated:'+digest+':'+uuid.uuid4().hex
-            if not store.db.execute('SELECT 1 FROM reader_problems WHERE identity=%s AND finished IS NULL',(identity,)).fetchone():break
-        else:raise RuntimeError('Unable to allocate incomplete occurrence')
-    candidate['id']=identity
-    candidate['operation']='producer:incomplete'
-    if identity!=key:candidate['incomplete_group_identity']=key
-    store.problems.sync_candidate(identity,candidate,now)
-
 
 class TransactionGroupDraft:
     """Transaction-local affected IDs; no work remains after commit/rollback."""
@@ -394,16 +354,6 @@ def reservation(store: Any, key: str) -> dict[str,Any] | None:
         or not _readable_timestamp(body.get('deadline')) or body['deadline']!=row['incomplete_due'] or row['finished']!=-62135596800
         or not valid_incomplete_projection(body.get('future')) or not body['future']['objects']):return None
     return {'id':row['id'],'deadline':body['deadline'],'future':body['future']}
-
-
-def clear_reservation(store: Any, key: str, saved: dict[str,Any], *, delete_row: bool) -> None:
-    identity='incomplete:reservation:'+saved['id']
-    if delete_row:store.db.execute('DELETE FROM reader_problems WHERE id=%s AND identity=%s',(saved['id'],identity))
-    store.db.execute('DELETE FROM state WHERE key=%s AND value=%s',(identity,key))
-    for existing in store.db.execute('SELECT key,value FROM state WHERE key=ANY(%s)',(reservation_pointers(key),)):
-        try:metadata=json.loads(existing['value'])
-        except (ValueError,TypeError):metadata=None
-        if metadata=={'group':key,'id':saved['id']}:store.db.execute('DELETE FROM state WHERE key=%s',(existing['key'],))
 
 
 def reservation_body(key: str, deadline: float, candidate: dict[str,Any] | None = None) -> dict[str,Any]:

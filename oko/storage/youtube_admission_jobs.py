@@ -199,12 +199,6 @@ def sync_captured(store: Any) -> bool:
     return touched
 
 
-def sync_items(store: Any,items: list[str]) -> bool:
-    """One-shot proof for stable graph; event integration must capture before/after."""
-    capture_items(store,items)
-    return sync_captured(store)
-
-
 def capture_fetch_flag_changes(store: Any, ids: list[int]) -> None:
     """Only flag changes that can affect the YouTube group need tracking."""
     for start in range(0,len(ids),100):
