@@ -45,7 +45,3 @@ class FilterResults:
         request=ProcessingRequest(operation='filter',sources=publication_input.sources(self.store,item,'filter'),
             prompt=values['prompt_filters']['value'],processor=values['processor']['value'],generation=0)
         return request,input_hash,public_ai
-
-
-    def forget(self,item: str) -> None:
-        self.store.jobs.forget_input('filter', [item])

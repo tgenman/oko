@@ -262,11 +262,6 @@ class JobRepository:
             self.store.problems.finish_processor_change(affected,processor_previous,self.store.wall_clock())
         if items and db.in_transaction:self.store.incomplete_draft.mark_materials(items)
 
-    def forget_input(self, kind: Kind, identities: list[str]) -> None:
-        ordered = sorted(set(identities))
-        for start in range(0, len(ordered), 400):
-            self.store.db.execute("UPDATE jobs SET input_snapshot=NULL WHERE kind=%s AND item=ANY(%s) AND input_snapshot IS NOT NULL", (kind, ordered[start:start+400]))
-
     def save_input(self, job: Job, work: ProcessingInput) -> None:
         selected = processing_input.settings(self.store, job.item)
         snapshot = dict(input_hash=work.input_hash, generation=job.generation, feed_id=selected['feed_id'],
