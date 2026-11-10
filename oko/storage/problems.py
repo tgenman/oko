@@ -582,46 +582,7 @@ class Problems:
                 self.db.execute('UPDATE reader_problems p SET identity=source.identity,body=source.body FROM unnest(%s::text[],%s::text[],%s::text[]) AS source(id,identity,body) WHERE p.id=source.id AND p.finished IS NULL',([r[0] for r in updates],[r[1] for r in updates],[r[2] for r in updates]))
                 status_changed(self.db)
             for job_id,previous in fallback.items():self.sync_fetch(job_id,previous,now)
-        occupied_rows={row['identity']:row for row in self.db.execute('SELECT id,identity,body FROM reader_problems WHERE identity=ANY(%s) AND finished IS NULL',(identities+list(legacy_keys),))}
-        occupied=set(occupied_rows)
-        isolated_rows: dict[str,list[Any]]={}
-        for row in self.db.execute("""SELECT r.*,target.canonical FROM unnest(%s::text[]) target(canonical) CROSS JOIN LATERAL (
-            SELECT id,identity,body FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:fetch'
-            AND body::jsonb->>'fetch_job_identity'=target.canonical LIMIT 101) r""",(identities,)):
-            isolated_rows.setdefault(row['canonical'],[]).append(row)
-        isolated=set(isolated_rows)
-        simple=[];complex_ids=set(overloaded_ids)
-        def ambiguous(candidate: dict[str,Any]) -> bool:
-            tail=candidate['id'][len('job:'+candidate['code']+':'):]
-            kinds=('fetch','discover','download_media','filter','theses','read','delete','feed-delete')
-            found=[kind for kind in kinds if ':'+kind+':' in tail]
-            return found!=['fetch'] or tail.count(':fetch:')!=1
-        def already_current(candidate: dict[str,Any]) -> bool:
-            canonical=candidate['id']
-            matches=([occupied_rows[canonical]] if canonical in occupied_rows else [])+isolated_rows.get(canonical,[])
-            if len(matches)!=1 or not self.fetch_record_matches(matches[0],candidate):return False
-            body=json.loads(matches[0]['body'])
-            desired={key:value for key,value in candidate.items() if key not in ('id','created_at','finished_at','outcome','_legacy_id')}
-            if matches[0]['identity']!=canonical:desired['fetch_job_identity']=canonical
-            return bool(body==desired)
-        for job_id,candidates in projected.items():
-            if job_id in overloaded_ids:continue
-            if candidates and all(counts[c['id']]==1 and already_current(c) for c in candidates):
-                continue
-            if any(counts[c['id']]!=1 or c['id'] in occupied or c['id'] in isolated or c['id'] in legacy_keys or c.get('_legacy_id') in occupied or ambiguous(c) for c in candidates):
-                complex_ids.add(job_id)
-            else:
-                simple.extend(candidates)
-        added=[]
-        for candidate in simple:
-            body={key:value for key,value in candidate.items() if key not in ('id','created_at','finished_at','outcome','_legacy_id')}
-            added.append((uuid.uuid4().hex,candidate['id'],'background',json.dumps(body),now))
-        if added:
-            if new_ids_out is not None:new_ids_out.update(row[0] for row in added)
-            self.db.execute("""INSERT INTO reader_problems(id,identity,origin,body,created,finished,outcome)
-                SELECT id,identity,origin,body,created,NULL,NULL FROM unnest(%s::text[],%s::text[],%s::text[],%s::text[],%s::double precision[]) AS p(id,identity,origin,body,created)""",tuple([row[i] for row in added] for i in range(5)))
-            status_changed(self.db)
-        return [row for row in rows if row['id'] in complex_ids]
+        return self._recover_independent_problems('fetch',rows,projected,now,overloaded=overloaded_ids,new_ids_out=new_ids_out)
 
     def recover_fetch_isolated_work(self) -> None:
         """Repair event-owned work-fetch occurrences left by older recovery."""
@@ -924,13 +885,12 @@ class Problems:
                 parsed.append((record,body,feed,item))
             items=sorted({item for _,_,_,item in parsed});feeds=sorted({feed for _,_,feed,_ in parsed})
             with self.db:
-                jobs={row['item']:row for row in self.db.execute("SELECT id,item,reason_code FROM jobs WHERE kind='fetch' AND item=ANY(%s)",(items,))} if items else {}
+                jobs={row['item']:row for row in self.db.execute("SELECT id,item FROM jobs WHERE kind='fetch' AND item=ANY(%s)",(items,))} if items else {}
                 from oko.storage.fetch_job_problems import managed_candidates_many
                 expected=managed_candidates_many(self.store,[row['id'] for row in jobs.values()],self.store.wall_clock()) if jobs else {}
                 affected={obj['id'] for _,body,_,_ in parsed for obj in body['objects']}
                 possible_active=self.active_fetch_roots(affected)
                 linked=self.fetch_linked_pairs(set(items),affected)
-                publications={row['id']:row for row in self.db.execute('SELECT id FROM publications WHERE id=ANY(%s)',(items,))} if items else {}
                 alive={row['id'] for row in self.db.execute("SELECT id FROM feeds WHERE id=ANY(%s) AND connection!='deleting'",(feeds,))} if feeds else set()
                 resolved_ids: list[str]=[]
                 irrelevant_ids: list[str]=[]
@@ -938,7 +898,6 @@ class Problems:
                 pending_jobs: dict[int,list[dict[str,Any]]]={}
                 for record,body,feed,item in parsed:
                     job=jobs.get(item)
-                    if body['code']=='work-fetch' and (not job or job['reason_code'] is None):continue
                     if job:
                         marked=body.get('fetch_job_id')==str(job['id'])
                         mentioned={obj['id'] for obj in body['objects']}
@@ -964,7 +923,6 @@ class Problems:
                             continue  # The stored identity may be misleading; preserve ambiguous evidence.
                         if any(obj['id']!=item and (obj['id'],item) not in linked for obj in body['objects']):
                             continue  # Every stored object needs evidence of its relationship to this Job.
-                        publication=publications.get(item)
                         irrelevant=feed not in alive
                         (irrelevant_ids if irrelevant else resolved_ids).append(record['id'])
                 for job_id,previous in pending_jobs.items():
@@ -1262,43 +1220,7 @@ class Problems:
                 self.db.execute('UPDATE reader_problems p SET identity=source.identity,body=source.body FROM unnest(%s::text[],%s::text[],%s::text[]) AS source(id,identity,body) WHERE p.id=source.id AND p.finished IS NULL',([r[0] for r in updates],[r[1] for r in updates],[r[2] for r in updates]))
                 status_changed(self.db)
             for job_id,previous in fallback.items():self.sync_media_problem(job_id,previous,now)
-        occupied_rows={row['identity']:row for row in self.db.execute('SELECT id,identity,body FROM reader_problems WHERE identity=ANY(%s) AND finished IS NULL',(identities+list(legacy_keys),))}
-        occupied=set(occupied_rows)
-        isolated_rows: dict[str,list[Any]]={}
-        for row in self.db.execute("SELECT id,identity,body,body::jsonb->>'media_job_identity' AS canonical FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:download_media' AND body::jsonb->>'media_job_identity'=ANY(%s)",(identities,)):
-            isolated_rows.setdefault(row['canonical'],[]).append(row)
-        isolated=set(isolated_rows)
-        simple=[];complex_ids=set()
-        def ambiguous(candidate: dict[str,Any]) -> bool:
-            tail=candidate['id'][len('job:'+candidate['code']+':'):]
-            kinds=('fetch','discover','download_media','filter','theses','read','delete','feed-delete')
-            found=[kind for kind in kinds if ':'+kind+':' in tail]
-            return found!=['download_media'] or tail.count(':download_media:')!=1
-        def already_current(candidate: dict[str,Any]) -> bool:
-            canonical=candidate['id']
-            matches=([occupied_rows[canonical]] if canonical in occupied_rows else [])+isolated_rows.get(canonical,[])
-            if len(matches)!=1 or not self.media_record_matches(matches[0],candidate):return False
-            body=json.loads(matches[0]['body'])
-            desired={key:value for key,value in candidate.items() if key not in ('id','created_at','finished_at','outcome','_legacy_id')}
-            if matches[0]['identity']!=canonical:desired['media_job_identity']=canonical
-            return bool(body==desired)
-        for job_id,candidates in projected.items():
-            if candidates and all(counts[c['id']]==1 and already_current(c) for c in candidates):
-                continue
-            if any(counts[c['id']]!=1 or c['id'] in occupied or c['id'] in isolated or c['id'] in legacy_keys or c.get('_legacy_id') in occupied or ambiguous(c) for c in candidates):
-                complex_ids.add(job_id)
-            else:
-                simple.extend(candidates)
-        added=[]
-        for candidate in simple:
-            body={key:value for key,value in candidate.items() if key not in ('id','created_at','finished_at','outcome','_legacy_id')}
-            added.append((uuid.uuid4().hex,candidate['id'],'background',json.dumps(body),now))
-        if added:
-            if new_ids_out is not None:new_ids_out.update(row[0] for row in added)
-            self.db.execute("""INSERT INTO reader_problems(id,identity,origin,body,created,finished,outcome)
-                SELECT id,identity,origin,body,created,NULL,NULL FROM unnest(%s::text[],%s::text[],%s::text[],%s::text[],%s::double precision[]) AS p(id,identity,origin,body,created)""",tuple([row[i] for row in added] for i in range(5)))
-            status_changed(self.db)
-        return [row for row in rows if row['id'] in complex_ids]
+        return self._recover_independent_problems('media',rows,projected,now,new_ids_out=new_ids_out)
 
     def recover_subtitles(self, *, profile_only: bool = False) -> None:
         marker='subtitle-profile-problems-recovered-v1' if profile_only else 'subtitle-problems-recovered-v1'
@@ -1512,9 +1434,7 @@ class Problems:
                 publications_ids={row['publication_id'] for row in files.values()}
                 possible_active=self.active_media_roots(affected)
                 linked=self.fetch_linked_pairs(publications_ids,affected)
-                publications={row['id']:row for row in self.db.execute('SELECT id FROM publications WHERE id=ANY(%s)',(list(publications_ids),))} if publications_ids else {}
                 resolved_ids: list[str]=[]
-                irrelevant_ids: list[str]=[]
                 updates: list[tuple[str,str]]=[]
                 pending_jobs: dict[int,list[dict[str,Any]]]={}
                 for record,body,feed,item in parsed:
@@ -1549,18 +1469,15 @@ class Problems:
                             continue  # The stored identity may be misleading; preserve ambiguous evidence.
                         if any(obj['id']!=publication_id and (obj['id'],publication_id) not in linked for obj in body['objects']):
                             continue  # Every stored object needs evidence of its relationship to this Job.
-                        publication=publications.get(publication_id)
-                        irrelevant=False
-                        (irrelevant_ids if irrelevant else resolved_ids).append(record['id'])
+                        resolved_ids.append(record['id'])
                 for job_id,previous in pending_jobs.items():
                     self.sync_media_problem(job_id,previous,self.store.wall_clock())
                 if updates:
                     self.db.execute('UPDATE reader_problems p SET body=source.body FROM unnest(%s::text[],%s::text[]) AS source(id,body) WHERE p.id=source.id AND p.finished IS NULL',( [row[0] for row in updates], [row[1] for row in updates]))
                     status_changed(self.db)
-                for outcome,ids in (('resolved',resolved_ids),('irrelevant',irrelevant_ids)):
-                    if ids:
-                        self.db.execute('UPDATE reader_problems SET finished=%s,outcome=%s WHERE id=ANY(%s) AND finished IS NULL',(self.store.wall_clock(),outcome,ids))
-                        status_changed(self.db)
+                if resolved_ids:
+                    self.db.execute('UPDATE reader_problems SET finished=%s,outcome=%s WHERE id=ANY(%s) AND finished IS NULL',(self.store.wall_clock(),'resolved',resolved_ids))
+                    status_changed(self.db)
             problem_cursor=(records[-1]['created'],records[-1]['id'])
             self.store.fault('media_problem_record_recovery_batch')
         cursor: int | None=None
@@ -1857,10 +1774,8 @@ class Problems:
                        WHERE link.source_publication_id=target.root AND j.status IN ('pending','running','failed','unavailable','blocked') AND (j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL))""",(ordered[start:start+400],)))
         return result
 
-    def recover_processing_batch(self, rows: list[Any], now: float) -> list[Any]:
-        """Persist independent first occurrences; address legacy collisions separately."""
-        from oko.storage.processing_job_problems import managed_candidates_many
-        projected=managed_candidates_many(self.store,[row['id'] for row in rows],now)
+    def _recover_independent_problems(self, kind: Literal['fetch','media','processing'], rows: list[Any], projected: dict[int,list[dict[str,Any]]], now: float, *, overloaded: set[int] | None = None, new_ids_out: set[str] | None = None) -> list[Any]:
+        """Insert unambiguous problems and return jobs requiring individual recovery."""
         counts: dict[str,int]={};legacy_keys: set[str]=set()
         for candidates in projected.values():
             for candidate in candidates:
@@ -1871,24 +1786,40 @@ class Problems:
         occupied_rows={row['identity']:row for row in self.db.execute('SELECT id,identity,body FROM reader_problems WHERE identity=ANY(%s) AND finished IS NULL',(identities+list(legacy_keys),))}
         occupied=set(occupied_rows)
         isolated_rows: dict[str,list[Any]]={}
-        for row in self.db.execute("SELECT id,identity,body,body::jsonb->>'processing_job_identity' AS canonical FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation' IN ('producer:filter','producer:theses') AND body::jsonb->>'processing_job_identity'=ANY(%s)",(identities,)):
+        if kind=='fetch':
+            query="""SELECT r.*,target.canonical FROM unnest(%s::text[]) target(canonical) CROSS JOIN LATERAL (
+                SELECT id,identity,body FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:fetch'
+                AND body::jsonb->>'fetch_job_identity'=target.canonical LIMIT 101) r"""
+            field='fetch_job_identity'
+            matcher=self.fetch_record_matches
+        elif kind=='media':
+            query="SELECT id,identity,body,body::jsonb->>'media_job_identity' AS canonical FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:download_media' AND body::jsonb->>'media_job_identity'=ANY(%s)"
+            field='media_job_identity'
+            matcher=self.media_record_matches
+        else:
+            query="SELECT id,identity,body,body::jsonb->>'processing_job_identity' AS canonical FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation' IN ('producer:filter','producer:theses') AND body::jsonb->>'processing_job_identity'=ANY(%s)"
+            field='processing_job_identity'
+            matcher=self.processing_record_matches
+        for row in self.db.execute(query,(identities,)):
             isolated_rows.setdefault(row['canonical'],[]).append(row)
         isolated=set(isolated_rows)
-        simple=[];complex_ids=set()
+        simple=[];complex_ids=set(overloaded or ())
         def ambiguous(candidate: dict[str,Any]) -> bool:
             tail=candidate['id'][len('job:'+candidate['code']+':'):]
             kinds=('fetch','discover','download_media','filter','theses','read','delete','feed-delete')
-            found=[kind for kind in kinds if ':'+kind+':' in tail]
-            return found!=[candidate['processing_kind']] or tail.count(':'+candidate['processing_kind']+':')!=1
+            target='fetch' if kind=='fetch' else 'download_media' if kind=='media' else candidate['processing_kind']
+            found=[item for item in kinds if ':'+item+':' in tail]
+            return found!=[target] or tail.count(':'+target+':')!=1
         def already_current(candidate: dict[str,Any]) -> bool:
             canonical=candidate['id']
             matches=([occupied_rows[canonical]] if canonical in occupied_rows else [])+isolated_rows.get(canonical,[])
-            if len(matches)!=1 or not self.processing_record_matches(matches[0],candidate):return False
+            if len(matches)!=1 or not matcher(matches[0],candidate):return False
             body=json.loads(matches[0]['body'])
             desired={key:value for key,value in candidate.items() if key not in ('id','created_at','finished_at','outcome','_legacy_id')}
-            if matches[0]['identity']!=canonical:desired['processing_job_identity']=canonical
+            if matches[0]['identity']!=canonical:desired[field]=canonical
             return bool(body==desired)
         for job_id,candidates in projected.items():
+            if overloaded and job_id in overloaded:continue
             if candidates and all(counts[c['id']]==1 and already_current(c) for c in candidates):
                 continue
             if any(counts[c['id']]!=1 or c['id'] in occupied or c['id'] in isolated or c['id'] in legacy_keys or c.get('_legacy_id') in occupied or ambiguous(c) for c in candidates):
@@ -1900,10 +1831,17 @@ class Problems:
             body={key:value for key,value in candidate.items() if key not in ('id','created_at','finished_at','outcome','_legacy_id')}
             added.append((uuid.uuid4().hex,candidate['id'],'background',json.dumps(body),now))
         if added:
+            if new_ids_out is not None:new_ids_out.update(row[0] for row in added)
             self.db.execute("""INSERT INTO reader_problems(id,identity,origin,body,created,finished,outcome)
                 SELECT id,identity,origin,body,created,NULL,NULL FROM unnest(%s::text[],%s::text[],%s::text[],%s::text[],%s::double precision[]) AS p(id,identity,origin,body,created)""",tuple([row[i] for row in added] for i in range(5)))
             status_changed(self.db)
         return [row for row in rows if row['id'] in complex_ids]
+
+    def recover_processing_batch(self, rows: list[Any], now: float) -> list[Any]:
+        """Persist independent first occurrences; address legacy collisions separately."""
+        from oko.storage.processing_job_problems import managed_candidates_many
+        projected=managed_candidates_many(self.store,[row['id'] for row in rows],now)
+        return self._recover_independent_problems('processing',rows,projected,now)
 
     def recover_profile_problems(self, kind: Literal['media','filter','theses']) -> None:
         """Recover profile-coded jobs and preserve ambiguous legacy for one stage."""
@@ -2010,7 +1948,6 @@ class Problems:
                 affected={obj['id'] for _,body,_,_,_ in parsed for obj in body['objects']}
                 possible_active=self.active_processing_roots(affected)
                 linked=self.fetch_linked_pairs(set(items),affected)
-                publications={row['id']:row for row in self.db.execute('SELECT id FROM publications WHERE id=ANY(%s)',(items,))} if items else {}
                 alive={row['id'] for row in self.db.execute("SELECT id FROM feeds WHERE id=ANY(%s) AND connection!='deleting'",(feeds,))} if feeds else set()
                 resolved_ids: list[str]=[]
                 irrelevant_ids: list[str]=[]
@@ -2047,7 +1984,6 @@ class Problems:
                             continue  # The stored identity may be misleading; preserve ambiguous evidence.
                         if any(obj['id']!=item and (obj['id'],item) not in linked for obj in body['objects']):
                             continue  # Every stored object needs evidence of its relationship to this Job.
-                        publication=publications.get(item)
                         irrelevant=feed not in alive
                         (irrelevant_ids if irrelevant else resolved_ids).append(record['id'])
                 for job_id,previous in pending_jobs.items():
