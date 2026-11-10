@@ -260,7 +260,7 @@ def test_profile_recovery_survives_interruption_and_preserves_legacy(tmp_path,po
             if point==f'{kind}_profile_{"problems_recovery" if phase=="recovery" else "legacy_protection"}_batch':raise RuntimeError('interrupted')
         store.fault=fail
         with pytest.raises(RuntimeError,match='interrupted'):
-            store.problems.recover_processing_profile_problems(kind)
+            store.problems.recover_profile_problems(kind)
         assert not store.db.execute('SELECT 1 FROM state WHERE key=%s',(marker,)).fetchone()
         store.db.close()
         store=Store(tmp_path,lambda _:None,database_url=postgres_url)
@@ -290,7 +290,7 @@ def test_profile_recovery_processes_multiple_pages(tmp_path,postgres_url,kind):
         before=[tuple(row) for row in store.db.execute("SELECT id,identity,body,created,finished FROM reader_problems WHERE id LIKE 'old%%' ORDER BY id")]
         calls=[]
         store.fault=calls.append
-        store.problems.recover_processing_profile_problems(kind)
+        store.problems.recover_profile_problems(kind)
         assert calls.count(f'{kind}_profile_problems_recovery_batch')==2
         assert calls.count(f'{kind}_profile_legacy_protection_batch')==2
         assert store.db.execute('SELECT 1 FROM state WHERE key=%s',(marker,)).fetchone()
