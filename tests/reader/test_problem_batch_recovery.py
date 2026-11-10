@@ -170,3 +170,51 @@ def test_recovery_resumes_after_first_of_two_job_pages(tmp_path,postgres_url,kin
         after=[tuple(row) for row in store.db.execute("SELECT id,identity,body,created FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'=%s ORDER BY id",('producer:'+kind,))]
         assert len(after)==101 and set(before).issubset(set(after))
     finally:store.db.close()
+
+
+@pytest.mark.parametrize('kind',['fetch','download_media','filter','theses'])
+@pytest.mark.parametrize('damage',['no_objects','invalid_object','empty_id','ambiguous_identity','mismatched_code','null_identity','mismatched_operation'])
+def test_recovery_preserves_untrusted_legacy_problem(tmp_path,postgres_url,kind,damage):
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    family={'fetch':'fetch','download_media':'media','filter':'processing','theses':'processing'}[kind]
+    marker=family+'-problems-recovered-v2'
+    identity=f'job:model-invalid:feed:{kind}:article'
+    body={'code':'model-invalid','section':'object','title':'Old','consequence':'Saved','next_step':'Inspect','objects':[{'kind':'material','id':'article'}],'action':None,'operation':'producer:'+kind,'state':'current','next_at':None}
+    if damage=='no_objects':body['objects']=[]
+    elif damage=='invalid_object':body['objects']=[{'kind':'feed','id':'article'}]
+    elif damage=='empty_id':body['objects']=[{'kind':'material','id':''}]
+    elif damage=='ambiguous_identity':identity=f'job:model-invalid:feed:fetch:other:{kind}:article'
+    elif damage=='mismatched_code':identity=f'job:other:feed:{kind}:article'
+    elif damage=='null_identity':body[{'fetch':'fetch_job_identity','download_media':'media_job_identity','filter':'processing_job_identity','theses':'processing_job_identity'}[kind]]=None
+    else:body['operation']='producer:theses' if kind=='filter' else 'producer:filter'
+    try:
+        with transaction(store.db):
+            store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('untrusted',%s,'background',%s,1)",(identity,json.dumps(body)))
+            store.db.execute('DELETE FROM state WHERE key=%s',(marker,))
+        before=tuple(store.db.execute("SELECT id,identity,body,created,finished,outcome FROM reader_problems WHERE id='untrusted'").fetchone())
+        if kind=='fetch':store.problems.recover_fetch_problems()
+        elif kind=='download_media':store.problems.recover_media_problems()
+        else:store.problems.recover_processing_problems()
+        assert tuple(store.db.execute("SELECT id,identity,body,created,finished,outcome FROM reader_problems WHERE id='untrusted'").fetchone())==before
+    finally:store.db.close()
+
+
+@pytest.mark.parametrize('kind',['fetch','download_media','filter','theses'])
+def test_recovery_resolves_legacy_status_without_identity_override(tmp_path,postgres_url,kind):
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    marker={'fetch':'fetch','download_media':'media','filter':'processing','theses':'processing'}[kind]+'-problems-recovered-v2'
+    identity=f'job:model-invalid:feed:{kind}:article'
+    body={'code':'model-invalid','section':'object','title':'Old','consequence':'Saved','next_step':'Inspect','objects':[{'kind':'material','id':'article'}],'action':None,'operation':'producer:status','state':'current','next_at':None}
+    try:
+        with transaction(store.db):
+            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
+            store.db.execute("INSERT INTO publications(id,platform,external_id,feed_id) VALUES ('article','other_web','article','feed')")
+            store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('legacy',%s,'background',%s,1)",(identity,json.dumps(body)))
+            store.db.execute('DELETE FROM state WHERE key=%s',(marker,))
+        if kind=='fetch':store.problems.recover_fetch_problems()
+        elif kind=='download_media':store.problems.recover_media_problems()
+        else:store.problems.recover_processing_problems()
+        row=store.db.execute("SELECT identity,body,finished,outcome FROM reader_problems WHERE id='legacy'").fetchone()
+        assert row is not None and row['identity']==identity and json.loads(row['body'])==body
+        assert row['finished'] is not None and row['outcome']=='resolved'
+    finally:store.db.close()
