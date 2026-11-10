@@ -63,11 +63,7 @@ def candidates(store: 'Store', job_id: int, now: float) -> list[dict[str, Any]]:
 
 
 def managed_candidates(store: 'Store', job_id: int, now: float) -> list[dict[str, Any]]:
-    """Only per-publication failures with explicit, non-shared codes."""
-    rows=candidates(store,job_id,now)
-    excluded={'codex-choice','ai-permission','youtube-admission','processor-config'}
-    return [dict({k:v for k,v in row.items() if k!='_code_present'},fetch_job_id=str(job_id)) for row in rows
-            if row['_code_present'] and row['code'] and row['code'] not in excluded and not row['code'].startswith('source-')]
+    return managed_candidates_many(store,[job_id],now).get(job_id,[])
 
 
 def managed_candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_suppressed: bool = False, include_youtube: bool = True) -> dict[int,list[dict[str, Any]]]:

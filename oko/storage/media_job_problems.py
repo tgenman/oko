@@ -63,12 +63,7 @@ def candidates(store: 'Store', job_id: int, now: float) -> list[dict[str, Any]]:
 
 
 def managed_candidates(store: 'Store', job_id: int, now: float) -> list[dict[str, Any]]:
-    """Only per-publication failures with explicit, non-shared codes."""
-    rows=candidates_many(store,[job_id],now,include_subtitles=True).get(job_id,[])
-    excluded={'codex-choice','ai-permission','youtube-admission','processor-config'}
-    profiles={'identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'}
-    return [dict({k:v for k,v in row.items() if k not in ('_code_present','_subtitle')},media_job_id=str(job_id)) for row in rows
-            if (row['_code_present'] or row['_subtitle']) and row['code'] and row['code'] not in excluded and (row['code'] not in profiles or row.get('media_profile_event') or row.get('subtitle_event')) and not row['code'].startswith('source-')]
+    return managed_candidates_many(store,[job_id],now,include_subtitles=True).get(job_id,[])
 
 
 def managed_candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_subtitles: bool = False, include_suppressed: bool = False) -> dict[int,list[dict[str, Any]]]:
