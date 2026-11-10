@@ -11,7 +11,7 @@ from oko.storage import problem_links
 from oko.storage.reader_status import changed as status_changed
 from dataclasses import dataclass
 import uuid
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Literal
 
 if TYPE_CHECKING:
     from oko.storage.store import Store
@@ -1952,16 +1952,17 @@ class Problems:
             status_changed(self.db)
         return [row for row in rows if row['id'] in complex_ids]
 
-    def recover_filter_profile_problems(self) -> None:
-        """Recover supported profile-coded filter jobs and preserve ambiguous legacy."""
+    def recover_processing_profile_problems(self, kind: Literal['filter','theses']) -> None:
+        """Recover profile-coded jobs and preserve ambiguous legacy for one stage."""
+        if kind not in ('filter','theses'):raise ValueError('Unsupported processing kind')
         from oko.storage import memberships
         from oko.storage.processing_job_problems import managed_candidates_many
         cursor: int | None=None
         while True:
             with self.db:
                 memberships.lock_graph(self.db)
-                if self.db.execute("SELECT 1 FROM state WHERE key='filter-profile-problems-recovered-v1'").fetchone():return
-                query="""SELECT id FROM jobs WHERE kind='filter' AND item IS NOT NULL AND item<>''
+                if self.db.execute("SELECT 1 FROM state WHERE key=%s",(kind+'-profile-problems-recovered-v1',)).fetchone():return
+                query=f"""SELECT id FROM jobs WHERE kind='{kind}' AND item IS NOT NULL AND item<>''
                     AND reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')"""
                 if cursor is not None:query+=' AND id>%s'
                 rows=self.db.execute(query+' ORDER BY id LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
@@ -1974,69 +1975,26 @@ class Problems:
                     suppressed=bool({part['id'] for part in old}-{part['id'] for part in current})
                     self.sync_processing_problem(row['id'],old,now,allow_rekey=not suppressed)
                 cursor=rows[-1]['id']
-            self.store.fault('filter_profile_problems_recovery_batch')
+            self.store.fault(kind+'_profile_problems_recovery_batch')
         legacy_cursor: str | None=None
         while True:
             with self.db:
                 memberships.lock_graph(self.db)
-                if self.db.execute("SELECT 1 FROM state WHERE key='filter-profile-problems-recovered-v1'").fetchone():return
-                query="""SELECT id,identity FROM reader_problems WHERE finished IS NULL AND identity LIKE 'job:%%'
+                if self.db.execute("SELECT 1 FROM state WHERE key=%s",(kind+'-profile-problems-recovered-v1',)).fetchone():return
+                query=f"""SELECT id,identity FROM reader_problems WHERE finished IS NULL AND identity LIKE 'job:%%'
                     AND body::jsonb->>'code' IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')
-                    AND (identity LIKE '%%:filter:%%' OR body::jsonb->>'status_job_identity' LIKE '%%:filter:%%' OR body::jsonb->>'processing_job_identity' LIKE '%%:filter:%%')
-                    AND (body::jsonb->>'operation' IS NULL OR body::jsonb->>'operation' IN ('producer:status','producer:filter'))
-                    AND (body::jsonb->>'processing_job_id' IS NULL OR body::jsonb->>'filter_profile_event' IS DISTINCT FROM 'true')"""
+                    AND (identity LIKE '%%:{kind}:%%' OR body::jsonb->>'status_job_identity' LIKE '%%:{kind}:%%' OR body::jsonb->>'processing_job_identity' LIKE '%%:{kind}:%%')
+                    AND (body::jsonb->>'operation' IS NULL OR body::jsonb->>'operation' IN ('producer:status','producer:{kind}'))
+                    AND (body::jsonb->>'processing_job_id' IS NULL OR body::jsonb->>'{kind}_profile_event' IS DISTINCT FROM 'true')"""
                 if legacy_cursor is not None:query+=' AND id COLLATE "C">%s'
                 else:query=query.replace('%%','%')
                 records=self.db.execute(query+' ORDER BY id COLLATE "C" LIMIT 100',(legacy_cursor,) if legacy_cursor is not None else ()).fetchall()
                 if not records:
-                    self.db.execute("INSERT INTO state(key,value) VALUES ('filter-profile-problems-recovered-v1','true') ON CONFLICT DO NOTHING")
+                    self.db.execute("INSERT INTO state(key,value) VALUES (%s,'true') ON CONFLICT DO NOTHING",(kind+'-profile-problems-recovered-v1',))
                     return
                 from oko.storage.subtitle_problems import protect_rows
                 protect_rows(self.store,list(records));legacy_cursor=records[-1]['id']
-            self.store.fault('filter_profile_legacy_protection_batch')
-
-    def recover_theses_profile_problems(self) -> None:
-        """Recover supported profile-coded theses jobs and preserve ambiguous legacy."""
-        from oko.storage import memberships
-        from oko.storage.processing_job_problems import managed_candidates_many
-        cursor: int | None=None
-        while True:
-            with self.db:
-                memberships.lock_graph(self.db)
-                if self.db.execute("SELECT 1 FROM state WHERE key='theses-profile-problems-recovered-v1'").fetchone():return
-                query="""SELECT id FROM jobs WHERE kind='theses' AND item IS NOT NULL AND item<>''
-                    AND reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')"""
-                if cursor is not None:query+=' AND id>%s'
-                rows=self.db.execute(query+' ORDER BY id LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
-                if not rows:break
-                now=self.store.wall_clock();ids=[row['id'] for row in rows]
-                before=managed_candidates_many(self.store,ids,now,include_suppressed=True)
-                visible=managed_candidates_many(self.store,ids,now)
-                for row in rows:
-                    old=before.get(row['id'],[]);current=visible.get(row['id'],[])
-                    suppressed=bool({part['id'] for part in old}-{part['id'] for part in current})
-                    self.sync_processing_problem(row['id'],old,now,allow_rekey=not suppressed)
-                cursor=rows[-1]['id']
-            self.store.fault('theses_profile_problems_recovery_batch')
-        legacy_cursor: str | None=None
-        while True:
-            with self.db:
-                memberships.lock_graph(self.db)
-                if self.db.execute("SELECT 1 FROM state WHERE key='theses-profile-problems-recovered-v1'").fetchone():return
-                query="""SELECT id,identity FROM reader_problems WHERE finished IS NULL AND identity LIKE 'job:%%'
-                    AND body::jsonb->>'code' IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')
-                    AND (identity LIKE '%%:theses:%%' OR body::jsonb->>'status_job_identity' LIKE '%%:theses:%%' OR body::jsonb->>'processing_job_identity' LIKE '%%:theses:%%')
-                    AND (body::jsonb->>'operation' IS NULL OR body::jsonb->>'operation' IN ('producer:status','producer:theses'))
-                    AND (body::jsonb->>'processing_job_id' IS NULL OR body::jsonb->>'theses_profile_event' IS DISTINCT FROM 'true')"""
-                if legacy_cursor is not None:query+=' AND id COLLATE "C">%s'
-                else:query=query.replace('%%','%')
-                records=self.db.execute(query+' ORDER BY id COLLATE "C" LIMIT 100',(legacy_cursor,) if legacy_cursor is not None else ()).fetchall()
-                if not records:
-                    self.db.execute("INSERT INTO state(key,value) VALUES ('theses-profile-problems-recovered-v1','true') ON CONFLICT DO NOTHING")
-                    return
-                from oko.storage.subtitle_problems import protect_rows
-                protect_rows(self.store,list(records));legacy_cursor=records[-1]['id']
-            self.store.fault('theses_profile_legacy_protection_batch')
+            self.store.fault(kind+'_profile_legacy_protection_batch')
 
     def recover_processing_problems(self) -> None:
         self.recover_jobs_without_reason('filter')
