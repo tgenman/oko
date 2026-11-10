@@ -285,7 +285,7 @@ def test_interrupted_attempt_uses_new_model_on_next_attempt(postgres_url, tmp_pa
     finally:
         store.db.close()
     restarted = Store(tmp_path, lambda _: None, database_url=postgres_url)
-    execution = Execution(lambda: True)
+    execution = Execution()
     execution._store = restarted
     tasks = JobControl(execution, restarted.clock)
     model = Recording()

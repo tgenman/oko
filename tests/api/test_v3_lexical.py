@@ -21,12 +21,9 @@ def test_textual_query_validates_before_domain_admission(tmp_path):
             assert response.json()['code'] == 'request_invalid'
 
 
-def test_legacy_lifetime_intervals_are_validated_without_enabling_presence():
+def test_legacy_lifetime_intervals_are_validated_without_enabling_presence(tmp_path):
     import pytest
-    from oko.reader.lifetime import Lifetime
     for lease, grace in [(0, 15), (-1, 15), (6, 0), (float('inf'), 15), (float('nan'), 15), (5e-324, 15)]:
         with pytest.raises(ValueError):
-            Lifetime(lease=lease, grace=grace)
-    lifetime = Lifetime(lease=6, grace=15)
-    assert lifetime.admitted()
-    assert not lifetime.should_stop()
+            create_app(tmp_path, api_only=True, lease=lease, grace=grace)
+    create_app(tmp_path, api_only=True, lease=6, grace=15)

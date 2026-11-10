@@ -23,11 +23,6 @@ from oko.workers.processing import FilterWorker, SummaryWorker
 class Host:
     clear_feed_checks: Callable[[],None]
 
-    async def admission_changed(self) -> None:
-        async with self.execution._actions:
-            if not self.execution._live() and not self.stopped:
-                await self._cancel_work()
-
     async def _cancel_work(self) -> None:
         """Cleanup must remain possible after a failed rollback closes SQL."""
         try:
@@ -42,9 +37,9 @@ class Host:
 
     def __init__(self, root: Path, source: FeedAdapter | None, clock: Callable[[], float],
                  fault: Callable[[str], None], shutdown: Callable[[], None],
-                 admitted: Callable[[], bool], should_stop: Callable[[], bool], source_feed: str, rss_enabled: bool, rss_transport: httpx.AsyncBaseTransport | None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None, youtube_captions: CaptionsClient | None = None, youtube_history: HistoryClient | None = None, wall_clock: Callable[[], float] = time.time, database_url: str | None = None) -> None:
+                 source_feed: str, rss_enabled: bool, rss_transport: httpx.AsyncBaseTransport | None, ai_transport: httpx.AsyncBaseTransport | None = None, codex_client: CodexClient | None = None, youtube_captions: CaptionsClient | None = None, youtube_history: HistoryClient | None = None, wall_clock: Callable[[], float] = time.time, database_url: str | None = None) -> None:
         self._database_url = database_url
-        self.execution = Execution(admitted)
+        self.execution = Execution()
         self.codex=codex_client or LocalCodex()
         self.collection=CollectionWorker(self.execution,source,clock,fault,source_feed,rss_enabled,rss_transport,youtube_captions,youtube_history,wall_clock)
         self.jobs=self.collection.jobs
@@ -52,7 +47,7 @@ class Host:
         self.summaries=SummaryWorker(self.execution,self.jobs,clock,self.codex,ai_transport)
         self._root,self._source,self._source_feed=root,source,source_feed
         self._fault,self._clock,self._wall_clock=fault,clock,wall_clock
-        self._shutdown,self._admitted,self._should_stop=shutdown,admitted,should_stop
+        self._shutdown=shutdown
         self._reader_advanced=float('-inf')
         self._closed=False
 
@@ -139,11 +134,6 @@ class Host:
                     if self.execution._store and self.execution._error is None and self.execution.reader_advance and now-self._reader_advanced>=.25:
                         self.execution.reader_advance()
                         self._reader_advanced=now
-                    if not self.execution._live():
-                        if not self._admitted():
-                            await self._cancel_work()
-                        if self._should_stop():
-                            self.execution._stop_requested.set()
                 await asyncio.sleep(.001 if recovering else .02)
         finally:
             self.execution._stop_requested.set()
