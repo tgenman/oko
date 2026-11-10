@@ -145,7 +145,7 @@ class JobRepository:
         if job.kind=='download_media' and previous_media:
             self.store.problems.sync_media_problem(job.id,previous_media,self.store.wall_clock(),successful=True)
         if job.kind in ('filter','theses') and (changed['previous_error'] is not None or changed['previous_code'] is not None):
-            previous_processing=self.store.problems.saved_processing_candidates([job.id]).get(job.id,[])
+            previous_processing=self.store.problems.saved_job_candidates([job.id], 'processing').get(job.id,[])
             if previous_processing:self.store.problems.sync_processing_problem(job.id,previous_processing,self.store.wall_clock())
         if job.kind=='discover':
             codes=((discover_before['reason_code'] or 'work-discover'),) if discover_before and (discover_before['reason_code'] is not None or discover_before['reason_message'] is not None) else ()
@@ -288,7 +288,7 @@ class JobRepository:
         return self.store.jobs.next_job(now,ai_only=True,processing_kind=kind)
 
     def _revoke_running_input(self, row: Any) -> None:
-        previous=self.store.problems.saved_processing_candidates([row['id']]).get(row['id'],[]) if row['reason_message'] is not None or row['reason_code'] is not None else []
+        previous=self.store.problems.saved_job_candidates([row['id']], 'processing').get(row['id'],[]) if row['reason_message'] is not None or row['reason_code'] is not None else []
         processor_previous=self.store.problems.prepare_processor_change([row['id']],self.store.wall_clock())
         changed=job_write(self.store.db, """UPDATE jobs SET status='pending',generation=generation+1,input_snapshot=NULL,
             next=CASE WHEN wait_scope IS NOT NULL AND retry_at>%s THEN next ELSE 0 END,
@@ -369,7 +369,7 @@ class JobRepository:
         current_input=processing_input.input_hash(self.store,item,kind)
         if current_input is None:
             return False
-        stage_previous=self.store.problems.saved_processing_candidates([before['id']]).get(before['id'],[]) if before['reason_message'] is not None or before['reason_code'] is not None else []
+        stage_previous=self.store.problems.saved_job_candidates([before['id']], 'processing').get(before['id'],[]) if before['reason_message'] is not None or before['reason_code'] is not None else []
         affected=[before['id']] if before['processor_visible'] or before['reason_code']=='processor-config' else []
         previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
         self.store.jobs.forget_execution(kind,item)
@@ -396,7 +396,7 @@ class JobRepository:
         collection_jobs.fail(self.store,job,AdapterIssue(code,error,AdapterErrorKind.temporary))
         if valid and job.kind=='filter':self.store.processing.filter_changed(job.item)
         if not processing_input.stage_enabled(self.store, job.item, job.kind):
-            previous=self.store.problems.saved_processing_candidates([job.id]).get(job.id,[])
+            previous=self.store.problems.saved_job_candidates([job.id], 'processing').get(job.id,[])
             changed=job_write(self.store.db, "UPDATE jobs SET status='blocked' WHERE id=%s AND generation=%s AND status='pending' AND CASE WHEN reason_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING id,OLD.reason_code AS previous_code", (job.id, job.generation)).fetchone()
             if changed and (changed['previous_code'] or '').startswith('source-'):
                 from oko.storage import source_groups
@@ -1009,7 +1009,7 @@ class JobRepository:
         source_rows=list(cancelled)
         excluded=skip_problem_jobs or set()
         changed_ids=[row['id'] for row in cancelled if row['id'] not in excluded and (row['reason_message'] is not None or row['reason_code'] is not None)]
-        saved=self.store.problems.saved_media_candidates(changed_ids)
+        saved=self.store.problems.saved_job_candidates(changed_ids, 'media')
         for job_id,previous in saved.items():self.store.problems.sync_media_problem(job_id,previous,self.store.wall_clock())
         for row in db.execute("SELECT j.id,j.item FROM jobs j JOIN media_files m ON m.id=j.item WHERE j.kind='download_media' AND j.status='unavailable' AND j.reason_code='media-metadata-changed' AND m.publication_id=%s AND m.status='ready'",(item,)).fetchall():
             if self.store.media.file(item,row['item']) is None:
@@ -1180,7 +1180,7 @@ class JobRepository:
         processor_previous=self.store.problems.prepare_processor_change(affected,self.store.wall_clock())
         stage_previous: dict[int,list[dict[str,Any]]]={}
         for start in range(0,len(ids),400):
-            stage_previous.update(self.store.problems.saved_processing_candidates(ids[start:start+400]))
+            stage_previous.update(self.store.problems.saved_job_candidates(ids[start:start+400], 'processing'))
         changed=job_write(self.store.db,"""UPDATE jobs SET
             status=CASE WHEN status='running' THEN 'pending' ELSE status END,generation=generation+1,
             reason_message=CASE WHEN wait_scope IS NOT NULL AND retry_at>%s THEN reason_message ELSE NULL END,

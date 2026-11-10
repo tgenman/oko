@@ -1526,19 +1526,6 @@ class Problems:
         return True
 
 
-    def saved_media_candidates(self, job_ids: list[int]) -> dict[int,list[dict[str,Any]]]:
-        if not job_ids:return {}
-        rows=self.db.execute("SELECT identity,body FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:download_media' AND body::jsonb->>'media_job_id'=ANY(%s)",([str(job) for job in job_ids],)).fetchall()
-        groups: dict[int,list[dict[str,Any]]]={}
-        requested={str(job):job for job in job_ids}
-        for row in rows:
-            body=json.loads(row['body'])
-            marker=body.get('media_job_id') if isinstance(body,dict) else None
-            if not isinstance(marker,str) or marker not in requested or not isinstance(body.get('objects'),list):continue
-            body['id']=body.get('media_job_identity',row['identity'])
-            groups.setdefault(requested[marker],[]).append(body)
-        return groups
-
     def sync_media_problem(self, job_id: int, previous: list[dict[str,Any]], now: float, *, successful: bool = False, allow_rekey: bool = True) -> None:
         from oko.storage.media_job_problems import managed_candidates
         previous_subtitle=[dict(candidate) for candidate in previous if candidate.get('subtitle_event')]
@@ -2032,16 +2019,20 @@ class Problems:
         return True
 
 
-    def saved_processing_candidates(self, job_ids: list[int]) -> dict[int,list[dict[str,Any]]]:
+    def saved_job_candidates(self, job_ids: list[int], kind: Literal['media','processing']) -> dict[int,list[dict[str,Any]]]:
         if not job_ids:return {}
-        rows=self.db.execute("SELECT identity,body FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation' IN ('producer:filter','producer:theses') AND body::jsonb->>'processing_job_id'=ANY(%s)",([str(job) for job in job_ids],)).fetchall()
+        if kind=='media':
+            query="SELECT identity,body FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'='producer:download_media' AND body::jsonb->>'media_job_id'=ANY(%s)"
+        else:
+            query="SELECT identity,body FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation' IN ('producer:filter','producer:theses') AND body::jsonb->>'processing_job_id'=ANY(%s)"
+        rows=self.db.execute(query,([str(job) for job in job_ids],)).fetchall()
         groups: dict[int,list[dict[str,Any]]]={}
         requested={str(job):job for job in job_ids}
         for row in rows:
             body=json.loads(row['body'])
-            marker=body.get('processing_job_id') if isinstance(body,dict) else None
+            marker=body.get(kind+'_job_id') if isinstance(body,dict) else None
             if not isinstance(marker,str) or marker not in requested or not isinstance(body.get('objects'),list):continue
-            body['id']=body.get('processing_job_identity',row['identity'])
+            body['id']=body.get(kind+'_job_identity',row['identity'])
             groups.setdefault(requested[marker],[]).append(body)
         return groups
 
