@@ -84,7 +84,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     onChanged: contentChanged => {if (contentChanged) invalidate(); void refresh();},
   });
   const list = createMaterialList({
-    readerApi, fetchMedia,
+    fetchMedia,
     onContext: (card, context, x, y, trigger) => {folderMenu.close(false);feedActions.close(false);newsActions.open(card, context, x, y, trigger);},
     onOpen: card => opened.open(card),
     onRetry: refresh,
@@ -144,7 +144,7 @@ export function createReadingCoordination({readerApi, fetchMedia, debug, menus, 
     onChanged: async (id, removed) => {await menus.folderChanged(id, removed); await changed();},
   });
   const tree = createReadingTree({
-    readerApi, fetchMedia,
+    fetchMedia,
     onSelect: (selection,reason) => {
       newsActions.close(false);
       invalidate();

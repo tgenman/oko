@@ -3,7 +3,6 @@ import {useLayoutEffect,useEffect,useState,useRef} from 'react';
 import type {NavigationEntry} from '../api/generated/types.gen';
 import type {SourceState} from '../api/generated/types.gen';
 export type Navigation={folders:{id:string;title:string;count:number}[];feeds:(NavigationEntry&{folder_id:string})[];count:number};
-import type {ReaderApi} from '../api/reader';
 import {mountSurface} from '../renderer';
 import {createStore,useStore,saved,save,host} from './store';
 
@@ -26,7 +25,7 @@ export function FeedAvatar({url,fetchMedia,kind}:{url:string;fetchMedia:MediaFet
 function Title({title,kind,count,avatar,fetchMedia,completed=false}:{title:string;kind:string;count?:number;avatar?:string;fetchMedia?:MediaFetch;completed?:boolean}) {return <>{avatar&&fetchMedia?<FeedAvatar url={avatar} fetchMedia={fetchMedia} kind={kind}/>:<SourceIcon kind={kind}/> }<span className="tree-title">{title}{completed&&<small className="feed-completed-label">All Read</small>}</span>{count!==undefined&&<span className="tree-count">{count||''}</span>}</>;}
 const byTitle=(a:{title:string;id:string},b:{title:string;id:string})=>a.title.localeCompare(b.title,undefined,{sensitivity:'base'})||a.id.localeCompare(b.id);
 const feedIcon=(feed:Navigation['feeds'][number])=>['youtube','telegram'].includes(feed.kind)?feed.kind:'rss';
-export function createReadingTree({readerApi,onSelect,onFeedSettings,onFeedMenu,onFolderMenu,onWarning,onShowRead,fetchMedia}:{readerApi:ReaderApi;fetchMedia:MediaFetch;onSelect:(selection:Selection,reason:'user'|'reconcile')=>void;onFolderMenu:(folder:Navigation['folders'][number],catalog:Navigation,x:number,y:number,trigger:HTMLElement)=>void;onFeedMenu:(feed:Navigation['feeds'][number],folders:Navigation['folders'],x:number,y:number,trigger:HTMLElement)=>void;onFeedSettings:(id:string,trigger:HTMLElement)=>void;onWarning:()=>void;onShowRead:()=>void}) {
+export function createReadingTree({onSelect,onFeedSettings,onFeedMenu,onFolderMenu,onWarning,onShowRead,fetchMedia}:{fetchMedia:MediaFetch;onSelect:(selection:Selection,reason:'user'|'reconcile')=>void;onFolderMenu:(folder:Navigation['folders'][number],catalog:Navigation,x:number,y:number,trigger:HTMLElement)=>void;onFeedMenu:(feed:Navigation['feeds'][number],folders:Navigation['folders'],x:number,y:number,trigger:HTMLElement)=>void;onFeedSettings:(id:string,trigger:HTMLElement)=>void;onWarning:()=>void;onShowRead:()=>void}) {
   let collapsed:Record<string,boolean>={};
   try {const value:unknown=JSON.parse(saved('oko-reading-collapsed','{}'));if(value&&typeof value==='object'&&!Array.isArray(value))collapsed=value as Record<string,boolean>;}catch{}
   const store=createStore({catalog:{folders:[],feeds:[],count:0} as Navigation,sources:[] as SourceState[],selection:{kind:'all',id:null} as Selection,collapsed,showRead:saved('oko-reading-show-read','false')==='true',width:Number(saved('oko-reading-width','280'))||280});
