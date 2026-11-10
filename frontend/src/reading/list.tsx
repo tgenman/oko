@@ -4,7 +4,6 @@ import {newsTitle} from './title';
 import {useEffect,useLayoutEffect,useRef,useState} from 'react';
 import type {CardView as Card} from './resources';
 import type {Navigation} from './tree';
-import type {ReaderApi} from '../api/reader';
 import {mountSurface} from '../renderer';
 import {reportError} from '../status/debug';
 import type {NewsContext} from './news-actions';
@@ -36,7 +35,7 @@ function Row({card,selected,onOpen,onArrow,onContext,preview,fetchMedia,showSour
   const sources=card.feed_title||card.feed_id||'';
   return <button type="button" className={'material-row '+(selected?'active ':'')+(preview?'news-range-preview':'')} data-card={card.id} aria-pressed={selected} aria-label={(kind?kind+' · ':'')+title+' · '+sources+' · '+date(card)+(card.external_attachment_kinds?.length?' · '+card.external_attachment_kinds.map(externalMediaLabel).join(' · '):'')} onClick={()=>onOpen(card)} {...longPress((x,y,trigger)=>onContext(card,x,y,trigger))} onKeyDown={event=>{if(event.key==='ContextMenu'||event.shiftKey&&event.key==='F10'){event.preventDefault();const rect=event.currentTarget.getBoundingClientRect();onContext(card,rect.left,rect.bottom,event.currentTarget);return;}if(['ArrowUp','ArrowDown'].includes(event.key)){event.preventDefault();onArrow(card.id,event.key==='ArrowDown'?1:-1);}}}><Preview card={card} fetchMedia={fetchMedia}/><span className="card-body"><span className="card-title" title={title}>{title}</span>{status&&<span className="card-kind">{status}</span>}{showSource&&<span className="card-meta"><span className="card-source" title={sources}>{sources}</span></span>}</span></button>;
 }
-export function createMaterialList({readerApi,onOpen,onRetry,onContext,onMore,onNew,fetchMedia}:{readerApi:ReaderApi;onOpen:(card:Card)=>void;onRetry:()=>void;onMore:()=>Promise<void>;onNew:()=>void;onContext:(card:Card,context:NewsContext,x:number,y:number,trigger:HTMLElement)=>void;fetchMedia:MediaFetch}) {
+export function createMaterialList({onOpen,onRetry,onContext,onMore,onNew,fetchMedia}:{onOpen:(card:Card)=>void;onRetry:()=>void;onMore:()=>Promise<void>;onNew:()=>void;onContext:(card:Card,context:NewsContext,x:number,y:number,trigger:HTMLElement)=>void;fetchMedia:MediaFetch}) {
   const stored=saved('oko-material-sort','newest');
   const sort=['newest','oldest'].includes(stored)?stored:'newest';
   const store=createStore({area:'all',cards:[] as Card[],total:0,more:false,newItems:false,preview:[] as string[],selected:null as string|null,title:'All Items',folder:false,status:'Loading items…',retry:false,menu:false,sort,showHidden:false,width:Math.max(320,Math.min(640,Number(saved('oko-material-width','440'))||440))});
