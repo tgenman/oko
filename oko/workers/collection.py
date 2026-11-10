@@ -17,7 +17,7 @@ from oko.collection.rss_adapter import RSSAdapter
 from oko.collection.telegram.adapter import TelegramWebAdapter
 from oko.collection.youtube.adapter import YouTubeAdapter
 from oko.collection.contracts import SourceError, SourceUnavailable, SourceSkipped, SourceDeferred, SourceObservation
-from oko.collection.adapters import ExternalReference, FeedAdapter
+from oko.collection.adapters import ExternalReference, FeedAdapter, PublicationContent
 from oko.collection.adapters import AdapterException, AdapterErrorKind, AdapterIssue
 from oko.collection.telegram.http import TelegramHTTP
 from oko.collection.http import SourceHTTP
@@ -35,7 +35,6 @@ from oko.diagnostics import Journal, diagnostic_source, diagnostic_materials, ca
 from oko.execution import Execution, ActionError
 from oko.workers.control import JobControl, _CollectionAttempt
 from oko.storage.collection_repository import CollectionRepository
-from oko.services.discovery import DiscoveryService
 from oko.services.media import MediaService
 from oko.application.collection_effects import CollectionApplication
 
@@ -62,7 +61,6 @@ class CollectionWorker:
                  wall_clock: Callable[[],float]) -> None:
         self.execution = execution
         self.service=collection_service(execution.require_store)
-        self.discovery=DiscoveryService(lambda: execution.require_store().discovery)
         self.media=media_service(execution.retained_store)
         self._youtube_captions = youtube_captions or LocalCaptions()
         self._youtube_history = youtube_history
@@ -365,7 +363,12 @@ class CollectionWorker:
                             if outcome.observation.identity:
                                 self.service.refresh_identity(feed, outcome.observation.identity.as_info())
                             current.jobs.begin_collection(job)
-                            effects=self.discovery.accept(list(outcome.publications),outcome.cursor,feed,namespace,description=outcome.observation.description,successful=outcome.retry_error is None)
+                            publications=list(outcome.publications)
+                            for discovered in publications:
+                                ref=discovered.metadata.reference if isinstance(discovered,PublicationContent) else discovered.adapter_reference
+                                if ref is None or not ref.key.external_id:
+                                    raise ValueError('Adapter did not return a publication external key')
+                            effects=current.discovery.accept(publications,outcome.cursor,feed,namespace,description=outcome.observation.description,successful=outcome.retry_error is None)
                             CollectionApplication(current.jobs,current.publications,current.processing).apply(effects,job=job)
                             current.jobs.checkpoint('collection_after_result')
                             current.jobs.finish(job)
