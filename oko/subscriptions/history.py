@@ -139,14 +139,6 @@ class History:
         assert result is not None
         return result
 
-    def freeze(self, feed: str, items: list[str]) -> None:
-        row = self.db.execute('SELECT frozen FROM initial_history WHERE feed = %s', (feed,)).fetchone()
-        if not row or row['frozen']:
-            return
-        self._add_members(feed,items)
-        self.db.execute('UPDATE initial_history SET frozen = 1 WHERE feed = %s', (feed,))
-        source_changed(self.db)
-
     def enroll(self, feed: str, items: list[str], complete: bool) -> None:
         self._add_members(feed,items)
         if self.db.execute('UPDATE initial_history SET frozen = 1 , scan_complete = %s WHERE feed = %s AND (frozen IS DISTINCT FROM 1 OR scan_complete IS DISTINCT FROM %s)', (complete, feed, complete)).rowcount:

@@ -56,10 +56,6 @@ class Publications:
         self.store = store
         (store.root/'media').mkdir(exist_ok=True)
 
-    def owns(self, item: str) -> bool:
-        row=material_read.item(self.store.db,item)
-        return row is not None and row['platform'] is not None
-
     def notify_parents(self, item: str, *, preserve_cancelled: bool = False) -> None:
         if not self.store.db.transaction_depth:
             raise RuntimeError('Publication notification requires an owning transaction')
