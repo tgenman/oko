@@ -31,7 +31,7 @@ def worker_library(root, *, text='Useful text', fault=lambda _:None, database_ur
     assert job.kind=='discover'
     discovered(store,[publication_packet(Publication('one','https://example.org/one',100),Material('Title',text),needs_fetch=False)],'{}',job)
     item=store.db.execute('SELECT id FROM publications').fetchone()[0]
-    execution=Execution(lambda:True)
+    execution=Execution()
     execution._store=store
     tasks=JobControl(execution,store.clock)
     return store,item,execution,tasks
@@ -58,7 +58,6 @@ def collection_worker(root,store,source):
     app=create_app(root,token='test',api_only=True)
     worker=app.state.host.collection
     worker.execution._store=store
-    worker.execution._admitted=lambda:True
     from oko.collection.sources import FeedRuntime,SourceSettings
     worker._sources['fixture']=FeedRuntime(source,SourceSettings('fixture','injected','https://fixture.invalid/feed',0,None),'injected')
     return worker

@@ -30,8 +30,7 @@ def read_locked(execution: 'Execution') -> Callable[[Callable[P, Awaitable[T]]],
 
 
 class Execution:
-    def __init__(self, admitted: Callable[[], bool]) -> None:
-        self._admitted = admitted
+    def __init__(self) -> None:
         self._actions = asyncio.Lock()
         self._stop_requested = asyncio.Event()
         self._store: Store | None = None
@@ -49,7 +48,7 @@ class Execution:
 
 
     def _live(self) -> bool:
-        return not self.stopped and self._error is None and self.enabled and self._admitted()
+        return not self.stopped and self._error is None and self.enabled
 
 
     def require_store(self) -> Store:

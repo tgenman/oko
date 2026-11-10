@@ -22,7 +22,7 @@ from oko.processing.codex import CodexClient
 from oko.host import Host
 from oko.application.reader import ReaderApplication
 from oko.execution import ActionError
-from oko.reader.lifetime import Lifetime
+from oko.reader.lifetime import validate_legacy_intervals
 from oko.reader import api_v3
 from oko.reader.password_auth import PasswordAccess, access_response, install_login
 from oko.reader.http_schemas import SchemaRoute
@@ -57,16 +57,16 @@ def create_app(root: Path, *, source: FeedAdapter | None = None, token: str | No
             raise ValueError('Public URL must be a local HTTP or explicit HTTPS origin')
         public_host = parsed.netloc
     password_access = PasswordAccess(root, wall_clock) if persistent or (public_url and urlsplit(public_url).scheme == 'https') else None
-    lifetime = Lifetime(lease=lease, grace=grace)
+    validate_legacy_intervals(lease, grace)
     token = token or secrets.token_urlsafe(32)
     instance_id = secrets.token_hex(16)
-    runtime = Host(root, source, clock, fault, shutdown, lifetime.admitted, lifetime.should_stop, source_feed, rss_enabled, rss_transport, ai_transport, codex_client, youtube_captions, youtube_history, wall_clock, database_url)
+    runtime = Host(root, source, clock, fault, shutdown, source_feed, rss_enabled, rss_transport, ai_transport, codex_client, youtube_captions, youtube_history, wall_clock, database_url)
     application = ReaderApplication(runtime.execution, runtime.jobs, clock=clock, wall_clock=wall_clock,
         sources=runtime.collection._sources, sync_sources=runtime.collection._sync_sources,
         interval_changed=lambda value: setattr(runtime.collection, '_collection_interval', value),
         source_description=runtime.collection._collection.description, rss_transport=rss_transport, ai_transport=ai_transport,
         telegram_http=runtime.collection._telegram_http, codex=runtime.codex,
-        stop=runtime.stop, admission_changed=runtime.admission_changed, set_power=runtime.set_power)
+        stop=runtime.stop, set_power=runtime.set_power)
     journal = Journal(root, token)
     runtime.collection.clean_collection=application._clean_collection
     runtime.clear_feed_checks=application._feed_checks.clear

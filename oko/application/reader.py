@@ -42,7 +42,7 @@ class StatusSnapshot:
 
 
 class ReaderApplication:
-    def __init__(self, execution: Execution, jobs: JobControl, *, clock: Callable[[], float], wall_clock: Callable[[], float], sources: dict[str, FeedRuntime], sync_sources: Callable[[], None], interval_changed: Callable[[float], None], source_description: Callable[[str], str | None], rss_transport: httpx.AsyncBaseTransport | None, ai_transport: httpx.AsyncBaseTransport | None, telegram_http: TelegramHTTP, codex: CodexClient, stop: Callable[[], Awaitable[None]], admission_changed: Callable[[], Awaitable[None]], set_power: Callable[[bool], Awaitable[None]]) -> None:
+    def __init__(self, execution: Execution, jobs: JobControl, *, clock: Callable[[], float], wall_clock: Callable[[], float], sources: dict[str, FeedRuntime], sync_sources: Callable[[], None], interval_changed: Callable[[float], None], source_description: Callable[[str], str | None], rss_transport: httpx.AsyncBaseTransport | None, ai_transport: httpx.AsyncBaseTransport | None, telegram_http: TelegramHTTP, codex: CodexClient, stop: Callable[[], Awaitable[None]], set_power: Callable[[bool], Awaitable[None]]) -> None:
         self.execution, self.jobs = execution, jobs
         self.subscriptions = subscription_service(execution.require_store)
         self.queries = reader_queries(execution.require_store)
@@ -61,7 +61,7 @@ class ReaderApplication:
         self._source_description = source_description
         self._rss_transport, self._ai_transport = rss_transport, ai_transport
         self._telegram_http, self._codex_client = telegram_http, codex
-        self.stop, self.admission_changed, self.set_power = stop, admission_changed, set_power
+        self.stop, self.set_power = stop, set_power
         self._cancel = jobs.cancel
         self._feed_checks: dict[str, str] = {}
         self._last_problems: dict[str, Any] = dict(current=[], recent=[], count=0, updated_at=wall_clock())
@@ -112,9 +112,6 @@ class ReaderApplication:
     def _live(self) -> bool:
         return self.execution._live()
 
-    def _admitted(self) -> bool:
-        return self.execution._admitted()
-
     def require_work(self) -> None:
         self.execution.require_work()
 
@@ -135,7 +132,7 @@ class ReaderApplication:
             binding=bindings.get(feed['id'])
             feed['collection_access'] = 'Web' if binding and binding['kind']=='web' else feed.get('transport') or feed['kind']
         sources = current.collection_status.snapshot(feeds, self._live(),
-            'Oko is stopped' if not self.enabled else 'Waiting for reader presence' if not self._admitted() else 'Work is paused',
+            'Oko is stopped' if not self.enabled else 'Work is paused',
             {identity: dict(generation=attempt.job.generation, elapsed_seconds=max(0.,self._clock()-attempt.started),stage=attempt.capture.stage)
              for identity, attempt in self.jobs._collection_active.items()}, details=feed_id is not None)
         self._collection_revision += 1
