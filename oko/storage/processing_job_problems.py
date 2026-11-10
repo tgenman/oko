@@ -49,10 +49,6 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
     return grouped
 
 
-def candidates(store: 'Store', job_id: int, now: float) -> list[dict[str, Any]]:
-    return candidates_many(store,[job_id],now).get(job_id,[])
-
-
 def managed_candidates(store: 'Store', job_id: int, now: float) -> list[dict[str, Any]]:
     return managed_candidates_many(store,[job_id],now).get(job_id,[])
 

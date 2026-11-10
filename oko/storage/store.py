@@ -85,8 +85,6 @@ class Store:
             self.reading = ReadingComposition(self)
             self.youtube = YouTubeAccess(self)
             self.problems = Problems(self)
-            from oko.storage.incomplete_index import recover as recover_incomplete_class
-            recover_incomplete_class(self)
             from oko.storage.incomplete_group_draft import recover_group_keys,recover_group_problems,TransactionGroupDraft
             if self.db.execute("SELECT 1 FROM state WHERE key='experimental-incomplete-problems-v1'").fetchone():
                 self.incomplete_draft=TransactionGroupDraft(self)
