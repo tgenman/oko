@@ -3,7 +3,6 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from typing import Any, Protocol
 from oko.processing.execution import CodexSettings
-from oko.processing.config import ProcessorConfig
 from oko.domain.processing import Kind, ProcessingInput, ProcessingPreparation
 from oko.services.access import repository_access
 from oko.processing.contracts import FilterResult, Theses
@@ -20,7 +19,6 @@ class ProcessingOperations(Protocol):
     def prepare(self, item: str, kind: Kind) -> ProcessingPreparation: ...
     def current(self, value: ProcessingInput) -> bool: ...
     def apply(self, value: ProcessingInput, result: FilterResult | Theses | None, origin: dict[str, Any] | None) -> None: ...
-    def processor_config(self) -> ProcessorConfig | None: ...
     def codex_config(self) -> CodexSettings | None: ...
     def refresh(self, item: str) -> None: ...
     def regenerate(self, item: str, kind: Kind) -> bool: ...
@@ -57,10 +55,6 @@ class ProcessingService:
         if result is not None:
             result.validate_sources(value.request)
         self._repository().apply(value,result,origin)
-
-    @repository_access
-    def processor_config(self) -> ProcessorConfig | None:
-        return self._repository().processor_config()
 
     @repository_access
     def codex_config(self) -> CodexSettings | None:

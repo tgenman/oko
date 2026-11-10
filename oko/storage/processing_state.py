@@ -4,7 +4,6 @@ from typing import Any, Literal, TYPE_CHECKING
 from dataclasses import dataclass
 from oko.storage import processing_input as publication_input
 from oko.processing.contracts import ProcessingRequest, FilterResult, Theses
-from oko.processing.config import ProcessorConfig
 from oko.processing.execution import CodexSettings
 if TYPE_CHECKING:
     from oko.storage.store import Store
@@ -68,9 +67,6 @@ class ProcessingRepository:
 
     def satisfied(self, item: str, kind: Kind) -> bool:
         return self.store.filters.read(item)['status']=='done' if kind=='filter' else self.store.processing.theses.read(item) is not None
-
-    def processor_config(self) -> ProcessorConfig | None:
-        return self.store.processor_config()
 
     def codex_config(self) -> CodexSettings | None:
         return self.store.codex_config()
