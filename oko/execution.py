@@ -97,12 +97,6 @@ class _ExternalCheck:
 
         return wait()
 
-    def follow(self, later: '_ExternalCheck') -> '_ExternalCheck':
-        # Telegram's multi-step connection keeps its original Store, but the
-        # final info call supplies the acceptance generation. Do not strengthen
-        # this to a single generation spanning the whole connection.
-        return _ExternalCheck(self._runtime, self._store, later._epoch)
-
     @asynccontextmanager
     async def accept(self, *, require_work: bool = False, failure: ActionError | None = None) -> AsyncIterator[Store]:
         runtime = self._runtime
