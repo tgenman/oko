@@ -116,15 +116,15 @@ class Store:
             self.problems.recover_fetch_identity_unconfirmed(additional=True)
             self.problems.recover_media_problems()
             self.problems.recover_media_null_problems()
-            self.problems.recover_media_profile_problems()
+            self.problems.recover_profile_problems('media')
             self.problems.recover_subtitles()
             self.problems.recover_subtitles(profile_only=True)
             with self.db:
                 self.problems.recover_processor_duplicates(self.wall_clock())
                 self.problems.finish_processor_change([],None,self.wall_clock())
             self.problems.recover_processing_problems()
-            self.problems.recover_processing_profile_problems('filter')
-            self.problems.recover_processing_profile_problems('theses')
+            self.problems.recover_profile_problems('filter')
+            self.problems.recover_profile_problems('theses')
             from oko.storage.source_groups import recover as recover_source_groups
             recover_source_groups(self)
             if self.db.execute("SELECT 1 FROM state WHERE key LIKE 'source-youtube-timed:%%' LIMIT 1").fetchone():

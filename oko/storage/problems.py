@@ -1399,53 +1399,6 @@ class Problems:
                 self.store.fault('subtitle_profile_legacy_protection_batch')
         with self.db:self.db.execute("INSERT INTO state(key,value) VALUES (%s,'true') ON CONFLICT DO NOTHING",(marker,))
 
-    def recover_media_profile_problems(self) -> None:
-        """Recover profile-coded non-caption file errors by their Job owner."""
-        from oko.storage import memberships
-        cursor: int | None=None
-        while True:
-            with self.db:
-                memberships.lock_graph(self.db)
-                if self.db.execute("SELECT 1 FROM state WHERE key='media-profile-problems-recovered-v1'").fetchone():return
-                query="""SELECT j.id FROM jobs j LEFT JOIN media_files m ON m.id=j.item
-                    WHERE j.kind='download_media' AND j.item IS NOT NULL AND j.item<>''
-                    AND j.reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')
-                    AND m.resource_key IS DISTINCT FROM 'youtube:subtitles'"""
-                if cursor is not None:query+=' AND j.id>%s'
-                rows=self.db.execute(query+' ORDER BY j.id LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
-                if not rows:break
-                from oko.storage.media_job_problems import managed_candidates_many
-                now=self.store.wall_clock()
-                ids=[row['id'] for row in rows]
-                before=managed_candidates_many(self.store,ids,now,include_suppressed=True)
-                visible=managed_candidates_many(self.store,ids,now)
-                for row in rows:
-                    old=before.get(row['id'],[]);current=visible.get(row['id'],[])
-                    suppressed=bool({part['id'] for part in old}-{part['id'] for part in current})
-                    self.sync_media_problem(row['id'],old,now,allow_rekey=not suppressed)
-                cursor=rows[-1]['id']
-            self.store.fault('media_profile_problems_recovery_batch')
-        legacy_cursor: str | None=None
-        while True:
-            with self.db:
-                memberships.lock_graph(self.db)
-                if self.db.execute("SELECT 1 FROM state WHERE key='media-profile-problems-recovered-v1'").fetchone():return
-                query="""SELECT id,identity FROM reader_problems WHERE finished IS NULL AND identity LIKE 'job:%%'
-                    AND body::jsonb->>'code' IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')
-                    AND (identity LIKE '%%:download_media:%%' OR body::jsonb->>'status_job_identity' LIKE '%%:download_media:%%' OR body::jsonb->>'media_job_identity' LIKE '%%:download_media:%%')
-                    AND (body::jsonb->>'operation' IS NULL OR body::jsonb->>'operation' IN ('producer:status','producer:download_media'))
-                    AND (body::jsonb->>'media_job_id' IS NULL OR body::jsonb->>'media_profile_event' IS DISTINCT FROM 'true')"""
-                if legacy_cursor is not None:query+=' AND id COLLATE "C">%s'
-                else:query=query.replace('%%','%')
-                records=self.db.execute(query+' ORDER BY id COLLATE "C" LIMIT 100',(legacy_cursor,) if legacy_cursor is not None else ()).fetchall()
-                if not records:
-                    self.db.execute("INSERT INTO state(key,value) VALUES ('media-profile-problems-recovered-v1','true') ON CONFLICT DO NOTHING")
-                    return
-                from oko.storage.subtitle_problems import protect_rows
-                protect_rows(self.store,list(records))
-                legacy_cursor=records[-1]['id']
-            self.store.fault('media_profile_legacy_protection_batch')
-
     def recover_media_null_problems(self) -> None:
         """Recover old NULL-code file errors in restartable transaction-sized pages."""
         from oko.storage import memberships
@@ -1952,28 +1905,45 @@ class Problems:
             status_changed(self.db)
         return [row for row in rows if row['id'] in complex_ids]
 
-    def recover_processing_profile_problems(self, kind: Literal['filter','theses']) -> None:
+    def recover_profile_problems(self, kind: Literal['media','filter','theses']) -> None:
         """Recover profile-coded jobs and preserve ambiguous legacy for one stage."""
-        if kind not in ('filter','theses'):raise ValueError('Unsupported processing kind')
+        if kind not in ('media','filter','theses'):raise ValueError('Unsupported recovery kind')
         from oko.storage import memberships
-        from oko.storage.processing_job_problems import managed_candidates_many
+        from oko.storage.media_job_problems import managed_candidates_many as media_candidates
+        from oko.storage.processing_job_problems import managed_candidates_many as processing_candidates
+        if kind=='media':
+            job_kind, job_field, job_id, event = 'download_media', 'media_job_identity', 'media_job_id', 'media_profile_event'
+            job_query="""SELECT j.id FROM jobs j LEFT JOIN media_files m ON m.id=j.item
+                WHERE j.kind='download_media' AND j.item IS NOT NULL AND j.item<>''
+                AND j.reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')
+                AND m.resource_key IS DISTINCT FROM 'youtube:subtitles'"""
+            cursor_column='j.id'
+        else:
+            job_kind, job_field, job_id, event = kind, 'processing_job_identity', 'processing_job_id', kind+'_profile_event'
+            job_query=f"""SELECT id FROM jobs WHERE kind='{kind}' AND item IS NOT NULL AND item<>''
+                AND reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')"""
+            cursor_column='id'
         cursor: int | None=None
         while True:
             with self.db:
                 memberships.lock_graph(self.db)
                 if self.db.execute("SELECT 1 FROM state WHERE key=%s",(kind+'-profile-problems-recovered-v1',)).fetchone():return
-                query=f"""SELECT id FROM jobs WHERE kind='{kind}' AND item IS NOT NULL AND item<>''
-                    AND reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')"""
-                if cursor is not None:query+=' AND id>%s'
-                rows=self.db.execute(query+' ORDER BY id LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
+                query=job_query
+                if cursor is not None:query+=' AND '+cursor_column+'>%s'
+                rows=self.db.execute(query+' ORDER BY '+cursor_column+' LIMIT 100',(cursor,) if cursor is not None else ()).fetchall()
                 if not rows:break
                 now=self.store.wall_clock();ids=[row['id'] for row in rows]
-                before=managed_candidates_many(self.store,ids,now,include_suppressed=True)
-                visible=managed_candidates_many(self.store,ids,now)
+                if kind=='media':
+                    before=media_candidates(self.store,ids,now,include_suppressed=True)
+                    visible=media_candidates(self.store,ids,now)
+                else:
+                    before=processing_candidates(self.store,ids,now,include_suppressed=True)
+                    visible=processing_candidates(self.store,ids,now)
                 for row in rows:
                     old=before.get(row['id'],[]);current=visible.get(row['id'],[])
                     suppressed=bool({part['id'] for part in old}-{part['id'] for part in current})
-                    self.sync_processing_problem(row['id'],old,now,allow_rekey=not suppressed)
+                    if kind=='media':self.sync_media_problem(row['id'],old,now,allow_rekey=not suppressed)
+                    else:self.sync_processing_problem(row['id'],old,now,allow_rekey=not suppressed)
                 cursor=rows[-1]['id']
             self.store.fault(kind+'_profile_problems_recovery_batch')
         legacy_cursor: str | None=None
@@ -1983,9 +1953,9 @@ class Problems:
                 if self.db.execute("SELECT 1 FROM state WHERE key=%s",(kind+'-profile-problems-recovered-v1',)).fetchone():return
                 query=f"""SELECT id,identity FROM reader_problems WHERE finished IS NULL AND identity LIKE 'job:%%'
                     AND body::jsonb->>'code' IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')
-                    AND (identity LIKE '%%:{kind}:%%' OR body::jsonb->>'status_job_identity' LIKE '%%:{kind}:%%' OR body::jsonb->>'processing_job_identity' LIKE '%%:{kind}:%%')
-                    AND (body::jsonb->>'operation' IS NULL OR body::jsonb->>'operation' IN ('producer:status','producer:{kind}'))
-                    AND (body::jsonb->>'processing_job_id' IS NULL OR body::jsonb->>'{kind}_profile_event' IS DISTINCT FROM 'true')"""
+                    AND (identity LIKE '%%:{job_kind}:%%' OR body::jsonb->>'status_job_identity' LIKE '%%:{job_kind}:%%' OR body::jsonb->>'{job_field}' LIKE '%%:{job_kind}:%%')
+                    AND (body::jsonb->>'operation' IS NULL OR body::jsonb->>'operation' IN ('producer:status','producer:{job_kind}'))
+                    AND (body::jsonb->>'{job_id}' IS NULL OR body::jsonb->>'{event}' IS DISTINCT FROM 'true')"""
                 if legacy_cursor is not None:query+=' AND id COLLATE "C">%s'
                 else:query=query.replace('%%','%')
                 records=self.db.execute(query+' ORDER BY id COLLATE "C" LIMIT 100',(legacy_cursor,) if legacy_cursor is not None else ()).fetchall()
