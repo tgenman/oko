@@ -25,7 +25,6 @@ class SourceSettings:
     feed: str
     transport: str
     url: str
-    initial_days: int
     initial_history: dict[str, Any] | None
     deleting: bool = False
     telegram: TelegramAccess | None = None
@@ -51,7 +50,7 @@ class Sources:
                  captions: CaptionsClient, history: HistoryClient | None,
                  telegram_transport: httpx.AsyncBaseTransport | None = None,
                  publication_transport: httpx.AsyncBaseTransport | None = None) -> None:
-        self.sources: dict[str, FeedRuntime] = {source_feed: FeedRuntime(source,SourceSettings(source_feed,'injected','https://fixture.invalid/feed',0,None),'injected')} if source else {}
+        self.sources: dict[str, FeedRuntime] = {source_feed: FeedRuntime(source,SourceSettings(source_feed,'injected','https://fixture.invalid/feed',None),'injected')} if source else {}
         self._injected = source_feed if source else None
         self._rss_enabled, self._transport = rss_enabled, transport
         self._captions, self._history = captions, history
