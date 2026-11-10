@@ -156,6 +156,33 @@ def legacy_discover_classification(identity: str, body: Any) -> str:
     return 'ambiguous' if ':discover' in tail else 'other'
 
 
+def _parse_legacy_problem_records(records: Any, family: Literal['fetch','download_media','processing']) -> list[tuple[Any,dict[str,Any],str,str,str]]:
+    """Select only structurally attributable legacy problem identities."""
+    parsed=[]
+    kinds=('fetch','discover','download_media','filter','theses','read','delete','feed-delete')
+    field='processing_job_identity' if family=='processing' else 'media_job_identity' if family=='download_media' else 'fetch_job_identity'
+    for record in records:
+        try:body=json.loads(record['body'])
+        except (ValueError,TypeError):continue
+        if not isinstance(body,dict) or not isinstance(body.get('code'),str) or not isinstance(body.get('objects'),list):continue
+        if not body['objects'] or any(not isinstance(obj,dict) or obj.get('kind')!='material' or not isinstance(obj.get('id'),str) or not obj['id'] for obj in body['objects']):continue
+        identity=body.get(field,record['identity']);prefix='job:'+body['code']+':'
+        if not isinstance(identity,str) or not identity.startswith(prefix):continue
+        tail=identity[len(prefix):]
+        found=[kind for kind in kinds if ':'+kind+':' in tail]
+        if len(found)!=1:continue
+        kind=found[0]
+        if family=='processing':
+            if kind not in ('filter','theses') or body.get('operation') not in (None,'producer:status','producer:'+kind):continue
+        elif kind!=family:continue
+        delimiter=':'+kind+':'
+        if tail.count(delimiter)!=1:continue
+        feed,item=tail.split(delimiter,1)
+        if not feed or not item:continue
+        parsed.append((record,body,feed,item,kind))
+    return parsed
+
+
 class Problems:
     def __init__(self, store: 'Store') -> None:
         self.store = store
@@ -868,21 +895,7 @@ class Problems:
             if problem_cursor is not None:query+=' AND (created,id COLLATE "C")>(%s,%s)'
             records=self.db.execute(query+' ORDER BY created,id COLLATE "C" LIMIT 100',problem_cursor if problem_cursor is not None else ()).fetchall()
             if not records:break
-            parsed=[]
-            for record in records:
-                try:body=json.loads(record['body'])
-                except (ValueError,TypeError):continue
-                if not isinstance(body,dict) or not isinstance(body.get('code'),str) or not isinstance(body.get('objects'),list):continue
-                if not body['objects'] or any(not isinstance(obj,dict) or obj.get('kind')!='material' or not isinstance(obj.get('id'),str) or not obj['id'] for obj in body['objects']):continue
-                code=body['code'];identity=body.get('fetch_job_identity',record['identity']);prefix='job:'+code+':'
-                if not isinstance(identity,str) or not identity.startswith(prefix):continue
-                tail=identity[len(prefix):]
-                kinds=('fetch','discover','download_media','filter','theses','read','delete','feed-delete')
-                found=[kind for kind in kinds if ':'+kind+':' in tail]
-                if found!=['fetch'] or tail.count(':fetch:')!=1:continue
-                feed,item=tail.split(':fetch:',1)
-                if not feed or not item:continue
-                parsed.append((record,body,feed,item))
+            parsed=[(record,body,feed,item) for record,body,feed,item,_ in _parse_legacy_problem_records(records,'fetch')]
             items=sorted({item for _,_,_,item in parsed});feeds=sorted({feed for _,_,feed,_ in parsed})
             with self.db:
                 jobs={row['item']:row for row in self.db.execute("SELECT id,item FROM jobs WHERE kind='fetch' AND item=ANY(%s)",(items,))} if items else {}
@@ -1409,21 +1422,7 @@ class Problems:
             if problem_cursor is not None:query+=' AND (created,id COLLATE "C")>(%s,%s)'
             records=self.db.execute(query+' ORDER BY created,id COLLATE "C" LIMIT 100',problem_cursor if problem_cursor is not None else ()).fetchall()
             if not records:break
-            parsed=[]
-            for record in records:
-                try:body=json.loads(record['body'])
-                except (ValueError,TypeError):continue
-                if not isinstance(body,dict) or not isinstance(body.get('code'),str) or not isinstance(body.get('objects'),list):continue
-                if not body['objects'] or any(not isinstance(obj,dict) or obj.get('kind')!='material' or not isinstance(obj.get('id'),str) or not obj['id'] for obj in body['objects']):continue
-                code=body['code'];identity=body.get('media_job_identity',record['identity']);prefix='job:'+code+':'
-                if not isinstance(identity,str) or not identity.startswith(prefix):continue
-                tail=identity[len(prefix):]
-                kinds=('fetch','discover','download_media','filter','theses','read','delete','feed-delete')
-                found=[kind for kind in kinds if ':'+kind+':' in tail]
-                if found!=['download_media'] or tail.count(':download_media:')!=1:continue
-                feed,item=tail.split(':download_media:',1)
-                if not feed or not item:continue
-                parsed.append((record,body,feed,item))
+            parsed=[(record,body,feed,item) for record,body,feed,item,_ in _parse_legacy_problem_records(records,'download_media')]
             items=sorted({item for _,_,_,item in parsed});feeds=sorted({feed for _,_,feed,_ in parsed})
             with self.db:
                 jobs={row['item']:row for row in self.db.execute("SELECT id,item FROM jobs WHERE kind='download_media' AND item=ANY(%s)",(items,))} if items else {}
@@ -1920,24 +1919,7 @@ class Problems:
             if problem_cursor is not None:query+=' AND (created,id COLLATE "C")>(%s,%s)'
             records=self.db.execute(query+' ORDER BY created,id COLLATE "C" LIMIT 100',problem_cursor if problem_cursor is not None else ()).fetchall()
             if not records:break
-            parsed=[]
-            for record in records:
-                try:body=json.loads(record['body'])
-                except (ValueError,TypeError):continue
-                if not isinstance(body,dict) or not isinstance(body.get('code'),str) or not isinstance(body.get('objects'),list):continue
-                if not body['objects'] or any(not isinstance(obj,dict) or obj.get('kind')!='material' or not isinstance(obj.get('id'),str) or not obj['id'] for obj in body['objects']):continue
-                code=body['code'];identity=body.get('processing_job_identity',record['identity']);prefix='job:'+code+':'
-                if not isinstance(identity,str) or not identity.startswith(prefix):continue
-                tail=identity[len(prefix):]
-                kinds=('fetch','discover','download_media','filter','theses','read','delete','feed-delete')
-                found=[kind for kind in kinds if ':'+kind+':' in tail]
-                if len(found)!=1 or found[0] not in ('filter','theses'):continue
-                kind=found[0];delimiter=':'+kind+':'
-                if body.get('operation') not in (None,'producer:status','producer:'+kind):continue
-                if tail.count(delimiter)!=1:continue
-                feed,item=tail.split(delimiter,1)
-                if not feed or not item:continue
-                parsed.append((record,body,feed,item,kind))
+            parsed=_parse_legacy_problem_records(records,'processing')
             items=sorted({item for _,_,_,item,_ in parsed});feeds=sorted({feed for _,_,feed,_,_ in parsed})
             with self.db:
                 jobs={(row['kind'],row['item']):row for row in self.db.execute("SELECT id,kind,item,reason_code FROM jobs WHERE kind IN ('filter','theses') AND item=ANY(%s)",(items,))} if items else {}
