@@ -4,16 +4,6 @@ import pytest
 from oko.storage.postgres_migrations import migrate, verify
 
 
-def test_problem_rowid_cutover_preserves_current_and_history(postgres_database_url):
-    from oko.storage.postgres_schema import MIGRATIONS
-    with psycopg.connect(postgres_database_url,autocommit=True) as db:
-        migrate(db,MIGRATIONS[:63])
-        db.execute("INSERT INTO reader_problems(id,identity,origin,body,created,finished,outcome) VALUES ('open','a','background','{}',1,NULL,NULL),('old','b','action','{}',2,3,'resolved')")
-        before=db.execute('SELECT id,identity,origin,body,created,finished,outcome FROM reader_problems ORDER BY id').fetchall()
-        migrate(db,MIGRATIONS)
-        assert db.execute('SELECT id,identity,origin,body,created,finished,outcome FROM reader_problems ORDER BY id').fetchall()==before
-        assert db.execute("SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='reader_problems' AND column_name='rowid'").fetchone()[0]==0
-        verify(db,MIGRATIONS)
 
 
 def test_problem_cleanup_rolls_back_with_caller(tmp_path,postgres_url):

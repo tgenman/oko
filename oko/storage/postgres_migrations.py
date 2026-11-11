@@ -10,11 +10,11 @@ import hashlib
 from typing import Any
 
 import psycopg
-from psycopg import sql
 from psycopg.pq import TransactionStatus
 
 
 _LOCK = 0x4F4B4F534348454D
+_ADOPTED_LEDGER_SHA256 = '5678f338cfe99dd2e14b62d87cb16ff394d7cfd03d5a84cc51d6e78454a9e11c'
 
 
 class SchemaMismatch(RuntimeError):
@@ -26,27 +26,17 @@ class Migration:
     version: int
     name: str
     sql: str
-    prelude_sql: str = ''
-    prelude_start: int = 0
-    prelude_before: int = 0
 
     @property
     def checksum(self) -> str:
-        source = self.sql.encode('utf-8')
-        if self.prelude_sql:
-            source += b'\0' + str(self.prelude_start).encode() + b'\0' + str(self.prelude_before).encode() + b'\0' + self.prelude_sql.encode('utf-8')
-        return hashlib.sha256(source).hexdigest()
+        return hashlib.sha256(self.sql.encode('utf-8')).hexdigest()
 
 
 def _validate(migrations: Sequence[Migration]) -> None:
-    if [migration.version for migration in migrations] != list(range(1, len(migrations) + 1)):
-        raise ValueError('Schema migrations must be consecutive, starting at 1')
+    if not migrations or [m.version for m in migrations] != list(range(128, 128 + len(migrations))):
+        raise ValueError('Schema migrations must be consecutive, starting at 128')
     if any(not migration.name or not migration.sql.strip() for migration in migrations):
         raise ValueError('Schema migrations need a name and SQL')
-    if any((migration.prelude_sql and not 0 < migration.prelude_start <= migration.prelude_before < migration.version) or
-           (not migration.prelude_sql and (migration.prelude_start or migration.prelude_before))
-           for migration in migrations):
-        raise ValueError('Invalid migration prelude')
 
 
 def _installed(db: psycopg.Connection[Any], migrations: Sequence[Migration]) -> int:
@@ -80,53 +70,19 @@ def migrate(db: psycopg.Connection[Any], migrations: Sequence[Migration]) -> Non
             db.execute('''CREATE TABLE IF NOT EXISTS oko_schema_migrations (
                 version integer PRIMARY KEY, name text NOT NULL, checksum text NOT NULL,
                 applied_at timestamptz NOT NULL DEFAULT clock_timestamp())''')
+            rows = db.execute('SELECT version,name,checksum FROM oko_schema_migrations ORDER BY version').fetchall()
+            if rows and rows[-1][0] == 127:
+                # One-time adoption of the fully migrated installation. No older schema is supported.
+                fingerprint = hashlib.sha256(''.join(f'{version}:{name}:{checksum}\n' for version, name, checksum in rows).encode()).hexdigest()
+                if len(rows) != 127 or fingerprint != _ADOPTED_LEDGER_SHA256:
+                    raise SchemaMismatch('Expected the complete, unmodified version 127 schema')
+                db.execute('DELETE FROM oko_schema_migrations')
+                baseline = migrations[0]
+                db.execute('INSERT INTO oko_schema_migrations(version,name,checksum) VALUES (%s,%s,%s)',
+                           (baseline.version, baseline.name, baseline.checksum))
             installed = _installed(db, migrations)
-            # A later migration may carry a checksummed prelude that must run
-            # before immutable legacy migrations in this same transaction.
-            pending_preludes = [migration for migration in migrations[installed:]
-                                if migration.prelude_sql and installed < migration.prelude_before]
             for migration in migrations[installed:]:
-                for later in reversed(pending_preludes):
-                    if migration.version == max(later.prelude_start, installed + 1):
-                        db.execute(later.prelude_sql, prepare=False)
-                if (migration.version, migration.name) == (10, 'feed-details'):
-                    # Older writers could populate feeds.created_at before details.created.
-                    schema = db.execute('SELECT current_schema()').fetchone()
-                    if not schema or schema[0] is None:
-                        raise SchemaMismatch('Migration 10 requires a current schema')
-                    db.execute(sql.SQL('''UPDATE {}.feed_details d SET created=f.created_at
-                        FROM {}.feeds f WHERE d.feed=f.id AND d.created IS NULL
-                        AND f.created_at IS NOT NULL''').format(sql.Identifier(schema[0]), sql.Identifier(schema[0])))
-                if (migration.version, migration.name) == (53, 'feed-processing-copies'):
-                    # Preserve unused legacy copies verbatim before the old DDL drops them.
-                    schema = db.execute('SELECT current_schema()').fetchone()
-                    if not schema or schema[0] is None:
-                        raise SchemaMismatch('Migration 53 requires a current schema')
-                    owner = sql.Identifier(schema[0])
-                    db.execute(sql.SQL('LOCK TABLE {}.feeds IN ACCESS EXCLUSIVE MODE').format(owner))
-                    db.execute(sql.SQL('''INSERT INTO {}.state(key,value)
-                        SELECT 'migration:053:feed-processing-config-archive-v1',
-                            json_agg(json_build_object('feed',id,'filter_config',filter_config,
-                                'summary_config',summary_config) ORDER BY id)::text
-                        FROM {}.feeds WHERE filter_config IS DISTINCT FROM '{{}}'
-                            OR summary_config IS DISTINCT FROM '{{}}' HAVING count(*) > 0''').format(owner, owner))
-                    db.execute(sql.SQL('''UPDATE {}.feeds SET filter_config='{{}}',summary_config='{{}}'
-                        WHERE filter_config IS DISTINCT FROM '{{}}' OR summary_config IS DISTINCT FROM '{{}}' ''').format(owner))
-                if (migration.version, migration.name) == (89, 'feeds-config-jsonb'):
-                    # Its preflight and ALTER must see the same feed values, even
-                    # when an external writer does not use our advisory lease.
-                    target=db.execute("SELECT current_schema(),to_regclass(format('%I.%I',current_schema(),'feeds'))").fetchone()
-                    if not target or target[0] is None or target[1] is None:
-                        raise SchemaMismatch('Migration 89 requires feeds in the current schema')
-                    db.execute(sql.SQL('LOCK TABLE {}.{} IN ACCESS EXCLUSIVE MODE').format(
-                        sql.Identifier(target[0]),sql.Identifier('feeds')))
-                    path_row=db.execute("SELECT current_setting('search_path')").fetchone()
-                    if not path_row:raise SchemaMismatch('Cannot read migration search_path')
-                    original_path=path_row[0]
-                    db.execute("SELECT set_config('search_path',format('pg_catalog,%%I,pg_temp',%s::text),true)",(target[0],))
                 db.execute(migration.sql, prepare=False)
-                if (migration.version, migration.name) == (89, 'feeds-config-jsonb'):
-                    db.execute("SELECT set_config('search_path',%s,true)",(original_path,))
                 db.execute('INSERT INTO oko_schema_migrations(version,name,checksum) VALUES (%s,%s,%s)',
                            (migration.version, migration.name, migration.checksum))
     finally:
@@ -171,7 +127,7 @@ def main() -> None:
             verify_reader_permissions(db)
         else:
             migrate(db,MIGRATIONS)
-    print('PostgreSQL reader permissions verified' if args.check_reader_permissions else 'PostgreSQL schema verified: version ' + str(len(MIGRATIONS)))
+    print('PostgreSQL reader permissions verified' if args.check_reader_permissions else 'PostgreSQL schema verified: version ' + str(MIGRATIONS[-1].version))
 
 
 if __name__ == '__main__':

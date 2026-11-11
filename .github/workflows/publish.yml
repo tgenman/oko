@@ -59,7 +59,7 @@ jobs:
         run: |
           test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$IMAGE:$RELEASE_SHA")" = linux/amd64
           test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$IMAGE:$RELEASE_SHA")" = "$RELEASE_SHA"
-          docker run --rm --entrypoint python "$IMAGE:$RELEASE_SHA" -c 'from oko.reader.app import create_app; from oko.storage.postgres_schema import MIGRATIONS; assert MIGRATIONS[-1].version==len(MIGRATIONS)'
+          docker run --rm --entrypoint python "$IMAGE:$RELEASE_SHA" -c 'from oko.reader.app import create_app; from oko.storage.postgres_schema import MIGRATIONS; assert MIGRATIONS[-1].version>=128'
           docker run --rm --entrypoint python "$IMAGE:$RELEASE_SHA" -m oko --help
           docker run --rm --entrypoint python "$IMAGE:$RELEASE_SHA" -m oko.processing.codex_bridge --help
       - name: Exercise a running locked-down container without external networking

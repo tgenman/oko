@@ -45,18 +45,12 @@ python -m oko.storage.postgres_migrations --check --database-url-file /run/secre
 python -m oko --persistent --no-browser --data /var/lib/oko --database-url-file /run/secrets/oko-reader-dsn
 ```
 
-Files in `oko/storage/postgres/` are native, ordered PostgreSQL migrations.
-Never edit an applied migration. The ledger verifies versions, names and SHA-256
-checksums, and rejects missing, incomplete, modified or newer release histories.
-All pending migrations and ledger updates commit as one transaction. Migration
-SQL is trusted release code and must not contain its own transaction control.
-
-Migration 103 also carries a checksummed SQL prelude. When upgrading from a
-schema before 97, the migrator runs that prelude before the still-pending 96/97
-migrations in the same transaction. It locks `publications` and protects the
-canonical title and quote from older migration rules; a conflict or malformed
-value aborts the complete release. The prelude contents and execution range are
-included in migration 103's ledger checksum.
+`oko/storage/postgres/baseline.sql` creates the current schema for a new library.
+Subsequent migrations are ordered and immutable. The ledger verifies versions,
+names and SHA-256 checksums. Pending changes commit as one transaction.
+The first release with the baseline adopts only a complete, unmodified version
+127 ledger; older schemas and backups are not supported. Adoption replaces the
+ledger without changing the library data.
 
 Migration takes an exclusive, schema-scoped advisory lock. A live Store holds a
 shared lease that blocks migrations, plus an exclusive instance lease that

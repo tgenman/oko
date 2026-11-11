@@ -24,7 +24,7 @@ def main():
                  image='ghcr.io/tgenman/oko-runtime@'+args.digest,
                  image_tag='ghcr.io/tgenman/oko-runtime:'+args.sha,
                  helper=dict(release=args.sha, protocol=VERSION), codex=pin,
-                 schema=dict(minimum=len(MIGRATIONS), maximum=len(MIGRATIONS)))
+                 schema=dict(minimum=MIGRATIONS[-1].version, maximum=MIGRATIONS[-1].version))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(value, indent=2)+'\n')
 
