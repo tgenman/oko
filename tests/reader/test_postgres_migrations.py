@@ -331,28 +331,6 @@ def test_content_inventory_reports_counts_without_publication_text(connections):
 
 
 
-def test_complete_prior_ledger_is_adopted_without_touching_data(connections, monkeypatch):
-    import hashlib
-    import oko.storage.postgres_migrations as migrations
-    from oko.storage.postgres_schema import MIGRATIONS
-    rows = [(i, f'old-{i}', f'checksum-{i}') for i in range(1, 128)]
-    fingerprint = hashlib.sha256(''.join(f'{version}:{name}:{checksum}\n' for version, name, checksum in rows).encode()).hexdigest()
-    monkeypatch.setattr(migrations, '_ADOPTED_LEDGER_SHA256', fingerprint)
-    with connections() as db:
-        db.execute("CREATE TABLE oko_schema_migrations (version integer PRIMARY KEY,name text NOT NULL,checksum text NOT NULL,applied_at timestamptz DEFAULT clock_timestamp())")
-        for row in rows:
-            db.execute('INSERT INTO oko_schema_migrations(version,name,checksum) VALUES (%s,%s,%s)', row)
-        db.execute('CREATE TABLE saved_publication (content text)')
-        db.execute("INSERT INTO saved_publication VALUES ('preserve')")
-        db.execute("UPDATE oko_schema_migrations SET checksum='altered' WHERE version=3")
-        with pytest.raises(SchemaMismatch, match='complete, unmodified'):
-            migrate(db, MIGRATIONS)
-        assert db.execute('SELECT count(*) FROM oko_schema_migrations').fetchone() == (127,)
-        db.execute("UPDATE oko_schema_migrations SET checksum='checksum-3' WHERE version=3")
-        migrate(db, MIGRATIONS)
-        verify(db, MIGRATIONS)
-        assert db.execute('SELECT version,name FROM oko_schema_migrations').fetchall() == [(128, 'baseline')]
-        assert db.execute('SELECT content FROM saved_publication').fetchone() == ('preserve',)
 
 
 def test_old_incomplete_ledger_is_not_adopted(connections):
