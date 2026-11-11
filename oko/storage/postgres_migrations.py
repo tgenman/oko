@@ -14,7 +14,6 @@ from psycopg.pq import TransactionStatus
 
 
 _LOCK = 0x4F4B4F534348454D
-_ADOPTED_LEDGER_SHA256 = '5678f338cfe99dd2e14b62d87cb16ff394d7cfd03d5a84cc51d6e78454a9e11c'
 
 
 class SchemaMismatch(RuntimeError):
@@ -70,16 +69,6 @@ def migrate(db: psycopg.Connection[Any], migrations: Sequence[Migration]) -> Non
             db.execute('''CREATE TABLE IF NOT EXISTS oko_schema_migrations (
                 version integer PRIMARY KEY, name text NOT NULL, checksum text NOT NULL,
                 applied_at timestamptz NOT NULL DEFAULT clock_timestamp())''')
-            rows = db.execute('SELECT version,name,checksum FROM oko_schema_migrations ORDER BY version').fetchall()
-            if rows and rows[-1][0] == 127:
-                # One-time adoption of the fully migrated installation. No older schema is supported.
-                fingerprint = hashlib.sha256(''.join(f'{version}:{name}:{checksum}\n' for version, name, checksum in rows).encode()).hexdigest()
-                if len(rows) != 127 or fingerprint != _ADOPTED_LEDGER_SHA256:
-                    raise SchemaMismatch('Expected the complete, unmodified version 127 schema')
-                db.execute('DELETE FROM oko_schema_migrations')
-                baseline = migrations[0]
-                db.execute('INSERT INTO oko_schema_migrations(version,name,checksum) VALUES (%s,%s,%s)',
-                           (baseline.version, baseline.name, baseline.checksum))
             installed = _installed(db, migrations)
             for migration in migrations[installed:]:
                 db.execute(migration.sql, prepare=False)
