@@ -17,7 +17,7 @@ def test_running_retry_takes_precedence_over_previous_processing_error(tmp_path)
             store=app.state.host.require_store()
             fetch=claim_job(store, store.clock(),feeds=[store.item_feed(items[0])])
             assert fetch and fetch.kind=='fetch'
-            save_material(store,fetch,Material('Synthetic','Original text',captions='available'))
+            save_material(store,fetch,Material('Synthetic','Original text'))
         client.portal.call(prepare)
         response = client.get('/api/v3/publication/'+items[0])
         assert response.status_code == 200

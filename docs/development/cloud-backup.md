@@ -124,8 +124,12 @@ sudo python3 deployment/backup.py restore \
 ```
 
 The command downloads/decrypts and verifies the full snapshot before restoring
-the custom dump transactionally. It sets `work-enabled=false` in every restored
-library schema before any reader starts. Files become visible only after those
+the custom dump transactionally. Snapshots whose release manifest predates schema
+baseline 131 are not supported and are rejected before the database restore.
+It sets `work-enabled=false` and assigns a new `storage-id` in every restored
+library schema before any reader starts. A dump can contain inactive older
+schemas, but their historical reader identity formats are not supported and
+those schemas must not be started with older releases. Files become visible only after those
 steps succeed. `recovery.json` records the snapshot, target container and disabled
 state. Reader/helper are never automatically started for recovery. Failed DB
 restore may leave the dedicated DB for diagnosis; discard/recreate that isolated

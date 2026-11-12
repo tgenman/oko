@@ -1,7 +1,7 @@
 """Revision lifecycle through the agreed reader API and external HTTP seam."""
 from tests.support.publications import captions_state,body_text,subtitle_text,loading
 from oko.collection.contracts import DiscoveryResult
-from tests.support.legacy_source import FetchResult
+
 from tests.support.presence import presence, close_presence
 import time
 import httpx
@@ -80,7 +80,7 @@ def test_confirmed_remote_deletion_keeps_local_copy_but_absence_is_not_deletion(
 def test_interrupted_version_publish_keeps_old_until_fresh_retry(tmp_path):
     import asyncio
     import threading
-    from tests.support.legacy_source import Publication
+    from tests.support.source import publication
     from tests.support.synthetic_material import material as Material
     class Editable:
         changes = None
@@ -89,13 +89,13 @@ def test_interrupted_version_publish_keeps_old_until_fresh_retry(tmp_path):
         retry_started = threading.Event()
         release_retry = threading.Event()
         async def discover(self, cursor):
-            return DiscoveryResult(tuple([Publication('one', 'https://source.test/one', time.time())]), 'one')
+            return DiscoveryResult(tuple([publication('https://source.test/one', time.time())]), 'one')
         async def fetch(self, publication):
             if self.hold:
                 self.retry_started.set()
                 while not self.release_retry.is_set():
                     await asyncio.sleep(.01)
-            return FetchResult(Material('Новость', self.text))
+            return Material('Новость', self.text)
     source = Editable()
     interrupted = [False]
     def fault(point):
@@ -137,16 +137,16 @@ def test_late_ai_response_cannot_publish_theses_for_superseded_version(tmp_path)
     import asyncio
     import json
     import threading
-    from tests.support.legacy_source import Publication
+    from tests.support.source import publication
     from tests.support.synthetic_material import material as Material
     from tests.support.models import model_transport
     class Editable:
         changes = None
         text = 'Старое утверждение'
         async def discover(self, cursor):
-            return DiscoveryResult(tuple([Publication('one', 'https://source.test/one', time.time())]), 'one')
+            return DiscoveryResult(tuple([publication('https://source.test/one', time.time())]), 'one')
         async def fetch(self, publication):
-            return FetchResult(Material('Новость', self.text))
+            return Material('Новость', self.text)
     class Held(httpx.AsyncBaseTransport):
         started = threading.Event()
         release = threading.Event()
@@ -215,16 +215,16 @@ def test_youtube_title_edit_is_visible_but_leaving_atom_window_is_not_deletion(t
 
 @pytest.mark.skip(reason='Ручная пересборка вместо автоматического обновления: задача #216')
 def test_revision_waits_for_public_ai_permission_instead_of_reusing_old_theses(tmp_path):
-    from tests.support.legacy_source import Publication
+    from tests.support.source import publication
     from tests.support.synthetic_material import material as Material
     from tests.support.models import model_transport
     class Editable:
         changes = None
         text = 'Первая версия'
         async def discover(self, cursor):
-            return DiscoveryResult(tuple([Publication('one', 'https://source.test/one', time.time())]), 'one')
+            return DiscoveryResult(tuple([publication('https://source.test/one', time.time())]), 'one')
         async def fetch(self, publication):
-            return FetchResult(Material('Новость', self.text))
+            return Material('Новость', self.text)
     source, calls = Editable(), []
     with TestClient(create_app(tmp_path, source=source, token='test-token', ai_transport=model_transport(calls)), headers=HEADERS) as client:
         client.put('/api/v3/processors/llamacpp', json={'endpoint': 'https://remote.test', 'model': 'local:latest', 'local_execution': False})

@@ -13,7 +13,7 @@ from tests.support.reader import wait_for
 from tests.support.source import Image, SyntheticMaterial
 from tests.support.v3 import TestClient
 from oko.collection.contracts import DiscoveryResult
-from tests.support.legacy_source import FetchResult, Publication
+from tests.support.source import publication
 
 
 def test_postgres_runs_all_workers_http_media_and_restart(tmp_path):
@@ -34,10 +34,10 @@ def test_postgres_runs_all_workers_http_media_and_restart(tmp_path):
         changes=None
         async def discover(self,cursor):
             assert not app.state.host.require_store().db.in_transaction
-            return DiscoveryResult((Publication('two','https://example.org/two',200),),'accepted')
+            return DiscoveryResult((publication('https://example.org/two',200),),'accepted')
         async def fetch(self,publication):
             assert not app.state.host.require_store().db.in_transaction
-            return FetchResult(SyntheticMaterial('New title','New useful text',images=(Image('test.png',b'synthetic-image'),)))
+            return SyntheticMaterial('New title','New useful text',images=(Image('test.png',b'synthetic-image'),))
     app=create_app(target,token='test',api_only=True,source=Source(),ai_transport=httpx.MockTransport(model))
     with TestClient(app,headers={'Authorization':'Bearer test'}) as client:
         presence(client)

@@ -13,9 +13,8 @@ import psycopg
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 from oko.storage.store import Store as ProductionStore
-from oko.collection.adapters import ExternalKey, ExternalReference, Platform
-from tests.support.legacy_source import Material, Publication
-import json
+from oko.collection.adapters import ExternalKey, ExternalReference, Platform, PublicationContent, PublicationMetadata
+from datetime import datetime, timezone
 from oko.storage.postgres_connection import PostgresConnection
 from oko.storage.postgres_migrations import migrate
 from oko.storage.postgres_schema import MIGRATIONS
@@ -67,18 +66,17 @@ class Store(ProductionStore):
     def __init__(self, root: Path, *args: Any, database_url: str | None = None, **kwargs: Any) -> None:
         super().__init__(root, *args, database_url=database_url or globals()['database_url'](root), **kwargs)
 
-    def publication(self, item: str) -> Publication | None:
-        return legacy_publication(self,item)
+    def publication(self, item: str) -> PublicationContent | None:
+        return stored_publication(self, item)
 
 
-def legacy_publication(self: ProductionStore, item: str) -> Publication | None:
-    row = self.db.execute("SELECT *, COALESCE(content #> '{extra,telegram,members}','[]'::jsonb)::text AS members FROM publications WHERE id = %s", (item,)).fetchone()
-    if row:
-        reference=ExternalReference(ExternalKey(Platform(row['platform']),row['external_id']),row['url'])
-        description=next((block['text'] for block in row['content'].get('blocks',[]) if block.get('type')=='text' and block.get('role')=='description'),'')
-        teaser = Material(row['title'],members=tuple(json.loads(row['members'])),description=description) if 'blocks' in row['content'] else None
-        return Publication(row['external_id'],row['url'],row['published_at'] or 0.,teaser,tuple(json.loads(row['members'])),row['published_at'] is not None,adapter_reference=reference)
-    return None
+def stored_publication(store: ProductionStore, item: str) -> PublicationContent | None:
+    row = store.db.execute("SELECT platform, external_id, url, title, published_at, content FROM publications WHERE id = %s", (item,)).fetchone()
+    if row is None:
+        return None
+    reference = ExternalReference(ExternalKey(Platform(row['platform']), row['external_id']), row['url'])
+    published = datetime.fromtimestamp(row['published_at'], timezone.utc) if row['published_at'] is not None else None
+    return PublicationContent(PublicationMetadata(reference, row['title'], published), row['content'])
 
 
 @contextmanager

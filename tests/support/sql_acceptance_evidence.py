@@ -12,7 +12,7 @@ from tests.support.reading_cost import library,traced_app,tracing
 from tests.support.reader import HEADERS
 from tests.support.storage import Store, ensure_fixture
 from tests.support.postgres_work import scan_rows
-from tests.support.legacy_source import Publication
+from tests.support.source import publication
 from tests.support.synthetic_material import material as Material
 
 
@@ -69,7 +69,7 @@ def background_evidence():
       with s.db:s.db.execute("UPDATE jobs SET status = 'pending' , next = 0 WHERE kind = 'discover' AND item = %s",(feeds[0],))
       job=claim_job(s, s.clock(),feeds=[feeds[0]])
       assert job and job.kind=='discover'
-      changed=cost(lambda:discovered(s,[publication_packet(Publication('new','https://example.org/new',999,teaser=Material('New','',captions='not_requested')))],'{}',job,feeds[0]))
+      changed=cost(lambda:discovered(s,[publication_packet(publication('https://example.org/new',999,content=Material('New','')))],'{}',job,feeds[0]))
       output['background'].append(dict(total=count*4,idle_processing_sql=idle,viewed_store_sql=viewed,new_publication_transaction_sql=changed))
       s.db.close()
     for count in [4,20]:

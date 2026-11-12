@@ -36,7 +36,7 @@ def test_refresh_preserves_successfully_collected_copy_without_recollecting(tmp_
     from collections import Counter
     from tests.support.synthetic_source import SyntheticSource
     from oko.collection.contracts import DiscoveryResult, SourceUnavailable, SourceError
-    from tests.support.legacy_source import Publication, FetchResult
+    from tests.support.source import publication
     from tests.support.synthetic_material import material as Material
     class Source(SyntheticSource):
         def __init__(self):
@@ -44,14 +44,14 @@ def test_refresh_preserves_successfully_collected_copy_without_recollecting(tmp_
             self.cursors=[]
         async def discover(self,cursor):
             self.cursors.append(cursor)
-            return DiscoveryResult(tuple(Publication(str(i),'https://fixture.test/'+str(i),1800000000) for i in range(1,3)) if cursor is None else (), '2')
+            return DiscoveryResult(tuple(publication('https://fixture.test/'+str(i),1800000000) for i in range(1,3)) if cursor is None else (), '2')
         async def fetch(self,publication):
-            self.calls[publication.id]+=1
-            if publication.id=='2' and self.calls['2']>2:
+            self.calls[publication.url.rstrip('/').rsplit('/',1)[-1]]+=1
+            if publication.url.rstrip('/').rsplit('/',1)[-1]=='2' and self.calls['2']>2:
                 raise SourceError('Still unavailable',delay=.03)
-            if publication.id=='2' and self.calls['2']>1:
+            if publication.url.rstrip('/').rsplit('/',1)[-1]=='2' and self.calls['2']>1:
                 raise SourceUnavailable()
-            return FetchResult(Material('Item '+publication.id,'Saved copy'))
+            return Material('Item '+publication.url.rstrip('/').rsplit('/',1)[-1],'Saved copy')
     source=Source()
     with TestClient(create_app(tmp_path,token='test',api_only=True,source=source),headers=HEADERS) as client:
         client.patch('/api/v3/settings/oko/global',json={'theses':False,'prompt_filters':''})
@@ -102,18 +102,18 @@ def test_refresh_retries_failed_theses_but_keeps_ready_results(tmp_path):
 def test_refresh_keeps_forced_source_wait_but_advances_ordinary_retries(tmp_path):
     from tests.support.synthetic_source import SyntheticSource
     from oko.collection.contracts import DiscoveryResult, SourceError
-    from tests.support.legacy_source import Publication
+    from tests.support.source import publication
     from tests.support.reader import Clock
     from collections import Counter
     class Source(SyntheticSource):
         calls=Counter()
         async def discover(self,cursor):
-            return DiscoveryResult(tuple(Publication(str(i),'https://fixture.test/'+str(i),1800000000) for i in (1,2)) if cursor is None else (), '2')
+            return DiscoveryResult(tuple(publication('https://fixture.test/'+str(i),1800000000) for i in (1,2)) if cursor is None else (), '2')
         async def fetch(self,p):
-            self.calls[p.id]+=1
-            if self.calls[p.id]==1:
-                error=SourceError('Wait for source' if p.id=='1' else 'Network error',delay=30,code='source-unavailable')
-                if p.id=='1':
+            self.calls[p.url.rstrip('/').rsplit('/',1)[-1]]+=1
+            if self.calls[p.url.rstrip('/').rsplit('/',1)[-1]]==1:
+                error=SourceError('Wait for source' if p.url.rstrip('/').rsplit('/',1)[-1]=='1' else 'Network error',delay=30,code='source-unavailable')
+                if p.url.rstrip('/').rsplit('/',1)[-1]=='1':
                     from oko.collection.adapters import AdapterIssue,AdapterErrorKind
                     from datetime import datetime,timezone,timedelta
                     error.adapter_issue=AdapterIssue('source-wait',error.label,AdapterErrorKind.source_wait,

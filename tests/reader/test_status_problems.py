@@ -1,5 +1,5 @@
 from oko.collection.contracts import DiscoveryResult
-from tests.support.legacy_source import FetchResult
+
 from tests.support.presence import presence
 from fastapi.testclient import TestClient
 
@@ -8,7 +8,7 @@ from tests.support.codex import CodexService, configure_codex
 from tests.support.reader import HEADERS
 from tests.support.reader import wait_for
 from oko.collection.contracts import SourceError
-from tests.support.legacy_source import Publication
+from tests.support.source import publication
 from tests.support.synthetic_material import material as Material
 
 
@@ -17,13 +17,13 @@ class FailedDownloads:
     fixed = False
 
     async def discover(self, cursor):
-        return DiscoveryResult(tuple([Publication('one', 'https://source.test/one', 1800000000),
-                 Publication('two', 'https://source.test/two', 1800000001)] if cursor is None else []), 'done')
+        return DiscoveryResult(tuple([publication('https://source.test/one', 1800000000),
+                 publication('https://source.test/two', 1800000001)] if cursor is None else []), 'done')
 
     async def fetch(self, publication):
         if not self.fixed:
             raise SourceError('Синтетический сбой загрузки', code='source-connection')
-        return FetchResult(Material('Заголовок ' + publication.id, 'Текст'))
+        return Material('Заголовок ' + publication.url.rstrip('/').rsplit('/',1)[-1], 'Текст')
 
 
 def test_source_failures_group_objects_and_retry_is_not_completion(tmp_path):
