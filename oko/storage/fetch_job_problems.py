@@ -6,7 +6,7 @@ if TYPE_CHECKING:
 
 
 def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_suppressed: bool = False, include_youtube: bool = True) -> dict[int,list[dict[str, Any]]]:
-    rows=store.db.execute(f"""SELECT j.id,j.kind,j.item,j.status,j.reason_message AS reason_message,j.reason_code AS reason_code,j.feed_id,
+    rows=store.db.execute(f"""SELECT j.id,j.kind,j.item,j.status,j.reason_message AS reason_message,j.reason_code AS reason_code,
         coalesce(p.feed_id,root.feed_id,j.feed_id) AS owner,
         coalesce(root.id,j.item) AS affected, f.kind AS feed_kind
         FROM jobs j LEFT JOIN publications p ON p.id=j.item
@@ -27,7 +27,7 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
     results: dict[tuple[int,str],dict[str,Any]]={}
     for row in rows:
         if not isinstance(row['item'],str) or not row['item']:
-            continue  # Preserve an unaddressable legacy Job rather than inventing a material ID.
+            continue
         code=row['reason_code']
         if row['status'] not in ('pending','running','failed','unavailable','blocked') and not (row['status']=='done' and code and row['reason_message']):continue
         if code in ('codex-choice','ai-permission','youtube-admission','processor-config'):continue
@@ -48,9 +48,6 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
             if row['reason_message']:body['reason']=row['reason_message']
             if code=='source-reconnect':body.update(section='action',next_step='Проверьте привязку источника; доступ не изменяется автоматически.')
             results[group]=body
-        legacy_feed=row['feed_id'] or row['item'] or ''
-        legacy_identity='job:'+code+':'+legacy_feed+':fetch'+('' if shared else ':'+item)
-        if legacy_identity!=identity:results[group]['_legacy_id']=legacy_identity
         obj=dict(kind='material',id=row['affected'])
         if obj not in results[group]['objects']:results[group]['objects'].append(obj)
     grouped: dict[int,list[dict[str,Any]]]={}

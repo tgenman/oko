@@ -184,13 +184,14 @@ def test_unavailable_media_without_optional_reason_remains_visible(tmp_path,post
     finally:store.db.close()
 
 
-def test_restart_recovers_unavailable_media_without_optional_reason(tmp_path,postgres_url):
+def test_restart_preserves_unavailable_media_without_optional_reason(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     with store.db:
         store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
         store.db.execute("INSERT INTO publications(id,platform,external_id,feed_id) VALUES ('article','other_web','article','feed')")
         store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('file','article','image:1','','image','unavailable')")
-        store.db.execute("INSERT INTO jobs(kind,item,status) VALUES ('download_media','file','unavailable')")
+        job=store.db.execute("INSERT INTO jobs(kind,item,status) VALUES ('download_media','file','unavailable') RETURNING id").fetchone()[0]
+        store.problems.sync_media_problem(job,[],store.wall_clock())
     store.db.close()
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
@@ -215,60 +216,3 @@ def test_retired_job_cleanup_rejects_new_generation_or_restored_target(tmp_path,
             store.jobs.finish_retired_media_cleanup(Job(job,'download_media','file',3),'media/article/file')
             assert store.db.execute('SELECT id FROM jobs WHERE id=%s',(job,)).fetchone() is None
     finally:store.db.close()
-
-
-def test_media_profile_recovery_paginates_and_excludes_subtitle_jobs(tmp_path,postgres_url):
-    import hashlib
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    try:
-        with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id,platform,external_id,feed_id) VALUES ('article','other_web','article','feed')")
-            store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) SELECT 'm'||n,'article','image:'||n,'https://example.test/'||n,'file','pending_download' FROM generate_series(1,101) n")
-            store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status) VALUES ('subtitle','article','youtube:subtitles','https://example.test/sub','sub','pending_download')")
-            store.db.execute("INSERT INTO jobs(kind,item,status,reason_code,reason_message) SELECT 'download_media','m'||n,'failed','profile_not_configured','unavailable' FROM generate_series(1,101) n")
-            store.db.execute("INSERT INTO jobs(kind,item,status,reason_code,reason_message) VALUES ('download_media','subtitle','failed','profile_not_configured','unavailable'),('download_media','orphan','failed','profile_not_configured','unavailable')")
-            body=json.dumps({'code':'profile_not_configured','operation':'producer:status'})
-            store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) SELECT 'old'||n,'job:profile_not_configured:feed:download_media:old'||n,'background',%s,1 FROM generate_series(1,101) n",(body,))
-            store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('oldsubtitle','job:profile_not_configured:feed:download_media:subtitle','background',%s,1)",(body,))
-            store.db.execute("DELETE FROM state WHERE key IN ('media-profile-problems-recovered-v1','subtitle-problems-recovered-v1','subtitle-profile-problems-recovered-v1')")
-        before=[tuple(row) for row in store.db.execute("SELECT id,identity,body,created,finished FROM reader_problems WHERE id LIKE 'old%%' ORDER BY id")]
-        calls=[];store.fault=calls.append
-        store.problems.recover_profile_problems('media')
-        assert calls.count('media_profile_problems_recovery_batch')==2
-        assert calls.count('media_profile_legacy_protection_batch')==2
-        assert store.db.execute("SELECT 1 FROM state WHERE key='media-profile-problems-recovered-v1'").fetchone()
-        keys=['fetch-null-protected:'+hashlib.sha256(row[0].encode()).hexdigest() for row in before]
-        pointers={row['key']:json.loads(row['value']) for row in store.db.execute('SELECT key,value FROM state WHERE key=ANY(%s)',(keys,))}
-        assert all(pointers[key]==['oko-fetch-null-v2',row[0],row[1]] for key,row in zip(keys,before))
-        assert [tuple(row) for row in store.db.execute("SELECT id,identity,body,created,finished FROM reader_problems WHERE id LIKE 'old%%' ORDER BY id")]==before
-        assert not store.db.execute("SELECT 1 FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'media_file_id'='subtitle'").fetchone()
-        assert store.db.execute("SELECT count(*) FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'media_profile_event'='true'").fetchone()[0]==102
-        store.problems.recover_subtitles()
-        store.problems.recover_subtitles(profile_only=True)
-        assert [tuple(row) for row in store.db.execute("SELECT id,identity,body,created,finished FROM reader_problems WHERE id LIKE 'old%%' ORDER BY id")]==before
-        assert {row['key']:json.loads(row['value']) for row in store.db.execute('SELECT key,value FROM state WHERE key=ANY(%s)',(keys,))}==pointers
-        assert store.db.execute("SELECT 1 FROM state WHERE key='subtitle-profile-problems-recovered-v1'").fetchone()
-        assert store.db.execute("SELECT 1 FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'media_file_id'='subtitle' AND body::jsonb->>'subtitle_event'='true'").fetchone()
-    finally:store.db.close()
-
-
-def test_media_profile_recovery_restarts_after_each_batch_failure(tmp_path,postgres_url):
-    import pytest
-    for phase in ('problems_recovery','legacy_protection'):
-        store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-        try:
-            with transaction(store.db):
-                store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','other_web','p') ON CONFLICT DO NOTHING")
-                store.db.execute("INSERT INTO jobs(kind,item,status,reason_code,reason_message) VALUES ('download_media','orphan','failed','profile_not_configured','unavailable') ON CONFLICT(kind,item) DO NOTHING")
-                store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('legacy','job:profile_not_configured:feed:download_media:missing','background',%s,1) ON CONFLICT(id) DO NOTHING",(json.dumps({'code':'profile_not_configured','operation':'producer:status'}),))
-                store.db.execute("DELETE FROM state WHERE key='media-profile-problems-recovered-v1'")
-            def fail(point):
-                if point==f'media_profile_{phase}_batch':raise RuntimeError('interrupted')
-            store.fault=fail
-            with pytest.raises(RuntimeError,match='interrupted'):store.problems.recover_profile_problems('media')
-            assert not store.db.execute("SELECT 1 FROM state WHERE key='media-profile-problems-recovered-v1'").fetchone()
-            store.db.close();store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-            assert store.db.execute("SELECT 1 FROM state WHERE key='media-profile-problems-recovered-v1'").fetchone()
-            assert store.db.execute("SELECT 1 FROM reader_problems WHERE id='legacy' AND finished IS NULL").fetchone()
-        finally:store.db.close()

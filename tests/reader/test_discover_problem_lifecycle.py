@@ -36,20 +36,23 @@ def test_discover_failure_and_completion_are_saved_without_status_read(tmp_path,
 
 
 
-def test_http_reports_recovered_source_failure_without_get_writes(tmp_path,postgres_url):
+def test_http_reports_saved_source_failure_without_get_writes(tmp_path,postgres_url):
     from fastapi.testclient import TestClient
     from tests.support.app import create_app
     from tests.support.reader import HEADERS
     import psycopg
-    with psycopg.connect(postgres_url,autocommit=True) as db:
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    with store.db as db:
         db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
-        db.execute("INSERT INTO jobs(kind,item,status,reason_message,reason_code) VALUES ('discover','feed','failed','failure','source-connection')")
+        job=db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('discover','feed','running',1) RETURNING id").fetchone()[0]
+    retry_job(store,Job(job,'discover','feed',1),store.wall_clock(),'failure',delay=3600,code='source-connection')
+    store.db.close()
     with TestClient(create_app(tmp_path,token='test',database_url=postgres_url,api_only=True),headers=HEADERS) as client:
         with psycopg.connect(postgres_url,autocommit=True) as db:
             before=db.execute("SELECT id,xmin::text,body FROM reader_problems WHERE identity='job:source-connection:feed:discover' AND finished IS NULL").fetchone()
         response=client.get('/api/v3/status/details')
         assert response.status_code==200,response.text
-        assert any(p['id']==before[0] for p in response.json()['problems']['current'])
+        assert any(p['id']==before[0] for p in response.json()['problems']['current']), (before[0], [p['id'] for p in response.json()['problems']['current']])
         etag=response.headers.get('etag')
         if etag: assert client.get('/api/v3/status/details',headers={'If-None-Match':etag}).status_code==304
         with psycopg.connect(postgres_url,autocommit=True) as db:

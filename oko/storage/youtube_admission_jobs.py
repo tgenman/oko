@@ -56,31 +56,6 @@ def sync_ids(store: Any, ids: list[int]) -> None:
             WHERE j.id=v.id AND (j.youtube_admission_candidate IS DISTINCT FROM v.active OR j.youtube_admission_objects IS DISTINCT FROM v.objects::jsonb OR j.youtube_admission_unknown IS DISTINCT FROM v.unknown)''',tuple([row[i] for row in values] for i in range(4)))
 
 
-def recover_flags(store: Any) -> None:
-    """Restartable one-time recovery over the active collection queue only."""
-    from oko.storage.transaction import begin_write
-    if store.db.execute('SELECT youtube_admission_recovered FROM youtube_access WHERE id=1').fetchone()[0]:return
-    while True:
-        stale=store.db.execute("SELECT id FROM jobs WHERE youtube_admission_candidate AND (kind NOT IN ('fetch','download_media') OR kind IS NULL OR status NOT IN ('pending','running') OR status IS NULL) ORDER BY id LIMIT 100").fetchall()
-        if not stale:break
-        with store.db:
-            begin_write(store.db)
-            store.db.execute("UPDATE jobs SET youtube_admission_candidate=false,youtube_admission_objects='[]'::jsonb,youtube_admission_unknown=false WHERE id=ANY(%s)",([r['id'] for r in stale],))
-        store.fault('youtube_admission_jobs_recovery_batch')
-    cursor: int | None=None
-    while True:
-        sql="SELECT id FROM jobs WHERE kind IN ('fetch','download_media') AND status IN ('pending','running')"
-        if cursor is not None:sql+=' AND id>%s'
-        sql+=' ORDER BY id LIMIT 100'
-        rows=store.db.execute(sql,(cursor,) if cursor is not None else ()).fetchall()
-        if not rows:break
-        with store.db:
-            begin_write(store.db)
-            sync_ids(store,[r['id'] for r in rows])
-        cursor=rows[-1]['id']
-        store.fault('youtube_admission_jobs_recovery_batch')
-    with store.db:
-        store.db.execute('UPDATE youtube_access SET youtube_admission_recovered=true WHERE id=1')
 
 
 def group_objects(store: Any) -> list[str]:

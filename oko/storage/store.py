@@ -85,14 +85,13 @@ class Store:
             self.reading = ReadingComposition(self)
             self.youtube = YouTubeAccess(self)
             self.problems = Problems(self)
-            from oko.storage.incomplete_group_draft import recover_group_keys,recover_group_problems,TransactionGroupDraft
-            if self.db.execute("SELECT 1 FROM state WHERE key='experimental-incomplete-problems-v1'").fetchone():
-                self.incomplete_draft=TransactionGroupDraft(self)
-                self.db.before_commit=self.incomplete_draft.flush
-                setattr(self.db,'incomplete_group_mark',self.incomplete_draft.mark_materials)
-                setattr(self.db,'incomplete_job_mark',self.incomplete_draft.mark_job)
-                setattr(self.db,'youtube_admission_feed_mark',self.incomplete_draft.mark_admission_feed)
-                if expect_row(self.db.execute('SELECT youtube_admission_recovered FROM youtube_access WHERE id=1').fetchone())[0]:self.youtube_admission_ready=True
+            from oko.storage.incomplete_group_draft import TransactionGroupDraft
+            self.incomplete_draft=TransactionGroupDraft(self)
+            self.db.before_commit=self.incomplete_draft.flush
+            setattr(self.db,'incomplete_group_mark',self.incomplete_draft.mark_materials)
+            setattr(self.db,'incomplete_job_mark',self.incomplete_draft.mark_job)
+            setattr(self.db,'youtube_admission_feed_mark',self.incomplete_draft.mark_admission_feed)
+            self.youtube_admission_ready=True
             with self.db:
                 self.problems.sync_codex_choice(self.wall_clock())
             for name in ('content', 'staging'):
@@ -107,41 +106,16 @@ class Store:
                 job_write(self.db, "UPDATE jobs SET next = 0 WHERE status = 'pending' AND next IS DISTINCT FROM 0")
             with transaction(self.db):
                 collection_jobs.recover(self)
-            self.problems.recover_discover_problems()
-            self.problems.recover_fetch_problems()
-            self.problems.recover_finished_foreign_fetch_deletions()
-            self.problems.recover_fetch_null()
-            self.problems.recover_youtube_null_fetch()
-            self.problems.recover_fetch_identity_unconfirmed()
-            self.problems.recover_fetch_identity_unconfirmed(additional=True)
-            self.problems.recover_media_problems()
-            self.problems.recover_media_null_problems()
-            self.problems.recover_profile_problems('media')
-            self.problems.recover_subtitles()
-            self.problems.recover_subtitles(profile_only=True)
+            for kind in ('fetch', 'download_media', 'filter', 'theses'):
+                self.problems.recover_jobs_without_reason(kind)
             with self.db:
                 self.problems.recover_processor_duplicates(self.wall_clock())
                 self.problems.finish_processor_change([],None,self.wall_clock())
-            self.problems.recover_processing_problems()
-            self.problems.recover_profile_problems('filter')
-            self.problems.recover_profile_problems('theses')
-            from oko.storage.source_groups import recover as recover_source_groups
-            recover_source_groups(self)
             if self.db.execute("SELECT 1 FROM state WHERE key LIKE 'source-youtube-timed:%%' LIMIT 1").fetchone():
                 from oko.storage.source_groups import sync_youtube_timer
                 with self.db:sync_youtube_timer(self,self.wall_clock())
-            recover_group_keys(self)
-            recover_group_problems(self)
-            if not hasattr(self,'incomplete_draft'):
-                self.incomplete_draft=TransactionGroupDraft(self)
-                self.db.before_commit=self.incomplete_draft.flush
-                setattr(self.db,'incomplete_group_mark',self.incomplete_draft.mark_materials)
-                setattr(self.db,'incomplete_job_mark',self.incomplete_draft.mark_job)
-                setattr(self.db,'youtube_admission_feed_mark',self.incomplete_draft.mark_admission_feed)
-            from oko.storage.youtube_admission_jobs import recover_flags,group_objects,has_unknown_objects
+            from oko.storage.youtube_admission_jobs import group_objects,has_unknown_objects
             from oko.storage.youtube_admission import sync as sync_admission,close_current as close_admission
-            recover_flags(self)
-            self.youtube_admission_ready=True
             with self.db:
                 from oko.storage.transaction import begin_write
                 begin_write(self.db)

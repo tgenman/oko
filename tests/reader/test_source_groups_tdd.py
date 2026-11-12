@@ -91,11 +91,15 @@ def test_http_source_group_is_visible_and_get_does_not_write(tmp_path,postgres_u
     from fastapi.testclient import TestClient
     from tests.support.app import create_app
     from tests.support.reader import HEADERS
-    with psycopg.connect(postgres_url,autocommit=True) as db:
+    from oko.storage.source_groups import sync_jobs
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    with store.db as db:
         db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','rss','rss','connected',ARRAY[]::text[])")
         db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','other_web','p')")
         db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
-        db.execute("INSERT INTO jobs(kind,item,status,reason_message,reason_code) VALUES ('fetch','p','failed','failure','source-network')")
+        job=db.execute("INSERT INTO jobs(kind,item,status,reason_message,reason_code) VALUES ('fetch','p','failed','failure','source-network') RETURNING id").fetchone()[0]
+        sync_jobs(store,[job],store.wall_clock())
+    store.db.close()
     with TestClient(create_app(tmp_path,token='test',database_url=postgres_url,api_only=True),headers=HEADERS) as client:
         with psycopg.connect(postgres_url,autocommit=True) as db:
             before=db.execute("SELECT id,xmin::text,body FROM reader_problems WHERE body::jsonb->>'source_group_identity'='job:source-network:f:fetch' AND finished IS NULL").fetchone()

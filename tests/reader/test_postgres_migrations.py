@@ -341,3 +341,22 @@ def test_old_incomplete_ledger_is_not_adopted(connections):
         with pytest.raises(SchemaMismatch):
             migrate(db, MIGRATIONS)
         assert db.execute('SELECT version FROM oko_schema_migrations').fetchall() == [(126,)]
+
+
+def test_remove_old_problem_indexes_preserves_current_data(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+
+    indexes = (
+        'reader_fetch_work_legacy_item', 'reader_fetch_work_legacy_item_paged',
+        'reader_foreign_fetch_delete_recovery', 'reader_incomplete_legacy_recovery',
+        'reader_media_null_legacy_recovery', 'reader_media_work_legacy_item',
+        'reader_subtitle_legacy_paged', 'reader_subtitle_profile_legacy',
+    )
+    with connections() as db:
+        migrate(db, MIGRATIONS[:1])
+        assert all(db.execute('SELECT to_regclass(%s)', (index,)).fetchone()[0] for index in indexes)
+        db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES ('saved','action:example','action','{}',1)")
+        migrate(db, MIGRATIONS)
+        verify(db, MIGRATIONS)
+        assert all(db.execute('SELECT to_regclass(%s)', (index,)).fetchone()[0] is None for index in indexes)
+        assert db.execute("SELECT identity FROM reader_problems WHERE id='saved'").fetchone() == ('action:example',)
