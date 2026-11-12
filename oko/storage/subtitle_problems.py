@@ -21,7 +21,7 @@ def sync_timer(store: 'Store', now: float, job_ids: list[int] | None = None, *, 
 def matches_active_snapshot(store: 'Store', row: Any, candidate: dict[str,Any]) -> bool:
     try:body=json.loads(row['body'])
     except (TypeError,ValueError):return False
-    expected={key:value for key,value in candidate.items() if key not in ('id','created_at','finished_at','outcome','_legacy_id')}
+    expected={key:value for key,value in candidate.items() if key not in ('id','created_at','finished_at','outcome')}
     if row['identity']!=candidate['id']:expected['media_job_identity']=candidate['id']
     return body==expected and store.problems.media_record_matches(row,candidate)
 
@@ -33,7 +33,7 @@ def matches_snapshot(store: 'Store', row: Any, candidate: dict[str,Any], pointer
         saved=store.db.execute('SELECT value FROM state WHERE key=%s',(row['identity'],)).fetchone()
         pointer=saved['value'] if saved else None
     if pointer!=json.dumps(['oko-subtitle-v1',body['media_job_id'],body['subtitle_canonical']]):return False
-    expected={key:value for key,value in candidate.items() if key not in ('id','created_at','finished_at','outcome','_legacy_id')}
+    expected={key:value for key,value in candidate.items() if key not in ('id','created_at','finished_at','outcome')}
     expected.update(subtitle_reservation=True,subtitle_canonical=candidate['id'])
     return body==expected and store.problems.media_record_matches(row,candidate)
 
@@ -79,21 +79,6 @@ def transfer_reservation(store: 'Store', job_id: int, previous: list[dict[str,An
     return shared_transfer_reservation(store,job_id,previous,current,new_ids,subtitle=True)
 
 
-def protect_legacy(store: 'Store', item: str) -> None:
-    """Preserve exact affected legacy occurrences, never an item-wide marker."""
-    cursor: tuple[str,str] | None=None
-    while True:
-        query="""SELECT id,identity,md5(id) AS page_hash FROM reader_problems WHERE finished IS NULL AND identity LIKE 'job:%%'
-            AND body::jsonb->>'code'='work-download_media' AND body::jsonb->>'operation' IN ('producer:download_media','producer:status')
-            AND md5(substring(coalesce(body::jsonb->>'media_job_identity',body::jsonb->>'status_job_identity',identity) FROM ':download_media:(.*)$'))=md5(%s)
-            AND substring(coalesce(body::jsonb->>'media_job_identity',body::jsonb->>'status_job_identity',identity) FROM ':download_media:(.*)$')=%s"""
-        params: tuple[Any,...]=(item,item)
-        if cursor is not None:query+=' AND (md5(id),id COLLATE "C")>(%s,%s)';params=(*params,*cursor)
-        rows=store.db.execute(query+' ORDER BY md5(id),id COLLATE "C" LIMIT 400',params).fetchall()
-        if not rows:return
-        protect_rows(store,rows)
-        cursor=(rows[-1]['page_hash'],rows[-1]['id'])
-        store.fault('subtitle_legacy_protection_batch')
 
 
 def protect_isolated(store: 'Store', field: str, canonical: str) -> None:

@@ -1,0 +1,8 @@
+DROP INDEX reader_fetch_work_legacy_item;
+DROP INDEX reader_fetch_work_legacy_item_paged;
+DROP INDEX reader_foreign_fetch_delete_recovery;
+DROP INDEX reader_incomplete_legacy_recovery;
+DROP INDEX reader_media_null_legacy_recovery;
+DROP INDEX reader_media_work_legacy_item;
+DROP INDEX reader_subtitle_legacy_paged;
+DROP INDEX reader_subtitle_profile_legacy;

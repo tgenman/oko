@@ -2,7 +2,6 @@ from tests.support.youtube_action import youtube_action
 from fastapi.testclient import TestClient
 from tests.support.app import create_app
 from tests.support.reader import HEADERS
-from oko.storage.youtube_admission_jobs import recover_flags
 
 
 def test_virtual_expiry_http_etag_and_xmin_across_tick(tmp_path,postgres_url):
@@ -11,7 +10,6 @@ def test_virtual_expiry_http_etag_and_xmin_across_tick(tmp_path,postgres_url):
     with TestClient(app,headers=HEADERS) as client:
         def setup():
             store=app.state.host.require_store()
-            recover_flags(store)
             store.youtube_admission_ready=True
             youtube_action(store, 'blocked', 100,900)
             app.state.host.execution.reader_advance=None

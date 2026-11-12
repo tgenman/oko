@@ -66,16 +66,19 @@ def test_linked_fetch_failure_updates_all_owners_and_resolves_together(tmp_path,
     finally:store.db.close()
 
 
-def test_http_status_reads_recovered_fetch_without_mutation(tmp_path,postgres_url):
+def test_http_status_reads_saved_fetch_without_mutation(tmp_path,postgres_url):
     import psycopg
     from fastapi.testclient import TestClient
     from tests.support.app import create_app
     from tests.support.reader import HEADERS
-    with psycopg.connect(postgres_url,autocommit=True) as db:
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    with store.db as db:
         db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
         db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','other_web','article')")
         db.execute("UPDATE publications SET feed_id='feed' WHERE id='article'")
-        db.execute("INSERT INTO jobs(kind,item,status,reason_message,reason_code) VALUES ('fetch','article','failed','failure','article-limit')")
+        job=db.execute("INSERT INTO jobs(kind,item,status,reason_message,reason_code) VALUES ('fetch','article','failed','failure','article-limit') RETURNING id").fetchone()[0]
+        store.problems.sync_fetch(job,[],store.wall_clock())
+    store.db.close()
     with TestClient(create_app(tmp_path,token='test',database_url=postgres_url,api_only=True),headers=HEADERS) as client:
         with psycopg.connect(postgres_url,autocommit=True) as db:
             before=db.execute("SELECT id,xmin::text,body FROM reader_problems WHERE identity='job:article-limit:feed:fetch:article' AND finished IS NULL").fetchone()
@@ -131,12 +134,13 @@ def test_unavailable_fetch_without_optional_reason_remains_visible(tmp_path,post
     finally:store.db.close()
 
 
-def test_restart_recovers_unavailable_fetch_without_optional_reason(tmp_path,postgres_url):
+def test_restart_preserves_unavailable_fetch_without_optional_reason(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     with store.db:
         store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
         store.db.execute("INSERT INTO publications(id,platform,external_id,feed_id) VALUES ('article','other_web','article','feed')")
-        store.db.execute("INSERT INTO jobs(kind,item,status) VALUES ('fetch','article','unavailable')")
+        job=store.db.execute("INSERT INTO jobs(kind,item,status) VALUES ('fetch','article','unavailable') RETURNING id").fetchone()[0]
+        store.problems.sync_fetch(job,[],store.wall_clock())
     store.db.close()
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:

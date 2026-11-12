@@ -8,12 +8,11 @@ if TYPE_CHECKING:
 def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_subtitles: bool = False, include_completed: bool = False, include_suppressed: bool = False) -> dict[int,list[dict[str, Any]]]:
     subtitle_filter="" if include_subtitles else " AND m.resource_key IS DISTINCT FROM 'youtube:subtitles'"
     error_filter="TRUE" if include_completed else "(j.reason_message IS NOT NULL OR j.reason_code IS NOT NULL OR j.status IN ('failed','unavailable'))"
-    rows=store.db.execute(f"""SELECT j.id,j.kind,j.item,j.status,j.reason_message AS reason_message,j.reason_code AS reason_code,j.feed_id,m.publication_id,m.resource_key,
-        coalesce(legacy_item.feed_id,p.feed_id,root.feed_id,j.feed_id) AS owner,
+    rows=store.db.execute(f"""SELECT j.id,j.kind,j.item,j.status,j.reason_message AS reason_message,j.reason_code AS reason_code,m.publication_id,m.resource_key,
+        coalesce(p.feed_id,root.feed_id,j.feed_id) AS owner,
         coalesce(root.id,m.publication_id,j.item) AS affected, f.kind AS feed_kind
         FROM jobs j LEFT JOIN media_files m ON m.id=j.item LEFT JOIN publications p ON p.id=m.publication_id
-        LEFT JOIN publications legacy_item ON legacy_item.id=j.item AND (j.reason_code IS NULL OR j.reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')) AND m.resource_key IS DISTINCT FROM 'youtube:subtitles'
-        LEFT JOIN publication_links link ON link.target_publication_id=coalesce(legacy_item.id,p.id)
+        LEFT JOIN publication_links link ON link.target_publication_id=p.id
         LEFT JOIN publications root ON root.id=link.source_publication_id
         LEFT JOIN feeds f ON f.id=coalesce(p.feed_id,root.feed_id,j.feed_id)
         WHERE j.id=ANY(%s) AND j.kind='download_media'{subtitle_filter} AND {error_filter} ORDER BY j.id,root.id""",(job_ids,)).fetchall()
@@ -21,7 +20,7 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
     seen_objects: dict[tuple[int,str],set[str]]={}
     for row in rows:
         if not isinstance(row['item'],str) or not row['item']:
-            continue  # Preserve an unaddressable legacy Job rather than inventing a material ID.
+            continue
         code=row['reason_code']
         if row['status'] not in ('pending','running','failed','unavailable','blocked') and not (include_completed and row['status']=='done' and row['reason_message'] is None and row['reason_code'] is None):continue
         if code in ('codex-choice','ai-permission','youtube-admission','processor-config'):continue
@@ -46,9 +45,6 @@ def candidates_many(store: 'Store', job_ids: list[int], now: float, *, include_s
             if code=='source-reconnect':body.update(section='action',next_step='Проверьте привязку источника; доступ не изменяется автоматически.')
             results[group]=body
             seen_objects[group]=set()
-        legacy_feed=row['feed_id'] or row['item'] or ''
-        legacy_identity='job:'+code+':'+legacy_feed+':download_media'+('' if shared else ':'+item)
-        if legacy_identity!=identity:results[group]['_legacy_id']=legacy_identity
         obj=dict(kind='material',id=row['affected'])
         if row['affected'] not in seen_objects[group]:
             seen_objects[group].add(row['affected'])

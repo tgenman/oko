@@ -18,9 +18,6 @@ def save_keys(db: Any, items: list[str]) -> None:
     return None
 
 
-def recover_group_keys(store: Any) -> None:
-    with store.db:
-        store.db.execute("INSERT INTO state(key,value) VALUES ('experimental-incomplete-groups-v1','true') ON CONFLICT DO NOTHING")
 
 
 def generic_job_targets(db: Any, roots: list[str]) -> list[str]:
@@ -95,7 +92,7 @@ def valid_group_record(row: Any, key: str, allowed: set[str]) -> bool:
     from oko.storage.problems import _readable_timestamp
     if not _readable_timestamp(row['created']):return False
     fields={'code','section','title','consequence','next_step','objects','action','operation','state','next_at','reason','incomplete_group_identity'}
-    if set(body)-fields or body.get('code')!='material-incomplete' or body.get('operation') not in (None,'producer:status','producer:incomplete'):
+    if set(body)-fields or body.get('code')!='material-incomplete' or body.get('operation')!='producer:incomplete':
         return False
     if body.get('incomplete_group_identity') not in (None,key) or body.get('section')!='object' or body.get('state') not in ('current','retrying') or body.get('next_at') is not None:
         return False
@@ -691,58 +688,6 @@ def sync_existing_reservations_batch(store: Any, keys: list[str], now: float, pr
     return None if expired else set(current)
 
 
-def recover_group_problems(store: Any) -> None:
-    """Two phases: populate all group members first, then reconcile occurrences."""
-    from oko.storage.transaction import begin_write
-    if store.db.execute("SELECT 1 FROM state WHERE key='experimental-incomplete-problems-v1'").fetchone():return
-    cursor: str | None=None
-    while True:
-        query='SELECT incomplete_group_key COLLATE "C" AS incomplete_group_key FROM pg_temp.oko_incomplete_facts WHERE incomplete_group_key IS NOT NULL'
-        if cursor is not None:query+=' AND incomplete_group_key COLLATE "C">%s'
-        query+=' GROUP BY incomplete_group_key COLLATE "C" ORDER BY incomplete_group_key COLLATE "C" LIMIT 100'
-        rows=store.db.execute(query,(cursor,) if cursor is not None else ()).fetchall()
-        if not rows:break
-        keys=[row['incomplete_group_key'] for row in rows]
-        with store.db:
-            begin_write(store.db)
-            now=store.wall_clock()
-            apply_due_current_for_keys(store,keys,now)
-            sync_groups_time_batch(store,keys,now)
-        cursor=keys[-1]
-        store.fault('experimental_incomplete_group_problem_batch')
-    cursor=None
-    while True:
-        query="""SELECT id,identity,body,created FROM reader_problems WHERE finished IS NULL AND left(identity,11)='incomplete:'
-            AND body::jsonb->>'code'='material-incomplete' AND coalesce(body::jsonb->>'operation','producer:status')='producer:status'"""
-        if cursor is not None:query+=' AND id COLLATE "C">%s'
-        query+=' ORDER BY id COLLATE "C" LIMIT 100'
-        rows=store.db.execute(query,(cursor,) if cursor is not None else ()).fetchall()
-        if not rows:break
-        possible={}
-        for row in rows:
-            try:body=json.loads(row['body'])
-            except (ValueError,TypeError):continue
-            objects=body.get('objects') if isinstance(body,dict) else None
-            if not isinstance(objects,list) or len(objects)!=1 or not isinstance(objects[0],dict):continue
-            item=objects[0].get('id');identity=row['identity']
-            if (objects[0].get('kind')!='material' or not isinstance(item,str) or not item or ':' in item or item in ('missing','error')
-                or not identity.startswith('incomplete:') or identity.count(':')!=2 or not identity.endswith(':'+item)):continue
-            if not valid_group_record(row,identity,{item}):continue
-            possible[identity]={item}
-        if possible:
-            item_ids=sorted({item for values in possible.values() for item in values})
-            saved={row['id']:row for row in store.db.execute('SELECT id,incomplete_group_unknown,incomplete_group_conflict FROM pg_temp.oko_incomplete_facts WHERE id=ANY(%s)',(item_ids,))}
-            possible={identity:items for identity,items in possible.items() if all(item in saved and not saved[item]['incomplete_group_unknown'] and not saved[item]['incomplete_group_conflict'] for item in items)}
-        if possible:
-            with store.db:
-                begin_write(store.db)
-                sync_groups_time_batch(store,list(possible),store.wall_clock(),possible)
-        cursor=rows[-1]['id']
-        store.fault('experimental_incomplete_legacy_problem_batch')
-    with store.db:
-        store.db.execute("INSERT INTO state(key,value) VALUES ('experimental-incomplete-problems-v1','true') ON CONFLICT DO NOTHING")
-
-
 def verified_reservation_rows(store: Any, rows: list[Any]) -> dict[str,dict[str,Any]]:
     """Validate both ownership pointers; preserve all unrecognised legacy rows."""
     candidates={}
@@ -781,10 +726,10 @@ def virtual_due_groups(store: Any, now: float) -> list[dict[str,Any]]:
     singles={key:values[0] for key,values in groups.items() if len(values)==1}
     keys=sorted(singles)
     result: list[dict[str,Any]]=[]
-    from oko.storage.problems import _readable_timestamp,_legacy_problem_id
+    from oko.storage.problems import _readable_timestamp
     for row in rows:
         if row['id'] in valid:continue
-        result.append(dict(id=row['id'] or _legacy_problem_id(row['identity']),code='material-incomplete',section='object',
+        result.append(dict(id=row['id'],code='material-incomplete',section='object',
             title='Сведения о неполном материале недоступны',consequence='Исходная запись сохранена.',
             next_step='Проверьте журнал диагностики.',objects=[],action=None,operation='producer:incomplete-legacy',
             created_at=row['created'] if _readable_timestamp(row['created']) else now,state='current',finished_at=None,outcome=None,next_at=None))
@@ -810,7 +755,7 @@ def valid_incomplete_projection(value: Any) -> bool:
     if set(value)-fields:return False
     if value.get('section')!='object' or value.get('state') not in ('current','retrying') or value.get('next_at') is not None or value.get('action') is not None:return False
     if any(not isinstance(value.get(field),str) for field in ('title','consequence','next_step')):return False
-    if value.get('operation') not in (None,'producer:status','producer:incomplete'):return False
+    if value.get('operation')!='producer:incomplete':return False
     if 'reason' in value and not isinstance(value['reason'],str):return False
     if 'request_id' in value:return False
     objects=value.get('objects')

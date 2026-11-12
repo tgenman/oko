@@ -37,6 +37,10 @@ def test_http_rejects_replay_of_malformed_receipt(tmp_path,postgres_database_url
     with psycopg.connect(postgres_database_url,autocommit=True) as db:
         migrate(db,MIGRATIONS)
         db.execute("INSERT INTO reader_action_results(id,identity,body,started,result) VALUES ('receipt','command','{}',1,'failed')")
+    from tests.support.storage import Store
+    store=Store(tmp_path,lambda _:None,database_url=postgres_database_url)
+    with store.db:store.problems.sync_action('command',store.wall_clock())
+    store.db.close()
     app=create_app(tmp_path,token='test',database_url=postgres_database_url,api_only=True)
     with TestClient(app,headers=HEADERS) as client:
         response=client.get('/api/v3/status/details')

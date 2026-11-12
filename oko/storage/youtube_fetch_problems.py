@@ -21,7 +21,7 @@ def sync_timer(store: 'Store', now: float, job_ids: list[int] | None = None, *, 
 def matches_active_snapshot(store: 'Store', row: Any, candidate: dict[str,Any]) -> bool:
     try:body=json.loads(row['body'])
     except (TypeError,ValueError):return False
-    expected={key:value for key,value in candidate.items() if key not in ('id','created_at','finished_at','outcome','_legacy_id','_fetch_item')}
+    expected={key:value for key,value in candidate.items() if key not in ('id','created_at','finished_at','outcome','_fetch_item')}
     if row['identity']!=candidate['id']:expected['fetch_job_identity']=candidate['id']
     return body==expected and store.problems.fetch_record_matches(row,candidate)
 
@@ -33,7 +33,7 @@ def matches_snapshot(store: 'Store', row: Any, candidate: dict[str,Any], pointer
         saved=store.db.execute('SELECT value FROM state WHERE key=%s',(row['identity'],)).fetchone()
         pointer=saved['value'] if saved else None
     if pointer!=json.dumps(['oko-youtube-fetch-v1',body['fetch_job_id'],body['fetch_youtube_canonical']]):return False
-    expected={key:value for key,value in candidate.items() if key not in ('id','created_at','finished_at','outcome','_legacy_id','_fetch_item')}
+    expected={key:value for key,value in candidate.items() if key not in ('id','created_at','finished_at','outcome','_fetch_item')}
     expected.update(fetch_youtube_reservation=True,fetch_youtube_canonical=candidate['id'])
     return body==expected and store.problems.fetch_record_matches(row,candidate)
 

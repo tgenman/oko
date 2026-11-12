@@ -8,12 +8,11 @@ def test_pause_rolls_back_timer_occurrence_and_flags_together(tmp_path,postgres_
     store=Store(tmp_path,lambda _:None,database_url=postgres_url,wall_clock=lambda:100)
     try:
         with transaction(store.db):
-            store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
             store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
             store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','other_web','p')")
             store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,reason_message) VALUES ('fetch','p','failed','waiting') RETURNING id").fetchone()[0]
-        store.problems.recover_youtube_null_fetch()
+        with transaction(store.db):store.problems.sync_fetch(job,[],100)
         before=store.db.execute('SELECT id,identity,body,finished FROM reader_problems WHERE finished IS NULL AND body::jsonb->>\'fetch_job_id\'=%s',(str(job),)).fetchall()
         with pytest.raises(RuntimeError,match='rollback'):
             with transaction(store.db):
@@ -37,12 +36,12 @@ def test_http_etag_stable_when_virtual_fetch_is_materialized(tmp_path,postgres_u
         def setup():
             store=app.state.host.require_store()
             with transaction(store.db):
-                store.db.execute("DELETE FROM state WHERE key='youtube-null-fetch-recovered-v1'")
                 store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('f','f','F','default','youtube','rss','connected',ARRAY[]::text[])")
                 store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('p','youtube','p')")
                 store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
-                store.db.execute("INSERT INTO jobs(kind,item,status,reason_message) VALUES ('fetch','p','failed','waiting')")
-            store.problems.recover_youtube_null_fetch();youtube_action(store, 'start', 100)
+                job=store.db.execute("INSERT INTO jobs(kind,item,status,reason_message) VALUES ('fetch','p','failed','waiting') RETURNING id").fetchone()[0]
+                store.problems.sync_fetch(job,[],100)
+            youtube_action(store, 'start', 100)
             app.state.host.execution.reader_advance=None
         client.portal.call(setup);clock[0]=111
         before=client.get('/api/v3/status/details');assert before.status_code==200

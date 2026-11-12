@@ -25,7 +25,7 @@ def valid(row: Any) -> bool:
     elif not _readable_timestamp(body.get('next_at')):return False
     due=row['youtube_admission_due']
     if due is not None and (not _readable_timestamp(due) or (not unknown_time and due>body['next_at'])):return False
-    if body.get('operation') not in (None,'producer:status','producer:youtube-admission'):return False
+    if body.get('operation')!='producer:youtube-admission':return False
     if body.get('youtube_admission_owner') not in (None,IDENTITY):return False
     if body.get('section')!='wait' or body.get('state')!='retrying' or body.get('action') is not None:return False
     if any(not isinstance(body.get(k),str) for k in ('title','consequence','next_step')):return False
@@ -44,10 +44,6 @@ def current(store: Any) -> Any:
         if row['identity']!=IDENTITY and (not row['identity'].startswith('youtube:admission:isolated:') or body.get('youtube_admission_owner')!=IDENTITY or body.get('operation')!='producer:youtube-admission'):
             raise RuntimeError('Unrecognized YouTube admission pointer')
         return row if row['finished'] is None else None
-    row=store.db.execute('SELECT * FROM reader_problems WHERE identity=%s AND finished IS NULL',(IDENTITY,)).fetchone()
-    if row is not None and valid(row):
-        body=json.loads(row['body'])
-        if body.get('operation') in (None,'producer:status') and 'youtube_admission_owner' not in body and 'youtube_admission_time_unknown' not in body and row['youtube_admission_due'] is None:return row
     return None
 
 

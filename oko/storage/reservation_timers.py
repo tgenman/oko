@@ -25,7 +25,7 @@ def sync_timer(store: 'Store', now: float, job_ids: list[int] | None, new_ids: s
         job_field,canonical_field,flag,identity_field='fetch_job_id','fetch_youtube_canonical','fetch_youtube_reservation','fetch_job_identity'
         label='YouTube fetch'
     operation='producer:'+kind
-    excluded=('id','created_at','finished_at','outcome','_legacy_id') + (() if subtitle else ('_fetch_item',))
+    excluded=('id','created_at','finished_at','outcome') + (() if subtitle else ('_fetch_item',))
     limits=store.youtube._limits()
     def safe_limit(value: Any) -> float:
         return float(value) if _readable_timestamp(value) else float('inf')
@@ -187,7 +187,7 @@ def activate_due(store: 'Store', now: float, job_id: int | list[int] | None = No
     label='Subtitle' if subtitle else 'YouTube fetch'
     import hashlib
     isolated_prefix='job:media-isolated:' if subtitle else 'job:fetch-isolated:'
-    excluded=('id','created_at','finished_at','outcome','_legacy_id') + (() if subtitle else ('_fetch_item',))
+    excluded=('id','created_at','finished_at','outcome') + (() if subtitle else ('_fetch_item',))
     if job_id is None:
         query=f"SELECT * FROM reader_problems WHERE {due} IS NOT NULL AND {reserved} AND {due}<=%s"
         params: tuple[Any,...]=(now,)
@@ -290,7 +290,7 @@ def verified(store: 'Store', rows: list[Any], now: float, *, projected_out: dict
     ops=subtitle_problems if subtitle else youtube_fetch_problems
     kind,owned_field=('download_media','subtitle_event_owned') if subtitle else ('fetch','fetch_youtube_sensitive')
     job_field,canonical_field,flag=('media_job_id','subtitle_canonical','subtitle_reservation') if subtitle else ('fetch_job_id','fetch_youtube_canonical','fetch_youtube_reservation')
-    excluded=('id','created_at','finished_at','outcome','_legacy_id') + (() if subtitle else ('_fetch_item',))
+    excluded=('id','created_at','finished_at','outcome') + (() if subtitle else ('_fetch_item',))
     preliminary: dict[str,tuple[Any,dict[str,Any]]]={}
     jobs: set[int]=set()
     for row in rows:
@@ -334,7 +334,7 @@ def transfer_reservation(store: 'Store', job_id: int, previous: list[dict[str,An
     job_field,canonical_field,flag=('media_job_id','subtitle_canonical','subtitle_reservation') if subtitle else ('fetch_job_id','fetch_youtube_canonical','fetch_youtube_reservation')
     code,implicit=('work-download_media','media_implicit_code') if subtitle else ('work-fetch','fetch_implicit_code')
     label='Subtitle' if subtitle else 'YouTube fetch'
-    excluded=('id','created_at','finished_at','outcome','_legacy_id') + (() if subtitle else ('_fetch_item',))
+    excluded=('id','created_at','finished_at','outcome') + (() if subtitle else ('_fetch_item',))
     old_by_id={candidate['id']:candidate for candidate in previous}
     current_by_id={candidate['id']:candidate for candidate in current}
     removed=[candidate for identity,candidate in old_by_id.items() if identity not in current_by_id]

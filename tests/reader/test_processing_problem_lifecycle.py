@@ -100,16 +100,19 @@ def test_settings_reenable_blocked_processing_with_same_input(tmp_path,postgres_
 
 
 @pytest.mark.parametrize('kind',['filter','theses'])
-def test_http_status_reads_recovered_processing_without_mutation(tmp_path,postgres_url,kind):
+def test_http_status_reads_saved_processing_without_mutation(tmp_path,postgres_url,kind):
     import psycopg
     from fastapi.testclient import TestClient
     from tests.support.app import create_app
     from tests.support.reader import HEADERS
-    with psycopg.connect(postgres_url,autocommit=True) as db:
+    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
+    with store.db as db:
         db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
         db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','other_web','article')")
         db.execute("UPDATE publications SET feed_id='feed' WHERE id='article'")
-        db.execute("INSERT INTO jobs(kind,item,status,reason_message,reason_code) VALUES (%s,'article','failed','failure','model-invalid')",(kind,))
+        job=db.execute("INSERT INTO jobs(kind,item,status,reason_message,reason_code) VALUES (%s,'article','failed','failure','model-invalid') RETURNING id",(kind,)).fetchone()[0]
+        store.problems.sync_processing_problem(job,[],store.wall_clock())
+    store.db.close()
     with TestClient(create_app(tmp_path,token='test',database_url=postgres_url,api_only=True),headers=HEADERS) as client:
         with psycopg.connect(postgres_url,autocommit=True) as db:
             before=db.execute("SELECT id,xmin::text,body FROM reader_problems WHERE identity=%s AND finished IS NULL",('job:model-invalid:feed:'+kind+':article',)).fetchone()
@@ -227,80 +230,16 @@ def test_failed_processing_without_optional_reason_is_visible(tmp_path,postgres_
 
 
 @pytest.mark.parametrize('kind',['filter','theses'])
-def test_restart_recovers_failed_processing_without_optional_reason(tmp_path,postgres_url,kind):
+def test_restart_preserves_failed_processing_without_optional_reason(tmp_path,postgres_url,kind):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     with store.db:
         store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
         store.db.execute("INSERT INTO publications(id,platform,external_id,feed_id) VALUES ('article','other_web','article','feed')")
-        store.db.execute("INSERT INTO jobs(kind,item,status) VALUES (%s,'article','failed')",(kind,))
+        job=store.db.execute("INSERT INTO jobs(kind,item,status) VALUES (%s,'article','failed') RETURNING id",(kind,)).fetchone()[0]
+        store.problems.sync_processing_problem(job,[],store.wall_clock())
     store.db.close()
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         rows=store.problems.snapshot(store.wall_clock())['current']
         assert any(p['code']=='work-'+kind and any(o['id']=='article' for o in p['objects']) for p in rows)
     finally:store.db.close()
-
-
-@pytest.mark.parametrize('kind',['filter','theses'])
-@pytest.mark.parametrize('phase',['recovery','legacy_protection'])
-def test_profile_recovery_survives_interruption_and_preserves_legacy(tmp_path,postgres_url,kind,phase):
-    import hashlib
-
-    marker=f'{kind}-profile-problems-recovered-v1'
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    try:
-        with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id,platform,external_id,feed_id) VALUES ('article','other_web','article','feed')")
-            store.db.execute("INSERT INTO jobs(kind,item,status,reason_code,reason_message) VALUES (%s,'article','failed','profile_not_configured','unavailable')",(kind,))
-            body=json.dumps({'code':'profile_not_configured','operation':'producer:status'})
-            store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) VALUES (%s,%s,'background',%s,1)",('legacy',f'job:profile_not_configured:feed:{kind}:article',body))
-            store.db.execute('DELETE FROM state WHERE key=%s',(marker,))
-        def fail(point):
-            if point==f'{kind}_profile_{"problems_recovery" if phase=="recovery" else "legacy_protection"}_batch':raise RuntimeError('interrupted')
-        store.fault=fail
-        with pytest.raises(RuntimeError,match='interrupted'):
-            store.problems.recover_profile_problems(kind)
-        assert not store.db.execute('SELECT 1 FROM state WHERE key=%s',(marker,)).fetchone()
-        store.db.close()
-        store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-        assert store.db.execute('SELECT 1 FROM state WHERE key=%s',(marker,)).fetchone()
-        saved=store.db.execute("SELECT body FROM reader_problems WHERE id='legacy'").fetchone()
-        assert saved is not None and json.loads(saved['body'])==json.loads(body)
-        protection='fetch-null-protected:'+hashlib.sha256(b'legacy').hexdigest()
-        assert store.db.execute('SELECT 1 FROM state WHERE key=%s',(protection,)).fetchone()
-    finally:
-        store.db.close()
-
-
-@pytest.mark.parametrize('kind',['filter','theses'])
-def test_profile_recovery_processes_multiple_pages(tmp_path,postgres_url,kind):
-    import hashlib
-
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    try:
-        marker=f'{kind}-profile-problems-recovered-v1'
-        with transaction(store.db):
-            store.db.execute("INSERT INTO feeds(id,identity,title,folder_id,kind,transport,connection,original_urls) VALUES ('feed','feed','Feed','default','rss','rss','connected',ARRAY[]::text[])")
-            store.db.execute("INSERT INTO publications(id,platform,external_id,feed_id) SELECT 'p'||n,'other_web','p'||n,'feed' FROM generate_series(1,101) n")
-            store.db.execute("INSERT INTO jobs(kind,item,status,reason_code,reason_message) SELECT %s,'p'||n,'failed','profile_not_configured','unavailable' FROM generate_series(1,101) n",(kind,))
-            body=json.dumps({'code':'profile_not_configured','operation':'producer:status'})
-            store.db.execute("INSERT INTO reader_problems(id,identity,origin,body,created) SELECT 'old'||n,'job:profile_not_configured:feed:'||%s||':orphan'||n,'background',%s,1 FROM generate_series(1,101) n",(kind,body))
-            store.db.execute('DELETE FROM state WHERE key=%s',(marker,))
-        before=[tuple(row) for row in store.db.execute("SELECT id,identity,body,created,finished FROM reader_problems WHERE id LIKE 'old%%' ORDER BY id")]
-        calls=[]
-        store.fault=calls.append
-        store.problems.recover_profile_problems(kind)
-        assert calls.count(f'{kind}_profile_problems_recovery_batch')==2
-        assert calls.count(f'{kind}_profile_legacy_protection_batch')==2
-        assert store.db.execute('SELECT 1 FROM state WHERE key=%s',(marker,)).fetchone()
-        keys=['fetch-null-protected:'+hashlib.sha256(f'old{i}'.encode()).hexdigest() for i in range(1,102)]
-        pointers={row['key']:json.loads(row['value']) for row in store.db.execute('SELECT key,value FROM state WHERE key=ANY(%s)',(keys,))}
-        assert len(pointers)==101
-        for row in before:
-            key='fetch-null-protected:'+hashlib.sha256(row[0].encode()).hexdigest()
-            assert pointers[key]==['oko-fetch-null-v2',row[0],row[1]]
-        assert [tuple(row) for row in store.db.execute("SELECT id,identity,body,created,finished FROM reader_problems WHERE id LIKE 'old%%' ORDER BY id")]==before
-        assert store.db.execute("SELECT count(*) FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation'=%s AND body::jsonb->>'processing_job_id' IS NOT NULL",('producer:'+kind,)).fetchone()[0]==101
-    finally:
-        store.db.close()
