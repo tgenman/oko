@@ -528,11 +528,8 @@ CREATE INDEX reader_fetch_status_identity ON reader_problems USING btree ((((bod
 
 CREATE INDEX reader_fetch_work_job_owner ON reader_problems USING btree ((((body)::jsonb ->> 'fetch_job_id'::text)) COLLATE "C", id COLLATE "C") WHERE ((finished IS NULL) AND (((body)::jsonb ->> 'operation'::text) = 'producer:fetch'::text) AND (((body)::jsonb ->> 'code'::text) = 'work-fetch'::text) AND (((body)::jsonb ->> 'fetch_job_identity'::text) IS NOT NULL) AND (((body)::jsonb ->> 'fetch_job_id'::text) IS NOT NULL));
 
-CREATE INDEX reader_fetch_work_legacy_item ON reader_problems USING btree ("substring"(COALESCE(((body)::jsonb ->> 'status_job_identity'::text), identity), ':fetch:(.*)$'::text)) WHERE ((finished IS NULL) AND (identity ~~ 'job:%'::text) AND (((body)::jsonb ->> 'code'::text) = 'work-fetch'::text) AND (((body)::jsonb ->> 'operation'::text) = ANY (ARRAY['producer:fetch'::text, 'producer:status'::text])));
 
-CREATE INDEX reader_fetch_work_legacy_item_paged ON reader_problems USING btree (md5("substring"(COALESCE(((body)::jsonb ->> 'status_job_identity'::text), identity), ':fetch:(.*)$'::text)), md5(id)) WHERE ((finished IS NULL) AND (identity ~~ 'job:%'::text) AND (((body)::jsonb ->> 'code'::text) = 'work-fetch'::text) AND (((body)::jsonb ->> 'operation'::text) = ANY (ARRAY['producer:fetch'::text, 'producer:status'::text])));
 
-CREATE INDEX reader_foreign_fetch_delete_recovery ON reader_problems USING btree (created, id COLLATE "C") WHERE ((finished IS NULL) AND (identity ~~ 'job:%'::text) AND (identity ~~ '%:fetch:%'::text) AND (identity ~~ '%:delete:%'::text) AND (((body)::jsonb ->> 'operation'::text) = 'producer:status'::text) AND (((body)::jsonb ->> 'code'::text) = ANY (ARRAY['delete'::text, 'feed-delete'::text, 'work-delete'::text, 'work-feed-delete'::text])));
 
 CREATE INDEX reader_incomplete_current_due ON reader_problems USING btree (incomplete_due) WHERE ((finished IS NULL) AND (incomplete_due IS NOT NULL));
 
@@ -540,7 +537,6 @@ CREATE INDEX reader_incomplete_due ON reader_problems USING btree (incomplete_du
 
 CREATE INDEX reader_incomplete_group_isolated ON reader_problems USING btree ((((body)::jsonb ->> 'incomplete_group_identity'::text)), created, id COLLATE "C") WHERE ((finished IS NULL) AND (((body)::jsonb ->> 'operation'::text) = 'producer:incomplete'::text));
 
-CREATE INDEX reader_incomplete_legacy_recovery ON reader_problems USING btree (id COLLATE "C") WHERE ((finished IS NULL) AND ("left"(identity, 11) = 'incomplete:'::text) AND (((body)::jsonb ->> 'code'::text) = 'material-incomplete'::text) AND (COALESCE(((body)::jsonb ->> 'operation'::text), 'producer:status'::text) = 'producer:status'::text));
 
 CREATE INDEX reader_incomplete_objects_gin ON reader_problems USING gin ((((body)::jsonb -> 'objects'::text)) jsonb_path_ops) WHERE ((finished IS NULL) AND (((body)::jsonb ->> 'code'::text) = 'material-incomplete'::text));
 
@@ -550,7 +546,6 @@ CREATE INDEX reader_incomplete_reservations_due ON reader_problems USING btree (
 
 CREATE INDEX reader_incomplete_virtual_expiry ON reader_problems USING btree (incomplete_due) WHERE ((finished IS NULL) AND incomplete_closes);
 
-CREATE INDEX reader_media_null_legacy_recovery ON reader_problems USING btree (id COLLATE "C") WHERE ((finished IS NULL) AND (identity ~~ 'job:%'::text) AND (((body)::jsonb ->> 'code'::text) = 'work-download_media'::text) AND (((body)::jsonb ->> 'operation'::text) = ANY (ARRAY['producer:status'::text, 'producer:download_media'::text])));
 
 CREATE INDEX reader_media_problem_identity ON reader_problems USING btree ((((body)::jsonb ->> 'media_job_identity'::text))) WHERE ((finished IS NULL) AND (((body)::jsonb ->> 'operation'::text) = 'producer:download_media'::text));
 
@@ -560,7 +555,6 @@ CREATE INDEX reader_media_problem_recovery ON reader_problems USING btree (creat
 
 CREATE INDEX reader_media_status_identity ON reader_problems USING btree ((((body)::jsonb ->> 'status_job_identity'::text))) WHERE ((finished IS NULL) AND (((body)::jsonb ->> 'operation'::text) = 'producer:download_media'::text));
 
-CREATE INDEX reader_media_work_legacy_item ON reader_problems USING btree ("substring"(COALESCE(((body)::jsonb ->> 'media_job_identity'::text), ((body)::jsonb ->> 'status_job_identity'::text), identity), ':download_media:(.*)$'::text)) WHERE ((finished IS NULL) AND (identity ~~ 'job:%'::text) AND (((body)::jsonb ->> 'code'::text) = 'work-download_media'::text) AND (((body)::jsonb ->> 'operation'::text) = ANY (ARRAY['producer:download_media'::text, 'producer:status'::text])));
 
 CREATE INDEX reader_problem_expiry ON reader_problems USING btree (finished, id) WHERE (finished IS NOT NULL);
 
@@ -586,11 +580,9 @@ CREATE INDEX reader_source_group_identity ON reader_problems USING btree ((((bod
 
 CREATE INDEX reader_subtitle_due ON reader_problems USING btree (subtitle_due, id COLLATE "C") WHERE ((subtitle_due IS NOT NULL) AND subtitle_reserved_owned);
 
-CREATE INDEX reader_subtitle_legacy_paged ON reader_problems USING btree (md5("substring"(COALESCE(((body)::jsonb ->> 'media_job_identity'::text), ((body)::jsonb ->> 'status_job_identity'::text), identity), ':download_media:(.*)$'::text)), md5(id)) WHERE ((finished IS NULL) AND (identity ~~ 'job:%'::text) AND (((body)::jsonb ->> 'code'::text) = 'work-download_media'::text) AND (((body)::jsonb ->> 'operation'::text) = ANY (ARRAY['producer:download_media'::text, 'producer:status'::text])));
 
 CREATE INDEX reader_subtitle_media_isolated_paged ON reader_problems USING btree (md5(((body)::jsonb ->> 'media_job_identity'::text)), md5(id)) WHERE ((finished IS NULL) AND (((body)::jsonb ->> 'operation'::text) = 'producer:download_media'::text) AND (((body)::jsonb ->> 'media_job_identity'::text) IS NOT NULL));
 
-CREATE INDEX reader_subtitle_profile_legacy ON reader_problems USING btree (id COLLATE "C") WHERE ((finished IS NULL) AND (identity ~~ 'job:%'::text) AND (((body)::jsonb ->> 'code'::text) = ANY (ARRAY['identity-unconfirmed'::text, 'profile_not_configured'::text, 'profile_unavailable'::text, 'account_identity_mismatch'::text])) AND (COALESCE(((body)::jsonb ->> 'status_job_identity'::text), ((body)::jsonb ->> 'media_job_identity'::text), identity) ~~ '%:download_media:%'::text));
 
 CREATE INDEX reader_subtitle_reservation_job ON reader_problems USING btree (md5(((body)::jsonb ->> 'media_job_id'::text)), md5(((body)::jsonb ->> 'subtitle_canonical'::text))) WHERE ((subtitle_due IS NOT NULL) AND subtitle_reserved_owned AND (identity ~~ 'subtitle:reservation:%'::text));
 

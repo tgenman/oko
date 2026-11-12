@@ -14,6 +14,7 @@ from psycopg.pq import TransactionStatus
 
 
 _LOCK = 0x4F4B4F534348454D
+_ADOPTED_LEDGER_SHA256 = '2d25ec39151820c20e7bc53e6dd10459dd458427938825c832f5f4de6522b11f'
 
 
 class SchemaMismatch(RuntimeError):
@@ -32,8 +33,8 @@ class Migration:
 
 
 def _validate(migrations: Sequence[Migration]) -> None:
-    if not migrations or [m.version for m in migrations] != list(range(128, 128 + len(migrations))):
-        raise ValueError('Schema migrations must be consecutive, starting at 128')
+    if not migrations or [m.version for m in migrations] != list(range(130, 130 + len(migrations))):
+        raise ValueError('Schema migrations must be consecutive, starting at 130')
     if any(not migration.name or not migration.sql.strip() for migration in migrations):
         raise ValueError('Schema migrations need a name and SQL')
 
@@ -69,6 +70,15 @@ def migrate(db: psycopg.Connection[Any], migrations: Sequence[Migration]) -> Non
             db.execute('''CREATE TABLE IF NOT EXISTS oko_schema_migrations (
                 version integer PRIMARY KEY, name text NOT NULL, checksum text NOT NULL,
                 applied_at timestamptz NOT NULL DEFAULT clock_timestamp())''')
+            rows = db.execute('SELECT version,name,checksum FROM oko_schema_migrations ORDER BY version').fetchall()
+            if rows and rows[-1][0] == 129:
+                fingerprint = hashlib.sha256(''.join(f'{version}:{name}:{checksum}\n' for version, name, checksum in rows).encode()).hexdigest()
+                if len(rows) != 2 or fingerprint != _ADOPTED_LEDGER_SHA256:
+                    raise SchemaMismatch('Expected the complete, unmodified version 129 schema')
+                db.execute('DELETE FROM oko_schema_migrations')
+                baseline = migrations[0]
+                db.execute('INSERT INTO oko_schema_migrations(version,name,checksum) VALUES (%s,%s,%s)',
+                           (baseline.version, baseline.name, baseline.checksum))
             installed = _installed(db, migrations)
             for migration in migrations[installed:]:
                 db.execute(migration.sql, prepare=False)
