@@ -12,7 +12,3 @@ def presence(client: Client, name: str = 'reader') -> Response:
 
 def close_presence(client: Client, name: str = 'reader') -> Response:
     return client.delete('/api/v3/client-sessions/' + name)
-
-
-def new_presence(client: Client, name: str = 'reader') -> Response:
-    return presence(client, name)
