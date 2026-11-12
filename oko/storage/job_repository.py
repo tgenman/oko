@@ -1079,23 +1079,6 @@ class JobRepository:
             store.incomplete_draft.mark_jobs([('download_media',row['item']) for row in rows])
 
 
-    def revalidate_media(self, identity: str, *, manual: bool = True, sync_processor: bool = True) -> None:
-        store=self.store
-        row=store.db.execute(f"SELECT m.resource_key, i.platform, i.feed_id AS feed_id FROM media_files m JOIN publications i ON i.id=m.publication_id WHERE m.id = %s AND m.status = 'ready'",(identity,)).fetchone()
-        if row is None or row['resource_key']=='youtube:subtitles' and not store.subscriptions.youtube_theses(row['feed_id']):
-            return
-        memberships.lock_graph(store.db)
-        affected=store.problems.processor_jobs_for_materials([identity]) if sync_processor else []
-        previous=store.problems.prepare_processor_change(affected,store.wall_clock()) if sync_processor else None
-        changed_source=job_write(store.db, "INSERT INTO jobs ( kind , item , manual_once , queued_wall ) VALUES ( 'download_media' , %s , true , extract(epoch FROM clock_timestamp()) ) ON CONFLICT ( kind , item ) DO UPDATE SET queued_wall = CASE WHEN jobs.kind IN ('discover','fetch','download_media') AND jobs.status != 'pending' THEN excluded.queued_wall ELSE jobs.queued_wall END , status = 'pending' , manual_once = true , generation = jobs . generation + 1 , reason_code = NULL , reason_message = NULL , next = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . next ELSE 0 END , retry_at = CASE WHEN jobs . wait_scope IS NOT NULL AND jobs . retry_at > %s THEN jobs . retry_at ELSE NULL END WHERE (jobs . status IN ( 'done' , 'cancelled' ) OR ( %s = 1 AND jobs . status IN ( 'failed' , 'unavailable' ) )) AND CASE WHEN jobs.reason_code LIKE 'source-%%' THEN pg_advisory_xact_lock(hashtextextended(current_schema(),5713747719990890568))::text IS NOT NULL ELSE TRUE END RETURNING id,OLD.reason_code AS previous_code",
-            (identity,store.wall_clock(),store.wall_clock(),manual)).fetchone()
-        if changed_source and (changed_source['previous_code'] or '').startswith('source-'):
-            from oko.storage import source_groups
-            source_groups.sync_changed_rows(store,[changed_source],store.wall_clock())
-        if affected:store.problems.finish_processor_change(affected,previous,store.wall_clock())
-        if store.db.in_transaction:store.incomplete_draft.mark_job('download_media',identity)
-
-
     def retry_linked(self, item: str) -> None:
         for row in self.store.db.execute('SELECT p.id,p.status FROM publication_links l JOIN publications p ON p.id=l.target_publication_id WHERE l.source_publication_id=%s',(item,)).fetchall():
             if row['status']=='pending_collection':

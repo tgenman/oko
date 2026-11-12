@@ -132,24 +132,6 @@ def test_caption_defer_records_current_reason_on_job(tmp_path,postgres_url):
     finally:store.db.close()
 
 
-def test_revalidate_saved_file_clears_reason_without_deleting_bytes(tmp_path,postgres_url):
-    store=Store(tmp_path,lambda _:None,database_url=postgres_url)
-    try:
-        saved=tmp_path/'media'/'article'/'file'
-        saved.parent.mkdir(parents=True,exist_ok=True)
-        saved.write_bytes(b'previous bytes')
-        with store.db:
-            store.db.execute("INSERT INTO publications(id,platform,external_id) VALUES ('article','other_web','article')")
-            store.db.execute("INSERT INTO media_files(id,publication_id,resource_key,source_locator,name,status,storage_key) VALUES ('file','article','image:1','https://example.test/file','file','ready','media/article/file')")
-            job=store.db.execute("INSERT INTO jobs(kind,item,status,generation,reason_code,reason_message) VALUES ('download_media','file','failed',4,'network','old error') RETURNING id").fetchone()[0]
-            store.jobs.revalidate_media('file')
-            row=store.db.execute('SELECT status,generation,reason_code,reason_message FROM jobs WHERE id=%s',(job,)).fetchone()
-            assert tuple(row)==('pending',5,None,None)
-            assert store.db.execute("SELECT status,storage_key FROM media_files WHERE id='file'").fetchone()[0]=='ready'
-            assert saved.read_bytes()==b'previous bytes'
-    finally:store.db.close()
-
-
 def test_source_change_records_media_reason_in_job_and_revokes_old_attempt(tmp_path,postgres_url):
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:

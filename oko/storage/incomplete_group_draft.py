@@ -298,30 +298,6 @@ def reservation_pointers(key: str) -> list[str]:
     return [base,base+':1',base+':2']
 
 
-def reservation(store: Any, key: str) -> dict[str,Any] | None:
-    pointers=store.db.execute('SELECT key,value FROM state WHERE key=ANY(%s)',(reservation_pointers(key),)).fetchall()
-    recognized=[]
-    for pointer in pointers:
-        try:metadata=json.loads(pointer['value'])
-        except (TypeError,ValueError):continue
-        if isinstance(metadata,dict) and metadata.get('group')==key and isinstance(metadata.get('id'),str):recognized.append(metadata)
-    if len(recognized)!=1:return None
-    metadata=recognized[0]
-    identity='incomplete:reservation:'+metadata['id']
-    reverse=store.db.execute('SELECT value FROM state WHERE key=%s',(identity,)).fetchone()
-    if not reverse or reverse['value']!=key:return None
-    row=store.db.execute('SELECT id,identity,body,finished,incomplete_due FROM reader_problems WHERE id=%s AND identity=%s AND finished IS NOT NULL',(metadata['id'],identity)).fetchone()
-    if not row:return None
-    try:body=json.loads(row['body'])
-    except (TypeError,ValueError):return None
-    from oko.storage.problems import _readable_timestamp
-    if (not isinstance(body,dict) or body.get('reservation') is not True or body.get('code')!='material-incomplete'
-        or body.get('operation')!='producer:incomplete-reservation' or body.get('incomplete_group_identity')!=key
-        or not _readable_timestamp(body.get('deadline')) or body['deadline']!=row['incomplete_due'] or row['finished']!=-62135596800
-        or not valid_incomplete_projection(body.get('future')) or not body['future']['objects']):return None
-    return {'id':row['id'],'deadline':body['deadline'],'future':body['future']}
-
-
 def reservation_body(key: str, deadline: float, candidate: dict[str,Any] | None = None) -> dict[str,Any]:
     future=None
     if candidate is not None:
@@ -330,19 +306,6 @@ def reservation_body(key: str, deadline: float, candidate: dict[str,Any] | None 
     return dict(code='material-incomplete',section='object',title='Резерв идентификатора',consequence='Служебная запись.',
         next_step='Ожидание.',objects=[],action=None,operation='producer:incomplete-reservation',state='current',next_at=None,
         reservation=True,incomplete_group_identity=key,deadline=deadline,future=future)
-
-
-def virtual_group(store: Any, key: str, now: float) -> dict[str,Any] | None:
-    saved=reservation(store,key)
-    if not saved or now<saved['deadline']:return None
-    candidate=dict(saved['future'])
-    candidate.update(id=saved['id'],created_at=saved['deadline'],finished_at=None,outcome=None)
-    return candidate
-
-
-def sync_group_with_time(store: Any, key: str, now: float, *, previous_items: set[str] | None = None) -> None:
-    previous={key:previous_items} if previous_items is not None else None
-    sync_groups_time_batch(store,[key],now,previous)
 
 
 def sync_groups_batch(store: Any, keys: list[str], now: float, previous_items: dict[str,set[str]] | None = None, sticky: set[str] | None = None, projected: dict[str,dict[str,Any]] | None = None) -> None:

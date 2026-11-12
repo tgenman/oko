@@ -1,6 +1,6 @@
 import {randomId} from '../browser-platform';
 import {createClient} from './generated/client';
-import {status as runtimeStatus, createClientSession, renewClientSession, closeClientSession, stop, collect, setPower} from './generated/sdk.gen';
+import {status as runtimeStatus, stop, collect, setPower} from './generated/sdk.gen';
 import type {CommandContext,StatusSummary} from './generated/types.gen';
 import {ReaderError,decodeJson} from './errors';
 import {isBinaryOperation} from './generated/media.gen';
@@ -73,10 +73,6 @@ export function createReaderApi({fetch: adapter, token, origin, onError}: {fetch
       const reply = await runtimeStatus({client, signal});
       return reply.data;
     },
-    lifetime: compatible,
-    async createSession() {return (await createClientSession({client})).data;},
-    async renewSession(identity: string) {return (await renewClientSession({client, path:{identity}})).data;},
-    async closeSession(identity: string) {return (await closeClientSession({client, path:{identity}, keepalive:true})).data;},
     async collect(target:import('./generated/types.gen').CollectionTarget={scope:'all'}) {return this.command({operation:'collect',target},async headers=>(await collect({client,headers,body:target})).data);},
     async setPower(enabled:boolean) {return this.command({operation:'power',enabled},async headers=>(await setPower({client,headers,body:{enabled}})).data);},
     async stop(actionId?: string) {return (await stop({client, headers:actionId ? {'X-Oko-Action':actionId} : {}})).data;},
