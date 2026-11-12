@@ -192,14 +192,12 @@ class TransactionGroupDraft:
             self.mark_jobs([(row['kind'],row['item']) for row in rows],capture_admission=False)
 
     def mark_jobs(self, jobs: list[tuple[str,Any]], *, capture_admission: bool = True) -> bool:
-        # Legacy generic status can resolve a media item's text ID as a
-        # publication ID as well as through media_files; preserve both paths.
         roots: set[str]=set()
         media: set[str]=set()
         for kind,item in jobs:
             if not isinstance(item,str) or not item or kind in ('read','discover','feed-delete'):continue
-            roots.add(item)
             if kind=='download_media':media.add(item)
+            else:roots.add(item)
         ordered=sorted(media)
         for start in range(0,len(ordered),400):
             roots.update(row['publication_id'] for row in self.store.db.execute('SELECT publication_id FROM media_files WHERE id=ANY(%s)',(ordered[start:start+400],)))

@@ -55,7 +55,7 @@ def sync(store: 'Store', item: str, references: tuple[ExternalReference,...], ef
     for ref in references:
         if (ref.key.platform.value,ref.key.external_id)==(owner['platform'],owner['external_id']):
             continue
-        row=store.db.execute(f"SELECT i.*, i.feed_id AS reader_feed_id, (SELECT j.id FROM jobs j WHERE j.kind='fetch' AND j.item=i.id AND ((j.reason_code IS NULL AND j.reason_message IS NOT NULL) OR (j.reason_code IS NOT NULL AND j.reason_code NOT LIKE 'source-%%' AND j.reason_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config')))) AS fetch_problem_job, (EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=i.id AND (((m.resource_key='youtube:subtitles' OR j.media_null_owned) AND j.reason_code IS NULL AND j.reason_message IS NOT NULL) OR (j.reason_code IS NOT NULL AND j.reason_code NOT LIKE 'source-%%'))) OR EXISTS (SELECT 1 FROM jobs j WHERE j.kind='download_media' AND j.item=i.id AND ((j.media_null_owned AND j.reason_code IS NULL AND j.reason_message IS NOT NULL) OR (j.identity_event_owned AND j.reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch'))))) AS media_problem_exists, EXISTS (SELECT 1 FROM jobs j WHERE j.kind IN ('filter','theses') AND j.item=i.id AND (((j.reason_code='' OR (j.reason_code IS NULL AND j.reason_message IS NOT NULL))) OR (j.reason_code IS NOT NULL AND j.reason_code<>'' AND j.reason_code NOT LIKE 'source-%%' AND j.reason_code NOT IN ('processor-config','ai-permission','codex-choice','youtube-admission')))) AS processing_problem_exists FROM publications i WHERE i.platform = %s AND i.external_id = %s",
+        row=store.db.execute(f"SELECT i.*, i.feed_id AS reader_feed_id, (SELECT j.id FROM jobs j WHERE j.kind='fetch' AND j.item=i.id AND ((j.reason_code IS NULL AND j.reason_message IS NOT NULL) OR (j.reason_code IS NOT NULL AND j.reason_code NOT LIKE 'source-%%' AND j.reason_code NOT IN ('codex-choice','ai-permission','youtube-admission','processor-config')))) AS fetch_problem_job, (EXISTS (SELECT 1 FROM media_files m JOIN jobs j ON j.kind='download_media' AND j.item=m.id WHERE m.publication_id=i.id AND (((m.resource_key='youtube:subtitles' OR j.media_null_owned) AND j.reason_code IS NULL AND j.reason_message IS NOT NULL) OR (j.reason_code IS NOT NULL AND j.reason_code NOT LIKE 'source-%%')))) AS media_problem_exists, EXISTS (SELECT 1 FROM jobs j WHERE j.kind IN ('filter','theses') AND j.item=i.id AND (((j.reason_code='' OR (j.reason_code IS NULL AND j.reason_message IS NOT NULL))) OR (j.reason_code IS NOT NULL AND j.reason_code<>'' AND j.reason_code NOT LIKE 'source-%%' AND j.reason_code NOT IN ('processor-config','ai-permission','codex-choice','youtube-admission')))) AS processing_problem_exists FROM publications i WHERE i.platform = %s AND i.external_id = %s",
                              (ref.key.platform.value,ref.key.external_id)).fetchone()
         if row is None:
             identity=str(uuid4())
@@ -147,11 +147,7 @@ def capture_media_problems(store: 'Store', effects: CollectionDiagnostics, items
             effects.media_problems_checked.add(row['id'])
             previous=previous_candidates(store,row['id'],store.wall_clock())
             if previous or row['identity_event_owned'] or row['media_null_owned'] or row['subtitle_event_owned']:effects.media_problems_before[row['id']]=previous
-        for row in store.db.execute("SELECT id,identity_event_owned,media_null_owned FROM jobs WHERE kind='download_media' AND item=ANY(%s) AND ((media_null_owned AND reason_code IS NULL AND reason_message IS NOT NULL) OR (identity_event_owned AND reason_code IN ('identity-unconfirmed','profile_not_configured','profile_unavailable','account_identity_mismatch')))",(ordered[start:start+400],)):
-            if row['id'] in effects.media_problems_checked:continue
-            effects.media_problems_checked.add(row['id'])
-            previous=previous_candidates(store,row['id'],store.wall_clock())
-            if previous or row['identity_event_owned'] or row['media_null_owned']:effects.media_problems_before[row['id']]=previous
+
 
 
 def capture_fetch_problems(store: 'Store', effects: CollectionDiagnostics, items: set[str]) -> None:

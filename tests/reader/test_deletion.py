@@ -19,9 +19,9 @@ def retained(root, identity):
 def test_corrupt_database_is_reported_and_never_replaced(tmp_path: Path, postgres_url):
     import psycopg
     with psycopg.connect(postgres_url, autocommit=True) as db:
-        db.execute("UPDATE oko_schema_migrations SET checksum='preserve-corruption-evidence' WHERE version=130")
+        db.execute("UPDATE oko_schema_migrations SET checksum='preserve-corruption-evidence' WHERE version=131")
     with TestClient(create_app(tmp_path, token='test-token', database_url=postgres_url), headers=HEADERS) as client:
         assert client.get('/api/v3/cards').status_code == 503
         assert client.get('/api/v3/status').json()['runtime_state']=='unavailable'
     with psycopg.connect(postgres_url, autocommit=True) as db:
-        assert db.execute('SELECT checksum FROM oko_schema_migrations WHERE version=130').fetchone()[0] == 'preserve-corruption-evidence'
+        assert db.execute('SELECT checksum FROM oko_schema_migrations WHERE version=131').fetchone()[0] == 'preserve-corruption-evidence'

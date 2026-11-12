@@ -32,8 +32,8 @@ class Migration:
 
 
 def _validate(migrations: Sequence[Migration]) -> None:
-    if not migrations or [m.version for m in migrations] != list(range(130, 130 + len(migrations))):
-        raise ValueError('Schema migrations must be consecutive, starting at 130')
+    if not migrations or [m.version for m in migrations] != list(range(131, 131 + len(migrations))):
+        raise ValueError('Schema migrations must be consecutive, starting at 131')
     if any(not migration.name or not migration.sql.strip() for migration in migrations):
         raise ValueError('Schema migrations need a name and SQL')
 
@@ -69,6 +69,17 @@ def migrate(db: psycopg.Connection[Any], migrations: Sequence[Migration]) -> Non
             db.execute('''CREATE TABLE IF NOT EXISTS oko_schema_migrations (
                 version integer PRIMARY KEY, name text NOT NULL, checksum text NOT NULL,
                 applied_at timestamptz NOT NULL DEFAULT clock_timestamp())''')
+            rows = db.execute('SELECT version,name,checksum FROM oko_schema_migrations ORDER BY version').fetchall()
+            if rows and rows[-1][0] == 130:
+                if rows != [(130, 'baseline', 'be0fa5801b7e06a9401fc82bd691fe73fc42f4c6b7d3de51c91811f1d305e4cd')]:
+                    raise SchemaMismatch('Expected the complete, unmodified version 130 schema')
+                db.execute("""DROP INDEX reader_delete_problem_recovery, reader_discover_problem_recovery,
+                    reader_fetch_problem_recovery, reader_media_problem_recovery,
+                    reader_processing_problem_recovery, reader_read_problem_recovery""")
+                db.execute('DELETE FROM oko_schema_migrations')
+                baseline = migrations[0]
+                db.execute('INSERT INTO oko_schema_migrations(version,name,checksum) VALUES (%s,%s,%s)',
+                           (baseline.version, baseline.name, baseline.checksum))
             installed = _installed(db, migrations)
             for migration in migrations[installed:]:
                 db.execute(migration.sql, prepare=False)
