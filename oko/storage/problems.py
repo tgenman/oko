@@ -871,7 +871,7 @@ class Problems:
             for row in self.db.execute("SELECT *,body::jsonb->>'processing_job_identity' AS canonical FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation' IN ('producer:filter','producer:theses') AND body::jsonb->>'processing_job_identity'=ANY(%s)",(sorted(keys),)):
                 isolated.setdefault(row['canonical'],[]).append(row)
             if any((candidate.get('filter_profile_event') or candidate.get('theses_profile_event')) for candidate in previous+candidates):
-                for row in self.db.execute("SELECT *,body::jsonb->>'status_job_identity' AS canonical FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation' IN ('producer:filter','producer:theses','producer:status') AND body::jsonb->>'status_job_identity'=ANY(%s)",(sorted(keys),)):
+                for row in self.db.execute("SELECT *,body::jsonb->>'status_job_identity' AS canonical FROM reader_problems WHERE finished IS NULL AND body::jsonb->>'operation' IN ('producer:filter','producer:theses') AND body::jsonb->>'status_job_identity'=ANY(%s)",(sorted(keys),)):
                     isolated.setdefault(row['canonical'],[]).append(row)
         profile_related=any((candidate.get('filter_profile_event') or candidate.get('theses_profile_event')) for candidate in previous+candidates)
         protected: set[str]=set()
@@ -1757,13 +1757,10 @@ class Problems:
             elif (isinstance(operation,str) and operation.startswith('producer:') and (
                 (saved is not None and saved['id'] in protected_fetch_null)
                 or (isinstance(body,dict) and isinstance(body.get('source_group_identity'),str) and isinstance(candidate.get('code'),str) and candidate['code'].startswith('source-'))
-                or (isinstance(body,dict) and isinstance(body.get('operation'),str) and body['operation'].startswith('producer:') and body['operation'] not in ('producer:status',operation))
+                or (isinstance(body,dict) and isinstance(body.get('operation'),str) and body['operation'].startswith('producer:') and body['operation'] != operation)
                 or (identity in claimed and claimed[identity]!=(operation,target))
                 or (isinstance(body,dict) and body.get('operation')==operation and isinstance(body.get('status_job_target'),str) and body['status_job_target']!=target)
-                or (isinstance(body,dict) and body.get('code') in ('delete','feed-delete','work-delete','work-feed-delete')
-                    and body.get('operation') in (None,'producer:status')
-                    and operation not in ('producer:status','producer:delete','producer:feed-delete')
-                    and (':delete:' in identity or ':feed-delete:' in identity)))):
+)):
                 digest = hashlib.sha256((identity+'\0'+operation).encode()).hexdigest()
                 for _ in range(3):
                     alternate = 'job:status-isolated:'+digest+':'+new_read_problem_token()

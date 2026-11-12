@@ -18,8 +18,8 @@ def connections(postgres_database_url):
 
 
 def test_atomic_release_and_restart(connections):
-    first = Migration(130, 'library', 'CREATE TABLE library(id text PRIMARY KEY)')
-    broken = Migration(131, 'broken', 'CREATE TABLE partial(id text); SELECT missing_column FROM library')
+    first = Migration(131, 'library', 'CREATE TABLE library(id text PRIMARY KEY)')
+    broken = Migration(132, 'broken', 'CREATE TABLE partial(id text); SELECT missing_column FROM library')
     with connections() as db:
         with pytest.raises(SchemaMismatch, match='not been migrated'):
             verify(db, [first])
@@ -35,25 +35,25 @@ def test_atomic_release_and_restart(connections):
 
 
 def test_incompatible_or_changed_history_is_rejected(connections):
-    first = Migration(130, 'library', 'CREATE TABLE library(id text PRIMARY KEY)')
-    second = Migration(131, 'title', 'ALTER TABLE library ADD COLUMN title text')
+    first = Migration(131, 'library', 'CREATE TABLE library(id text PRIMARY KEY)')
+    second = Migration(132, 'title', 'ALTER TABLE library ADD COLUMN title text')
     with connections() as db:
         migrate(db, [first])
         with pytest.raises(SchemaMismatch, match='needs migration'):
             verify(db, [first, second])
         with pytest.raises(SchemaMismatch, match='history'):
-            migrate(db, [Migration(130, 'library', first.sql + '; SELECT 1')])
+            migrate(db, [Migration(131, 'library', first.sql + '; SELECT 1')])
         migrate(db, [first, second])
         with pytest.raises(SchemaMismatch, match='newer'):
             verify(db, [first])
-        db.execute('DELETE FROM oko_schema_migrations WHERE version=130')
+        db.execute('DELETE FROM oko_schema_migrations WHERE version=131')
         with pytest.raises(SchemaMismatch, match='history'):
             migrate(db, [first, second])
 
 
 def test_second_migration_cannot_enter_locked_release(connections):
     from oko.storage.postgres_migrations import schema_lock_key
-    first = Migration(130, 'library', 'CREATE TABLE library(id text PRIMARY KEY)')
+    first = Migration(131, 'library', 'CREATE TABLE library(id text PRIMARY KEY)')
     with connections() as owner, connections() as contender:
         key = schema_lock_key(owner)
         owner.execute('SELECT pg_advisory_lock(%s)', (key,))
@@ -68,10 +68,10 @@ def test_second_migration_cannot_enter_locked_release(connections):
 
 
 def test_verification_is_read_only_and_migration_requires_idle_owner(connections):
-    first = Migration(130, 'library', 'CREATE TABLE library(id text PRIMARY KEY)')
+    first = Migration(131, 'library', 'CREATE TABLE library(id text PRIMARY KEY)')
     with connections() as db:
         with pytest.raises(ValueError, match='consecutive'):
-            migrate(db, [Migration(131, 'gap', 'SELECT 1')])
+            migrate(db, [Migration(132, 'gap', 'SELECT 1')])
         assert db.execute("SELECT to_regclass('oko_schema_migrations')").fetchone()[0] is None
         migrate(db, [first])
         with db.transaction():
@@ -341,3 +341,35 @@ def test_old_incomplete_ledger_is_not_adopted(connections):
         with pytest.raises(SchemaMismatch):
             migrate(db, MIGRATIONS)
         assert db.execute('SELECT version FROM oko_schema_migrations').fetchall() == [(126,)]
+
+
+def test_adopt_130_removes_obsolete_problem_indexes_and_retains_data(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    names = ('reader_delete_problem_recovery', 'reader_discover_problem_recovery',
+             'reader_fetch_problem_recovery', 'reader_media_problem_recovery',
+             'reader_processing_problem_recovery', 'reader_read_problem_recovery')
+    with connections() as db:
+        db.execute('CREATE TABLE oko_schema_migrations(version integer PRIMARY KEY,name text NOT NULL,checksum text NOT NULL,applied_at timestamptz NOT NULL DEFAULT clock_timestamp())')
+        db.execute("INSERT INTO oko_schema_migrations(version,name,checksum) VALUES (130,'baseline','be0fa5801b7e06a9401fc82bd691fe73fc42f4c6b7d3de51c91811f1d305e4cd')")
+        db.execute('CREATE TABLE saved(value text)')
+        db.execute("INSERT INTO saved VALUES ('preserved')")
+        for name in names:
+            db.execute('CREATE INDEX '+name+' ON saved(value)')
+        migrate(db, MIGRATIONS)
+        verify(db, MIGRATIONS)
+        assert db.execute('SELECT version FROM oko_schema_migrations').fetchall() == [(131,)]
+        assert db.execute('SELECT value FROM saved').fetchone() == ('preserved',)
+        assert all(db.execute('SELECT to_regclass(%s)', (name,)).fetchone()[0] is None for name in names)
+
+
+def test_adopt_130_rejects_changed_checksum_without_touching_data(connections):
+    from oko.storage.postgres_schema import MIGRATIONS
+    with connections() as db:
+        db.execute('CREATE TABLE oko_schema_migrations(version integer PRIMARY KEY,name text NOT NULL,checksum text NOT NULL,applied_at timestamptz NOT NULL DEFAULT clock_timestamp())')
+        db.execute("INSERT INTO oko_schema_migrations(version,name,checksum) VALUES (130,'baseline','damaged')")
+        db.execute('CREATE TABLE saved(value text)')
+        db.execute("INSERT INTO saved VALUES ('preserved')")
+        with pytest.raises(SchemaMismatch, match='unmodified version 130'):
+            migrate(db, MIGRATIONS)
+        assert db.execute('SELECT version,checksum FROM oko_schema_migrations').fetchall() == [(130, 'damaged')]
+        assert db.execute('SELECT value FROM saved').fetchone() == ('preserved',)
