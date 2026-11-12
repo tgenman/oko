@@ -12,8 +12,6 @@ def seed(store,status):
         store.db.execute("INSERT INTO publications(id,platform,external_id,url,published_at,content,status) VALUES ('p','other_web','https://p.test','https://p.test',1,%s,'pending_collection')",(content,))
         store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
         job=store.db.execute("INSERT INTO jobs(kind,item,status,reason_message,reason_code,generation) VALUES ('fetch','p',%s,NULL,NULL,1) RETURNING id",(status,)).fetchone()[0]
-        from oko.storage.incomplete_group_draft import save_keys
-        save_keys(store.db,['p'])
         store.incomplete_draft.mark(['p'])
     return job
 

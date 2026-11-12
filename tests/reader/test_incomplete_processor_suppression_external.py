@@ -4,7 +4,6 @@ import pytest
 from tests.support.storage import Store
 from tests.support.postgres_work import measure_reads
 from oko.storage.transaction import transaction
-from oko.storage.incomplete_group_draft import save_keys
 
 
 def test_processor_failure_suppresses_then_restores_incomplete_atomically(tmp_path,postgres_url):
@@ -17,7 +16,7 @@ def test_processor_failure_suppresses_then_restores_incomplete_atomically(tmp_pa
             store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
             job=store.db.execute("INSERT INTO jobs(kind,item,status,generation) VALUES ('fetch','p','done',1) RETURNING id").fetchone()[0]
             store.db.execute("INSERT INTO jobs(kind,item,status,generation,reason_message,reason_code) SELECT 'fetch','foreign-'||n,'failed',1,'foreign','processor-config' FROM generate_series(1,10000)n")
-            save_keys(store.db,['p']);store.incomplete_draft.mark(['p'])
+            store.incomplete_draft.mark(['p'])
         store.db._db.execute('ANALYZE jobs')
         old=store.db.execute("SELECT id FROM reader_problems WHERE identity='incomplete:f:p' AND finished IS NULL").fetchone()[0]
         with transaction(store.db):

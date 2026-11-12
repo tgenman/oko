@@ -54,8 +54,7 @@ class PostgresConnection:
                   CASE WHEN facts.incomplete_class=0 AND facts.feed_id IS NOT NULL
                     AND facts.content ? 'blocks'
                     THEN 'incomplete:'||facts.feed_id||':'||facts.id ELSE NULL END AS incomplete_group_key,
-                  facts.feed_id AS incomplete_group_owner,true AS incomplete_group_ready,
-                  false AS incomplete_group_unknown,false AS incomplete_group_conflict
+                  facts.feed_id AS incomplete_group_owner
                 FROM (SELECT p.*,CASE WHEN p.status='pending_collection' OR EXISTS (
                     SELECT 1 FROM media_files m LEFT JOIN jobs j ON j.kind='download_media' AND j.item=m.id
                     WHERE m.publication_id=p.id AND m.status<>'ready'
@@ -126,7 +125,7 @@ class PostgresConnection:
         assert result is not None
         if result[0] is None:
             if self._trace:self._trace('CREATE TEMP TABLE oko_incomplete_work')
-            self._db.execute('CREATE TEMP TABLE oko_incomplete_work (item text COLLATE "C" PRIMARY KEY, old_key text COLLATE "C", new_key text COLLATE "C", sticky boolean NOT NULL DEFAULT false, forgotten boolean NOT NULL DEFAULT false, unknown boolean NOT NULL DEFAULT false) ON COMMIT DROP')
+            self._db.execute('CREATE TEMP TABLE oko_incomplete_work (item text COLLATE "C" PRIMARY KEY, old_key text COLLATE "C", new_key text COLLATE "C", sticky boolean NOT NULL DEFAULT false, forgotten boolean NOT NULL DEFAULT false) ON COMMIT DROP')
             if self._trace:self._trace('CREATE INDEX oko_incomplete_work_old_key')
             self._db.execute('CREATE INDEX ON oko_incomplete_work(old_key)')
             if self._trace:self._trace('CREATE INDEX oko_incomplete_work_new_key')

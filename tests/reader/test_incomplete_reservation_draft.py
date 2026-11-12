@@ -3,7 +3,7 @@ import json
 import pytest
 from tests.support.storage import Store
 from oko.storage.transaction import transaction
-from oko.storage.incomplete_group_draft import save_keys,sync_group_with_time,reservation,virtual_group
+from oko.storage.incomplete_group_draft import sync_group_with_time,reservation,virtual_group
 
 
 def test_pause_reservation_stable_through_deadline_tick_and_restart(tmp_path,postgres_url):
@@ -16,7 +16,6 @@ def test_pause_reservation_stable_through_deadline_tick_and_restart(tmp_path,pos
             store.db.execute("INSERT INTO publications(id,platform,external_id,content,status) VALUES ('p','youtube','p',%s,'pending_collection')",(content,))
             store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
             store.db.execute("UPDATE youtube_access SET blocked_until=200 WHERE id=1")
-            save_keys(store.db,['p'])
         with transaction(store.db):sync_group_with_time(store,'incomplete:f:p',100)
         reserved=reservation(store,'incomplete:f:p')
         assert reserved is not None and virtual_group(store,'incomplete:f:p',100) is None
@@ -46,7 +45,6 @@ def test_feed_removal_after_deadline_does_not_restore_forgotten_material(tmp_pat
             raw=json.dumps({'blocks':[],'extra':{}})
             store.db.execute("INSERT INTO publications(id,platform,external_id,content,discovered_at,status) VALUES ('p','youtube','p',%s,1,'pending_collection')",(raw,))
             store.db.execute("UPDATE publications SET feed_id='f' WHERE id='p'")
-            save_keys(store.db,['p'])
         youtube_action(store, 'blocked', 100,900);clock[0]=1001
         seen=virtual_due_groups(store,clock[0]);assert len(seen)==1
         with transaction(store.db):
