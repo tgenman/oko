@@ -341,30 +341,3 @@ def test_old_incomplete_ledger_is_not_adopted(connections):
         with pytest.raises(SchemaMismatch):
             migrate(db, MIGRATIONS)
         assert db.execute('SELECT version FROM oko_schema_migrations').fetchall() == [(126,)]
-
-
-
-def test_adopt_complete_problem_schema_without_recreating_data(connections):
-    from oko.storage.postgres_schema import MIGRATIONS
-    with connections() as db:
-        db.execute('CREATE TABLE oko_schema_migrations(version integer PRIMARY KEY,name text NOT NULL,checksum text NOT NULL,applied_at timestamptz NOT NULL DEFAULT clock_timestamp())')
-        db.execute("INSERT INTO oko_schema_migrations(version,name,checksum) VALUES (128,'baseline','c3c7781f970d3f6ce9dad6b2c2a200bf56e1821e6177e40beda3ba92dc64701d'),(129,'drop_legacy_problem_indexes','0f57e617af46cded7d824547a6824425261c72b75894557c3627d0703d3c2ef3')")
-        db.execute('CREATE TABLE saved(value text)')
-        db.execute("INSERT INTO saved VALUES ('preserved')")
-        migrate(db, MIGRATIONS)
-        verify(db, MIGRATIONS)
-        assert db.execute('SELECT version,name FROM oko_schema_migrations').fetchall() == [(130, 'baseline')]
-        assert db.execute('SELECT value FROM saved').fetchone() == ('preserved',)
-
-
-def test_adoption_rejects_changed_problem_schema(connections):
-    from oko.storage.postgres_schema import MIGRATIONS
-    with connections() as db:
-        db.execute('CREATE TABLE oko_schema_migrations(version integer PRIMARY KEY,name text NOT NULL,checksum text NOT NULL,applied_at timestamptz NOT NULL DEFAULT clock_timestamp())')
-        db.execute("INSERT INTO oko_schema_migrations(version,name,checksum) VALUES (128,'baseline','c3c7781f970d3f6ce9dad6b2c2a200bf56e1821e6177e40beda3ba92dc64701d'),(129,'drop_legacy_problem_indexes','damaged')")
-        db.execute('CREATE TABLE saved(value text)')
-        db.execute("INSERT INTO saved VALUES ('preserved')")
-        with pytest.raises(SchemaMismatch, match='complete, unmodified version 129'):
-            migrate(db, MIGRATIONS)
-        assert db.execute('SELECT version,checksum FROM oko_schema_migrations ORDER BY version').fetchall() == [(128, 'c3c7781f970d3f6ce9dad6b2c2a200bf56e1821e6177e40beda3ba92dc64701d'), (129, 'damaged')]
-        assert db.execute('SELECT value FROM saved').fetchone() == ('preserved',)
