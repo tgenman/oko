@@ -35,7 +35,7 @@ def installation(tmp_path):
     (root / 'secrets/database-reader').write_text('synthetic-private-dsn')
     (root / 'secrets/docker').mkdir()
     (root / 'secrets/docker/config.json').write_text('registry-token-do-not-copy')
-    (root / 'release.json').write_text(json.dumps(dict(sha='a' * 40, image='synthetic-image')))
+    (root / 'release.json').write_text(json.dumps(dict(sha='a' * 40, image='synthetic-image', schema=dict(minimum=131, maximum=131))))
     (root / 'operator').mkdir()
     (root / 'operator/compose.app.yaml').write_text('synthetic-compose')
     for name, value in [('password', 'private-backup-canary'), ('credentials', 'AWS_ACCESS_KEY_ID=synthetic\nAWS_SECRET_ACCESS_KEY=private-s3-canary\n')]:
@@ -140,9 +140,13 @@ def test_restore_refuses_existing_target_before_remote_access(tmp_path):
     assert not (root / 'events').exists()
 
 
-@pytest.mark.parametrize('layout', ['legacy', 'state-text', 'state-jsonb'])
-def test_restore_recovers_verified_snapshot_into_dedicated_target_with_work_disabled(tmp_path, postgres_url, layout):
+@pytest.mark.parametrize('minimum', [131, 132])
+def test_restore_recovers_verified_snapshot_into_dedicated_target_with_work_disabled(tmp_path, postgres_url, minimum):
     root, env = installation(tmp_path)
+    release_path = root / 'release.json'
+    release = json.loads(release_path.read_text())
+    release['schema'] = dict(minimum=minimum, maximum=minimum)
+    release_path.write_text(json.dumps(release))
     assert run_backup(root, env, 'backup').returncode == 0
     target = tmp_path / 'recovered'
     result = run_backup(root, dict(env, RESTORE_TARGET=str(target)), 'restore', '--snapshot', json.loads((root / 'backup/status.json').read_text())['snapshot_id'],
@@ -159,32 +163,54 @@ def test_restore_recovers_verified_snapshot_into_dedicated_target_with_work_disa
     from psycopg import sql
     from psycopg.conninfo import make_conninfo
     from uuid import uuid4
+    from oko.storage.postgres_migrations import migrate
+    from oko.storage.postgres_schema import MIGRATIONS
     name = 'test_restore_' + uuid4().hex
     with psycopg.connect(postgres_url, autocommit=True) as admin:
         admin.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(name)))
         try:
             dsn = make_conninfo(postgres_url, dbname=name, options='')
             with psycopg.connect(dsn, autocommit=True) as restored:
-                value_type = 'jsonb' if layout == 'state-jsonb' else 'text'
-                restored.execute(sql.SQL('CREATE TABLE state(key text PRIMARY KEY,value {})').format(sql.SQL(value_type)))
-                restored.execute('CREATE TABLE reader_entities(kind text,identity text,version bigint)')
-                restored.execute("INSERT INTO state VALUES ('work-enabled','true')")
-                if layout == 'legacy':
-                    restored.execute('CREATE TABLE reader_identity(id integer PRIMARY KEY,value text)')
-                    restored.execute("INSERT INTO reader_identity VALUES (1,'previous-timeline')")
-                else:
-                    restored.execute("INSERT INTO state VALUES ('storage-id',%s)", ('"previous-timeline"',))
-                restored.execute("INSERT INTO reader_entities VALUES ('card','saved',42)")
+                migrate(restored, MIGRATIONS)
+                restored.execute("UPDATE state SET value='true' WHERE key='work-enabled'")
+                restored.execute("INSERT INTO state VALUES ('storage-id',%s) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value", ('"previous-timeline"',))
+                restored.execute("INSERT INTO folders(id,title,position) VALUES ('saved','Synthetic',42)")
+                # A whole-database snapshot can include an inactive older schema.
+                restored.execute('CREATE SCHEMA archived')
+                restored.execute('CREATE TABLE archived.state(key text PRIMARY KEY,value text)')
+                restored.execute("INSERT INTO archived.state VALUES ('work-enabled','true')")
+                restored.execute('CREATE TABLE archived.reader_identity(id integer PRIMARY KEY,value text)')
+                restored.execute("INSERT INTO archived.reader_identity VALUES (1,'archived-timeline')")
                 restored.execute((root / 'restore-work-disabled.sql').read_text())
-                if layout == 'legacy':
-                    identity = restored.execute('SELECT value FROM reader_identity').fetchone()[0]
-                else:
-                    identity = restored.execute("SELECT value::jsonb #>> '{}' FROM state WHERE key='storage-id'").fetchone()[0]
+                identity = restored.execute("SELECT value::jsonb #>> '{}' FROM state WHERE key='storage-id'").fetchone()[0]
                 assert identity != 'previous-timeline'
-                assert restored.execute('SELECT version FROM reader_entities').fetchone()[0] == 42
+                assert restored.execute("SELECT position FROM folders WHERE id='saved'").fetchone()[0] == 42
                 assert restored.execute("SELECT value::text FROM state WHERE key='work-enabled'").fetchone()[0] == 'false'
+                assert restored.execute("SELECT value FROM archived.state WHERE key='work-enabled'").fetchone()[0] == 'false'
+                assert restored.execute('SELECT value FROM archived.reader_identity').fetchone()[0] == 'archived-timeline'
         finally:
             admin.execute(sql.SQL('DROP DATABASE {}').format(sql.Identifier(name)))
+
+
+@pytest.mark.parametrize('schema', [None, {'minimum': 130, 'maximum': 130}])
+def test_restore_rejects_old_release_before_database_restore(tmp_path, schema):
+    root, env = installation(tmp_path)
+    release_path = root / 'release.json'
+    release = json.loads(release_path.read_text())
+    if schema is None:
+        del release['schema']
+    else:
+        release['schema'] = schema
+    release_path.write_text(json.dumps(release))
+    assert run_backup(root, env, 'backup').returncode == 0
+    target = tmp_path / 'recovered'
+    result = run_backup(root, dict(env, RESTORE_TARGET=str(target)), 'restore', '--snapshot',
+                        json.loads((root / 'backup/status.json').read_text())['snapshot_id'],
+                        '--target', str(target), '--postgres-container', 'synthetic-recovery')
+    assert result.returncode != 0
+    assert 'Backup predates the supported schema baseline' in result.stderr
+    assert not target.exists()
+    assert 'pg_restore' not in (root / 'events').read_text()
 
 
 def test_corrupt_download_is_not_successful_or_pruned(tmp_path):

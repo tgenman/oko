@@ -1,4 +1,4 @@
-from tests.support.storage import legacy_publication
+from tests.support.storage import stored_publication
 from tests.support.collection_acceptance import apply_simulated_collection, running_collection_job
 import asyncio
 from fastapi.testclient import TestClient
@@ -32,15 +32,15 @@ def test_http_does_not_publish_late_summary_after_linked_title_roundtrip(tmp_pat
             def change():
                 store=app.state.host.require_store()
                 service=collection_service(lambda:store)
-                old=legacy_publication(store,'linked')
-                assert old and old.teaser
+                old=stored_publication(store,'linked')
+                assert old is not None
                 content=store.db.execute("SELECT content FROM publications WHERE id='linked'").fetchone()[0]
                 text='\n\n'.join(block['text'] for block in content['blocks'] if block['type']=='text' and block['role']=='body')
                 for title in ('New title','Old title'):
                     with transaction(store.db):
-                        material=StructuredSource(None).describe(legacy_publication(store,'linked'),Material(title,text))
+                        material=StructuredSource(None).describe(stored_publication(store,'linked'),Material(title,text))
                         job_for_collection=running_collection_job(store,'fetch','linked')
-                        _,effects=service.collected_content('linked',material.adapter_content)
+                        _,effects=service.collected_content('linked',material)
                         apply_simulated_collection(store,effects,job=job_for_collection)
             client.portal.call(change)
             model.release_old.set();assert model.old_done.wait(3)

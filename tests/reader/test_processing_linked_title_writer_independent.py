@@ -24,7 +24,7 @@ def test_linked_title_change_rollback_restores_running_parent(tmp_path):
             with transaction(store.db):
                 material=StructuredSource(None).describe(store.publication('linked'),Material('New title','Useful text'))
                 job_for_collection=running_collection_job(store,'fetch','linked')
-                _,effects=collection_service(execution.require_store).collected_content('linked',material.adapter_content)
+                _,effects=collection_service(execution.require_store).collected_content('linked',material)
                 apply_simulated_collection(store,effects,job=job_for_collection)
                 assert not store.jobs.valid(job)
                 raise RuntimeError('rollback')
@@ -59,7 +59,7 @@ def test_linked_title_roundtrip_rejects_real_late_model_reply(tmp_path):
                 with transaction(store.db):
                     material=StructuredSource(None).describe(store.publication('linked'),Material(title,'Useful text'))
                     job_for_collection=running_collection_job(store,'fetch','linked')
-                    _,effects=collection_service(execution.require_store).collected_content('linked',material.adapter_content)
+                    _,effects=collection_service(execution.require_store).collected_content('linked',material)
                     apply_simulated_collection(store,effects,job=job_for_collection)
             assert old_job and not store.jobs.valid(old_job)
             release.set();await tasks._ai

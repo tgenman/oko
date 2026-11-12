@@ -558,7 +558,7 @@ def test_started_theses_are_saved_after_viewing(tmp_path):
             item = items[0]
             assert client.post('/api/v3/cards/read', json={'ids': [item]}).status_code == 204
             release.set()
-            result = wait_for(client, lambda: client.get('/api/v3/publication/' + item).json()['summarized_content']['points'])
+            result = wait_for(client, lambda: client.get('/api/v3/publication/' + item).json()['summarized_content'].get('points'))
             assert result[0]['text'] == 'Synthetic result'
         finally:
             release.set()

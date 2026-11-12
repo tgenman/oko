@@ -18,7 +18,7 @@ def image_material(source,store,item,text='Useful text'):
 def accept_material(store,service,item,material):
     with store.jobs.transaction(lambda:True):
         job_for_collection=running_collection_job(store,'fetch',item)
-        error,effects=service.collected_content(item,material.adapter_content)
+        error,effects=service.collected_content(item,material)
         assert error is None
         apply_simulated_collection(store,effects,job=job_for_collection)
 
@@ -28,15 +28,12 @@ def test_old_download_success_or_error_cannot_replace_a_refreshed_locator(tmp_pa
     async def scenario():
         entered,release=asyncio.Event(),asyncio.Event()
         class Held(StructuredSource):
-            def publication_adapter(self):
-                class Provider:
-                    async def download_media(self,publication,media,output):
-                        entered.set()
-                        await release.wait()
-                        if failed:raise AdapterException(AdapterIssue('old-locator','Old locator failed',AdapterErrorKind.temporary))
-                        output.write(b'old')
-                        return media
-                return Provider()
+            async def download_media(self,publication,media,output):
+                entered.set()
+                await release.wait()
+                if failed:raise AdapterException(AdapterIssue('old-locator','Old locator failed',AdapterErrorKind.temporary))
+                output.write(b'old')
+                return media
         store,item,execution,tasks=worker_library(tmp_path)
         source=Held(None)
         worker=collection_worker(tmp_path,store,source)
@@ -47,8 +44,8 @@ def test_old_download_success_or_error_cannot_replace_a_refreshed_locator(tmp_pa
         assert job
         task=asyncio.create_task(worker._execute(job))
         await asyncio.wait_for(entered.wait(),2)
-        old=material.adapter_content.media[0]
-        changed=replace(material,adapter_content=replace(material.adapter_content,media=(replace(old,locator='new-locator',name='new-file.png'),)))
+        old=material.media[0]
+        changed=replace(material,media=(replace(old,locator='new-locator',name='new-file.png'),))
         accept_material(store,service,item,changed)
         assert store.jobs.valid(job)
         release.set()
@@ -118,11 +115,8 @@ def test_reader_http_does_not_serve_a_media_key_outside_the_library(tmp_path):
 
 def test_failed_media_attempt_and_diagnostic_roll_back_together(tmp_path, monkeypatch):
     class Failing(StructuredSource):
-        def publication_adapter(self):
-            class Provider:
-                async def download_media(self,publication,media,output):
-                    raise AdapterException(AdapterIssue('synthetic-failure','Synthetic failure',AdapterErrorKind.temporary))
-            return Provider()
+        async def download_media(self,publication,media,output):
+            raise AdapterException(AdapterIssue('synthetic-failure','Synthetic failure',AdapterErrorKind.temporary))
     store,item,execution,tasks=worker_library(tmp_path)
     try:
         source=Failing(None)
@@ -144,11 +138,8 @@ def test_failed_media_attempt_and_diagnostic_roll_back_together(tmp_path, monkey
 
 def test_changed_media_waits_for_new_metadata_with_explanation(tmp_path):
     class Changed(StructuredSource):
-        def publication_adapter(self):
-            class Provider:
-                async def download_media(self,publication,media,output):
-                    raise AdapterException(AdapterIssue('changed','Media locator changed',AdapterErrorKind.media_changed))
-            return Provider()
+        async def download_media(self,publication,media,output):
+            raise AdapterException(AdapterIssue('changed','Media locator changed',AdapterErrorKind.media_changed))
     store,item,execution,tasks=worker_library(tmp_path)
     try:
         source=Changed(None)

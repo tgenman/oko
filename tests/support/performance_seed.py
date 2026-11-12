@@ -19,7 +19,7 @@ def saved_library(root:Path, per_feed:int) -> dict[str,object]:
     """Clone one real accepted publication into a closed synthetic library."""
     from uuid import uuid4
     from tests.support.collection_acceptance import discovered
-    from tests.support.legacy_source import Publication
+    from tests.support.source import publication
     from tests.support.source import publication_packet
     from oko.subscriptions.subscriptions import AddFeed
 
@@ -34,11 +34,11 @@ def saved_library(root:Path, per_feed:int) -> dict[str,object]:
             store.jobs.enqueue_discovery(feeds[0])
         discovery=claim_job(store, store.clock(),feeds=[feeds[0]])
         assert discovery is not None
-        discovered(store,[publication_packet(Publication('prototype','https://example.org/prototype',1),
-            Material('Prototype','',captions='not_requested',description='Synthetic video'),needs_fetch=True)],'{}',discovery,feeds[0])
+        discovered(store,[publication_packet(publication('https://example.org/prototype',1),
+            Material('Prototype',''),needs_fetch=True)],'{}',discovery,feeds[0])
         job=claim_job(store, store.clock(),feeds=[feeds[0]])
         assert job is not None and job.kind=='fetch'
-        save_material(store,job,Material('Prototype','Synthetic saved text.',captions='available'))
+        save_material(store,job,Material('Prototype','Synthetic saved text.'))
         prototype=store.db.execute('SELECT content FROM publications WHERE id=%s',(job.item,)).fetchone()[0]
         rows=[]
         for index,feed in enumerate(feeds):

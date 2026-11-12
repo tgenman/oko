@@ -4,7 +4,6 @@ from tests.support.job_claim import retry_job
 from typing import Any
 from tests.support.storage import Store
 from oko.domain.job import Job
-from tests.support.legacy_source import Publication, Material
 from oko.storage.transaction import transaction
 from oko.storage.job_repository import JobRepository
 from oko.collection.adapters import AdapterIssue, AdapterErrorKind, PublicationContent
@@ -18,13 +17,12 @@ def discovered(store: Store, publications: list[PublicationContent], cursor: str
         CollectionApplication(jobs,store.publications,store.processing).apply(effects,job=job)
         jobs.finish(job)
 
-def save(store: Store, job: Job, material: Material) -> None:
+def save(store: Store, job: Job, material: PublicationContent) -> None:
     with transaction(store.db):
         jobs=JobRepository(store)
         if not jobs.valid(job): return
         jobs.begin_collection(job)
-        assert material.adapter_content is not None
-        error,effects=store.collected_publication.accept_content(job.item,material.adapter_content)
+        error,effects=store.collected_publication.accept_content(job.item,material)
         CollectionApplication(jobs,store.publications,store.processing).apply(effects,job=job)
         if error:
             retry_job(store, job,store.clock(),error.label,issue=error.adapter_issue or AdapterIssue(error.code or 'fetch-failed',error.label,AdapterErrorKind.temporary if error.retryable else AdapterErrorKind.permanent))

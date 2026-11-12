@@ -8,7 +8,7 @@ from tests.support.app import create_app
 from tests.support.collection_acceptance import apply_simulated_collection,running_collection_job
 from tests.support.reader import HEADERS,setup_reader
 from tests.support.source import StructuredSource
-from tests.support.storage import legacy_publication
+from tests.support.storage import stored_publication
 from tests.support.synthetic_material import material as synthetic_material
 from tests.support.synthetic_source import SyntheticSource
 
@@ -32,9 +32,9 @@ def test_http_rejects_late_summary_after_text_roundtrip(tmp_path):
                 original='\n\n'.join(block['text'] for block in row['content']['blocks'] if block['type']=='text' and block['role']=='body')
                 for text in ('Changed input',original):
                     with transaction(store.db):
-                        material=StructuredSource(None).describe(legacy_publication(store,item),synthetic_material(row['title'],text))
+                        material=StructuredSource(None).describe(stored_publication(store,item),synthetic_material(row['title'],text))
                         job=running_collection_job(store,'fetch',item)
-                        _,effects=collection_service(lambda:store).collected_content(item,material.adapter_content)
+                        _,effects=collection_service(lambda:store).collected_content(item,material)
                         apply_simulated_collection(store,effects,job=job)
             try:
                 client.portal.call(change)

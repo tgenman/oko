@@ -54,18 +54,18 @@ def test_claim_incomplete_event_rolls_back_and_clears_ephemeral_state(tmp_path,p
 
 
 def test_content_becoming_full_finishes_incomplete_before_status_get(tmp_path,postgres_url):
-    from tests.support.legacy_source import Publication
+    from tests.support.source import publication as make_publication
     from tests.support.synthetic_material import material as Material
     from tests.support.source import StructuredSource
     store=Store(tmp_path,lambda _:None,database_url=postgres_url)
     try:
         seed(store,'done');store.problems.snapshot(1)
         old=current(store)['id']
-        publication=Publication('p','https://p.test',1)
+        publication=make_publication('https://p.test',1)
         material=StructuredSource(None).describe(publication,Material('Full','Complete',full=True))
         with transaction(store.db):
             job_for_collection=running_collection_job(store,'fetch','p')
-            _,effects=store.collected_publication.accept_content('p',material.adapter_content);apply_simulated_collection(store,effects,job=job_for_collection)
+            _,effects=store.collected_publication.accept_content('p',material);apply_simulated_collection(store,effects,job=job_for_collection)
         assert tuple(store.db.execute('SELECT outcome,finished IS NOT NULL FROM reader_problems WHERE id=%s',(old,)).fetchone())==('resolved',True)
     finally:store.db.close()
 

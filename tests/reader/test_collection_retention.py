@@ -45,9 +45,10 @@ def test_multiple_operations_share_one_hundred_newest_failed_requests(tmp_path):
 
     class MultipleFailures(SyntheticSource):
         async def fetch(self, publication):
-            if publication.id == '1':
+            identity = publication.url.rsplit('/', 1)[-1]
+            if identity == '1':
                 raise remote_error('first operation', 'recent', 2000)
-            if publication.id == '2':
+            if identity == '2':
                 while not release_second.is_set():
                     await asyncio.sleep(.01)
                 raise remote_error('second operation', 'older', 1000)

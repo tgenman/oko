@@ -3,7 +3,7 @@ from datetime import datetime,timezone
 from typing import BinaryIO
 from oko.collection.adapters import ExternalKey,ExternalReference,Platform,PublicationAdapter,PublicationContent,PublicationMetadata,MediaReference
 from oko.collection.contracts import DiscoveryResult
-from tests.support.legacy_source import Material, Publication, FetchResult
+from tests.support.source import publication
 
 
 def reference(identity: str) -> ExternalReference:
@@ -32,9 +32,7 @@ class SyntheticSource:
         return SyntheticAdapter()
 
     async def discover(self,cursor: str | None) -> DiscoveryResult:
-        return DiscoveryResult(tuple(Publication(str(i),reference(str(i)).url,1800000000-i,adapter_reference=reference(str(i))) for i in range(1,4)) if cursor is None else (), '3')
+        return DiscoveryResult(tuple(publication(reference(str(i)).url,1800000000-i,adapter_reference=reference(str(i))) for i in range(1,4)) if cursor is None else (), '3')
 
-    async def fetch(self,publication: Publication) -> FetchResult:
-        assert publication.adapter_reference is not None
-        value=await self.publication_adapter().fetch(publication.adapter_reference)
-        return FetchResult(Material(value.metadata.title,adapter_content=value))
+    async def fetch(self,publication: ExternalReference) -> PublicationContent:
+        return await self.publication_adapter().fetch(publication)

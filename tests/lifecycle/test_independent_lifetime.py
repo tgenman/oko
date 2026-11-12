@@ -1,7 +1,7 @@
 """Independent execution observed through the reader HTTP interface."""
 from tests.support.cards import read_all_cards
 from oko.collection.contracts import DiscoveryResult
-from tests.support.legacy_source import FetchResult
+
 import time
 import pytest
 

@@ -8,7 +8,7 @@ from tests.support.app import create_app
 from tests.support.v3 import TestClient
 from tests.support.reader import wait_for
 from oko.collection.contracts import SourceError
-from tests.support.legacy_source import Publication
+from tests.support.source import publication
 
 HEADERS={'Authorization':'Bearer test'}
 
@@ -33,7 +33,7 @@ class Unavailable:
     changes = None
     failure_code='fetch:UnexpectedExternalException'
     async def discover(self,cursor):
-        return DiscoveryResult(tuple([Publication('one','https://source.test/one',1800000000)]), 'one')
+        return DiscoveryResult(tuple([publication('https://source.test/one',1800000000)]), 'one')
 
     async def fetch(self,publication):
         raise SourceError('Saved source reason',code=self.failure_code)

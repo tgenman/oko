@@ -365,7 +365,7 @@ def test_youtube_discovery_accepts_adapter_content_without_material(tmp_path,mon
 def test_injected_source_fetch_also_uses_publication_adapter(tmp_path,monkeypatch):
     import time
     from oko.collection.contracts import DiscoveryResult
-    from tests.support.legacy_source import FetchResult, Publication
+    from tests.support.source import publication
     from tests.support.source import StructuredSource
     from tests.support.synthetic_material import material
     from oko.collection.adapters import ExternalReference
@@ -378,8 +378,8 @@ def test_injected_source_fetch_also_uses_publication_adapter(tmp_path,monkeypatc
     monkeypatch.setattr(StructuredSource,'fetch',adapter_fetch)
     class Synthetic:
         changes=None
-        async def discover(self,cursor):return DiscoveryResult((Publication('one','https://source.test/one',time.time()),),'one')
-        async def fetch(self,publication):return FetchResult(material('Title','From adapter'))
+        async def discover(self,cursor):return DiscoveryResult((publication('https://source.test/one',time.time()),),'one')
+        async def fetch(self,publication):return material('Title','From adapter')
     with TestClient(create_app(tmp_path,token='test-token',source=Synthetic()),headers={'Authorization':'Bearer test-token'}) as client:
         presence(client,'reader')
         item=wait_cards(client)[0]['id']

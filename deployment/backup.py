@@ -338,6 +338,11 @@ def restore_backup(root, identity, target, container):
             execute('restic', 'restore', identity, '--target', str(temporary / 'download'), env=environment)
             snapshot = temporary / 'download/snapshot'
             verify_snapshot(snapshot)
+            release = json.loads((snapshot / 'release.json').read_text())
+            schema = release.get('schema', {})
+            if (not isinstance(schema, dict) or type(schema.get('minimum')) is not int
+                    or schema['minimum'] < 131):
+                raise ValueError('Backup predates the supported schema baseline')
             # Input is a checked custom-format dump, never a live PostgreSQL directory.
             with (snapshot / 'database.dump').open('rb') as dump:
                 execute('docker', 'exec', '-i', '-u', 'postgres', container, 'pg_restore',
@@ -348,11 +353,7 @@ def restore_backup(root, identity, target, container):
 FOR s IN SELECT table_schema FROM information_schema.tables WHERE table_name='state'
 AND table_schema NOT IN ('pg_catalog','information_schema') LOOP
 EXECUTE format('INSERT INTO %I.state(key,value) VALUES (%L,%L) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value',s,'work-enabled','false');
-IF to_regclass(format('%I.reader_identity',s)) IS NOT NULL THEN
-    EXECUTE format('UPDATE %I.reader_identity SET value=gen_random_uuid()::text WHERE id=1',s);
-ELSE
-    EXECUTE format('INSERT INTO %I.state(key,value) VALUES (%L,%L) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value',s,'storage-id',to_json(gen_random_uuid()::text)::text);
-END IF;
+EXECUTE format('INSERT INTO %I.state(key,value) VALUES (%L,%L) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value',s,'storage-id',to_json(gen_random_uuid()::text)::text);
 END LOOP; END $body$;"""
             execute('docker', 'exec', '-i', '-u', 'postgres', container, 'psql', '-U', 'postgres',
                     '-d', 'oko', '-v', 'ON_ERROR_STOP=1', input=statement.encode())
@@ -426,5 +427,5 @@ if __name__ == '__main__':
     try:
         main()
     except Exception as error:
-        print('Oko backup failed: ' + (str(error) if isinstance(error, ValueError) and ('private regular file' in str(error) or 'empty separate target' in str(error)) else type(error).__name__), file=sys.stderr)
+        print('Oko backup failed: ' + (str(error) if isinstance(error, ValueError) and ('private regular file' in str(error) or 'empty separate target' in str(error) or str(error) == 'Backup predates the supported schema baseline') else type(error).__name__), file=sys.stderr)
         raise SystemExit(1) from None

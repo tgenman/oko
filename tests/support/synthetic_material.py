@@ -1,27 +1,20 @@
-"""Compact synthetic source data; text exists only in test fixtures."""
-from dataclasses import dataclass
+"""Construct current publication content for synthetic source scenarios."""
+import base64
+import hashlib
 from typing import Any
-from tests.support.legacy_source import Material
-from oko.collection.adapters import ExternalKey, ExternalReference, Platform, PublicationContent, PublicationMetadata
+from oko.collection.adapters import ExternalKey, ExternalReference, Platform, PublicationContent, PublicationMetadata, MediaReference
 
 
-@dataclass(frozen=True, init=False)
-class SyntheticMaterial(Material):
-    images: tuple[Any, ...] = ()
-    attachments: tuple[Any, ...] = ()
-
-    def __init__(self, title: str, text: str = '', full: bool = True, reason: str = '',
-                 members: tuple[int, ...] = (), captions: str | None = None,
-                 collection_error: Any = None, description: str = '',
-                 adapter_content: Any = None, images: tuple[Any, ...] = (), attachments: tuple[Any, ...] = ()) -> None:
-        if adapter_content is None:
-            reference=ExternalReference(ExternalKey(Platform.other_web, 'synthetic'), 'https://fixture.invalid/synthetic')
-            adapter_content=PublicationContent(PublicationMetadata(reference,title,None),
-                {'blocks':[{'type':'text','role':'body','text':text}], 'extra':{}})
-        super().__init__(title, full, reason, members, captions, collection_error, description, adapter_content)
-        object.__setattr__(self, 'images', images)
-        object.__setattr__(self, 'attachments', attachments)
+def material(title: str, text: str = '', *, full: bool = True, images: tuple[Any, ...] = (), attachments: tuple[Any, ...] = ()) -> PublicationContent:
+    reference = ExternalReference(ExternalKey(Platform.other_web, 'synthetic'), 'https://fixture.invalid/synthetic')
+    blocks: list[dict[str, Any]] = [dict(type='text', role='body', text=text)]
+    media = []
+    for attachment in (*images, *attachments):
+        digest = hashlib.sha256(attachment.data).hexdigest()
+        locator = 'data:application/octet-stream;base64,' + base64.b64encode(attachment.data).decode()
+        media.append(MediaReference(attachment.name, locator, attachment.name, getattr(attachment, 'mime', 'image/png'), len(attachment.data), digest))
+        blocks.append(dict(type='media', role=getattr(attachment, 'kind', 'image'), ref={'$media': attachment.name}))
+    return PublicationContent(PublicationMetadata(reference, title, None), dict(blocks=blocks, extra={}), tuple(media), needs_fetch=not full)
 
 
-def material(title: str, text: str, **kwargs: Any) -> Material:
-    return SyntheticMaterial(title, text, **kwargs)
+SyntheticMaterial = material

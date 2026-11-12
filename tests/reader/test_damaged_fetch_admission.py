@@ -9,7 +9,7 @@ from oko.collection.contracts import SourceError
 from oko.storage.transaction import transaction
 from oko.subscriptions.history import InitialHistory
 from tests.support.job_claim import claim_job
-from tests.support.legacy_source import FetchResult
+
 from tests.support.source import StructuredSource
 from tests.support.storage import cleanup, database_url, owned_schemas
 from tests.support.synthetic_material import material as Material
@@ -35,7 +35,7 @@ def test_structurally_valid_damaged_history_allows_known_fetch(tmp_path):
         class Source:
             changes=None
             async def fetch(self,publication):
-                return FetchResult(Material('Updated','Synthetic fetched text'))
+                return Material('Updated','Synthetic fetched text')
         store,item,_,_=worker_library(tmp_path)
         try:
             setup_history(store,item)
@@ -88,7 +88,7 @@ def test_inflight_fetch_does_not_commit_after_repair_to_paused(tmp_path,failed):
                 await release.wait()
                 if failed:
                     raise SourceError('synthetic late failure',retryable=False)
-                return FetchResult(Material('Updated','Late synthetic text'))
+                return Material('Updated','Late synthetic text')
         store,item,_,_=worker_library(tmp_path)
         task=None
         try:

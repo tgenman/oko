@@ -1,8 +1,8 @@
 from oko.collection.contracts import DiscoveryResult
-from tests.support.legacy_source import FetchResult
+
 from tests.support.presence import presence, close_presence
 import json, httpx
-from tests.support.legacy_source import Publication
+from tests.support.source import publication
 from tests.support.synthetic_material import material as Material
 from tests.support.models import model_transport
 from tests.support.reader import wait_for
@@ -11,11 +11,11 @@ from tests.support.reader import wait_for
 class FilterSource:
     changes = None
     async def discover(self, cursor):
-        return DiscoveryResult(tuple([Publication(str(i), f'https://example.org/filter/{i}', 1800000000-i) for i in range(3)] if cursor is None else []), '3')
+        return DiscoveryResult(tuple([publication(f'https://example.org/filter/{i}', 1800000000-i) for i in range(3)] if cursor is None else []), '3')
 
     async def fetch(self, publication):
         texts = ['Реклама: купите курс.', 'Открылась библиотека. Реклама: купите курс.', 'Изменён закон о выборах.']
-        return FetchResult(Material('Материал ' + publication.id, texts[int(publication.id)]))
+        return Material('Материал ' + publication.url.rstrip('/').rsplit('/',1)[-1], texts[int(publication.url.rstrip('/').rsplit('/',1)[-1])])
 
 
 def transport(calls, *, theses=False):

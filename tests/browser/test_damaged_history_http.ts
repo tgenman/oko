@@ -28,7 +28,7 @@ from tests.support.storage import Store
 from tests.support.collection_acceptance import discovered
 from tests.support.source import publication_packet
 from tests.support.synthetic_material import material as Material
-from tests.support.legacy_source import Publication
+from tests.support.source import publication
 from tests.support.subscription_action import subscription_action
 from tests.support.storage_action import storage_action
 from tests.support.job_claim import claim_job
@@ -53,7 +53,7 @@ with isolated_database(base) as dsn:
                 store.jobs.enqueue_discovery(feed)
             job=claim_job(store,store.clock(),feeds=[feed])
             assert job and job.kind=='discover'
-            pub=Publication(label,f'https://{label}.test/article',100)
+            pub=publication(f'https://{label}.test/article',100)
             discovered(store,[publication_packet(pub,Material(f'{label.title()} publication',f'{label.title()} synthetic body'),needs_fetch=False)],'{}',job,feed)
             items[label]=store.db.execute(owned_ids('= %s'),(feed,feed)).fetchone()[0]
         with store.db:

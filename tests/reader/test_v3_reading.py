@@ -183,7 +183,7 @@ def test_distinct_external_keys_are_not_merged_by_member_number(tmp_path):
     class OverlappingMembers(SyntheticSource):
         async def discover(self, cursor):
             result = await super().discover(cursor)
-            return replace(result, publications=tuple(replace(publication, members=(17,)) for publication in result.publications))
+            return replace(result, publications=tuple(replace(publication, content={'blocks': [], 'extra': {'telegram': {'members': [17]}}}) for publication in result.publications))
 
     with TestClient(create_app(tmp_path, token='test', api_only=True, source=OverlappingMembers()), headers=HEADERS) as client:
         setup_reader(client, theses=False)

@@ -6,7 +6,7 @@ from tests.support.collection_acceptance import discovered
 from contextvars import ContextVar
 import time
 
-from tests.support.legacy_source import Publication
+from tests.support.source import publication
 
 from tests.support.synthetic_material import material as Material
 from oko.storage.publication_owners import owned_ids
@@ -46,8 +46,8 @@ def build_library(root, counts):
                 store.jobs.enqueue_discovery(feed)
             job = claim_job(store, 0, feeds=[feed])
             assert job is not None
-            discovered(store,[publication_packet(Publication(str(n), f'https://example.org/{index}/{n}', n),
-                              Material(f'Video {n}', '', captions='not_requested', description='Synthetic video'),needs_fetch=True)
+            discovered(store,[publication_packet(publication(f'https://example.org/{index}/{n}', n),
+                              Material(f'Video {n}', ''),needs_fetch=True)
                               for n in range(count)], '{}', job, feed)
             items.append(store.db.execute(owned_ids('= %s')+' ORDER BY id', (feed,feed)).fetchone()[0])
         storage_action(store, 'set_work_enabled', False)

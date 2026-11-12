@@ -69,7 +69,7 @@ def test_power_rejects_late_download_and_resumes_interrupted_material(tmp_path):
     import threading
     import time
     from oko.collection.contracts import DiscoveryResult
-    from tests.support.legacy_source import FetchResult, Publication
+    from tests.support.source import publication
     from tests.support.synthetic_material import material as Material
     from tests.support.presence import presence
     from tests.support.reader import wait_for
@@ -81,7 +81,7 @@ def test_power_rejects_late_download_and_resumes_interrupted_material(tmp_path):
         attempts = 0
 
         async def discover(self, cursor):
-            return DiscoveryResult((Publication('article', 'https://synthetic.test/article', time.time()),), 'done')
+            return DiscoveryResult((publication('https://synthetic.test/article', time.time()),), 'done')
 
         async def fetch(self, publication):
             self.attempts += 1
@@ -92,8 +92,8 @@ def test_power_rejects_late_download_and_resumes_interrupted_material(tmp_path):
                         await asyncio.sleep(.005)
                     except asyncio.CancelledError:
                         continue
-                return FetchResult(Material('Late result', 'Must never be accepted'))
-            return FetchResult(Material('Fresh result', 'Resumed successfully'))
+                return Material('Late result', 'Must never be accepted')
+            return Material('Fresh result', 'Resumed successfully')
 
     source = Source()
     with TestClient(create_app(tmp_path, token='test', source=source), headers=HEADERS) as client:

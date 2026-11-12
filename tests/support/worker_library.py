@@ -4,7 +4,7 @@ from tests.support.subscription_action import subscription_action
 from tests.support.job_claim import claim_job
 import json
 from tests.support.storage import Store, ensure_fixture
-from tests.support.legacy_source import Publication
+from tests.support.source import publication
 from tests.support.synthetic_material import material as Material
 from oko.subscriptions.subscriptions import Overrides
 from oko.processing.config import ProcessorConfig
@@ -29,7 +29,7 @@ def worker_library(root, *, text='Useful text', fault=lambda _:None, database_ur
         store.jobs.enqueue_discovery('fixture')
     job=claim_job(store, store.clock(),feeds=['fixture'])
     assert job.kind=='discover'
-    discovered(store,[publication_packet(Publication('one','https://example.org/one',100),Material('Title',text),needs_fetch=False)],'{}',job)
+    discovered(store,[publication_packet(publication('https://example.org/one',100),Material('Title',text),needs_fetch=False)],'{}',job)
     item=store.db.execute('SELECT id FROM publications').fetchone()[0]
     execution=Execution()
     execution._store=store
