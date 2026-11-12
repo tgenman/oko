@@ -1,23 +1,6 @@
-"""Experimental group projection; not wired into runtime."""
+"""Maintain incomplete-publication problems and their recovery."""
 import json
 from typing import Any
-
-
-class UnknownIncompleteGroup(ValueError):
-    pass
-
-
-def group_key(item: str, owner: str | None, classification: int | None) -> str | None:
-    if classification==1 or owner is None:return None
-    if classification!=0:raise UnknownIncompleteGroup('Unrecognized publication completeness')
-    return 'incomplete:'+owner+':'+item
-
-
-def save_keys(db: Any, items: list[str]) -> None:
-    # The connection-local view derives group keys directly from current facts.
-    return None
-
-
 
 
 def generic_job_targets(db: Any, roots: list[str]) -> list[str]:
@@ -271,26 +254,23 @@ class TransactionGroupDraft:
             for items in self.item_pages():
                 known=known_incomplete_materials(self.store,items)
                 if known:db.execute('UPDATE pg_temp.oko_incomplete_work SET sticky=true WHERE item=ANY(%s)',(sorted(known),))
-                save_keys(db,items)
                 refresh_youtube_flags(self.store,items)
-                db.execute("""UPDATE pg_temp.oko_incomplete_work w SET new_key=p.incomplete_group_key,unknown=p.incomplete_group_unknown,forgotten=false
+                db.execute("""UPDATE pg_temp.oko_incomplete_work w SET new_key=p.incomplete_group_key,forgotten=false
                     FROM pg_temp.oko_incomplete_facts p WHERE w.item=p.id AND w.item=ANY(%s)""",(items,))
                 db.execute('UPDATE pg_temp.oko_incomplete_work w SET forgotten=true WHERE item=ANY(%s) AND NOT EXISTS (SELECT 1 FROM publications p WHERE p.id=w.item)',(items,))
             db.execute('INSERT INTO pg_temp.oko_incomplete_groups(key) SELECT DISTINCT new_key FROM pg_temp.oko_incomplete_work WHERE new_key IS NOT NULL ON CONFLICT(key) DO NOTHING')
             self.update_group_weights()
             for keys in self.group_pages():
-                sql='SELECT item,old_key,new_key,sticky,unknown FROM pg_temp.oko_incomplete_work WHERE old_key=ANY(%s) OR new_key=ANY(%s)'
+                sql='SELECT item,old_key,new_key,sticky FROM pg_temp.oko_incomplete_work WHERE old_key=ANY(%s) OR new_key=ANY(%s)'
                 sample=db.execute(sql+' LIMIT 101',(keys,keys)).fetchall()
                 pages=(page for page in [sample]) if len(sample)<=100 else db.incomplete_row_pages(sql,(keys,keys))
-                old: dict[str,set[str]]={};sticky=set();blocked=set()
+                old: dict[str,set[str]]={};sticky=set()
                 for page in pages:
                     for row in page:
                         if row['old_key'] in keys:
                             old.setdefault(row['old_key'],set()).add(row['item'])
-                            if row['unknown']:blocked.add(row['old_key'])
                         if row['sticky']:sticky.add(row['item'])
-                selected=[key for key in keys if key not in blocked]
-                sync_groups_time_batch(self.store,selected,now,old,sticky)
+                sync_groups_time_batch(self.store,keys,now,old,sticky)
             cursor: str | None=None
             while True:
                 sql='SELECT id FROM pg_temp.oko_incomplete_materialized'
