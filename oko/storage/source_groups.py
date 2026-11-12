@@ -27,31 +27,11 @@ def possible_pairs(identity: str, kind: str) -> list[tuple[str,str]]:
 
 
 def job_keys(store: 'Store', job_id: int, code: str | None = None) -> set[str]:
-    rows=store.db.execute(f"""SELECT j.kind,j.item,coalesce(%s,j.reason_code) AS reason_code,j.feed_id,
-        coalesce(items.feed_id,media_owner.feed_id,root.feed_id,j.feed_id) AS owner
-        FROM jobs j LEFT JOIN publications items ON items.id=j.item
-        LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
-        LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
-        LEFT JOIN publication_links l ON l.target_publication_id=coalesce(items.id,media_owner.id)
-        LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id OFFSET 0) root ON true
-        WHERE j.id=%s AND coalesce(%s,j.reason_code) LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete')""",(code,job_id,code)).fetchall()
-    return {'job:'+r['reason_code']+':'+(r['owner'] or r['feed_id'] or r['item'] or '')+':'+r['kind'] for r in rows}
+    return set(job_evidence_many(store, [(job_id, code)]))
 
 
 
 
-def job_keys_with_previous_feed(store: 'Store', job_id: int, feed: str | None) -> tuple[str,set[str]] | None:
-    rows=store.db.execute(f"""SELECT j.kind,j.item,j.reason_code,
-        coalesce(items.feed_id,media_owner.feed_id,root.feed_id,%s::text) AS owner
-        FROM jobs j LEFT JOIN publications items ON items.id=j.item
-        LEFT JOIN media_files m ON j.kind='download_media' AND m.id=j.item
-        LEFT JOIN publications media_owner ON media_owner.id=m.publication_id
-        LEFT JOIN publication_links l ON l.target_publication_id=coalesce(items.id,media_owner.id)
-        LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id OFFSET 0) root ON true
-        WHERE j.id=%s AND j.reason_code LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete')""",(feed,job_id)).fetchall()
-    if not rows:return None
-    kind=rows[0]['kind']
-    return kind,{'job:'+row['reason_code']+':'+(row['owner'] or feed or row['item'] or '')+':'+kind for row in rows}
 
 def job_keys_many(store: 'Store', job_ids: list[int]) -> dict[int,tuple[str,set[str]]]:
     if not job_ids:return {}
@@ -255,7 +235,6 @@ def sync_transition(store: 'Store', kind: str, before: set[str], after: set[str]
             try:body=json.loads(row['body'])
             except (TypeError,ValueError):body={}
             allowed={pair for pair in evidence.get(previous,set()) if pair[0] in ('material','feed')}
-            if still is not None:allowed.update((obj['kind'],obj['id']) for obj in still['objects'])
             objects=body.get('objects') if isinstance(body,dict) else None
             valid=isinstance(body,dict) and body.get('code')==candidate['code'] and ('code',body.get('code')) in evidence.get(previous,set()) and body.get('code') in {code for code,_ in possible_pairs(previous,kind)} and all(isinstance(body.get(field),str) for field in ('title','section','consequence','next_step')) and body.get('state') in ('current','retrying') and body.get('action') is None and isinstance(objects,list) and (bool(objects) or kind=='delete') and all(isinstance(obj,dict) and set(obj)=={'kind','id'} and (obj.get('kind'),obj.get('id')) in allowed for obj in objects)
             if valid and isinstance(objects,list):valid=len({(obj['kind'],obj['id']) for obj in objects})==len(objects)
@@ -312,15 +291,7 @@ def sync_jobs(store: 'Store', job_ids: list[int], now: float) -> None:
         groups=job_keys_many(store,ordered[start:start+400]);all_groups.update(groups)
         for kind,keys in groups.values():grouped.setdefault(kind,set()).update(keys)
     evidence=job_evidence_many(store,[(job_id,None) for job_id in ordered])
-    failed={(kind,key) for kind,keys in grouped.items() for key in keys if not sync(store,kind,{key},now,evidence=evidence)}
-    eligible=[job_id for job_id,(kind,keys) in all_groups.items() if all((kind,key) not in failed for key in keys)]
-    eligible_set=set(eligible)
-    ineligible=[job_id for job_id in all_groups if job_id not in eligible_set]
-    for start in range(0,len(eligible),400):
-        store.db.execute("UPDATE jobs SET source_event_owned=(status IN ('pending','running','failed','unavailable','blocked') OR (kind='fetch' AND status='done' AND reason_message IS NOT NULL)) WHERE id=ANY(%s) AND reason_code LIKE 'source-%%'",(eligible[start:start+400],))
-    for start in range(0,len(ineligible),400):
-        store.db.execute("UPDATE jobs SET source_event_owned=false WHERE id=ANY(%s) AND source_event_owned",(ineligible[start:start+400],))
-    notify_admission(store,eligible+ineligible)
+    _sync_batch(store, all_groups, grouped, evidence, list(all_groups), now)
 
 
 def previous_keys_many(store: 'Store', rows: list[tuple[int,str]]) -> dict[int,tuple[str,set[str]]]:
@@ -352,10 +323,15 @@ def sync_changed_rows(store: 'Store', rows: list[Any], now: float) -> None:
     for start in range(0,len(ids),400):current.update(job_keys_many(store,ids[start:start+400]))
     grouped: dict[str,set[str]]={}
     for kind,keys in [*before.values(),*current.values()]:grouped.setdefault(kind,set()).update(keys)
+    _sync_batch(store, current, grouped, evidence, ids, now)
+
+
+def _sync_batch(store: 'Store', current: dict[int,tuple[str,set[str]]], grouped: dict[str,set[str]],
+                evidence: dict[str,set[tuple[str,str]]], affected_ids: list[int], now: float) -> None:
     failed={(kind,key) for kind,keys in grouped.items() for key in keys if not sync(store,kind,{key},now,evidence=evidence)}
     eligible=[job_id for job_id,(kind,keys) in current.items() if all((kind,key) not in failed for key in keys)]
     eligible_set=set(eligible)
-    ineligible=[job_id for job_id in ids if job_id not in eligible_set]
+    ineligible=[job_id for job_id in affected_ids if job_id not in eligible_set]
     for start in range(0,len(eligible),400):
         store.db.execute("UPDATE jobs SET source_event_owned=(status IN ('pending','running','failed','unavailable','blocked') OR (kind='fetch' AND status='done' AND reason_message IS NOT NULL)) WHERE id=ANY(%s) AND reason_code LIKE 'source-%%'",(eligible[start:start+400],))
     for start in range(0,len(ineligible),400):
@@ -387,7 +363,7 @@ def job_evidence_many(store: 'Store', rows: Sequence[tuple[int,str | None]]) -> 
     return evidence
 
 
-def job_evidence_with_previous_feed(store: 'Store', job_id: int, feed: str | None) -> dict[str,set[tuple[str,str]]]:
+def previous_feed_groups(store: 'Store', job_id: int, feed: str | None) -> tuple[str,dict[str,set[tuple[str,str]]]] | None:
     rows=store.db.execute(f"""SELECT j.kind,j.item,j.reason_code,
         coalesce(items.feed_id,media_owner.feed_id,root.feed_id,%s::text) AS owner,
         coalesce(root.id,m.publication_id,j.item) AS affected
@@ -397,6 +373,7 @@ def job_evidence_with_previous_feed(store: 'Store', job_id: int, feed: str | Non
         LEFT JOIN publication_links l ON l.target_publication_id=coalesce(items.id,media_owner.id)
         LEFT JOIN LATERAL (SELECT * FROM publications WHERE id=l.source_publication_id OFFSET 0) root ON true
         WHERE j.id=%s AND j.reason_code LIKE 'source-%%' AND j.kind IN ('fetch','download_media','filter','theses','delete','feed-delete')""",(feed,job_id)).fetchall()
+    if not rows:return None
     evidence: dict[str,set[tuple[str,str]]]={}
     for row in rows:
         owner=row['owner'] or feed or row['item'] or ''
@@ -405,4 +382,4 @@ def job_evidence_with_previous_feed(store: 'Store', job_id: int, feed: str | Non
         objects.add(('code',row['reason_code']))
         value=owner if row['kind']=='feed-delete' else row['affected']
         if row['kind']!='delete' and isinstance(value,str):objects.add(('feed' if row['kind']=='feed-delete' else 'material',value))
-    return evidence
+    return rows[0]['kind'],evidence

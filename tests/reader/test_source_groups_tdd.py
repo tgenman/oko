@@ -153,3 +153,36 @@ def test_manual_feed_refresh_resolves_old_source_problem_and_keeps_wait(tmp_path
         assert row['wait_scope']=='feed:f' and row['retry_at']>=deadline.timestamp()
         assert store.db.execute('SELECT finished FROM reader_problems WHERE id=%s',(old['id'],)).fetchone()[0] is not None
     finally:store.db.close()
+
+
+def test_collection_owner_change_keeps_source_problem_identity_after_restart(tmp_path, postgres_url):
+    from oko.domain.job import Job
+    from oko.storage import source_groups
+    from oko.storage.transaction import transaction
+
+    store = Store(tmp_path, lambda _: None, database_url=postgres_url)
+    try:
+        with transaction(store.db):
+            job_id = store.db.execute(
+                "INSERT INTO jobs(kind,item,feed_id,status,generation,reason_code,reason_message) "
+                "VALUES ('fetch','orphan','old','pending',1,'source-network','offline') RETURNING id"
+            ).fetchone()[0]
+            source_groups.sync_jobs(store, [job_id], store.wall_clock())
+        old = store.db.execute(
+            "SELECT id,created FROM reader_problems WHERE body::jsonb->>'source_group_identity'=%s AND finished IS NULL",
+            ('job:source-network:old:fetch',),
+        ).fetchone()
+        assert old is not None
+        with transaction(store.db):
+            store.collection_status.start(Job(job_id, 'fetch', 'orphan', 1), 'new')
+        moved = store.db.execute(
+            "SELECT id,created FROM reader_problems WHERE body::jsonb->>'source_group_identity'=%s AND finished IS NULL",
+            ('job:source-network:new:fetch',),
+        ).fetchone()
+        assert moved is not None and tuple(moved) == tuple(old)
+        store.db.close()
+        store = Store(tmp_path, lambda _: None, database_url=postgres_url)
+        restored = store.db.execute('SELECT id,created,finished FROM reader_problems WHERE id=%s', (old['id'],)).fetchone()
+        assert restored is not None and restored['created'] == old['created'] and restored['finished'] is None
+    finally:
+        store.db.close()
