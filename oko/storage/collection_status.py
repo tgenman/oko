@@ -47,11 +47,11 @@ class CollectionStatus:
         if changed is None:raise LookupError('Collection job no longer exists')
         if changed['kind'] in ('fetch','download_media','filter','theses') and (changed['previous_code'] or '').startswith('source-') and changed['previous_feed']!=feed:
             from oko.storage import source_groups
-            old=source_groups.job_keys_with_previous_feed(self.store,job,changed['previous_feed'])
+            old=source_groups.previous_feed_groups(self.store,job,changed['previous_feed'])
             if old:
-                kind,before=old
+                kind,evidence=old
+                before=set(evidence)
                 after=source_groups.job_keys(self.store,job)
-                evidence=source_groups.job_evidence_with_previous_feed(self.store,job,changed['previous_feed'])
                 complete=source_groups.sync_transition(self.store,kind,before,after,self.wall(),evidence=evidence)
                 self.db.execute("UPDATE jobs SET source_event_owned=(%s=1) WHERE id=%s",(complete,job))
         mark=getattr(self.db,'incomplete_job_mark',None)
